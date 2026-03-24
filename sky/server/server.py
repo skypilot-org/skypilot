@@ -2449,6 +2449,7 @@ SSHMessageType = websocket_utils.SSHMessageType
 
 # Hook for plugins to inject SSH redirect logic. When set, it is called after
 # WebSocket accept for clients that support the redirect protocol.
+# TODO(aylei): support in slurm ssh handler
 _ssh_redirect_hook: Optional[Callable[[fastapi.WebSocket, str],
                                       Awaitable[Optional[dict]]]] = None
 
