@@ -258,7 +258,7 @@ async def _connect_with_redirect(ws_url: str, timestamps_supported: bool,
                 redirect_info = json.loads(first_msg[1:].decode())
                 await websocket.close()
                 await _handle_redirect(redirect_info, timestamps_supported,
-                                       login_url)
+                                       login_url, original_url=ws_url)
                 return
             await run_websocket_proxy(websocket,
                                       timestamps_supported,
@@ -273,7 +273,8 @@ async def _connect_with_redirect(ws_url: str, timestamps_supported: bool,
 
 
 async def _handle_redirect(redirect_info: dict, timestamps_supported: bool,
-                           login_url: str) -> None:
+                           login_url: str,
+                           original_url: str = '') -> None:
     """Reconnect after receiving a REDIRECT frame.
 
     The redirect_info dict is opaque to this module — it contains a ready-to-use
@@ -282,12 +283,22 @@ async def _handle_redirect(redirect_info: dict, timestamps_supported: bool,
     """
     url = redirect_info['url']
     headers = redirect_info.get('headers', {})
-    await main(
-        url,
-        timestamps_supported,
-        login_url,
-        override_headers=headers,
-    )
+    try:
+        await main(
+            url,
+            timestamps_supported,
+            login_url,
+            override_headers=headers,
+        )
+    except (OSError, websockets.exceptions.InvalidURI,
+            websockets.exceptions.InvalidHandshake,
+            asyncio.TimeoutError) as e:
+        # The redirect target is unreachable, fallback to the API server
+        if not original_url:
+            raise
+        separator = '&' if '?' in original_url else '?'
+        fallback_url = f'{original_url}{separator}no_redirect=1'
+        await main(fallback_url, timestamps_supported, login_url)
 
 
 if __name__ == '__main__':

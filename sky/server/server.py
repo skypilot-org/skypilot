@@ -2496,7 +2496,8 @@ async def _get_cluster_and_validate(
 async def kubernetes_pod_ssh_proxy(
         websocket: fastapi.WebSocket,
         cluster_name: str,
-        client_version: Optional[int] = None) -> None:
+        client_version: Optional[int] = None,
+        no_redirect: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
@@ -2506,7 +2507,8 @@ async def kubernetes_pod_ssh_proxy(
         client_version = {client_version}')
 
     # Check if there is a hook wants to redirect this connection.
-    if (websocket_utils.ssh_redirect_hook is not None and
+    if (no_redirect != 1 and
+            websocket_utils.ssh_redirect_hook is not None and
             client_version is not None and client_version >=
             server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION):
         try:
