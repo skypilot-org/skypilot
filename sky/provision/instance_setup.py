@@ -350,10 +350,23 @@ def ray_worker_start_command(custom_resource: Optional[str],
         for key, value in custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
-    cmd = (
+    # Wrap ray start in a retry loop with exponential backoff + jitter.
+    # At large scale (1000+ nodes), the GCS server can be overwhelmed by
+    # simultaneous worker connections, causing transient connect failures
+    # (gcs_client.cc Check failed). Retrying individual workers avoids
+    # having to retry the entire batch.
+    ray_start_cmd = (
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
-        'exit 1;' + _RAY_PRLIMIT)
+        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options}')
+    cmd = (
+        f'for _ray_retry in 1 2 3 4 5; do '
+        f'{ray_start_cmd} && break; '
+        'echo "ray start failed (attempt $_ray_retry/5), retrying..."; '
+        '_ray_backoff=$(( _ray_retry * 5 + RANDOM % 10 )); '
+        'echo "sleeping $_ray_backoff seconds before retry"; '
+        'sleep $_ray_backoff; '
+        'if [ "$_ray_retry" -eq 5 ]; then exit 1; fi; '
+        'done;' + _RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status
