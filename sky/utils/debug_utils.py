@@ -86,6 +86,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.jobs.queue_v2': (),
     'sky.jobs.cancel': (),
     'sky.jobs.logs': (),
+    'sky.jobs.wait': (),
     'sky.jobs.download_logs': (),
     'sky.jobs.pool_down': (),
     'sky.jobs.pool_status': (),
@@ -147,12 +148,17 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
 SYSTEM_REQUEST_IDS = [d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
                      ] + [server_constants.ON_BOOT_CHECK_REQUEST_ID]
 
-# All managed-job request names, derived from RequestName so that new
-# jobs.* request types are automatically included.
-_MANAGED_JOB_REQUEST_NAMES = frozenset(server_constants.REQUEST_NAME_PREFIX +
-                                       name.value
-                                       for name in request_names.RequestName
-                                       if name.value.startswith('jobs.'))
+# Request names for managed job mutations (excludes read-only queue).
+# Used by both _get_requests_from_managed_jobs and
+# _get_managed_jobs_from_requests.
+_MANAGED_JOB_REQUEST_NAMES = frozenset({
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_CANCEL.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LOGS.value,
+})
 
 
 class DebugDumpContext(TypedDict):

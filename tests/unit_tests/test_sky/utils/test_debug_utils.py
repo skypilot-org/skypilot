@@ -272,13 +272,11 @@ class TestGetRequestsFromManagedJobs:
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
         assert task_filter.include_request_names is not None
-        # All jobs.* request names should be included
         assert 'sky.jobs.launch' in task_filter.include_request_names
         assert 'sky.jobs.cancel' in task_filter.include_request_names
         assert 'sky.jobs.logs' in task_filter.include_request_names
-        assert 'sky.jobs.queue' in task_filter.include_request_names
-        # Non-job requests should not be included
-        assert 'sky.launch' not in task_filter.include_request_names
+        # Queue is read-only, should not be included
+        assert 'sky.jobs.queue' not in task_filter.include_request_names
 
     @mock.patch(MOCK_QUEUE_V2)
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
