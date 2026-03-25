@@ -42,11 +42,14 @@ class GCPLoggingAgent(FluentbitAgent):
     def __init__(self, config: Dict[str, Any]):  # pylint: disable=super-init-not-called
         self.config = _GCPLoggingConfig(**config)
 
+    def _get_credential_path(self) -> str:
+        if self.config.credentials_file:
+            return self.config.credentials_file
+        return gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:
-        credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
-        if self.config.credentials_file:
-            credential_path = self.config.credentials_file
+        credential_path = self._get_credential_path()
         # Set GOOGLE_APPLICATION_CREDENTIALS and check whether credentials
         # is valid.
         # Stackdriver only support service account credentials or credentials
@@ -78,12 +81,8 @@ class GCPLoggingAgent(FluentbitAgent):
         display_name = cluster_name.display_name
         unique_name = cluster_name.name_on_cloud
 
-        credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
-        if self.config.credentials_file:
-            credential_path = self.config.credentials_file
-
         return _StackdriverOutputConfig(
-            google_service_credentials=credential_path,
+            google_service_credentials=self._get_credential_path(),
             export_to_project_id=self.config.project_id,
             labels={
                 'skypilot_cluster_name': display_name,
