@@ -46,7 +46,10 @@ class FluentbitAgent(LoggingAgent):
             # pylint: disable=line-too-long
             'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/$os_id/$codename $codename main" | sudo tee /etc/apt/sources.list.d/fluent-bit.list; '
             'sudo apt-get update; '
-            'sudo apt-get install -y fluent-bit; '
+            # Pin to <5.0 because fluent-bit 5.0.0 broke the stackdriver
+            # output plugin's service account auth (google_service_credentials
+            # and GOOGLE_APPLICATION_CREDENTIALS are both ignored).
+            'sudo apt-get install -y \"fluent-bit=4.*\"; '
             'fi')
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')
