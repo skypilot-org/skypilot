@@ -107,7 +107,7 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
 
 
 @annotations.lru_cache(scope='request')
-def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
+def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     cache_key = f'slurm:nodes_info:{cluster}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
@@ -244,6 +244,57 @@ def check_fuse_enabled(cluster: str) -> bool:
     return _check_cluster_feature(cluster, 'fuse',
                                   lambda c: c.check_fuse_enabled(),
                                   _SLURM_FUSE_CHECK_CACHE_TTL)
+
+
+_SLURM_SELECT_TYPE_PARAMS_CACHE_TTL = 3600  # 1 hour
+
+
+def get_select_type_parameters(cluster: str) -> Optional[str]:
+    """Get the raw SelectTypeParameters value for a Slurm cluster."""
+    cache_key = f'slurm:select_type_parameters:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm SelectTypeParameters found in cache ({cache_key})')
+        return cached
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    value = client.get_select_type_parameters()
+
+    if value is not None:
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, value,
+                time.time() + _SLURM_SELECT_TYPE_PARAMS_CACHE_TTL)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache slurm SelectTypeParameters for '
+                         f'{cluster}: {common_utils.format_exception(e)}')
+
+    return value
+
+
+def is_memory_scheduling_enabled(cluster: str) -> bool:
+    """Check if memory is a consumable resource on a Slurm cluster.
+
+    Returns False when SelectTypeParameters is CR_CPU or CR_Core (memory
+    is not tracked), meaning ``--mem`` requests may cause scheduling
+    failures. Returns True for CR_CPU_Memory, CR_Core_Memory, or when
+    the parameter cannot be determined (safe default).
+    """
+    value = get_select_type_parameters(cluster)
+    if value is None:
+        # Cannot determine — assume memory is tracked (safe default).
+        return True
+    return 'MEMORY' in value.upper()
 
 
 class SlurmInstanceType:
@@ -470,7 +521,14 @@ def _check_cpu_mem_fits(
 
     We check capacity (not allocatable) because availability can change
     during scheduling, and we want to let the Slurm scheduler handle that.
+
+    When ``candidate_instance_type.memory`` is 0, memory checking is skipped.
+    This happens when: (a) the user did not request memory and the cluster
+    does not track it as a consumable resource (CR_CPU, CR_Core, or
+    CR_Socket), or (b) the user explicitly requested ``--memory 0``.
     """
+    skip_mem_check = candidate_instance_type.memory == 0
+
     # We log max CPU and memory found on the GPU nodes for debugging.
     max_cpu = 0
     max_mem_gb = 0.0
@@ -483,8 +541,10 @@ def _check_cpu_mem_fits(
             max_cpu = node_cpus
             max_mem_gb = node_mem_gb
 
-        if (node_cpus >= candidate_instance_type.cpus and
-                node_mem_gb >= candidate_instance_type.memory):
+        cpu_fits = node_cpus >= candidate_instance_type.cpus
+        mem_fits = (skip_mem_check or
+                    node_mem_gb >= candidate_instance_type.memory)
+        if cpu_fits and mem_fits:
             return True, None
 
     return False, (f'Max found: {max_cpu} CPUs, '
@@ -507,7 +567,7 @@ def check_instance_fits(
     """
     # Get Slurm node list in the given cluster (region).
     try:
-        nodes = _get_slurm_nodes_info(cluster)
+        nodes = get_slurm_nodes_info(cluster)
     except FileNotFoundError:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '
@@ -547,11 +607,14 @@ def check_instance_fits(
     acc_count = (slurm_instance_type.accelerator_count
                  if slurm_instance_type.accelerator_count is not None else 0)
     acc_type = slurm_instance_type.accelerator_type
+    skip_mem = slurm_instance_type.memory == 0
+    req_str = f'CPU (>= {slurm_instance_type.cpus} CPUs)'
+    if not skip_mem:
+        req_str += (f' and/or memory '
+                    f'(>= {slurm_instance_type.memory} G)')
     candidate_nodes = nodes
     not_fit_reason_prefix = (
-        f'No nodes found with enough '
-        f'CPU (> {slurm_instance_type.cpus} CPUs) and/or '
-        f'memory (> {slurm_instance_type.memory} G){partition_suffix}. ')
+        f'No nodes found with enough {req_str}{partition_suffix}. ')
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
@@ -575,8 +638,7 @@ def check_instance_fits(
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type}{partition_suffix} do not have '
-            f'enough CPU (> {slurm_instance_type.cpus} CPUs) and/or '
-            f'memory (> {slurm_instance_type.memory} G). ')
+            f'enough {req_str}. ')
 
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
@@ -754,7 +816,7 @@ def resolve_gres_gpu_type(
     Raises:
         exceptions.ResourcesUnavailableError: If no matching GPU type is found.
     """
-    nodes = _get_slurm_nodes_info(cluster)
+    nodes = get_slurm_nodes_info(cluster)
     default_partition = get_cluster_default_partition(cluster)
 
     # Collect all GPU types from every node (for error messages) and

@@ -464,21 +464,27 @@ class GCP(clouds.Cloud):
         return cls._get_image_size(image_id)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 local_disk=local_disk,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='gcp')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='gcp')
 
     @classmethod
     def failover_disk_tier(
@@ -719,7 +725,9 @@ class GCP(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if host_vm_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -754,6 +762,7 @@ class GCP(clouds.Cloud):
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='gcp')
 
         if instance_list is None:

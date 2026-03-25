@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
+from sky.provision.nebius import utils
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -210,22 +211,28 @@ class Nebius(clouds.Cloud):
         return isinstance(other, Nebius)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
         """Returns the default instance type for Nebius."""
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 local_disk=local_disk,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='nebius')
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='nebius')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -262,12 +269,21 @@ class Nebius(clouds.Cloud):
         # Selecting image_family by platform
         # https://docs.nebius.com/compute/storage/boot-disk-images
         if platform.startswith('cpu'):
-            image_family = 'ubuntu24.04-driverless'
+            default_image_family = 'ubuntu24.04-driverless'
         elif platform.startswith('gpu'):
-            image_family = 'ubuntu24.04-cuda12'
+            default_image_family = 'ubuntu24.04-cuda13.0'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
+
+        if (resources.image_id is None or
+                resources.extract_docker_image() is not None):
+            image_id = default_image_family
+        else:
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                image_id = resources.image_id[region.name]
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
@@ -296,7 +312,7 @@ class Nebius(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_static_ip_address': use_static_ip_address,
             'region': region.name,
-            'image_id': image_family,
+            'image_id': image_id,
             # Nebius does not support specific zones.
             'zones': None,
             'use_spot': resources.use_spot,
@@ -373,7 +389,9 @@ class Nebius(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -394,6 +412,7 @@ class Nebius(clouds.Cloud):
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='nebius')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -535,3 +554,36 @@ class Nebius(clouds.Cloud):
         unknown_profile_type = profile.which_field_in_oneof('profile')
         raise exceptions.CloudUserIdentityError(
             f'Nebius profile is of an unknown type - {unknown_profile_type}')
+
+    # pylint: disable=import-outside-toplevel
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        from grpc import StatusCode
+        from nebius.aio.service_error import RequestError
+
+        sdk = nebius.sdk()
+        compute = nebius.compute()
+        image_client = compute.ImageServiceClient(sdk)
+        if image_id.startswith('computeimage-'):
+            try:
+                image = image_client.get(
+                    compute.GetImageRequest(id=image_id)).wait()
+            except RequestError as e:
+                if e.status.code == StatusCode.NOT_FOUND:
+                    raise ValueError(f'Image {image_id} does not exist') from e
+                raise e
+        else:
+            parent_id = None
+            if region is not None:
+                parent_id = utils.get_project_by_region(region)
+            request = compute.GetImageLatestByFamilyRequest(
+                image_family=image_id, parent_id=parent_id)
+            try:
+                image = image_client.get_latest_by_family(request).wait()
+            except RequestError as e:
+                if e.status.code == StatusCode.NOT_FOUND:
+                    raise ValueError(
+                        f'Image family {image_id} does not exist') from e
+                raise e
+
+        return image.status.min_disk_size_bytes / 1024**3

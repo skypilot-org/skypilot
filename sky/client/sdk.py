@@ -70,7 +70,6 @@ if typing.TYPE_CHECKING:
     import pathlib
     import secrets
     import time
-    import webbrowser
 
     import psutil
     import requests
@@ -89,8 +88,6 @@ else:
     requests = adaptors_common.LazyImport('requests')
     secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
-    # only used in dashboard() and api_login()
-    webbrowser = adaptors_common.LazyImport('webbrowser')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -476,6 +473,7 @@ def validate(
     omit_mount_cached_config = _omit(37)
     omit_file_mount_type = _omit(40)
     omit_priority_class = _omit(43)
+    omit_max_hourly_cost = _omit(44)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -507,6 +505,12 @@ def validate(
                     resource._set_priority_class(None)
             logger.debug('`priority_class` is ignored because the server '
                          'does not support it yet.')
+        if omit_max_hourly_cost:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._max_hourly_cost = None
+            logger.debug('`max_hourly_cost` is ignored because the server '
+                         'does not support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -527,7 +531,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
-    webbrowser.open(url)
+    common_utils.open_browser(url)
 
 
 @usage_lib.entrypoint
@@ -2657,7 +2661,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
 
         # Open browser to authorization page
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not webbrowser.open(auth_url):
+        if not common_utils.open_browser(auth_url):
             logger.debug('Failed to open browser.')
             return None
 
@@ -2708,7 +2712,7 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                                                    token_container, endpoint)
 
         token_url = f'{endpoint}/token?local_port={callback_port}'
-        if not webbrowser.open(token_url):
+        if not common_utils.open_browser(token_url):
             return None
 
         click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'

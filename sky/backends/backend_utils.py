@@ -948,6 +948,8 @@ def write_cluster_config(
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
                     sub_path=vol.sub_path,
+                    volume_type=vol.volume_config.type,
+                    host_path=vol.volume_config.config.get('host_path'),
                 )
                 volume_mount_vars.append(volume_info)
 
@@ -993,6 +995,12 @@ def write_cluster_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
                 keys=('vpc_name',),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
+            'subnet_names': skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('subnet_names',),
                 default_value=None,
                 override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.

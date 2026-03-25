@@ -644,6 +644,29 @@ class SlurmClient:
             return match.group(1)
         return None
 
+    def get_select_type_parameters(self) -> Optional[str]:
+        """Get SelectTypeParameters from Slurm configuration.
+
+        See: https://slurm.schedmd.com/slurm.conf.html#OPT_SelectTypeParameters
+
+        Returns:
+            The raw value (e.g., 'CR_CPU', 'CR_CPU_Memory', 'CR_Core_Memory'),
+            or None if it cannot be determined.
+        """
+        cmd = 'scontrol show config | grep -i "^SelectTypeParameters"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.warning(f'Failed to get SelectTypeParameters: {stderr}')
+            return None
+
+        # Parse output like "SelectTypeParameters     = CR_CPU_Memory"
+        # When unset, Slurm defaults to CR_CORE_MEMORY for select/cons_tres,
+        # so this field always has a value.
+        match = re.search(r'SelectTypeParameters\s*=\s*(\S+)', stdout)
+        if match:
+            return match.group(1)
+        return None
+
     def check_pyxis_enabled(self) -> bool:
         """Check if the Pyxis SPANK plugin is installed.
 
