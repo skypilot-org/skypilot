@@ -41,7 +41,7 @@ setup: |
     bash setup_deps.sh
   else
     echo ">>> No setup_deps.sh found, running BUILD_CMD: ${BUILD_CMD}"
-    eval "${BUILD_CMD}"
+    bash -c "${BUILD_CMD}"
   fi
 
 run: |
@@ -54,7 +54,7 @@ run: |
   # --- Build ---
   echo ">>> Building..."
   set -o pipefail
-  if ! eval "${BUILD_CMD}" 2>&1 | tail -30; then
+  if ! bash -c "${BUILD_CMD}" 2>&1 | tail -30; then
     echo "EXPERIMENT_STATUS: crash"
     echo "EXPERIMENT_ERROR: build failed"
     exit 0  # exit 0 so SkyPilot marks the job as SUCCEEDED for log retrieval

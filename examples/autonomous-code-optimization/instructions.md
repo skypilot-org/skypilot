@@ -91,7 +91,7 @@ For each experiment, prepare an isolated copy and submit:
 
 ```bash
 mkdir -p /tmp/autoresearch/exp-03
-cp -r . /tmp/autoresearch/exp-03/
+rsync -a --exclude='.git' --exclude='build/' . /tmp/autoresearch/exp-03/
 # ... edit source files in the copy ...
 
 sky launch -c vm-03 experiment.yaml \
