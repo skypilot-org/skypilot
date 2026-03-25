@@ -522,6 +522,12 @@ def get_volume_schema():
                     'namespace': {
                         'type': 'string',
                     },
+                    'host_path': {
+                        'type': 'string',
+                    },
+                    'cleanup_on_deletion': {
+                        'type': 'boolean',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
