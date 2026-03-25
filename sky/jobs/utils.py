@@ -6,6 +6,7 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
+import concurrent.futures
 from datetime import datetime
 import enum
 import json
@@ -875,11 +876,22 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     file_paths: List[Dict[str, str]] = []
     errors: List[Dict[str, str]] = []
 
-    # Collect per-job data
+    # Collect per-job data in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(_collect_job_debug_manifest, job_ids))
+
+    # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
-    for job_id in job_ids:
-        _collect_job_debug_manifest(job_id, inline_data, file_paths, errors,
-                                    seen_cluster_names)
+    for job_id, (job_inline, job_files, job_errors,
+                 cluster_name) in zip(job_ids, results):
+        inline_data.extend(job_inline)
+        file_paths.extend(job_files)
+        errors.extend(job_errors)
+        if cluster_name and cluster_name not in seen_cluster_names:
+            seen_cluster_names.add(cluster_name)
+            job_prefix = f'managed_jobs/{job_id}'
+            _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                            inline_data, errors)
 
     # Collect controller system log paths (shared, not per-job)
     _collect_controller_system_log_paths(file_paths, errors)
@@ -891,11 +903,18 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     }
 
 
-def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
-                                file_paths: List[Dict[str, str]],
-                                errors: List[Dict[str, str]],
-                                seen_cluster_names: Set[str]) -> None:
-    """Collect debug manifest entries for a single managed job."""
+def _collect_job_debug_manifest(
+    job_id: int,
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
+           Optional[str]]:
+    """Collect debug manifest entries for a single managed job.
+
+    Returns:
+        (inline_data, file_paths, errors, cluster_name) for this job.
+    """
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
     job_prefix = f'managed_jobs/{job_id}'
 
     # 1. Controller log for this job (FILE — needs rsync)
@@ -984,7 +1003,8 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'traceback': _full_traceback(),
         })
 
-    # 5. Cluster info and events (inline — DB data)
+    # 5. Resolve cluster name (cluster info collected in caller for dedup)
+    cluster_name = None
     try:
         cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         if cluster_name is None:
@@ -995,10 +1015,6 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
                 _, task_name, _, _, _ = task_info[0]
                 cluster_name = generate_managed_job_cluster_name(
                     task_name, job_id)
-        if cluster_name and cluster_name not in seen_cluster_names:
-            seen_cluster_names.add(cluster_name)
-            _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
             'component': 'managed_jobs',
@@ -1006,6 +1022,8 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'error': str(e),
             'traceback': _full_traceback(),
         })
+
+    return inline_data, file_paths, errors, cluster_name
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
