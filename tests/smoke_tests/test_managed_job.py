@@ -2185,23 +2185,13 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
                 job_record = job
                 break
 
-        if job_record is None:
-            yield f'Job {name} not found in queue'
-            return
-
+        assert job_record is not None, f'Job {name} not found in queue'
         metadata = job_record.get('metadata')
-        if metadata is None:
-            yield 'metadata field is None'
-            return
-
+        assert metadata is not None, 'metadata field is None'
         git_commit = metadata.get('git_commit')
-        if git_commit is None:
-            yield 'git_commit missing from metadata'
-            return
-
-        if git_commit != repo_commit:
-            yield (f'Expected git_commit {repo_commit}, got {git_commit}')
-            return
+        assert git_commit is not None, 'git_commit missing from metadata'
+        assert git_commit == repo_commit, (
+            f'Expected git_commit {repo_commit}, got {git_commit}')
 
     # Write the test YAML inside the current repo so that
     # load_chain_dag_from_yaml captures the repo's git commit.
