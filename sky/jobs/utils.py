@@ -7,6 +7,7 @@ ManagedJobCodeGen.
 import asyncio
 import collections
 import concurrent.futures
+import contextlib
 from datetime import datetime
 import enum
 import json
@@ -859,6 +860,21 @@ def _full_traceback() -> str:
         return traceback.format_exc()
 
 
+@contextlib.contextmanager
+def _catch_to_errors(errors: List[Dict[str, str]], component: str,
+                     resource: str):
+    """Catch exceptions and append to errors list with traceback."""
+    try:
+        yield
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': component,
+            'resource': resource,
+            'error': str(e),
+            'traceback': _full_traceback(),
+        })
+
+
 def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     """Collect a debug dump manifest from the controller.
 
@@ -918,7 +934,7 @@ def _collect_job_debug_manifest(
     job_prefix = f'managed_jobs/{job_id}'
 
     # 1. Controller log for this job (FILE — needs rsync)
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
         log_file = controller_logs_dir / f'{job_id}.log'
@@ -927,16 +943,9 @@ def _collect_job_debug_manifest(
                 'remote_path': str(log_file),
                 'relative_path': f'{job_prefix}/{job_id}.log',
             })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{job_id}/controller_log',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
 
     # 2. Job info from DB (inline — small data)
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/job_info'):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         if tasks:
             for t in tasks:
@@ -948,16 +957,9 @@ def _collect_job_debug_manifest(
                 'relative_path': f'{job_prefix}/job_info.json',
                 'content': json.dumps(tasks, indent=2, default=str),
             })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{job_id}/job_info',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
 
     # 3. Job events from DB (inline — small data)
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/events'):
         events = managed_job_state.get_job_events(job_id, limit=1000)
         if events:
             serializable_events = []
@@ -976,16 +978,9 @@ def _collect_job_debug_manifest(
                                       indent=2,
                                       default=str),
             })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{job_id}/events',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
 
     # 4. Job run logs (FILE — needs rsync)
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/run_logs'):
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
         for task_idx, (_, _, _, local_log_file, _) in enumerate(task_info):
@@ -995,17 +990,10 @@ def _collect_job_debug_manifest(
                     'remote_path': str(pathlib.Path(local_log_file)),
                     'relative_path': f'{job_prefix}/run{suffix}.log',
                 })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{job_id}/run_logs',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
 
     # 5. Resolve cluster name (cluster info collected in caller for dedup)
     cluster_name = None
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
         cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         if cluster_name is None:
             # Fall back to generated name
@@ -1015,13 +1003,6 @@ def _collect_job_debug_manifest(
                 _, task_name, _, _, _ = task_info[0]
                 cluster_name = generate_managed_job_cluster_name(
                     task_name, job_id)
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{job_id}/cluster_info',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
 
     return inline_data, file_paths, errors, cluster_name
 
@@ -1032,58 +1013,47 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
     """Collect cluster info and events for a managed job's cluster."""
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
-    try:
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/cluster_info'):
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is not None:
-            cluster_info = debug_dump_helpers.serialize_cluster_record(
-                cluster_record)
-            inline_data.append({
-                'relative_path': f'{cluster_prefix}/cluster_info.json',
-                'content': json.dumps(cluster_info, indent=2, default=str),
-            })
-
-            cluster_hash = cluster_record.get('cluster_hash')
-            if cluster_hash:
-                for event_data in debug_dump_helpers.get_cluster_events_data(
-                        cluster_hash):
-                    inline_data.append({
-                        'relative_path':
-                            f'{cluster_prefix}/'
-                            f'events_{event_data["event_type"]}.json',
-                        'content': json.dumps(event_data['events'],
-                                              indent=2,
-                                              default=str),
-                    })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': f'{cluster_name}/cluster_info',
-            'error': str(e),
-            'traceback': _full_traceback(),
+        if cluster_record is None:
+            return
+        cluster_info = debug_dump_helpers.serialize_cluster_record(
+            cluster_record)
+        inline_data.append({
+            'relative_path': f'{cluster_prefix}/cluster_info.json',
+            'content': json.dumps(cluster_info, indent=2, default=str),
         })
+
+        cluster_hash = cluster_record.get('cluster_hash')
+        if not cluster_hash:
+            return
+        for event_data in debug_dump_helpers.get_cluster_events_data(
+                cluster_hash):
+            inline_data.append({
+                'relative_path': f'{cluster_prefix}/'
+                                 f'events_{event_data["event_type"]}.json',
+                'content': json.dumps(event_data['events'],
+                                      indent=2,
+                                      default=str),
+            })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                                          errors: List[Dict[str, str]]) -> None:
     """Collect controller system log file paths (controller_*.log files)."""
-    try:
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
-        if controller_logs_dir.exists():
-            for log_file in controller_logs_dir.glob('controller_*.log'):
-                if log_file.is_file():
-                    file_paths.append({
-                        'remote_path': str(log_file),
-                        'relative_path': f'managed_jobs/controller_system/'
-                                         f'{log_file.name}',
-                    })
-    except Exception as e:  # pylint: disable=broad-except
-        errors.append({
-            'component': 'managed_jobs',
-            'resource': 'controller_system/logs',
-            'error': str(e),
-            'traceback': _full_traceback(),
-        })
+        if not controller_logs_dir.exists():
+            return
+        for log_file in controller_logs_dir.glob('controller_*.log'):
+            if log_file.is_file():
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
 
 
 def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
