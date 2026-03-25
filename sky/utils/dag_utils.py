@@ -162,7 +162,7 @@ def load_chain_dag_from_yaml(
     dag = _load_chain_dag(configs, env_overrides, secret_overrides)
     # Capture git commit from the YAML file's directory for tasks that
     # don't already have one (e.g. from a workdir).
-    yaml_dir = os.path.dirname(os.path.abspath(path))
+    yaml_dir = os.path.dirname(os.path.realpath(path))
     git_commit = common_utils.get_git_commit(yaml_dir)
     if git_commit is not None:
         for task in dag.tasks:
