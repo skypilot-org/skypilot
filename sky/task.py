@@ -544,7 +544,13 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
-        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+        git_commit = common_utils.get_git_commit(self.workdir)
+        # Always prefer the workdir's commit over any previously set value
+        # (e.g. from the YAML file's repo). But don't overwrite a valid
+        # value with None, which happens on the server where the uploaded
+        # blob directory is not a git repo.
+        if git_commit is not None:
+            self._metadata['git_commit'] = git_commit
 
     @staticmethod
     def from_yaml_config(
