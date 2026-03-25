@@ -46,11 +46,12 @@ class TestSecurityHeadersMiddleware:
         response = self.client.get('/test')
         assert 'Content-Security-Policy' in response.headers
 
-    def test_csp_no_unsafe_inline_on_non_html(self):
-        """Non-HTML responses must not allow unsafe-inline."""
+    def test_csp_no_unsafe_inline_in_script_src(self):
+        """script-src must not allow unsafe-inline."""
         response = self.client.get('/test')
         csp = response.headers['Content-Security-Policy']
-        assert 'unsafe-inline' not in csp
+        script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+        assert 'unsafe-inline' not in script_src
         assert 'unsafe-eval' not in csp
 
     def test_csp_strict_policy_on_non_html(self):
@@ -59,7 +60,7 @@ class TestSecurityHeadersMiddleware:
         csp = response.headers['Content-Security-Policy']
         assert "default-src 'self'" in csp
         assert "script-src 'self'" in csp
-        assert "style-src 'self'" in csp
+        assert "style-src 'self' 'unsafe-inline'" in csp
         assert "object-src 'none'" in csp
         assert "frame-ancestors 'self'" in csp
         assert "img-src 'self' data:" in csp
@@ -69,13 +70,16 @@ class TestSecurityHeadersMiddleware:
         """HTML responses should use nonce-based CSP."""
         response = self.client.get('/dashboard/index.html')
         csp = response.headers['Content-Security-Policy']
-        assert 'unsafe-inline' not in csp
+        # script-src must use nonce, not unsafe-inline.
+        script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+        assert 'unsafe-inline' not in script_src
         # Extract the nonce from the CSP header.
         match = re.search(r"'nonce-([A-Za-z0-9+/=]+)'", csp)
         assert match is not None, f'No nonce found in CSP: {csp}'
         nonce = match.group(1)
         assert f"script-src 'self' 'nonce-{nonce}'" in csp
-        assert f"style-src 'self' 'nonce-{nonce}'" in csp
+        # style-src uses unsafe-inline (CSS cannot execute scripts).
+        assert "style-src 'self' 'unsafe-inline'" in csp
 
     def test_nonce_in_html_body_matches_csp_header(self):
         """The nonce in the HTML body should match the CSP header nonce."""
