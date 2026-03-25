@@ -7716,14 +7716,11 @@ def debug_dump(
     output: Optional[str],
     async_call: bool,
 ):
-    """Create a debug dump for troubleshooting.
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
 
-    Creates a zip file containing logs, state, and configuration
-    for the specified requests, clusters, and/or managed jobs.
-    At least one of the filter options (--request-ids, --cluster-names,
-    --job-ids, or --recent-minutes) must be provided.
-
-    \b
     Example usage:
 
     \b

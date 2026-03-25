@@ -1223,6 +1223,9 @@ sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Op
 
 Create a debug dump for troubleshooting.
 
+At least one of ``request_ids``, ``cluster_names``, ``managed_job_ids``,
+or ``recent_minutes`` must be provided.
+
 **Args:**
     request_ids: List of request IDs or prefixes to include in the
         dump. Prefixes are resolved to all matching request IDs on
