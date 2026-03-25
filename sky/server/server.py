@@ -718,9 +718,12 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - base-uri 'self': Restrict <base> element to same origin
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
+    # style-src uses 'unsafe-inline' because CSS cannot execute scripts,
+    # and removing it would require propagating nonces into every CSS-in-JS
+    # library (Emotion, react-remove-scroll-bar, etc.) across all plugins.
     _CSP_TEMPLATE = ('default-src \'self\'; '
                      'script-src {script_src}; '
-                     'style-src {style_src}; '
+                     'style-src \'self\' \'unsafe-inline\'; '
                      'font-src \'self\'; '
                      'connect-src \'self\' http://localhost:* '
                      'http://127.0.0.1:*; '
@@ -739,10 +742,10 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # inline allowance.
         nonce = getattr(request.state, 'csp_nonce', None)
         if nonce:
-            src = f'\'self\' \'nonce-{nonce}\''
+            script_src = f'\'self\' \'nonce-{nonce}\''
         else:
-            src = '\'self\''
-        csp = self._CSP_TEMPLATE.format(script_src=src, style_src=src)
+            script_src = '\'self\''
+        csp = self._CSP_TEMPLATE.format(script_src=script_src)
         response.headers['Content-Security-Policy'] = csp
         # X-Frame-Options for legacy browsers that don't support CSP
         # frame-ancestors directive.

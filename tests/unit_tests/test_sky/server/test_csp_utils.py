@@ -75,3 +75,35 @@ class TestInjectNonceIntoHtml:
         assert f'<script nonce="{self.NONCE}">x()</script>' in result
         # No meta tag since there is no <head> to inject into.
         assert 'csp-nonce' not in result
+
+    def test_no_false_positive_script_inside_js(self):
+        """Nonce must not be injected into <script> literals in JS code.
+
+        Minified bundles (e.g. Vite/React) may contain strings like
+        ``innerHTML="<script><\\/script>"`` which should not be treated
+        as real HTML tags.
+        """
+        html = ('<script type="module">'
+                'e.innerHTML="<script><\\/script>";'
+                '</script>')
+        result = csp_utils.inject_nonce_into_html(html, self.NONCE)
+        # Only the outer <script> should get a nonce.
+        assert result.count(f'nonce="{self.NONCE}"') == 1
+        assert f'<script nonce="{self.NONCE}" type="module">' in result
+
+    def test_no_false_positive_style_inside_js(self):
+        """Nonce must not be injected into <style> literals in JS code."""
+        html = ('<script>'
+                'el.innerHTML="<style>body{color:red}</style>";'
+                '</script>')
+        result = csp_utils.inject_nonce_into_html(html, self.NONCE)
+        # Only the <script> gets a nonce; the <style> inside JS does not.
+        assert result.count(f'nonce="{self.NONCE}"') == 1
+        assert f'<script nonce="{self.NONCE}">' in result
+
+    def test_unclosed_script_tag(self):
+        """Malformed HTML with no closing </script> should not crash."""
+        html = '<script>alert(1)'
+        result = csp_utils.inject_nonce_into_html(html, self.NONCE)
+        assert f'<script nonce="{self.NONCE}">' in result
+        assert 'alert(1)' in result
