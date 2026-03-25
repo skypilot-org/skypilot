@@ -57,7 +57,7 @@ The [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.ht
 
 ## How It Differs from the GPU Autoresearch Example
 
-| | [GPU Autoresearch](../autoresearch/) | This Example |
+| | [GPU Autoresearch](https://github.com/skypilot-org/skypilot/tree/master/examples/autoresearch) | This Example |
 |---|---|---|
 | Target | ML training (karpathy/autoresearch) | Any OSS project |
 | Compute | GPU clusters (H100/H200) | CPU VMs (cheap) |
