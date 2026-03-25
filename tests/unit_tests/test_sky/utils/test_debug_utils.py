@@ -1826,6 +1826,8 @@ class TestRequestBodyAllowlistCoverage:
     # Request names intentionally excluded from the allowlist because they
     # contain sensitive non-task data (passwords, config dicts, recipe YAML).
     # Update this set when adding new request names that should be excluded.
+    # Unless the request has sensitive values, it should be added to
+    # _REQUEST_BODY_ALLOWLIST in sky/utils/debug_utils.py instead.
     _EXCLUDED_REQUEST_NAMES = {
         # Workspace config: config dict may contain credentials
         'sky.workspaces.update',
