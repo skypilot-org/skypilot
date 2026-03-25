@@ -1450,12 +1450,210 @@ class V1Node:
         return taints
 
 
+def get_allowed_nodes_config(
+        context: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Returns the allowed_nodes config for the given K8s context, or None.
+
+    Reads from ~/.sky/config.yaml, respecting context_configs overrides.
+    """
+    return skypilot_config.get_effective_region_config(cloud='kubernetes',
+                                                       region=context,
+                                                       keys=('allowed_nodes',),
+                                                       default_value=None)
+
+
+def _filter_allowed_nodes(nodes: List[V1Node],
+                          context: Optional[str] = None) -> List[V1Node]:
+    """Filter nodes based on the allowed_nodes config.
+
+    All criteria across all sub-fields are OR'd: a node is included if it
+    matches ANY label key-value pair, ANY name, or ANY IP address.
+
+    Args:
+        nodes: List of V1Node objects to filter.
+        context: K8s context name (for reading per-context config).
+
+    Returns:
+        Filtered list of nodes. Returns all nodes if no allowed_nodes
+        config is set or if the config is empty.
+    """
+    config = get_allowed_nodes_config(context)
+    if config is None:
+        return nodes
+
+    label_selector = config.get('label_selector', {})
+    allowed_names = set(config.get('names', []))
+    allowed_ips = set(config.get('ips', []))
+
+    # If all sub-fields are empty, return all nodes (empty config = no filter).
+    if not label_selector and not allowed_names and not allowed_ips:
+        return nodes
+
+    # Use a set to track already-added nodes and avoid duplicates when a
+    # node matches multiple criteria.
+    seen = set()
+    filtered = []
+    for node in nodes:
+        if node.metadata.name in seen:
+            continue
+
+        matched = False
+
+        # Check each label key-value pair (OR'd: match if ANY pair matches).
+        if label_selector:
+            for key, value in label_selector.items():
+                if node.metadata.labels.get(key) == value:
+                    matched = True
+                    break
+
+        # Check node name.
+        if not matched and allowed_names:
+            if node.metadata.name in allowed_names:
+                matched = True
+
+        # Check IPs (matches against any address type: InternalIP,
+        # ExternalIP, etc.).
+        if not matched and allowed_ips:
+            node_ips = {addr.address for addr in node.status.addresses}
+            if node_ips & allowed_ips:
+                matched = True
+
+        if matched:
+            seen.add(node.metadata.name)
+            filtered.append(node)
+
+    return filtered
+
+
+def inject_allowed_nodes_affinity(
+    pod_spec: Dict[str, Any],
+    allowed_nodes_config: Optional[Dict[str, Any]],
+    context: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Inject nodeAffinity constraints for allowed_nodes into a pod spec.
+
+    Ensures pods are only scheduled on nodes permitted by the allowed_nodes
+    config. Builds one matchExpression per criterion:
+
+    - Each label key-value pair becomes a label expression (autoscaler-
+      friendly: new nodes matching the label are automatically eligible).
+    - Names/IPs are resolved to a single kubernetes.io/hostname In
+      expression (static snapshot at scheduling time).
+
+    These expressions are then cross-producted with the existing
+    nodeSelectorTerms. Since K8s OR's across terms but AND's within a
+    term, this correctly expresses:
+
+        existing_constraints AND (label1 OR label2 OR hostname_set)
+
+    For example, with GPU affinity + label_selector {pool: gpu} +
+    names [node-01]:
+
+        (GPU AND pool=gpu) OR (GPU AND hostname in [node-01])
+
+    Args:
+        pod_spec: The pod spec dict (pod_spec['spec'] level, containing
+            'affinity', 'containers', etc.).
+        allowed_nodes_config: The allowed_nodes config dict, or None.
+        context: K8s context for resolving nodes when names/IPs are used.
+
+    Returns:
+        The modified pod_spec (also modified in-place).
+    """
+    if allowed_nodes_config is None:
+        return pod_spec
+
+    label_selector = allowed_nodes_config.get('label_selector', {})
+    has_names_or_ips = bool(
+        allowed_nodes_config.get('names') or allowed_nodes_config.get('ips'))
+
+    # Nothing to do if the config is completely empty.
+    if not label_selector and not has_names_or_ips:
+        return pod_spec
+
+    # Build a list of matchExpression entries — one per allowed_nodes
+    # criterion. Each entry represents one OR'd alternative. Labels are
+    # forwarded directly (autoscaler-friendly: new nodes matching the
+    # label are automatically eligible). Names/IPs are resolved to a
+    # kubernetes.io/hostname In expression (static snapshot).
+    allowed_exprs: List[Dict[str, Any]] = []
+
+    for key, value in label_selector.items():
+        allowed_exprs.append({
+            'key': key,
+            'operator': 'In',
+            'values': [value],
+        })
+
+    if has_names_or_ips:
+        # Resolve node names and IPs to kubernetes.io/hostname values.
+        # This label is set by the kubelet and may differ from
+        # node.metadata.name in some setups, so we look it up from
+        # the actual node objects rather than assuming equality.
+        allowed_names = set(allowed_nodes_config.get('names', []))
+        allowed_ips = set(allowed_nodes_config.get('ips', []))
+        all_nodes = get_kubernetes_nodes(context=context)
+        hostnames = set()
+        for node in all_nodes:
+            matched = False
+            if node.metadata.name in allowed_names:
+                matched = True
+            if not matched and allowed_ips:
+                node_ips = {a.address for a in node.status.addresses}
+                if node_ips & allowed_ips:
+                    matched = True
+            if matched:
+                hostnames.add(
+                    node.metadata.labels.get('kubernetes.io/hostname',
+                                             node.metadata.name))
+        if not hostnames and not label_selector:
+            raise exceptions.ResourcesUnavailableError(
+                'No Kubernetes nodes match the allowed_nodes filter '
+                'in ~/.sky/config.yaml. Check your allowed_nodes '
+                'configuration.')
+        if hostnames:
+            allowed_exprs.append({
+                'key': 'kubernetes.io/hostname',
+                'operator': 'In',
+                'values': sorted(hostnames),
+            })
+
+    if not allowed_exprs:
+        return pod_spec
+
+    # Cross-product the allowed expressions with existing nodeSelectorTerms.
+    # Each allowed expression becomes a separate term (OR'd by K8s), and
+    # within each term the expression is AND'd with existing constraints
+    # (e.g., GPU label). This correctly expresses:
+    #   existing_constraints AND (criterion1 OR criterion2 OR ...)
+    affinity = pod_spec.setdefault('affinity', {})
+    node_affinity = affinity.setdefault('nodeAffinity', {})
+    required = node_affinity.setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', {})
+    existing_terms = required.get('nodeSelectorTerms', [])
+
+    base_terms = existing_terms if existing_terms else [{}]
+    new_terms = []
+    for expr in allowed_exprs:
+        for term in base_terms:
+            new_term = copy.deepcopy(term)
+            new_term.setdefault('matchExpressions', []).append(expr)
+            new_terms.append(new_term)
+    required['nodeSelectorTerms'] = new_terms
+
+    return pod_spec
+
+
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
+
+    If allowed_nodes is configured in ~/.sky/config.yaml, the returned list
+    is filtered to only include nodes matching the config. All criteria
+    (labels, names, IPs) are OR'd.
     """
     if context is None:
         context = get_current_kube_config_context_name()
@@ -1471,6 +1669,9 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
         ]
     finally:
         response.release_conn()
+
+    # Apply allowed_nodes filtering if configured.
+    nodes = _filter_allowed_nodes(nodes, context)
 
     return nodes
 
@@ -2896,6 +3097,182 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
+# Sidecar container names.
+_DIND_CONTAINER_NAME = 'dind'
+_BUILDKITD_CONTAINER_NAME = 'buildkitd'
+# Cache subPath prefixes (used to isolate per-pod cache in a shared PVC).
+_DIND_CACHE_SUBPATH_PREFIX = 'var_lib_docker'
+_BUILDKIT_CACHE_SUBPATH_PREFIX = 'buildkit_cache'
+
+
+class DockerMode(str, enum.Enum):
+    """Modes for the ``enable_docker`` config."""
+    ALL = 'ALL'
+    BUILD = 'BUILD'
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerSidecarDefaults:
+    """Default image and volume names for a Docker sidecar mode."""
+    image: str
+    cli_image: str
+    cache_vol_name: str
+    cache_mount: str
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerConfig:
+    """Normalized ``enable_docker`` config produced by
+    :func:`normalize_enable_docker_config`."""
+    mode: DockerMode
+    cache_volume: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a plain dict (for YAML round-trip via provider)."""
+        return {'mode': self.mode.value, 'cache_volume': self.cache_volume}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'DockerConfig':
+        """Reconstruct from a dict (e.g. read back from provider config)."""
+        return cls(mode=DockerMode(d['mode']),
+                   cache_volume=d.get('cache_volume'))
+
+
+# Default images for each enable_docker mode.
+DOCKER_SIDECAR_DEFAULTS: Dict[DockerMode, DockerSidecarDefaults] = {
+    DockerMode.ALL: DockerSidecarDefaults(
+        image='docker:29.3-dind',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='dind-storage',
+        cache_mount='/var/lib/docker',
+    ),
+    DockerMode.BUILD: DockerSidecarDefaults(
+        image='moby/buildkit:v0.28.0-rootless',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='buildkit-cache',
+        cache_mount='/home/user/.local/share/buildkit',
+    ),
+}
+
+
+def normalize_enable_docker_config(
+    raw: Union[bool, str, Dict[str, Any], None],) -> Optional[DockerConfig]:
+    """Normalize ``enable_docker`` config into a :class:`DockerConfig`.
+
+    Returns ``None`` when disabled.
+    """
+    if raw is None or raw is False:
+        return None
+    if raw is True or raw == DockerMode.ALL:
+        return DockerConfig(mode=DockerMode.ALL)
+    if raw == DockerMode.BUILD:
+        return DockerConfig(mode=DockerMode.BUILD)
+    if isinstance(raw, dict):
+        if 'mode' not in raw:
+            # Empty dict or dict without 'mode' key (e.g. default_value
+            # from config lookup) — treat as disabled.
+            return None
+        mode_val = raw['mode']
+        if mode_val is False:
+            return None
+        mode = DockerMode(mode_val)
+        return DockerConfig(mode=mode, cache_volume=raw.get('cache_volume'))
+    raise ValueError(f'Invalid enable_docker value: {raw!r}')
+
+
+def inject_docker_cache_volume(
+    pod_spec: Dict[str, Any],
+    docker_config: DockerConfig,
+    pvc_name: Optional[str],
+    context: Optional[str],
+    namespace: str,
+) -> None:
+    """Inject a cache volume + volumeMount into the Docker sidecar container.
+
+    Mutates *pod_spec* in place.
+
+    * If *pvc_name* is set, a PVC-backed volume with a per-pod ``subPath``
+      is added (for persistent cache).  For BuildKit the pod-level
+      ``securityContext.fsGroup`` is set so the rootless daemon (uid 1000)
+      can write to the PVC.
+    * Otherwise an ``emptyDir`` is added so the builder avoids writing to
+      the container overlay (nested overlayfs causes perf/stability issues
+      for DinD).
+    * If the user already mounted something at the cache path via
+      ``pod_config``, this function is a no-op.
+    """
+    mode = docker_config.mode
+    defaults = DOCKER_SIDECAR_DEFAULTS[mode]
+    ctr_name = (_DIND_CONTAINER_NAME
+                if mode == DockerMode.ALL else _BUILDKITD_CONTAINER_NAME)
+    cache_vol_name = defaults.cache_vol_name
+    cache_mount = defaults.cache_mount
+
+    # Check if the user already mounted a volume at the cache path
+    # via pod_config (e.g. manual emptyDir or hostPath).
+    for ctr in pod_spec['spec'].get('containers', []):
+        if ctr['name'] == ctr_name:
+            for vm in ctr.get('volumeMounts', []):
+                if vm.get('mountPath') == cache_mount:
+                    return  # User-provided mount takes precedence.
+            break
+
+    if pvc_name:
+        # PVC path: per-pod subPath for isolation.
+        # For rootless buildkitd (uid/gid 1000), set fsGroup so the PVC
+        # mount is writable.
+        if mode == DockerMode.BUILD:
+            pod_sec = pod_spec['spec'].setdefault('securityContext', {})
+            pod_sec.setdefault('fsGroup', 1000)
+            pod_sec.setdefault('fsGroupChangePolicy', 'OnRootMismatch')
+
+        prefix = (_DIND_CACHE_SUBPATH_PREFIX
+                  if mode == DockerMode.ALL else _BUILDKIT_CACHE_SUBPATH_PREFIX)
+        pod_name = pod_spec['metadata']['name']
+        hash_key = f'{context or ""}:{namespace}:{pod_name}'
+        sub_path = (f'{prefix}_'
+                    f'{hashlib.sha256(hash_key.encode()).hexdigest()[:12]}')
+
+        # Reuse an existing volume entry for this PVC if one already exists
+        # (avoids duplicate spec.volumes entries).
+        existing_vol = next((
+            v['name']
+            for v in pod_spec['spec'].get('volumes', [])
+            if v.get('persistentVolumeClaim', {}).get('claimName') == pvc_name),
+                            None)
+        if existing_vol:
+            vol_name = existing_vol
+        else:
+            vol_name = cache_vol_name
+            pod_spec['spec'].setdefault('volumes', []).append({
+                'name': vol_name,
+                'persistentVolumeClaim': {
+                    'claimName': pvc_name
+                },
+            })
+
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': vol_name,
+                    'mountPath': cache_mount,
+                    'subPath': sub_path,
+                })
+    else:
+        # No PVC: add an emptyDir so the builder doesn't write to the
+        # container overlay layer.
+        pod_spec['spec'].setdefault('volumes', []).append({
+            'name': cache_vol_name,
+            'emptyDir': {},
+        })
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': cache_vol_name,
+                    'mountPath': cache_mount,
+                })
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
@@ -3318,6 +3695,27 @@ def get_kubernetes_node_info(
             if result is not None:
                 logger.debug(f'Got node info from external provider for '
                              f'{resolved_context}')
+                # Apply allowed_nodes filtering to plugin results. The
+                # plugin returns info for all nodes, but we need to
+                # respect the user's allowed_nodes config. Use
+                # get_kubernetes_nodes() (which is already filtered) to
+                # determine the set of allowed node names.
+                # TODO(cooperc): Move this filtering into the plugin's
+                # NodeInfoSource so it can filter server-side and avoid
+                # the extra list_node API call here.
+                allowed_config = get_allowed_nodes_config(resolved_context)
+                if allowed_config is not None:
+                    allowed_nodes = get_kubernetes_nodes(
+                        context=resolved_context)
+                    allowed_names = {n.metadata.name for n in allowed_nodes}
+                    result = models.KubernetesNodesInfo(
+                        node_info_dict={
+                            name: info
+                            for name, info in result.node_info_dict.items()
+                            if name in allowed_names
+                        },
+                        hint=result.hint,
+                    )
                 return result
         # Fall through to direct Kubernetes API query if provider returns None
 

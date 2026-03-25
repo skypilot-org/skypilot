@@ -40,6 +40,7 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
+    :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -77,6 +78,8 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
 
+  :ref:`api_server_access <yaml-spec-api-server-access>`: true
+
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
     /mnt/cache:
@@ -89,6 +92,11 @@ Below is the configuration syntax and some example values.  See details under ea
     /checkpoints:
       source: s3://existing-bucket
       mode: MOUNT
+    # Mount with VFS caching and a pre-tuned workload type
+    /data:
+      source: s3://my-model-data
+      mode: MOUNT_CACHED
+      type: DATASET_RO
     /datasets-s3: s3://my-awesome-dataset
 
   :ref:`setup <yaml-spec-setup>`: |
@@ -616,6 +624,32 @@ If ``'best'`` is specified, use the best network tier available on the specified
     network_tier: best
 
 
+.. _yaml-spec-resources-max-hourly-cost:
+
+``resources.max_hourly_cost``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When ``use_spot`` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100
+    max_hourly_cost: 10.0
+
+.. code-block:: yaml
+
+  # Combined with spot instances: filters by spot price
+  resources:
+    use_spot: true
+    max_hourly_cost: 5.0
+
+
 .. _yaml-spec-resources-ports:
 
 ``resources.ports``
@@ -676,7 +710,7 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -801,6 +835,17 @@ OR
       us-east-1: ami-123
       us-west-2: ami-456
 
+**Nebius**
+
+The ``image_id`` parameter supports specifying an image by ID, or by image family.
+
+.. code-block:: yaml
+
+  resources:
+    # Specify an image by ID
+    image_id: computeimage-e00d6q343kqz6ayd63
+    # Or use the latest image from a family
+    image_id: ubuntu24.04-cuda13.0
 
 **RunPod**
 
@@ -1026,6 +1071,22 @@ Example:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
 
+.. _yaml-spec-api-server-access:
+
+``api_server_access``
+~~~~~~~~~~~~~~~~~~~~~
+
+Whether to inject API server credentials into the task's environment so that it can call ``sky`` CLI/SDK to launch nested SkyPilot operations. Defaults to ``true``. Set to ``false`` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+.. code-block:: yaml
+
+  # Opt out of API server access injection
+  api_server_access: false
+
+See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for details.
+
 .. _yaml-spec-new-volumes:
 
 ``volumes``
@@ -1080,6 +1141,12 @@ Example:
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
       mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
+    # Mount with VFS caching and a pre-tuned workload type for model checkpoints.
+    /checkpoints:
+      source: s3://my-checkpoint-bucket
+      mode: MOUNT_CACHED
+      type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
+
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
 
@@ -1094,13 +1161,21 @@ OR
 .. code-block:: yaml
 
   file_mounts:
-    /remote/data: ./local_data  # Local to remote
+    /remote/config: ./local_config  # Local to remote
     /remote/output: s3://my-bucket/outputs  # Cloud storage
     /remote/models:
       name: my-models-bucket
       source: ~/local_models
       store: gcs
       mode: MOUNT
+    /remote/data:
+      source: gs://my-data-bucket
+      mode: MOUNT_CACHED
+      type: DATASET_RO
+
+The ``type`` field specifies a pre-tuned workload type for ``MOUNT_CACHED`` mode.
+Available types: ``MODEL_CHECKPOINT_RO``, ``MODEL_CHECKPOINT_RW``, ``DATASET_RO``, ``DATASET_RW``.
+See :ref:`mount_cached_workload_types` for details on workload types and ``config.mount_cached`` parameters.
 
 .. _yaml-spec-setup:
 

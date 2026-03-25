@@ -72,6 +72,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
+      names:
+        - gpu-node-01
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
@@ -85,6 +88,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
     :ref:`dws <config-yaml-kubernetes-dws>`:
@@ -150,6 +154,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
+    :ref:`subnet_names <config-yaml-aws-subnet-names>`:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
     :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -748,6 +755,36 @@ It is possible to set either a ``string`` (one VPC), or a ``list`` (multiple
 target VPCs).
 
 Default: ``null`` (use the default VPC in each region).
+
+.. _config-yaml-aws-subnet-names:
+
+``aws.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use in each region (optional).
+
+If set, SkyPilot will only use the specified subnets when launching instances.
+Subnets are matched by their ``Name`` tag. Multiple subnets can be specified
+for failover across availability zones. The subnets must all belong to the
+same VPC.
+
+If ``vpc_names`` is also set, the specified subnets must belong to the
+specified VPC. If ``vpc_names`` is not set, the VPC is automatically inferred
+from the specified subnets.
+
+It is possible to set either a ``string`` (one subnet name) or a ``list``
+(multiple subnet names).
+
+Default: ``null`` (automatically select subnets from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    subnet_names:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
 
 .. _config-yaml-aws-use-internal-ips:
 
@@ -1524,6 +1561,56 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
 
+.. _config-yaml-kubernetes-allowed-nodes:
+
+``kubernetes.allowed_nodes``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict which Kubernetes nodes SkyPilot can use within a cluster (optional).
+
+This filters nodes from both resource discovery (e.g., ``sky gpus list``) and pod
+scheduling. It is the node-level equivalent of ``allowed_contexts``.
+
+All criteria are OR'd: a node is allowed if it matches **any** label key-value pair,
+**any** name, or **any** IP address. If ``allowed_nodes`` is not set, all nodes in
+the cluster are available.
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_nodes:
+      # Label selectors: each key-value pair is OR'd.
+      # A node matching pool=gpu OR team=research is allowed.
+      label_selector:
+        pool: gpu
+        team: research
+      # Explicit node names:
+      names:
+        - gpu-node-01
+        - gpu-node-02
+      # Explicit IPs (internal or external):
+      ips:
+        - 10.0.1.5
+        - 10.0.1.6
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        allowed_nodes:
+          label_selector:
+            pool: production-gpu
+
+.. note::
+
+  When using only ``label_selector`` (no ``names`` or ``ips``), new nodes that
+  match the labels are automatically eligible (autoscaler-friendly). When
+  ``names`` or ``ips`` are configured, the allowed node set is resolved at
+  pod creation time.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
@@ -1627,6 +1714,51 @@ By default, SkyPilot automatically creates a single container named ``ray-node``
         containers:
           - name: ray-node
             ...
+
+.. _config-yaml-kubernetes-enable-docker:
+
+``kubernetes.enable_docker``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable Docker inside SkyPilot pods (optional, default: disabled).
+
+Set this to make the ``docker`` CLI available inside the pod. SkyPilot
+automatically injects a sidecar container with the appropriate runtime and
+installs the ``docker`` CLI and ``docker buildx`` plugin.
+
+Accepted values:
+
+- ``true`` or ``ALL`` — Full Docker access (build, push, and ``docker run``).
+  Requires ``privileged: true`` permission on the cluster.
+- ``BUILD`` — Build and push images only (via ``docker buildx build``). Does
+  not require privileged permissions.
+- ``false`` (default) — Docker is not injected.
+
+Simple form:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker: true   # or ALL / BUILD
+
+Detailed form with a persistent cache volume:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker:
+       mode: ALL            # or BUILD
+       cache_volume: my-builder-cache  # SkyPilot volume name
+
+This can also be set per-task in the task YAML's ``config`` field:
+
+.. code-block:: yaml
+
+   config:
+     kubernetes:
+       enable_docker: true
+
+See :ref:`use-docker-in-pod` for a full guide.
 
 .. _config-yaml-kubernetes-kueue:
 

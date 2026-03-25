@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import os
 import pathlib
 import threading
@@ -14,6 +15,7 @@ import uvicorn
 
 from sky import models
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
@@ -552,3 +554,204 @@ async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
 
     assert blob_path.exists(), (
         'Unreferenced but recent blob should not be deleted')
+
+
+# --- Tests for _resolve_dynamic_route ---
+
+# A minimal routes manifest matching the real Next.js dashboard build output.
+_TEST_ROUTES_MANIFEST = {
+    'dynamicRoutes': [
+        {
+            'page': '/clusters/[cluster]',
+            'regex': '^/clusters/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/clusters/[cluster]/[job]',
+            'regex': '^/clusters/([^/]+?)/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/infra/[context]',
+            'regex': '^/infra/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/pools/[pool]',
+            'regex': '^/jobs/pools/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/[job]',
+            'regex': '^/jobs/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/[job]/[task]',
+            'regex': '^/jobs/([^/]+?)/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/plugins/[...slug]',
+            'regex': '^/plugins/(.+?)(?:/)?$'
+        },
+        {
+            'page': '/recipes/[recipe]',
+            'regex': '^/recipes/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/volumes/[volume]',
+            'regex': '^/volumes/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/workspaces/[name]',
+            'regex': '^/workspaces/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/[...path]',
+            'regex': '^/(.+?)(?:/)?$'
+        },
+    ]
+}
+
+
+def _build_dashboard_tree(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Create a directory tree mimicking the Next.js dashboard build output."""
+    d = tmp_path / 'dashboard'
+    d.mkdir()
+    # Write the routes manifest
+    (d / 'routes-manifest.json').write_text(json.dumps(_TEST_ROUTES_MANIFEST))
+    # Top-level files
+    (d / 'index.html').write_text('')
+    (d / '[...path].html').write_text('')
+    # clusters
+    (d / 'clusters').mkdir()
+    (d / 'clusters' / '[cluster].html').write_text('')
+    cluster_dynamic = d / 'clusters' / '[cluster]'
+    cluster_dynamic.mkdir()
+    (cluster_dynamic / '[job].html').write_text('')
+    # infra
+    (d / 'infra').mkdir()
+    (d / 'infra' / '[context].html').write_text('')
+    # jobs
+    (d / 'jobs').mkdir()
+    (d / 'jobs' / '[job].html').write_text('')
+    job_dynamic = d / 'jobs' / '[job]'
+    job_dynamic.mkdir()
+    (job_dynamic / '[task].html').write_text('')
+    pools = d / 'jobs' / 'pools'
+    pools.mkdir()
+    (pools / '[pool].html').write_text('')
+    # plugins (catch-all)
+    (d / 'plugins').mkdir()
+    (d / 'plugins' / '[...slug].html').write_text('')
+    # recipes
+    (d / 'recipes').mkdir()
+    (d / 'recipes' / '[recipe].html').write_text('')
+    # volumes
+    (d / 'volumes').mkdir()
+    (d / 'volumes' / '[volume].html').write_text('')
+    # workspaces
+    (d / 'workspaces').mkdir()
+    (d / 'workspaces' / '[name].html').write_text('')
+    return d
+
+
+class TestResolveDynamicRoute:
+    """Tests for _resolve_dynamic_route using the routes manifest."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_routes_cache(self):
+        """Reset the cached dynamic routes between tests."""
+        server._DYNAMIC_ROUTES = None
+        yield
+        server._DYNAMIC_ROUTES = None
+
+    def test_single_dynamic_segment(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d),
+                                                   'clusters/my-cluster')
+        assert result is not None
+        assert result.endswith('[cluster].html')
+
+    def test_nested_dynamic_segments(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'jobs/123/456')
+        assert result is not None
+        assert result.endswith('[task].html')
+
+    def test_literal_dir_over_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'jobs/pools/my-pool')
+        assert result is not None
+        assert result.endswith('[pool].html')
+        assert 'pools' in result
+
+    def test_catchall_route(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'plugins/foo/bar')
+        assert result is not None
+        assert result.endswith('[...slug].html')
+
+    def test_catchall_single_segment(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'plugins/foo')
+        assert result is not None
+        assert result.endswith('[...slug].html')
+
+    def test_root_catchall_for_unknown_path(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'unknown/deep/path')
+        assert result is not None
+        assert result.endswith('[...path].html')
+
+    def test_infra_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'infra/k8s')
+        assert result is not None
+        assert result.endswith('[context].html')
+
+    def test_volumes_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'volumes/my-vol')
+        assert result is not None
+        assert result.endswith('[volume].html')
+
+    def test_workspaces_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'workspaces/my-ws')
+        assert result is not None
+        assert result.endswith('[name].html')
+
+    def test_recipes_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'recipes/my-recipe')
+        assert result is not None
+        assert result.endswith('[recipe].html')
+
+    def test_nested_cluster_job(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(
+                str(d), 'clusters/my-cluster/job-42')
+        assert result is not None
+        assert result.endswith('[job].html')
+
+    def test_no_match_returns_none(self, tmp_path):
+        d = tmp_path / 'empty'
+        d.mkdir()
+        # No manifest, no routes
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'anything')
+        assert result is None
+
+    def test_single_unknown_segment_uses_root_catchall(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'cron')
+        assert result is not None
+        assert result.endswith('[...path].html')
