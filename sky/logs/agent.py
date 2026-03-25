@@ -50,8 +50,12 @@ class FluentbitAgent(LoggingAgent):
             'fi')
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')
-        config_cmd = (f'mkdir -p {constants.LOGGING_CONFIG_DIR} && '
-                      f'echo {shlex.quote(cfg)} > {cfg_path}')
+        config_cmd = (
+            f'mkdir -p {constants.LOGGING_CONFIG_DIR} && '
+            f'echo {shlex.quote(cfg)} > {cfg_path} && '
+            # Resolve ~ to $HOME since fluent-bit does not
+            # expand ~ in file paths or config values.
+            f'sed -i "s|~/|$HOME/|g" {cfg_path}')
         kill_prior_cmd = (
             'if [ -f "/tmp/fluentbit.pid" ]; then '
             # pylint: disable=line-too-long

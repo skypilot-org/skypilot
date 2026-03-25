@@ -23,6 +23,7 @@ class _StackdriverOutputConfig(pydantic.BaseModel):
     """
     name: str = 'stackdriver'
     match: str = '*'
+    google_service_credentials: Optional[str] = None
     export_to_project_id: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
 
@@ -38,7 +39,7 @@ class _StackdriverOutputConfig(pydantic.BaseModel):
 class GCPLoggingAgent(FluentbitAgent):
     """GCP logging agent."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any]):  # pylint: disable=super-init-not-called
         self.config = _GCPLoggingConfig(**config)
 
     def get_setup_command(self,
@@ -54,10 +55,11 @@ class GCPLoggingAgent(FluentbitAgent):
         # there is NO metadata server available, the logging agent will fail to
         # authenticate and we require the user to upload a service account key
         # via logs.gcp.credentials_file in this case.
-        # Also note that we use env var instead of YAML config to specify the
-        # service account key file path in order to resolve the home directory
-        # more reliably.
-        # Ref: https://github.com/fluent/fluent-bit/issues/8804
+        # Note: fluent-bit v5.0.0+ no longer reads the
+        # GOOGLE_APPLICATION_CREDENTIALS env var for the stackdriver plugin,
+        # so we pass google_service_credentials in the YAML config directly
+        # (see fluentbit_output_config). The env var is kept here for the
+        # credential validation check below.
         # TODO(aylei): check whether the credentials config is valid before
         # provision.
         pre_cmd = (f'export GOOGLE_APPLICATION_CREDENTIALS={credential_path}; '
@@ -76,7 +78,12 @@ class GCPLoggingAgent(FluentbitAgent):
         display_name = cluster_name.display_name
         unique_name = cluster_name.name_on_cloud
 
+        credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+        if self.config.credentials_file:
+            credential_path = self.config.credentials_file
+
         return _StackdriverOutputConfig(
+            google_service_credentials=credential_path,
             export_to_project_id=self.config.project_id,
             labels={
                 'skypilot_cluster_name': display_name,
