@@ -1152,23 +1152,22 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
-    def get_user_identity_from_context_name(cls,
-                                            context_name: str) -> List[str]:
+    def get_user_identity_from_context(cls, context: str) -> List[str]:
         """Returns the user identity for a specific Kubernetes context.
 
         Args:
-            context_name: The name of the Kubernetes context to get the
+            context: The name of the Kubernetes context to get the
                 identity for.
 
         Raises:
-            AssertionError: If the context is not found in kubeconfig.
+            ValueError: If the context is not found in kubeconfig.
         """
         all_contexts, _ = kubernetes.list_kube_config_contexts()
-        for context in all_contexts:
-            if context['name'] == context_name:
-                return [cls.get_identity_from_context(context)]
-        assert False, (f'Kubernetes context {context_name!r} not found in '
-                       f'kubeconfig.')
+        context_map = {ctx['name']: ctx for ctx in all_contexts}
+        if context not in context_map:
+            raise ValueError(f'Kubernetes context {context!r} not '
+                             'found in kubeconfig.')
+        return [cls.get_identity_from_context(context_map[context])]
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

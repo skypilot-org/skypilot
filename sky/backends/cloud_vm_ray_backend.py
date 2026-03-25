@@ -1715,7 +1715,7 @@ class RetryingVmProvisioner(object):
                 elif isinstance(to_provision.cloud, clouds.Kubernetes):
                     # Region is guaranteed to be set by optimizer.
                     assert to_provision.region is not None
-                    cloud_user = clouds.Kubernetes.get_user_identity_from_context_name(  # pylint: disable=line-too-long
+                    cloud_user = clouds.Kubernetes.get_user_identity_from_context(  # pylint: disable=line-too-long
                         to_provision.region)
                 else:
                     cloud_user = to_provision.cloud.get_active_user_identity()
