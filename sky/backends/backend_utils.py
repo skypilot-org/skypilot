@@ -1988,6 +1988,7 @@ def _check_owner_identity_with_record(cluster_name: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
+    is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
     if user_identities is None:
@@ -2014,26 +2015,27 @@ def _check_owner_identity_with_record(cluster_name: str,
                 # by the cloud CLI output, e.g. gcloud.
                 owner = owner.replace('\n', '').replace('\\', '')
                 if owner == current:
-                    if i != 0:
-                        logger.warning(
-                            f'The cluster was owned by {owner_identity}, but '
-                            f'a new identity {identity} is activated. We still '
-                            'allow the operation as the two identities are '
-                            'likely to have the same access to the cluster. '
-                            'Please be aware that this can cause unexpected '
-                            'cluster leakage if the two identities are not '
-                            'actually equivalent (e.g., belong to the same '
-                            'person).')
-                    if i != 0 or len(owner_identity) != len(identity):
-                        # We update the owner of a cluster, when:
-                        # 1. The strictest identty (i.e. the first one) does not
-                        # match, but the latter ones match.
-                        # 2. The length of the two identities are different,
-                        # which will only happen when the cluster is launched
-                        # before #1808. Update the user identity to avoid
-                        # showing the warning above again.
-                        global_user_state.set_owner_identity_for_cluster(
-                            cluster_name, identity)
+                    if not is_k8s_cloud:
+                        if i != 0:
+                            logger.warning(
+                                f'The cluster was owned by {owner_identity}, '
+                                f'but a new identity {identity} is activated. '
+                                'We still allow the operation as the two '
+                                'identities are likely to have the same '
+                                'access to the cluster. Please be aware that '
+                                'this can cause unexpected cluster leakage if '
+                                'the two identities are not actually equivalent '
+                                '(e.g., belong to the same person).')
+                        if i != 0 or len(owner_identity) != len(identity):
+                            # We update the owner of a cluster, when:
+                            # 1. The strictest identty (i.e. the first one)
+                            # does not match, but the latter ones match.
+                            # 2. The length of the two identities are different,
+                            # which will only happen when the cluster is launched
+                            # before #1808. Update the user identity to avoid
+                            # showing the warning above again.
+                            global_user_state.set_owner_identity_for_cluster(
+                                cluster_name, identity)
                     return  # The user identity matches.
         # Generate error message if no match found
         if len(user_identities) == 1:
