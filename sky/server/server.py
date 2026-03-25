@@ -722,9 +722,6 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - base-uri 'self': Restrict <base> element to same origin
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
-    # style-src uses 'unsafe-inline' because CSS cannot execute scripts,
-    # and removing it would require propagating nonces into every CSS-in-JS
-    # library (Emotion, react-remove-scroll-bar, etc.) across all plugins.
     _CSP_TEMPLATE = ('default-src \'self\'; '
                      'script-src {script_src}; '
                      'style-src \'self\' \'unsafe-inline\'; '
