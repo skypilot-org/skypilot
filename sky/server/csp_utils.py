@@ -1,7 +1,7 @@
 """CSP nonce generation and HTML injection utilities.
 
 Provides helpers for per-request Content Security Policy nonces that
-replace 'unsafe-inline' in script-src and style-src directives.
+replace 'unsafe-inline' in the script-src directive.
 """
 import base64
 import os

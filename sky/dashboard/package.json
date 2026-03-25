@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
+    "@emotion/cache": "^11.13.0",
     "@emotion/react": "^11.13.0",
     "@emotion/styled": "^11.13.0",
     "@mui/material": "^5.16.7",

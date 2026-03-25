@@ -702,10 +702,14 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     # Content-Security-Policy directives:
     # - default-src 'self': Only allow resources from the same origin
-    # - script-src / style-src: For HTML responses a per-request nonce is
-    #   used ('nonce-<value>') so inline scripts/styles are allowed only
-    #   when they carry the matching nonce attribute.  Non-HTML responses
-    #   get a strict 'self'-only policy (no inline allowance needed).
+    # - script-src: For HTML responses a per-request nonce is used
+    #   ('nonce-<value>') so inline scripts are allowed only when they
+    #   carry the matching nonce attribute.  Non-HTML responses get a
+    #   strict 'self'-only policy (no inline allowance needed).
+    # - style-src: Uses 'unsafe-inline' because CSS-in-JS libraries
+    #   (Emotion, react-remove-scroll-bar) dynamically create <style>
+    #   elements that cannot easily carry nonces.  CSS cannot execute
+    #   scripts, so the risk is negligible.
     # - font-src 'self': Only allow same-origin fonts
     # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
     #   Allow same-origin fetch/XHR/WebSocket plus localhost connections

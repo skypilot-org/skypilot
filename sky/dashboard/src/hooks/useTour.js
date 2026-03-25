@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { useRouter } from 'next/router';
 import Shepherd from 'shepherd.js';
+import { getNonce } from '../utils/csp';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
 
 const TourContext = createContext(null);
@@ -199,9 +200,9 @@ export function TourProvider({ children }) {
       const globalStyle = document.createElement('style');
       globalStyle.id = 'shepherd-global-custom-style';
       // Propagate CSP nonce so the dynamic <style> is not blocked.
-      const cspMeta = document.querySelector('meta[name="csp-nonce"]');
-      if (cspMeta) {
-        globalStyle.nonce = cspMeta.getAttribute('content');
+      const nonce = getNonce();
+      if (nonce) {
+        globalStyle.nonce = nonce;
       }
       globalStyle.textContent = `
           .shepherd-element {
