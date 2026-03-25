@@ -1225,6 +1225,53 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 pod_spec_copy['metadata']['labels'].update(head_selector)
                 pod_spec_copy['metadata'][
                     'name'] = f'{cluster_name_on_cloud}-head'
+                # HACK(scale-test): Give the head node more resources
+                # for Ray GCS to handle large-scale worker registrations.
+                # This is needed for clusters with 1000+ nodes.
+                # 4Gi was OOM-killed with 2000 nodes; GCS alone uses ~2.2GB
+                # plus dashboard, agent, raylet totals ~3GB+ under load.
+                # CPU: GCS steady-state at 2000 nodes uses ~12 effective
+                # CPUs (peak during registration + heartbeat processing).
+                # Memory: GCS uses ~3.3GB, total head ~5GB with agents.
+                # A node tainted with skypilot-head=true:NoSchedule reserves
+                # a dedicated node so workers don't steal head resources.
+                # Using 30 CPUs / 64Gi on a 32-vCPU/128Gi node to leave
+                # room for kubelet. We'll monitor actual usage to right-size.
+                if config.count > 100:
+                    # Save the original CPU request so that
+                    # get_cluster_info() can use it for ray --num-cpus
+                    # (which should reflect per-worker CPUs, not the
+                    # boosted head resources).
+                    original_cpu = str(
+                        pod_spec_copy['spec']['containers'][0]['resources'].get(
+                            'requests', {}).get('cpu', '1'))
+                    for container in pod_spec_copy['spec']['containers']:
+                        container['resources']['requests'] = {
+                            'cpu': '30',
+                            'memory': '64Gi',
+                        }
+                        container['resources']['limits'] = {
+                            'cpu': '30',
+                            'memory': '96Gi',
+                        }
+                    # Store original CPU in an annotation for later use
+                    annotations = pod_spec_copy['metadata'].setdefault(
+                        'annotations', {})
+                    annotations[
+                        'skypilot.co/original-cpu-request'] = original_cpu
+                    # Add toleration for the dedicated head node taint
+                    tolerations = pod_spec_copy['spec'].setdefault(
+                        'tolerations', [])
+                    tolerations.append({
+                        'key': 'skypilot-head',
+                        'operator': 'Equal',
+                        'value': 'true',
+                        'effect': 'NoSchedule',
+                    })
+                    logger.info(
+                        f'Head node resources boosted to 30 CPU / 64Gi '
+                        f'(limit 96Gi) for {config.count}-node cluster. '
+                        f'Original CPU: {original_cpu}')
             else:
                 # If head pod already exists, we skip creating it.
                 return
@@ -1693,8 +1740,16 @@ def get_cluster_info(
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
             limits = (getattr(resources, 'limits', None) if resources else None)
-            cpu_request = ((requests or {}).get('cpu') or
-                           (limits or {}).get('cpu'))
+            # If the head pod was boosted for large clusters, use the
+            # original CPU annotation so ray --num-cpus reflects the
+            # per-worker CPU count, not the boosted head resources.
+            annotations = getattr(pod.metadata, 'annotations', None) or {}
+            original_cpu = annotations.get('skypilot.co/original-cpu-request')
+            if original_cpu is not None:
+                cpu_request = original_cpu
+            else:
+                cpu_request = ((requests or {}).get('cpu') or
+                               (limits or {}).get('cpu'))
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
