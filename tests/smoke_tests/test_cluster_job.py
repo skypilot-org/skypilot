@@ -1524,8 +1524,13 @@ def test_hostpath_volume_on_kubernetes():
                 # Verify the pod spec contains the hostPath volume
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
-                    f'pod=$(kubectl get pods -l skypilot-cluster={name} '
-                    f'-o jsonpath="{{.items[0].metadata.name}}") && '
+                    f'pod=$(kubectl get pods -o '
+                    f'custom-columns=NAME:.metadata.name,'
+                    f'ANN:.metadata.annotations.skypilot-cluster-name '
+                    f'--no-headers | '
+                    f'awk -v n="{name}" \'$NF==n{{print $1}}\' | '
+                    f'head -1) && '
+                    f'echo "Found pod: $pod" && '
                     f'spec=$(kubectl get pod $pod -o yaml) && '
                     f'echo "$spec" | grep "hostPath" && '
                     f'echo "$spec" | grep "path: {host_path}"',
