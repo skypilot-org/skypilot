@@ -1047,6 +1047,7 @@ def _build_debug_dump(
     debug_dump_context: DebugDumpContext,
     recent_minutes: Optional[float],
     client_info: Optional[Dict[str, Any]],
+    requested: Dict[str, Any],
 ) -> None:
     """Build the debug dump contents in dump_dir.
 
@@ -1054,13 +1055,6 @@ def _build_debug_dump(
     (server info, requests, clusters, managed jobs, client info,
     errors, summary).
     """
-    # Snapshot original inputs before cross-linking modifies the sets
-    requested = {
-        'request_ids': sorted(debug_dump_context['request_ids']),
-        'cluster_names': sorted(debug_dump_context['cluster_names']),
-        'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
-        'recent_minutes': recent_minutes,
-    }
 
     # Populate from recent activity if requested
     if recent_minutes is not None:
@@ -1209,8 +1203,19 @@ def create_debug_dump(
         try:
             sky_root_logger.addHandler(debug_handler)
             provision_logger.addHandler(debug_handler)
-            _build_debug_dump(dump_dir, debug_dump_context, recent_minutes,
-                              client_info)
+            # Pass original user inputs so "requested" reflects what the
+            # user asked for, even if some IDs didn't resolve.
+            original_requested = {
+                'request_ids': sorted(request_ids or []),
+                'cluster_names': sorted(cluster_names or []),
+                'managed_job_ids': sorted(managed_job_ids or []),
+                'recent_minutes': recent_minutes,
+            }
+            _build_debug_dump(dump_dir,
+                              debug_dump_context,
+                              recent_minutes,
+                              client_info,
+                              requested=original_requested)
         finally:
             sky_root_logger.removeHandler(debug_handler)
             provision_logger.removeHandler(debug_handler)
