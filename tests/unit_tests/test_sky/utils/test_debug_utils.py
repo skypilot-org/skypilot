@@ -272,11 +272,13 @@ class TestGetRequestsFromManagedJobs:
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
         assert task_filter.include_request_names is not None
+        # All jobs.* request names should be included
         assert 'sky.jobs.launch' in task_filter.include_request_names
         assert 'sky.jobs.cancel' in task_filter.include_request_names
         assert 'sky.jobs.logs' in task_filter.include_request_names
-        # Queue is read-only, should not be included
-        assert 'sky.jobs.queue' not in task_filter.include_request_names
+        assert 'sky.jobs.queue' in task_filter.include_request_names
+        # Non-job requests should not be included
+        assert 'sky.launch' not in task_filter.include_request_names
 
     @mock.patch(MOCK_QUEUE_V2)
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
@@ -1963,7 +1965,7 @@ class TestSanitizeRequestBody:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _redact_task_yaml
+# Tests for redact_task_yaml
 # ---------------------------------------------------------------------------
 class TestRedactTaskYaml:
 
@@ -1973,7 +1975,7 @@ class TestRedactTaskYaml:
                     'secrets:\n'
                     '  API_KEY: real_api_key\n'
                     '  TOKEN: real_token\n')
-        result = debug_utils._redact_task_yaml(yaml_str)
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'real_api_key' not in result
         assert 'real_token' not in result
         assert '<redacted>' in result
@@ -1984,13 +1986,13 @@ class TestRedactTaskYaml:
                     'resources:\n'
                     '  _docker_login_config:\n'
                     '    password: my_docker_pass\n')
-        result = debug_utils._redact_task_yaml(yaml_str)
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'my_docker_pass' not in result
         assert '<redacted>' in result
 
     def test_invalid_yaml_returns_error_string(self):
         """Invalid YAML should return a redacted error string."""
-        result = debug_utils._redact_task_yaml(': invalid: yaml: {{')
+        result = debug_dump_helpers.redact_task_yaml(': invalid: yaml: {{')
         assert result == '<parse error, redacted>'
 
     def test_multi_doc_yaml(self):
@@ -2002,7 +2004,7 @@ class TestRedactTaskYaml:
                     'name: task2\n'
                     'secrets:\n'
                     '  KEY2: val2\n')
-        result = debug_utils._redact_task_yaml(yaml_str)
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
 

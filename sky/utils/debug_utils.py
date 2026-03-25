@@ -147,17 +147,12 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
 SYSTEM_REQUEST_IDS = [d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
                      ] + [server_constants.ON_BOOT_CHECK_REQUEST_ID]
 
-# Request names for managed job mutations (excludes read-only queue).
-# Used by both _get_requests_from_managed_jobs and
-# _get_managed_jobs_from_requests.
-_MANAGED_JOB_REQUEST_NAMES = frozenset({
-    server_constants.REQUEST_NAME_PREFIX +
-    request_names.RequestName.JOBS_LAUNCH.value,
-    server_constants.REQUEST_NAME_PREFIX +
-    request_names.RequestName.JOBS_CANCEL.value,
-    server_constants.REQUEST_NAME_PREFIX +
-    request_names.RequestName.JOBS_LOGS.value,
-})
+# All managed-job request names, derived from RequestName so that new
+# jobs.* request types are automatically included.
+_MANAGED_JOB_REQUEST_NAMES = frozenset(server_constants.REQUEST_NAME_PREFIX +
+                                       name.value
+                                       for name in request_names.RequestName
+                                       if name.value.startswith('jobs.'))
 
 
 class DebugDumpContext(TypedDict):
@@ -566,11 +561,6 @@ def _dump_server_info(dump_dir: str,
     logger.debug('Exiting _dump_server_info')
 
 
-def _redact_task_yaml(yaml_str: str) -> str:
-    """Parse a task/dag YAML string and redact secrets and credentials."""
-    return debug_dump_helpers.redact_task_yaml(yaml_str)
-
-
 def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     """Sanitize a request body for inclusion in a debug dump.
 
@@ -596,7 +586,7 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     # Redact task/dag YAML fields
     for field in task_fields:
         if field in data and isinstance(data[field], str):
-            data[field] = _redact_task_yaml(data[field])
+            data[field] = debug_dump_helpers.redact_task_yaml(data[field])
     return data
 
 
