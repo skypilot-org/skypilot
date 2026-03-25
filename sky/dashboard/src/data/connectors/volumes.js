@@ -29,7 +29,7 @@ export async function getVolumes() {
           region: volume.region,
           zone: volume.zone,
           infra: infra,
-          size: `${volume.size}Gi`,
+          size: volume.size != null ? `${volume.size}Gi` : '-',
           config: volume.config,
           storage_class: volume.config?.storage_class_name || '-',
           access_mode: volume.config?.access_mode || '-',

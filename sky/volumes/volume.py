@@ -230,6 +230,8 @@ class HostPathVolume(Volume):
         if not host_path.startswith('/'):
             raise ValueError(
                 f'host_path must be an absolute path, got: {host_path!r}')
+        if host_path == '/':
+            raise ValueError('host_path must not be the root directory \'/\'')
 
 
 class RunpodNetworkVolume(Volume):

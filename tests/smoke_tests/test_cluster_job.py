@@ -1483,7 +1483,6 @@ def test_hostpath_volume_on_kubernetes():
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
         type: k8s-hostpath
-        use_existing: true
         config:
           host_path: {host_path}
     """)

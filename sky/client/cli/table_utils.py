@@ -155,9 +155,11 @@ class VolumeTable(abc.ABC):
                 last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
         else:
             last_attached_at_str = '-'
-        size = row.get('size', '')
-        if size:
+        size = row.get('size')
+        if size is not None:
             size = f'{size}Gi'
+        else:
+            size = '-'
         usedby_str = '-'
         usedby_clusters = row.get('usedby_clusters')
         usedby_pods = row.get('usedby_pods')

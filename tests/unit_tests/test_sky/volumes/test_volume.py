@@ -692,6 +692,18 @@ class TestHostPathVolume:
             )
             vol.validate()
 
+    def test_hostpath_volume_root_path(self):
+        """Test hostPath volume with root path raises error."""
+        with pytest.raises(ValueError, match='must not be the root directory'):
+            vol = volume_lib.HostPathVolume(
+                name='my-host-vol',
+                type='k8s-hostpath',
+                infra='k8s',
+                use_existing=True,
+                config={'host_path': '/'},
+            )
+            vol.validate()
+
     def test_hostpath_volume_no_size_required(self):
         """Test that hostPath volumes don't require size."""
         vol = volume_lib.HostPathVolume(
