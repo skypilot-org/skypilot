@@ -68,7 +68,6 @@ if typing.TYPE_CHECKING:
     import pathlib
     import secrets
     import time
-    import webbrowser
 
     import psutil
     import requests
@@ -87,8 +86,6 @@ else:
     requests = adaptors_common.LazyImport('requests')
     secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
-    # only used in dashboard() and api_login()
-    webbrowser = adaptors_common.LazyImport('webbrowser')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -532,7 +529,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
-    webbrowser.open(url)
+    common_utils.open_browser(url)
 
 
 @usage_lib.entrypoint
@@ -2662,7 +2659,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
 
         # Open browser to authorization page
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not webbrowser.open(auth_url):
+        if not common_utils.open_browser(auth_url):
             logger.debug('Failed to open browser.')
             return None
 
@@ -2713,7 +2710,7 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                                                    token_container, endpoint)
 
         token_url = f'{endpoint}/token?local_port={callback_port}'
-        if not webbrowser.open(token_url):
+        if not common_utils.open_browser(token_url):
             return None
 
         click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'

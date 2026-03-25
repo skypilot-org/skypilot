@@ -4,6 +4,8 @@ import collections
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+import colorama
+
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -33,7 +35,7 @@ def get_default_instance_type(
         use_spot: bool = False,
         max_hourly_cost: Optional[float] = None) -> Optional[str]:
     # Delete unused parameters.
-    del disk_tier, region, zone, local_disk, use_spot, max_hourly_cost
+    del disk_tier, zone, local_disk, use_spot, max_hourly_cost
 
     # Slurm provisions resources via --cpus-per-task and --mem.
     instance_cpus = float(
@@ -46,7 +48,41 @@ def get_default_instance_type(
         else:
             instance_mem = float(memory)
     else:
-        instance_mem = instance_cpus * _DEFAULT_MEMORY_CPU_RATIO
+        # User did not explicitly request memory. Check whether the cluster
+        # tracks memory as a consumable resource (CR_CPU_Memory /
+        # CR_Core_Memory). When memory is NOT tracked (CR_CPU / CR_Core),
+        # requesting --mem can cause scheduling failures, especially when
+        # admins set RealMemory=0. In that case we set memory to 0, which
+        # translates to omitting --mem from the sbatch script (letting Slurm
+        # use its default allocation).
+        # Check which clusters do NOT track memory.
+        no_mem_clusters: Dict[str, str] = {}  # cluster -> SelectTypeParams
+        clusters_to_check = ([region] if region is not None else
+                             slurm_utils.get_all_slurm_cluster_names())
+        for cluster in clusters_to_check:
+            try:
+                if not slurm_utils.is_memory_scheduling_enabled(cluster):
+                    params = slurm_utils.get_select_type_parameters(
+                        cluster) or 'unknown'
+                    no_mem_clusters[cluster] = params
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check memory scheduling for cluster '
+                             f'{cluster!r}: {e}')
+
+        all_no_mem = (clusters_to_check and
+                      len(no_mem_clusters) == len(clusters_to_check))
+        if all_no_mem:
+            details = ', '.join(
+                f'{c} ({p})' for c, p in no_mem_clusters.items())
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Some Slurm cluster(s) do not track '
+                f'memory as a consumable resource: {details}. '
+                f'--mem will be omitted from sbatch, and Slurm will use '
+                f'its default allocation.'
+                f'{colorama.Style.RESET_ALL}')
+            instance_mem = 0
+        else:
+            instance_mem = instance_cpus * _DEFAULT_MEMORY_CPU_RATIO
     virtual_instance_type = slurm_utils.SlurmInstanceType(
         instance_cpus, instance_mem).name
     return virtual_instance_type

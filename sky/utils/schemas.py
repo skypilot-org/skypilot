@@ -1276,6 +1276,34 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'allowed_nodes': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'label_selector': {
+                # Each key-value pair is OR'd: a node matches if ANY
+                # label matches. This differs from K8s label selectors
+                # which are AND'd.
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+            },
+            'names': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+            'ips': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',

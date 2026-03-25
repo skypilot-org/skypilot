@@ -240,8 +240,12 @@ spec:
           done
           {{- end }}
 
+          {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
+          {{- else }}
+          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+          {{- end }}
         ports:
         - containerPort: 46580
         livenessProbe:
@@ -387,7 +391,7 @@ spec:
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
-      {{- if .Values.apiService.logs.retention.enabled }}
+      {{- if and .Values.apiService.serveServerLog .Values.apiService.logs.retention.enabled }}
       - name: logrotate
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         command: ["/bin/sh", "-c"]
