@@ -3111,7 +3111,7 @@ def _build_client_info() -> Dict[str, Any]:
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(44)
+@versions.minimal_api_version(46)
 @annotations.client_api
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
@@ -3156,7 +3156,7 @@ def create_debug_dump(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(44)
+@versions.minimal_api_version(46)
 @annotations.client_api
 def download_debug_dump(dump_filename: str,
                         local_path: Optional[str] = None) -> str:
