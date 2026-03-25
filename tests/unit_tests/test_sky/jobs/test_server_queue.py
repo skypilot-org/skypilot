@@ -534,6 +534,63 @@ class TestQueue:
         assert [j['job_id'] for j in filtered] == [1]
         assert total_no_filter == 2
 
+    def test_queue_name_match(self, monkeypatch):
+        jobs = [
+            _make_job(1, job_name='train-gpt'),
+            _make_job(2, job_name='eval-gpt'),
+            _make_job(3, job_name='train-bert'),
+            _make_job(4, job_name='serve-llama'),
+        ]
+        self._patch_backend_and_utils(monkeypatch, jobs)
+
+        # Match jobs containing 'train'
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match='train',
+            pool_match=None,
+            page=None,
+            limit=None)
+        assert total == 2
+        assert [j['job_id'] for j in filtered] == [1, 3]
+        assert total_no_filter == 4
+
+        # Match jobs containing 'gpt'
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match='gpt',
+            pool_match=None,
+            page=None,
+            limit=None)
+        assert total == 2
+        assert [j['job_id'] for j in filtered] == [1, 2]
+        assert total_no_filter == 4
+
+        # No match
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
+            refresh=False,
+            skip_finished=False,
+            all_users=True,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match='nonexistent',
+            pool_match=None,
+            page=None,
+            limit=None)
+        assert total == 0
+        assert len(filtered) == 0
+        assert total_no_filter == 4
+
     def test_queue_skip_finished_includes_all_tasks_of_active_jobs(
             self, monkeypatch):
 

@@ -169,16 +169,17 @@ def queue_v2(
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
+    *,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
     user_match: Optional[str] = None,
     workspace_match: Optional[str] = None,
     statuses: Optional[List[str]] = None,
     page: Optional[int] = None,
-    limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.

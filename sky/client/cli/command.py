@@ -5675,18 +5675,65 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option('--name',
+              '-n',
+              default=None,
+              type=str,
+              required=False,
+              help='Filter jobs by name (substring match).')
+@click.option('--pool',
+              default=None,
+              type=str,
+              required=False,
+              help='Filter jobs by pool name (substring match).')
+@click.option('--user',
+              '-u',
+              default=None,
+              type=str,
+              required=False,
+              help='Filter jobs by user (substring match).')
+@click.option('--workspace',
+              '-w',
+              default=None,
+              type=str,
+              required=False,
+              help='Filter jobs by workspace (substring match).')
+@click.option('--status',
+              default=None,
+              type=str,
+              multiple=True,
+              required=False,
+              help='Filter jobs by status (can be specified multiple times).')
+@click.option('--sort-by',
+              default=None,
+              type=str,
+              required=False,
+              help='Field to sort by (e.g., job_id, name, submitted_at).')
+@click.option('--sort-order',
+              default=None,
+              type=click.Choice(['asc', 'desc']),
+              required=False,
+              help='Sort direction.')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(verbose: bool,
-               refresh: bool,
-               skip_finished: bool,
-               all_users: bool,
-               all: bool,
-               limit: int,
-               output_format: str = 'table'):
+def jobs_queue(
+        verbose: bool,
+        refresh: bool,
+        skip_finished: bool,
+        all_users: bool,
+        all: bool,
+        limit: int,
+        name: Optional[str],
+        pool: Optional[str],  # pylint: disable=redefined-outer-name
+        user: Optional[str],
+        workspace: Optional[str],
+        status: Tuple[str, ...],  # pylint: disable=redefined-outer-name
+        sort_by: Optional[str],
+        sort_order: Optional[str],
+        output_format: str = 'table'):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5757,12 +5804,23 @@ def jobs_queue(verbose: bool,
                 fields = fields + _USER_HASH_FIELD
         # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
         # in parallel
+        statuses = list(status) if status else None
+
         def get_managed_jobs_queue():
-            return cli_utils.get_managed_job_queue(refresh=refresh,
-                                                   skip_finished=skip_finished,
-                                                   all_users=all_users,
-                                                   limit=max_num_jobs_to_show,
-                                                   fields=fields)
+            return cli_utils.get_managed_job_queue(
+                refresh=refresh,
+                skip_finished=skip_finished,
+                all_users=all_users,
+                limit=max_num_jobs_to_show,
+                fields=fields,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                name_match=name,
+                pool_match=pool,
+                user_match=user,
+                workspace_match=workspace,
+                statuses=statuses,
+            )
 
         def get_pool_status():
             try:
