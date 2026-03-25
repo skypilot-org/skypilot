@@ -1310,14 +1310,9 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'cluster',
-                'operator': ':',
-                'value': handle.get_cluster_name(),
-            })
             cluster_dashboard_url = server_common.get_dashboard_url(
                 server_common.get_server_url(),
-                starting_page=f'clusters?{query}')
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -5603,19 +5598,12 @@ def jobs_launch(
                                                 controller=False)
         job_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'id',
-                'operator': '=',
-                'value': job_id,
-            })
             job_dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(),
-                starting_page=f'jobs?{query}')
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
         click.secho(
-            ux_utils.command_hint_messages(
-                ux_utils.CommandHintType.MANAGED_JOB,
-                job_id=str(job_id),
-                dashboard_url=job_dashboard_url))
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
         if returncode is not None:
             sys.exit(returncode)
     else:
