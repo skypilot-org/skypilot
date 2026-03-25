@@ -2,7 +2,7 @@
 
 Run [autoresearch](https://github.com/karpathy/autoresearch) / [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch)-style optimization loops against **any open-source project**, enhanced with academic literature search and parallelized across cloud VMs via SkyPilot. A local coding agent uses the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html) to spin up VMs, submit experiments, and parallelize work across multiple VMs.
 
-For a deep dive into methodology and results (llama.cpp CPU inference: +49% text generation throughput), check out the **[blog post](https://blog.skypilot.co/autonomous-code-optimization/)**.
+For a deep dive into methodology and results (llama.cpp CPU inference: +15% text generation throughput), check out the **[blog post](https://blog.skypilot.co/autonomous-code-optimization/)**.
 
 ## How It Works
 
