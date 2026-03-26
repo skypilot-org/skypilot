@@ -196,8 +196,8 @@ class TestLoadBalancerConfiguration:
 
     def test_default_load_balancer_settings(self):
         spec = service_spec.SkyServiceSpec.from_yaml_config({})
-        assert (
-            spec.lb_stream_timeout_seconds == serve_constants.LB_STREAM_TIMEOUT)
+        assert (spec.lb_stream_timeout_seconds ==
+                serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
 
     def test_load_balancer_stream_timeout_seconds_override(self):
 

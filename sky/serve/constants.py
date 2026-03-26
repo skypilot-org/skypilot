@@ -33,8 +33,7 @@ LB_MAX_RETRY = 3
 # Large LLMs like Llama2-70b is able to process the request within ~30 seconds.
 # We set the timeout to 120s to be safe. For reference, FastChat uses 100s:
 # https://github.com/lm-sys/FastChat/blob/f2e6ca964af7ad0585cadcf16ab98e57297e2133/fastchat/constants.py#L39 # pylint: disable=line-too-long
-# TODO(tian): Expose this option to users in yaml file.
-LB_STREAM_TIMEOUT = 120
+DEFAULT_LB_STREAM_TIMEOUT = 120
 
 # Default interval in seconds to probe replica endpoint.
 DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS = 10
