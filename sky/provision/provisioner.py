@@ -696,9 +696,19 @@ def _post_provision_setup(
         # We don't need to restart ray on worker nodes if the ray cluster is
         # already healthy, i.e. the head node has expected number of nodes
         # connected to the ray cluster.
+        # However, if new worker instances were just created (node
+        # replenishment), we must still start ray on them. The health
+        # check can give a false positive due to stale heartbeats from
+        # the dead node. no_restart ensures existing workers are not
+        # restarted.
+        has_new_workers = (
+            len(provision_record.created_instance_ids) > 0 and
+            not all(iid == head_instance.instance_id
+                    for iid in provision_record.created_instance_ids))
         if skip_ray_setup:
             logger.debug('Skip Ray cluster setup on the worker nodes.')
-        elif cluster_info.num_instances > 1 and not ray_cluster_healthy:
+        elif cluster_info.num_instances > 1 and (not ray_cluster_healthy or
+                                                 has_new_workers):
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not head_ray_needs_restart,

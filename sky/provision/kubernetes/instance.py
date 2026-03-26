@@ -1257,6 +1257,22 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
+            # If there are already running pods, this is a replacement
+            # pod for node replenishment. Defer ray start to the
+            # provisioner to avoid a race condition where ray dispatches
+            # tasks to the new worker before the SkyPilot runtime setup
+            # completes on it.
+            if running_pods:
+                for container in pod_spec_copy['spec']['containers']:
+                    if container['name'] == 'ray-node':
+                        env_list = container.get('env', [])
+                        env_list.append({
+                            'name': 'SKYPILOT_DEFER_RAY_START',
+                            'value': '1'
+                        })
+                        container['env'] = env_list
+                        break
+
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
             kubernetes_utils.inject_docker_cache_volume(

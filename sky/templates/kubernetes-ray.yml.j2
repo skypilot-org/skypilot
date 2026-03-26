@@ -1032,20 +1032,29 @@ available_node_types:
                   {{ ray_head_start_command }}
                 else
                   # Start ray worker on the worker pod.
-                  # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
-                  # Wait until the ray cluster is started on the head pod
-                  until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
-                    sleep 0.1
-                    echo "Waiting for netcat package to be installed..."
-                  done
-                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
-                    sleep 0.1
-                  done
 
-                  set +e
-                  {{ ray_worker_start_command }}
+                  if [ "${SKYPILOT_DEFER_RAY_START}" == "1" ]; then
+                    # This is a replacement pod for node replenishment.
+                    # Defer ray start to the provisioner so that the
+                    # SkyPilot runtime setup completes before this node
+                    # joins the ray cluster and receives task dispatches.
+                    echo "Deferring ray worker start to provisioner (node replenishment mode)."
+                  else
+                    # Wait until the head pod is available with an IP address
+                    # Wait until the ray cluster is started on the head pod
+                    until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
+                      sleep 0.1
+                      echo "Waiting for netcat package to be installed..."
+                    done
+                    until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                      sleep 0.1
+                    done
+
+                    set +e
+                    {{ ray_worker_start_command }}
+                  fi
                 fi
                 ) > /tmp/${STEPS[1]}.log 2>&1
                 if [ "$?" -ne "0" ]; then
