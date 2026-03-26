@@ -993,15 +993,22 @@ def get_task_schema():
                 'additionalProperties': False,
             },
             'secrets': {
-                'type': 'object',
-                'required': [],
-                'patternProperties': {
-                    # Checks secret keys are valid env var names.
-                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': ['string', 'null']
-                    }
-                },
-                'additionalProperties': False,
+                'oneOf': [
+                    {
+                        'type': 'object',
+                        # Dict form: inline secrets + managed refs
+                        'additionalProperties': {
+                            'type': ['string', 'null']
+                        },
+                    },
+                    {
+                        'type': 'array',
+                        # Array form: managed secret refs only
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
+                ],
             },
             'managed_secrets': {
                 'type': 'array',

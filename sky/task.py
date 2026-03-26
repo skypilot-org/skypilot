@@ -601,6 +601,8 @@ class Task:
                 else:
                     new_secrets[str(k)] = None
             config['secrets'] = new_secrets
+        elif secrets is not None and isinstance(secrets, list):
+            config['secrets'] = [str(item) for item in secrets]
 
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
@@ -617,9 +619,18 @@ class Task:
 
         if secrets_overrides is not None:
             # Override secrets vars from CLI.
-            new_secrets = config.get('secrets', {})
-            new_secrets.update(secrets_overrides)
-            config['secrets'] = new_secrets
+            existing = config.get('secrets')
+            if isinstance(existing, list):
+                # Convert list form to dict to merge CLI overrides
+                new_secrets: Dict[str, Optional[str]] = {}
+                for item in existing:
+                    new_secrets[str(item)] = None
+                new_secrets.update(secrets_overrides)
+                config['secrets'] = new_secrets
+            else:
+                new_secrets = existing or {}
+                new_secrets.update(secrets_overrides)
+                config['secrets'] = new_secrets
 
         for k, v in config.get('envs', {}).items():
             if v is None:
@@ -630,21 +641,26 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
 
-        for k, v in config.get('secrets', {}).items():
-            if v is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Secret variable {k!r} is None. Please set a '
-                        'value for it in task YAML or with --secret flag. '
-                        f'To set it to be empty, use an empty string ({k}: "" '
-                        f'in task YAML or --secret {k}="" in CLI).')
+        raw_secrets_check = config.get('secrets')
+        if isinstance(raw_secrets_check, dict):
+            for k, v in raw_secrets_check.items():
+                if v is None and not k.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Secret variable {k!r} is None. Please set a '
+                            'value for it in task YAML or with --secret flag.'
+                            f' To set it to be empty, use an empty string '
+                            f'({k}: "" in task YAML or '
+                            f'--secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets = config.get('secrets', {})
+        secrets_for_subst = config.get('secrets', {})
+        if isinstance(secrets_for_subst, list):
+            secrets_for_subst = {}  # Array form has no inline values
         env_and_secrets = env_vars.copy()
-        env_and_secrets.update(secrets)
+        env_and_secrets.update(secrets_for_subst)
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       env_and_secrets)
@@ -663,6 +679,36 @@ class Task:
             config['volumes'] = _fill_in_env_vars(config['volumes'],
                                                   env_and_secrets)
 
+        # Split secrets: inline values vs managed references
+        raw_secrets = config.pop('secrets', None)
+        inline_secrets = {}
+        managed_from_secrets = []
+        if isinstance(raw_secrets, list):
+            # Array form: all items are managed secret references
+            for item in raw_secrets:
+                if not isinstance(item, str) or not item.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid secret in array form: {item!r}. '
+                            'Array items must use the secrets: prefix '
+                            '(e.g., secrets:HF_TOKEN). For inline secrets '
+                            'with values, use dict form: '
+                            'secrets: {MY_SECRET: "value"}')
+                ref_name = item[len('secrets:'):]
+                name, scope = _parse_secret_name(ref_name)
+                managed_from_secrets.append(
+                    ManagedSecretRef(name=name, scope_override=scope))
+        elif isinstance(raw_secrets, dict):
+            # Dict form: split inline values vs secrets: prefix refs
+            for key, value in raw_secrets.items():
+                if key.startswith('secrets:'):
+                    ref_name = key[len('secrets:'):]
+                    name, scope = _parse_secret_name(ref_name)
+                    managed_from_secrets.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                else:
+                    inline_secrets[key] = value
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -670,7 +716,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
-            secrets=config.pop('secrets', None),
+            secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
             api_access=config.pop('api_access', False),
@@ -678,6 +724,11 @@ class Task:
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
+
+        # Append managed refs from secrets: field (secrets:NAME entries)
+        # pylint: disable=protected-access
+        for ref in managed_from_secrets:
+            task._managed_secret_refs.append(ref)
 
         # Parse managed_secrets references
         managed_secrets_raw = config.pop('managed_secrets', None)
@@ -1836,17 +1887,22 @@ class Task:
             for ref in self._managed_secret_refs:
                 prefix = (f'{ref.scope_override}.'
                           if ref.scope_override else '')
-                opts = {}
-                if ref.mount_path is not None:
-                    opts['mount_path'] = ref.mount_path
-                if ref.env is not None:
-                    opts['env'] = ref.env
-                if opts:
+                if ref.mount_path is not None or ref.env is not None:
+                    # Advanced: keep in managed_secrets field
+                    opts = {}
+                    if ref.mount_path is not None:
+                        opts['mount_path'] = ref.mount_path
+                    if ref.env is not None:
+                        opts['env'] = ref.env
                     managed_secrets.append(
                         {f'{prefix}{ref.name}': opts})
                 else:
-                    managed_secrets.append(f'{prefix}{ref.name}')
-            config['managed_secrets'] = managed_secrets
+                    # Simple: serialize as secrets:NAME: null
+                    config.setdefault(
+                        'secrets', {}
+                    )[f'secrets:{prefix}{ref.name}'] = None
+            if managed_secrets:
+                config['managed_secrets'] = managed_secrets
 
         add_if_not_none('file_mounts', {})
 
