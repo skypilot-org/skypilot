@@ -41,11 +41,11 @@ import {
   getSharedCaches,
   upsertSharedCache,
   deleteSharedCache,
-  getK8sContexts,
   getStorageClasses,
   getRwmVolumes,
   applyVolume,
 } from '@/data/connectors/shared-caches';
+import { getEnabledClouds } from '@/data/connectors/workspaces';
 
 export function CachesPanel() {
   const isMobile = useMobile();
@@ -64,12 +64,19 @@ export function CachesPanel() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [caches, contexts] = await Promise.all([
+      const [caches, infras] = await Promise.all([
         getSharedCaches(),
-        getK8sContexts(),
+        getEnabledClouds(null, true),
       ]);
       setData(caches);
-      setK8sContexts(contexts);
+      // Extract K8s context names from expanded infra strings
+      // (format: "Kubernetes/context-name")
+      const k8sPrefix = 'Kubernetes/';
+      setK8sContexts(
+        infras
+          .filter((s) => s.startsWith(k8sPrefix))
+          .map((s) => s.slice(k8sPrefix.length))
+      );
       setLastFetchedTime(new Date());
     } catch (error) {
       console.error('Failed to fetch shared caches:', error);
@@ -412,8 +419,13 @@ function CacheFormDialog({
     const fetchContexts = async () => {
       setLoadingContexts(true);
       try {
-        const data = await getK8sContexts();
-        setContexts(data);
+        const infras = await getEnabledClouds(null, true);
+        const k8sPrefix = 'Kubernetes/';
+        setContexts(
+          infras
+            .filter((s) => s.startsWith(k8sPrefix))
+            .map((s) => s.slice(k8sPrefix.length))
+        );
       } finally {
         setLoadingContexts(false);
       }

@@ -91,7 +91,6 @@ class RequestName(str, enum.Enum):
     SHARED_CACHES_LIST = 'shared_caches.list'
     SHARED_CACHES_UPSERT = 'shared_caches.upsert'
     SHARED_CACHES_DELETE = 'shared_caches.delete'
-    SHARED_CACHES_K8S_CONTEXTS = 'shared_caches.k8s_contexts'
     SHARED_CACHES_STORAGE_CLASSES = 'shared_caches.storage_classes'
     SHARED_CACHES_RWM_VOLUMES = 'shared_caches.rwm_volumes'
     # Internal request daemons

@@ -52,19 +52,6 @@ async def shared_caches_delete(request: fastapi.Request,
     )
 
 
-@router.get('/k8s_contexts')
-async def shared_caches_k8s_contexts(request: fastapi.Request) -> None:
-    """Lists available Kubernetes contexts."""
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.SHARED_CACHES_K8S_CONTEXTS,
-        request_body=payloads.RequestBody(),
-        func=core.list_k8s_contexts,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-        auth_user=request.state.auth_user,
-    )
-
-
 @router.post('/storage_classes')
 async def shared_caches_storage_classes(
         request: fastapi.Request,

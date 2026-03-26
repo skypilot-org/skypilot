@@ -9,7 +9,6 @@ from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -257,16 +256,6 @@ def delete_shared_cache(
 
     _update_kubernetes_config(modifier)
     return list_shared_caches()
-
-
-@usage_lib.entrypoint
-def list_k8s_contexts() -> List[str]:
-    """List available Kubernetes context names."""
-    try:
-        return kubernetes_utils.get_all_kube_context_names()
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to list Kubernetes contexts: {e}')
-        return []
 
 
 @usage_lib.entrypoint

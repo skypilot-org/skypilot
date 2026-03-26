@@ -76,20 +76,6 @@ export async function deleteSharedCache({ context, volume_name }) {
   }
 }
 
-export async function getK8sContexts() {
-  try {
-    const data = await apiClient.fetch(
-      '/shared_caches/k8s_contexts',
-      {},
-      'GET'
-    );
-    return data || [];
-  } catch (error) {
-    console.error('Failed to fetch K8s contexts:', error);
-    return [];
-  }
-}
-
 export async function getStorageClasses(context) {
   let msg = '';
   try {
