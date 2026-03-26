@@ -2,7 +2,6 @@
 import ipaddress
 import os
 import pathlib
-import sys
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -825,8 +824,6 @@ def launch(
             'priority': priority,
             'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
-            'python_cmd': sys.executable
-                          if is_consolidation_mode else 'python3',
             'pool': pool,
             'job_controller_indicator_file':
                 managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
