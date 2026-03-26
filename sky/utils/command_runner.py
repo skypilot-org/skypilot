@@ -1669,6 +1669,9 @@ class KubernetesCommandRunner(CommandRunner):
         encoded_namespace_context = (namespace_context.replace(
             '@', '%40').replace(':', '%3A').replace('/',
                                                     '%2F').replace('+', '%2B'))
+        container_env = ('' if self.container is None else
+                         f'SKYPILOT_K8S_EXEC_CONTAINER='
+                         f'{shlex.quote(self.container)} ')
         self._rsync(
             source,
             target,
@@ -1678,8 +1681,7 @@ class KubernetesCommandRunner(CommandRunner):
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=('' if self.container is None else
-                            f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} '),
+            prefix_command=container_env,
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
