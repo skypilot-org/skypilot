@@ -2016,6 +2016,12 @@ def _check_owner_identity_with_record(cluster_name: str,
                 owner = owner.replace('\n', '').replace('\\', '')
                 if owner == current:
                     if not is_k8s_cloud:
+                        # We skip patching owner identities for Kubernetes as
+                        # we expect users to naturally have multiple clusters
+                        # in their kubeconfig. The "active" identity is
+                        # considered as the current context, but users can and
+                        # will use contexts other than their current context
+                        # intentionally.
                         if i != 0:
                             logger.warning(
                                 f'The cluster was owned by {owner_identity}, '
