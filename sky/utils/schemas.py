@@ -1026,9 +1026,6 @@ def get_task_schema():
                                     'mount_path': {
                                         'type': 'string'
                                     },
-                                    'env': {
-                                        'type': 'string'
-                                    },
                                 },
                                 'additionalProperties': False,
                             },

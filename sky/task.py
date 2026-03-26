@@ -257,7 +257,6 @@ class ManagedSecretRef:
     name: str
     mount_path: Optional[str] = None
     scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
-    env: Optional[str] = None  # override env var name
 
 
 class Task:
@@ -748,7 +747,6 @@ class Task:
                                 name=name,
                                 mount_path=opts.get('mount_path'),
                                 scope_override=scope,
-                                env=opts.get('env'),
                             ))
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -1887,15 +1885,12 @@ class Task:
             for ref in self._managed_secret_refs:
                 prefix = (f'{ref.scope_override}.'
                           if ref.scope_override else '')
-                if ref.mount_path is not None or ref.env is not None:
+                if ref.mount_path is not None:
                     # Advanced: keep in managed_secrets field
-                    opts = {}
-                    if ref.mount_path is not None:
-                        opts['mount_path'] = ref.mount_path
-                    if ref.env is not None:
-                        opts['env'] = ref.env
                     managed_secrets.append(
-                        {f'{prefix}{ref.name}': opts})
+                        {f'{prefix}{ref.name}': {
+                            'mount_path': ref.mount_path
+                        }})
                 else:
                     # Simple: serialize as secrets:NAME: null
                     config.setdefault(
