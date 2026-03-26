@@ -690,6 +690,8 @@ class ReplicaManager:
             header_keys = list(spec.readiness_headers.keys())
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
+                    'Endpoint probe interval seconds: '
+                    f'{spec.endpoint_probe_interval_seconds}\n'
                     f'Post data: {spec.post_data}\n'
                     f'Readiness header keys: {header_keys}')
 
@@ -704,7 +706,6 @@ class ReplicaManager:
         We reduce the timeout for pool to 10 seconds to make the pool more
         responsive to the failure.
         """
-        # TODO(tian): Maybe let user determine this threshold
         return 10 if self._is_pool else 180
 
     def scale_up(self,
@@ -1451,7 +1452,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             # TODO(MaoZiming): Probe cloud for early preemption warning.
-            time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
+            time.sleep(self._get_endpoint_probe_interval_seconds())
 
     def get_active_replica_urls(self) -> List[str]:
         """Get the urls of all active replicas."""
@@ -1560,3 +1561,20 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _get_readiness_timeout_seconds(self, version: int) -> int:
         return self._get_version_spec(version).readiness_timeout_seconds
+
+    def _get_endpoint_probe_interval_seconds(self) -> int:
+        return self._get_version_spec(
+            self.latest_version).endpoint_probe_interval_seconds
+
+    def _consecutive_failure_threshold_timeout(self) -> int:
+        """The timeout for the consecutive failure threshold in seconds.
+
+        If not set by the user, we utilize 180 seconds as the default.
+        If it is a pool, we reduce the timeout to 10 seconds to make the
+        pool more responsive to the failure.
+        """
+        spec_timeout = self._get_version_spec(
+            self.latest_version).consecutive_failure_threshold_timeout
+        if spec_timeout is not None:
+            return spec_timeout
+        return 10 if self._is_pool else 180
