@@ -383,7 +383,7 @@ done
 
 # Get the latest job ID from a cluster
 job_id=$(sky queue exp-vm-01 -o json \
-  | python3 -c "import sys,json; jobs=json.load(sys.stdin)['exp-vm-01']; print(max(j['job_id'] for j in jobs))")
+  | python3 -c "import sys, json; jobs = json.load(sys.stdin).get('exp-vm-01', []); print(max(j['job_id'] for j in jobs) if jobs else '')")
 
 # Wait for a specific job and fetch last 50 lines
 sky logs exp-vm-01 $job_id --status && sky logs exp-vm-01 $job_id --tail 50
@@ -399,9 +399,9 @@ When using SkyPilot programmatically, follow this loop:
 1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
 2. **Launch**: `sky launch -c mycluster task.yaml`
 3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
-4. **Wait for completion**: `sky logs mycluster --status` (blocks until job finishes; exits 0 on success)
-5. **Inspect output**: `sky logs mycluster --no-follow` or `sky logs mycluster --tail 100`
-6. **Debug**: `sky logs mycluster` (stream from start) or `ssh mycluster` (interactive)
+4. **Wait for completion**: `sky logs mycluster <JOB_ID> --status` (blocks until job finishes; exits 0 on success; get JOB_ID from `sky queue mycluster -o json`)
+5. **Inspect output**: `sky logs mycluster <JOB_ID> --no-follow` or `sky logs mycluster <JOB_ID> --tail 100`
+6. **Debug**: `sky logs mycluster <JOB_ID>` (stream from start) or `ssh mycluster` (interactive)
 7. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
 8. **Cleanup**: `sky down mycluster`
 
