@@ -781,7 +781,7 @@ class TestAWSConfigSchema(unittest.TestCase):
         config = {'subnet_names': []}
         jsonschema.validate(instance=config, schema=self.aws_schema)
 
-        
+
 class TestServiceSchema(unittest.TestCase):
     """Tests for the service schema in schemas.py."""
 
