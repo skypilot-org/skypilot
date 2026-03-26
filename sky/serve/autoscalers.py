@@ -84,8 +84,9 @@ def _select_nonterminal_replicas_to_scale_down(
             later stage may become ready soon.
         2. Based on the version in ascending order, so we scale down the older
             versions first.
-        3. Based on the number of running jobs in ascending order, so we scale
-            down replicas with fewer jobs first.
+        3. For pools, based on the number of running jobs in ascending order,
+            so we scale down idle workers first. For SkyServe services, job
+            counts will be zero so this criterion has no effect.
         4. Based on the replica_id in descending order, which is also the order
             of the replicas being launched. We scale down the replicas that are
             launched earlier first, as the replicas that are launched later may
@@ -94,7 +95,8 @@ def _select_nonterminal_replicas_to_scale_down(
     Args:
         num_replica_to_scale_down: The number of replicas to scale down.
         replica_infos: The list of replica informations to select from.
-        service_name: The name of the service (pool name).
+        service_name: The name of the pool to query job counts for. When
+            provided, replicas with fewer running jobs are scaled down first.
 
     Returns:
         The list of replica ids to scale down.
@@ -105,21 +107,17 @@ def _select_nonterminal_replicas_to_scale_down(
         'All replicas to scale down should be in provisioning or launched '
         'status.', replicas)
 
-    # Get the number of running jobs for each replica.
-    replica_job_counts: Dict[int, int] = {}
+    # Get the number of running jobs for each replica. For pools this
+    # prioritizes scaling down idle workers; when service_name is not
+    # provided all counts default to 0 and the sort falls through.
+    cluster_job_counts: Dict[str, int] = {}
     if service_name is not None:
-        # For pools, query the actual job counts so we prefer scaling down
-        # idle workers.
         cluster_job_counts = (
             managed_job_state.get_nonterminal_job_counts_by_pool(service_name))
-        for info in replicas:
-            replica_job_counts[info.replica_id] = (cluster_job_counts.get(
-                info.cluster_name, 0))
-    else:
-        # For SkyServe, job counts are not tracked. Use a uniform value
-        # so the sort falls through to the remaining criteria.
-        for info in replicas:
-            replica_job_counts[info.replica_id] = 1
+    replica_job_counts: Dict[int, int] = {}
+    for info in replicas:
+        replica_job_counts[info.replica_id] = (cluster_job_counts.get(
+            info.cluster_name, 0))
 
     replicas = sorted(
         replicas,
@@ -156,7 +154,6 @@ class Autoscaler:
             update_mode: Update mode for the service.
         """
         self._service_name: str = service_name
-        self._is_pool: bool = spec.pool
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
