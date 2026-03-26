@@ -43,6 +43,7 @@ from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
@@ -3133,7 +3134,7 @@ def resolve_shared_caches(
         volume_name = spec['name']
         cache_paths = cache_entry['cache_paths']
 
-        # Resolve SkyPilot volume name to PVC claimName
+        # Resolve SkyPilot volume name to volume config
         record = global_user_state.get_volume_by_name(volume_name)
         if record is None:
             logger.warning(
@@ -3141,19 +3142,29 @@ def resolve_shared_caches(
                 f'volume DB. Skipping. Create it with: sky volumes apply')
             continue
         volume_config: models.VolumeConfig = record['handle']
-        pvc_claim_name = volume_config.name_on_cloud
 
         # Use a prefixed name to avoid conflicts with user volumes
         k8s_volume_name = f'shared-cache-{volume_name}'
 
         # Add volume entry (once per unique volume)
         if volume_name not in added_volumes:
-            pod_spec['spec']['volumes'].append({
-                'name': k8s_volume_name,
-                'persistentVolumeClaim': {
-                    'claimName': pvc_claim_name,
-                },
-            })
+            if volume_config.type == volume_lib.VolumeType.HOSTPATH.value:
+                host_path = volume_config.config.get('host_path')
+                pod_spec['spec']['volumes'].append({
+                    'name': k8s_volume_name,
+                    'hostPath': {
+                        'path': host_path,
+                        'type': 'DirectoryOrCreate',
+                    },
+                })
+            else:
+                pvc_claim_name = volume_config.name_on_cloud
+                pod_spec['spec']['volumes'].append({
+                    'name': k8s_volume_name,
+                    'persistentVolumeClaim': {
+                        'claimName': pvc_claim_name,
+                    },
+                })
             added_volumes.add(volume_name)
 
         # Add volumeMount entries for each cache path

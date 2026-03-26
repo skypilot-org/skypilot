@@ -298,7 +298,9 @@ def list_storage_classes(context: Optional[str] = None) -> List[Dict[str, Any]]:
 
 @usage_lib.entrypoint
 def list_rwm_volumes() -> List[Dict[str, Any]]:
-    """List existing SkyPilot volumes with ReadWriteMany access mode.
+    """List existing SkyPilot volumes suitable for shared caches.
+
+    Includes ReadWriteMany PVC volumes and hostPath volumes.
 
     Returns:
         List of volume info dicts suitable for dropdown selection.
@@ -307,6 +309,18 @@ def list_rwm_volumes() -> List[Dict[str, Any]]:
     result = []
     for vol in all_volumes:
         handle: models.VolumeConfig = vol['handle']
+        # Include hostPath volumes (always suitable for shared caches)
+        if handle.type == volume_utils.VolumeType.HOSTPATH.value:
+            result.append({
+                'name': vol['name'],
+                'name_on_cloud': handle.name_on_cloud,
+                'size': handle.size,
+                'cloud': handle.cloud,
+                'region': handle.region,
+                'type': handle.type,
+            })
+            continue
+        # Include RWX PVC volumes
         access_mode = handle.config.get('access_mode', '')
         if access_mode == volume_utils.VolumeAccessMode.READ_WRITE_MANY.value:
             result.append({
@@ -315,5 +329,6 @@ def list_rwm_volumes() -> List[Dict[str, Any]]:
                 'size': handle.size,
                 'cloud': handle.cloud,
                 'region': handle.region,
+                'type': handle.type,
             })
     return result

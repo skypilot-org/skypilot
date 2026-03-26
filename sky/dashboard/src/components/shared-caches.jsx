@@ -162,9 +162,13 @@ export function CachesPanel() {
 
   return (
     <>
-      {/* Header with Refresh */}
-      <div className="flex items-center justify-end mb-4">
-        <div className="flex items-center gap-3">
+      {/* Description and Refresh */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">
+          Shared caches let workloads share package caches, model weights, and
+          datasets, avoiding repeated downloads.
+        </p>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-4">
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
@@ -379,8 +383,11 @@ function CacheFormDialog({
     editingCache?.spec?.use_existing ? 'existing' : 'config'
   );
   const [volumeName, setVolumeName] = useState(editingCache?.spec?.name || '');
+  const [volumeType, setVolumeType] = useState('k8s-pvc');
   const [storageClass, setStorageClass] = useState('');
   const [volumeSize, setVolumeSize] = useState('100');
+  const [hostPath, setHostPath] = useState('');
+  const [cleanupOnDeletion, setCleanupOnDeletion] = useState(true);
   const [existingVolumeName, setExistingVolumeName] = useState(
     editingCache?.spec?.use_existing ? editingCache?.spec?.name || '' : ''
   );
@@ -434,7 +441,7 @@ function CacheFormDialog({
     fetchSC();
   }, [context, volumeMode]);
 
-  // Fetch and filter RWM volumes when context changes (existing mode)
+  // Fetch and filter volumes when context changes (existing mode)
   useEffect(() => {
     if (!context || volumeMode !== 'existing') return;
     setExistingVolumeName('');
@@ -443,7 +450,6 @@ function CacheFormDialog({
     const fetchVols = async () => {
       try {
         const data = await getRwmVolumes();
-        // Filter volumes to those matching the selected context
         const filtered = data.filter((vol) => vol.region === context);
         setRwmVolumes(filtered);
       } finally {
@@ -533,11 +539,15 @@ function CacheFormDialog({
     try {
       // If Volume Config mode, create the volume first
       if (volumeMode === 'config' && !isEditing) {
+        const isHostPath = volumeType === 'k8s-hostpath';
         const createResult = await applyVolume({
           name: targetName,
-          size: volumeSize,
-          storageClass: storageClass,
+          volumeType,
+          size: isHostPath ? null : volumeSize,
+          storageClass: isHostPath ? null : storageClass,
           region: context,
+          hostPath: isHostPath ? hostPath : null,
+          cleanupOnDeletion: isHostPath ? cleanupOnDeletion : null,
         });
         if (!createResult.success) {
           throw new Error(createResult.msg);
@@ -673,70 +683,119 @@ function CacheFormDialog({
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Type
                 </label>
-                <input
-                  type="text"
-                  value="k8s-pvc"
-                  disabled
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Storage Class
-                </label>
-                {!context ? (
-                  <p className="text-sm text-gray-400 italic">
-                    Select a context first
-                  </p>
-                ) : (
-                  <Select
-                    value={storageClass}
-                    onValueChange={setStorageClass}
-                    disabled={isEditing || loadingStorageClasses}
-                  >
-                    <SelectTrigger className="w-full h-10 text-sm">
-                      <SelectValue
-                        placeholder={
-                          loadingStorageClasses
-                            ? 'Loading...'
-                            : 'Select a storage class...'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {storageClasses.length === 0 ? (
-                        <SelectItem value="_none" disabled>
-                          No storage classes found
-                        </SelectItem>
-                      ) : (
-                        storageClasses.map((sc) => (
-                          <SelectItem key={sc.name} value={sc.name}>
-                            {sc.name} ({sc.provisioner})
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                )}
-                <p className="mt-1 text-xs text-amber-600">
-                  Shared caches require a storage class that supports
-                  ReadWriteMany (RWX) access mode. Verify your storage class
-                  provisioner supports RWX.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Volume Size (GiB)
-                </label>
-                <input
-                  type="number"
-                  value={volumeSize}
-                  onChange={(e) => setVolumeSize(e.target.value)}
+                <Select
+                  value={volumeType}
+                  onValueChange={setVolumeType}
                   disabled={isEditing}
-                  min="1"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
-                />
+                >
+                  <SelectTrigger className="w-full h-10 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="k8s-pvc">k8s-pvc</SelectItem>
+                    <SelectItem value="k8s-hostpath">k8s-hostpath</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              {volumeType === 'k8s-pvc' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Storage Class
+                    </label>
+                    {!context ? (
+                      <p className="text-sm text-gray-400 italic">
+                        Select a context first
+                      </p>
+                    ) : (
+                      <Select
+                        value={storageClass}
+                        onValueChange={setStorageClass}
+                        disabled={isEditing || loadingStorageClasses}
+                      >
+                        <SelectTrigger className="w-full h-10 text-sm">
+                          <SelectValue
+                            placeholder={
+                              loadingStorageClasses
+                                ? 'Loading...'
+                                : 'Select a storage class...'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {storageClasses.length === 0 ? (
+                            <SelectItem value="_none" disabled>
+                              No storage classes found
+                            </SelectItem>
+                          ) : (
+                            storageClasses.map((sc) => (
+                              <SelectItem key={sc.name} value={sc.name}>
+                                {sc.name} ({sc.provisioner})
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <p className="mt-1 text-xs text-amber-600">
+                      Shared caches require a storage class that supports
+                      ReadWriteMany (RWX) access mode. Verify your storage class
+                      provisioner supports RWX.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Volume Size (GiB)
+                    </label>
+                    <input
+                      type="number"
+                      value={volumeSize}
+                      onChange={(e) => setVolumeSize(e.target.value)}
+                      disabled={isEditing}
+                      min="1"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                    />
+                  </div>
+                </>
+              )}
+              {volumeType === 'k8s-hostpath' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Host Path
+                    </label>
+                    <input
+                      type="text"
+                      value={hostPath}
+                      onChange={(e) => setHostPath(e.target.value)}
+                      disabled={isEditing}
+                      placeholder="/var/skypilot/cache"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Host path volume has no size limit and the space is only
+                      freed when the volume is deleted. Prefer a path on a
+                      dedicated disk to avoid filling the system volume.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="cleanup-on-deletion"
+                      checked={cleanupOnDeletion}
+                      onChange={(e) => setCleanupOnDeletion(e.target.checked)}
+                      disabled={isEditing}
+                      className="h-4 w-4 rounded border-gray-300 text-sky-blue focus:ring-sky-blue"
+                    />
+                    <label
+                      htmlFor="cleanup-on-deletion"
+                      className="text-sm text-gray-700"
+                    >
+                      Clean up on deletion
+                    </label>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -767,13 +826,16 @@ function CacheFormDialog({
                     <SelectContent>
                       {rwmVolumes.length === 0 ? (
                         <SelectItem value="_none" disabled>
-                          No ReadWriteMany volumes found
+                          No suitable volumes found
                         </SelectItem>
                       ) : (
                         rwmVolumes.map((vol) => (
                           <SelectItem key={vol.name} value={vol.name}>
-                            {vol.name}
-                            {vol.size ? ` (${vol.size}Gi)` : ''}
+                            <span>{vol.name}</span>
+                            <span className="ml-2 text-gray-400 text-xs">
+                              {vol.type || 'k8s-pvc'}
+                              {vol.size ? ` / ${vol.size}Gi` : ''}
+                            </span>
                           </SelectItem>
                         ))
                       )}

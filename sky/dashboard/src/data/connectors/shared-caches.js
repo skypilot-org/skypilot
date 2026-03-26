@@ -131,20 +131,31 @@ export async function applyVolume({
   storageClass,
   region,
   namespace,
+  volumeType,
+  hostPath,
+  cleanupOnDeletion,
 }) {
+  const isHostPath = volumeType === 'k8s-hostpath';
+  const config = isHostPath
+    ? {
+        host_path: hostPath,
+        cleanup_on_deletion: cleanupOnDeletion ?? true,
+      }
+    : {
+        storage_class_name: storageClass || null,
+        access_mode: 'ReadWriteMany',
+        namespace: namespace || null,
+      };
+
   let msg = '';
   try {
     const response = await apiClient.post('/volumes/apply', {
       name,
-      volume_type: 'k8s-pvc',
+      volume_type: volumeType || 'k8s-pvc',
       cloud: 'kubernetes',
       region: region || null,
-      size: size ? String(size) : null,
-      config: {
-        storage_class_name: storageClass || null,
-        access_mode: 'ReadWriteMany',
-        namespace: namespace || null,
-      },
+      size: isHostPath ? null : size ? String(size) : null,
+      config,
       use_existing: false,
     });
     if (!response.ok) {
