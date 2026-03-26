@@ -27,6 +27,13 @@ def _resolve_volume_type(cloud: clouds.Cloud,
                 break
         if volume_types is None:
             raise ValueError(f'No default volume type found for cloud {cloud}')
+        # Filter to ephemeral-capable types for default resolution
+        ephemeral_types = [
+            vt for vt in volume_types
+            if vt.value in volume_utils.EPHEMERAL_VOLUME_TYPES
+        ]
+        if len(ephemeral_types) == 1:
+            return ephemeral_types[0].value
         if len(volume_types) != 1:
             raise ValueError(
                 f'Found multiple volume types for cloud {cloud}: {volume_types}'

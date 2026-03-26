@@ -262,7 +262,7 @@ class Task:
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
-        api_access: bool = False,
+        api_server_access: bool = True,
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
@@ -346,9 +346,10 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          api_access: If True, auto-inject API server credentials (endpoint
-            and service account token) into the job's environment so that the
-            job can call ``sky`` SDK / CLI to launch nested jobs.
+          api_server_access: If True, auto-inject API server credentials
+            (endpoint and service account token) into the job's environment
+            so that the job can call ``sky`` SDK / CLI to launch nested jobs.
+            Defaults to True.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -366,7 +367,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
-        self._api_access = api_access
+        self._api_server_access = api_server_access
 
         # concatenate commands if given as list
         def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
@@ -543,7 +544,13 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
-        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+        git_commit = common_utils.get_git_commit(self.workdir)
+        # Always prefer the workdir's commit over any previously set value
+        # (e.g. from the YAML file's repo). But don't overwrite a valid
+        # value with None, which happens on the server where the uploaded
+        # blob directory is not a git repo.
+        if git_commit is not None:
+            self._metadata['git_commit'] = git_commit
 
     @staticmethod
     def from_yaml_config(
@@ -650,7 +657,7 @@ class Task:
             secrets=config.pop('secrets', None),
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
-            api_access=config.pop('api_access', False),
+            api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
@@ -972,8 +979,8 @@ class Task:
         return self._secrets
 
     @property
-    def api_access(self) -> bool:
-        return self._api_access
+    def api_server_access(self) -> bool:
+        return self._api_server_access
 
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
@@ -1800,7 +1807,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
-        add_if_not_none('api_access', self._api_access or None)
+        if not self._api_server_access:
+            config['api_server_access'] = False
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
         add_if_not_none('_user_specified_yaml', self._user_specified_yaml)

@@ -980,6 +980,59 @@ class TestCreateVirtualInstance:
             'test-cluster-no-container', config)
         assert_sbatch_matches_snapshot('basic', written_script)
 
+    @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
+        (0.5, 512),
+        (1.5, 1536),
+        (8, 8192),
+        (16, 16384),
+        (0.25, 256),
+    ])
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
+    def test_fractional_memory_converted_to_mb(self, mock_ssh_runner,
+                                               mock_slurm_client,
+                                               mock_get_partition_info,
+                                               mock_get_proctrack_type,
+                                               mock_wait_for_job_nodes,
+                                               memory_gb, expected_mem_mb):
+        """Test that fractional GB memory is correctly converted to MB."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'cpus',
+                'provision_timeout': 300,
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 2,
+                'memory': memory_gb,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        written_script = self._run_and_capture_script('test-cluster-frac-mem',
+                                                      config)
+        assert f'#SBATCH --mem={expected_mem_mb}M' in written_script
+
 
 class TestGetPendingJobCount:
     """Test SlurmClient.get_pending_job_count()."""

@@ -28,6 +28,7 @@ class VolumeAccessMode(enum.Enum):
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
+    HOSTPATH = 'k8s-hostpath'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
 
     @classmethod
@@ -47,6 +48,8 @@ class VolumeInfo:
     volume_name_on_cloud: Optional[str] = None
     volume_id_on_cloud: Optional[str] = None
     sub_path: Optional[str] = None
+    volume_type: Optional[str] = None
+    host_path: Optional[str] = None
 
 
 class VolumeMount:

@@ -310,6 +310,10 @@ def _get_single_resources_schema():
             'local_disk': {
                 'type': 'string',
             },
+            'max_hourly_cost': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -517,6 +521,12 @@ def get_volume_schema():
                     },
                     'namespace': {
                         'type': 'string',
+                    },
+                    'host_path': {
+                        'type': 'string',
+                    },
+                    'cleanup_on_deletion': {
+                        'type': 'boolean',
                     },
                 },
             },
@@ -1030,7 +1040,7 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
-            'api_access': {
+            'api_server_access': {
                 'type': 'boolean',
             },
             '_metadata': {
@@ -1272,6 +1282,34 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'allowed_nodes': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'label_selector': {
+                # Each key-value pair is OR'd: a node matches if ANY
+                # label matches. This differs from K8s label selectors
+                # which are AND'd.
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+            },
+            'names': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+            'ips': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
@@ -1382,6 +1420,36 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                 },
             },
         },
+    },
+    'enable_docker': {
+        'oneOf': [
+            # Simple form: enable_docker: true / false
+            {
+                'type': 'boolean'
+            },
+            # Simple form: enable_docker: "ALL" / "BUILD"
+            {
+                'type': 'string',
+                'enum': ['ALL', 'BUILD'],
+            },
+            # Detailed form with optional cache volume.
+            {
+                'type': 'object',
+                'required': ['mode'],
+                'additionalProperties': False,
+                'properties': {
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['ALL', 'BUILD'],
+                    },
+                    # SkyPilot volume name for the Docker/BuildKit cache.
+                    # Omit to use an ephemeral emptyDir volume instead.
+                    'cache_volume': {
+                        'type': 'string',
+                    },
+                },
+            },
+        ],
     },
 }
 

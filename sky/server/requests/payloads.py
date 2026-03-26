@@ -628,6 +628,19 @@ class JobsLogsBody(RequestBody):
     task: Optional[Union[str, int]] = None
 
 
+class JobsWaitBody(RequestBody):
+    """The request body for the jobs wait endpoint."""
+    name: Optional[str] = None
+    job_id: Optional[int] = None
+    # Timeout in seconds. None means wait forever.
+    timeout: Optional[int] = None
+    # Polling interval in seconds. Minimum 5, default 15.
+    poll_interval: int = 15
+    # Task identifier for JobGroups: int for task_id, str for task_name.
+    # If None, waits for all tasks.
+    task: Optional[Union[str, int]] = None
+
+
 class RequestCancelBody(RequestBody):
     """The request body for the API request cancellation endpoint."""
     # Kill all requests if request_ids is None.
