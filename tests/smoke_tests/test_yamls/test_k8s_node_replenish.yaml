@@ -1,0 +1,13 @@
+resources:
+  cpus: 2
+  cloud: kubernetes
+
+num_nodes: 4
+
+run: |
+  echo "Node rank: $SKYPILOT_NODE_RANK on $(hostname)"
+  for i in $(seq 1 90); do
+    echo "[$(date)] Node $SKYPILOT_NODE_RANK alive - iteration $i"
+    sleep 1
+  done
+  echo "NODE $SKYPILOT_NODE_RANK COMPLETE"

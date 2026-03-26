@@ -2997,6 +2997,65 @@ def test_kubernetes_recovery():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_node_replenish_no_race():
+    """Test that replenishing a killed worker pod doesn't crash the job.
+
+    When a worker pod dies mid-job and sky launch replenishes it, the new
+    pod must not join the ray cluster before SkyPilot runtime setup
+    completes. Otherwise, ray dispatches a pending retry task to the
+    unready node, which crashes with ModuleNotFoundError and kills the
+    entire job. The SKYPILOT_DEFER_RAY_START env var prevents this.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    worker2 = f'{name_on_cloud}-worker2'
+    test = smoke_tests_utils.Test(
+        'kubernetes_node_replenish_no_race',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch 4-node job (each node runs 90 iterations then exits)
+            f'sky launch -y -c {name} -d '
+            f'tests/smoke_tests/test_yamls/test_k8s_node_replenish.yaml',
+            # Wait for the job to be running
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=180),
+            # Verify all 4 nodes are producing output
+            f'sleep 15 && '
+            f'sky logs {name} 1 --no-follow --tail 20 | '
+            f'grep -q "Node 2 alive"',
+            # Kill worker2
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl delete pod {worker2}'),
+            # Replenish with sky launch (no task)
+            f'sky launch -y -c {name} --infra kubernetes --cpus 2 '
+            f'--num-nodes 4',
+            # Verify the replacement node rejoined and the job is still
+            # running on all 4 nodes (not crashed by ModuleNotFoundError)
+            f'for i in $(seq 1 60); do '
+            f'  sky logs {name} 1 --no-follow --tail 100 2>/dev/null | '
+            f'  grep -q "Node 2 alive" && exit 0; sleep 1; '
+            f'done; echo "Node 2 never appeared"; exit 1',
+            # Wait for the job to succeed (all nodes finish 90 iterations)
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=300),
+        ],
+        f'sky down -y {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_sigterm_keepalive():
     """Test that worker pods survive SIGTERM (node drain) via keep-alive fix."""
     name = smoke_tests_utils.get_cluster_name()
