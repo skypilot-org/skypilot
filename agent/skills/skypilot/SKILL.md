@@ -90,9 +90,14 @@ Use `-o json` with status/query commands to get structured JSON output instead o
 | Command | Description |
 |---------|-------------|
 | `sky launch -c NAME task.yaml` | Launch a cluster or run a task |
-| `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning) |
+| `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning); syncs workdir each time |
+| `sky exec NAME task.yaml -d` | Same, but detach immediately (don't stream logs) |
 | `sky status -o json` | Show all clusters |
 | `sky logs NAME` | Stream job logs from a cluster |
+| `sky logs NAME --no-follow` | Print existing logs and exit immediately |
+| `sky logs NAME --tail 50` | Print last 50 lines of logs and exit |
+| `sky logs NAME --status` | Exit with code 0=succeeded, 100=failed, 101=not finished, 102=not found, 103=cancelled |
+| `sky queue NAME -o json` | List jobs on a cluster with status (structured JSON) |
 | `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
 | `sky down NAME` | Tear down a cluster completely |
 | `sky gpus list -o json` | List available GPU types across clouds |
@@ -256,6 +261,23 @@ sky start mycluster
 sky down mycluster
 ```
 
+## Workdir Sync Behavior
+
+`workdir:` is synced to `~/sky_workdir` on the remote via `rsync` before every `sky exec`. **rsync is additive — deleted local files are NOT removed from the remote.** This can cause experiments to run against stale build artifacts or old configs.
+
+To ensure a clean slate, SSH and wipe before `sky exec`:
+```bash
+ssh mycluster "rm -rf ~/sky_workdir"
+sky exec mycluster task.yaml
+```
+
+Or clean inside `run:` if only specific artifacts need removal:
+```yaml
+run: |
+  find ~/sky_workdir/build -name '*.o' -delete 2>/dev/null || true
+  cd ~/sky_workdir && make
+```
+
 ## Managed Jobs
 
 Use `sky jobs launch` for long-running jobs that should run unattended. SkyPilot manages the full lifecycle — provisioning, execution, recovery from preemptions/quota/failures, and teardown:
@@ -349,6 +371,27 @@ sky serve down my-llm
 3. Get endpoint: `sky serve status my-service --endpoint`
 4. Update model: `sky serve update my-service updated.yaml`
 
+### Parallel Experiment Submission
+
+Use `sky exec -d` to submit jobs to multiple VMs without blocking, then collect results:
+
+```bash
+# Submit all experiments (detached, returns after job is queued)
+for i in 1 2 3 4; do
+  sky exec exp-vm-0$i task.yaml --env LR=1e-$i -d
+done
+
+# Get the latest job ID from a cluster
+job_id=$(sky queue exp-vm-01 -o json \
+  | python3 -c "import sys,json; jobs=json.load(sys.stdin)['exp-vm-01']; print(max(j['job_id'] for j in jobs))")
+
+# Wait for a specific job and fetch last 50 lines
+sky logs exp-vm-01 $job_id --status && sky logs exp-vm-01 $job_id --tail 50
+
+# Check all jobs across a cluster at once
+sky queue exp-vm-01 -o json
+```
+
 ## Agent Feedback Loop
 
 When using SkyPilot programmatically, follow this loop:
@@ -356,9 +399,13 @@ When using SkyPilot programmatically, follow this loop:
 1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
 2. **Launch**: `sky launch -c mycluster task.yaml`
 3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
-4. **Debug**: `sky logs mycluster` (stream logs) or `ssh mycluster` (interactive)
-5. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
-6. **Cleanup**: `sky down mycluster`
+4. **Wait for completion**: `sky logs mycluster --status` (blocks until job finishes; exits 0 on success)
+5. **Inspect output**: `sky logs mycluster --no-follow` or `sky logs mycluster --tail 100`
+6. **Debug**: `sky logs mycluster` (stream from start) or `ssh mycluster` (interactive)
+7. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
+8. **Cleanup**: `sky down mycluster`
+
+> **Never poll with `sleep` + `sky queue`** — use `sky logs CLUSTER JOB_ID --status` to block until done, then `--tail N` to fetch output.
 
 ## Common Agent Mistakes
 
@@ -372,6 +419,9 @@ When using SkyPilot programmatically, follow this loop:
 | Running `sky launch` without `-c <name>` | Creates randomly-named cluster, hard to reference | Always name clusters with `-c` |
 | Parsing table output from status commands | Table formatting is for humans, fragile to parse | Use `-o json` for structured output |
 | Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
+| Polling job status with `sleep` + `sky queue` | Wastes tokens, introduces timing bugs, fragile | Use `sky logs CLUSTER JOB_ID --status` to block until done |
+| Assuming workdir sync removes remote files | rsync is additive; old remote files persist across `sky exec` calls | SSH and manually clean `~/sky_workdir`, or clean in `run:` script |
+| Not using `--tail` when only last output matters | Streaming full logs wastes tokens for long jobs | Use `sky logs CLUSTER JOB_ID --tail 50` for last N lines |
 
 ## Common Issues Quick Reference
 
