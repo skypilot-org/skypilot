@@ -122,27 +122,6 @@ const formatAutostop = (autostop, toDown) => {
   return autostopStr;
 };
 
-// Helper function to format username for display (reuse from users.jsx)
-const formatUserDisplay = (username, userId) => {
-  if (username && username.includes('@')) {
-    const emailPrefix = username.split('@')[0];
-    // Show email prefix with userId if they're different
-    if (userId && userId !== emailPrefix) {
-      return `${emailPrefix} (${userId})`;
-    }
-    return emailPrefix;
-  }
-  // If no email, show username with userId in parentheses only if they're different
-  const usernameBase = username || userId || 'N/A';
-
-  // Skip showing userId if it's the same as username
-  if (userId && userId !== usernameBase) {
-    return `${usernameBase} (${userId})`;
-  }
-
-  return usernameBase;
-};
-
 // Helper function to format duration in a human-readable way
 const formatDuration = (durationSeconds) => {
   if (!durationSeconds || durationSeconds === 0) {
@@ -261,58 +240,12 @@ export function Clusters() {
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
-        // Trigger cache preloading for clusters page and background preload other pages
+        // Trigger cache preloading for clusters page and background preload
+        // other pages. Note: cluster data is fetched via the pagination plugin
+        // (fast DB query), not getClusters (slow /status endpoint).
+        // Filter option values are built by ClusterTable from the paginated
+        // data, so we only need to preload workspaces here.
         await cachePreloader.preloadForPage('clusters');
-
-        // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-
-        // Fetch all clusters to see if 'default' workspace is implicitly used
-        const allClusters = await dashboardCache.get(getClusters);
-        const uniqueClusterWorkspaces = [
-          ...new Set(
-            allClusters
-              .map((cluster) => cluster.workspace || 'default')
-              .filter((ws) => ws)
-          ),
-        ];
-
-        // Combine configured workspaces with any actively used 'default' workspace
-        const finalWorkspaces = new Set(configuredWorkspaceNames);
-        if (
-          uniqueClusterWorkspaces.includes('default') &&
-          !finalWorkspaces.has('default')
-        ) {
-          // Add 'default' if it's used by clusters but not in configured list
-          // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
-        }
-        // Ensure all unique cluster workspaces are in the list, especially 'default'
-        uniqueClusterWorkspaces.forEach((wsName) =>
-          finalWorkspaces.add(wsName)
-        );
-
-        // Get unique users from cluster data for filter dropdown
-        const uniqueClusterUsers = [
-          ...new Set(
-            allClusters
-              .map((cluster) => ({
-                userId: cluster.user_hash || cluster.user,
-                username: cluster.user,
-              }))
-              .filter((user) => user.userId)
-          ).values(),
-        ];
-
-        // Process users for filtering - only use cluster users
-        const finalUsers = new Map();
-        uniqueClusterUsers.forEach((user) => {
-          finalUsers.set(user.userId, {
-            userId: user.userId,
-            username: user.username,
-            display: formatUserDisplay(user.username, user.userId),
-          });
-        });
 
         // Signal that preloading is complete
         setPreloadingComplete(true);
