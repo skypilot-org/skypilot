@@ -239,11 +239,24 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
     return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
+def _parse_secret_name(raw_name: str):
+    """Parse 'scope.NAME' into (name, scope_override).
+
+    Supports prefixes: personal., workspace., global.
+    Returns (name, None) if no prefix found.
+    """
+    for prefix in ('personal.', 'workspace.', 'global.'):
+        if raw_name.startswith(prefix):
+            return raw_name[len(prefix):], prefix[:-1]
+    return raw_name, None
+
+
 @dataclasses.dataclass
 class ManagedSecretRef:
     """A reference to a managed secret in task YAML."""
     name: str
     mount_path: Optional[str] = None
+    scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
 
 
 class Task:
@@ -671,14 +684,18 @@ class Task:
             # pylint: disable=protected-access
             for entry in managed_secrets_raw:
                 if isinstance(entry, str):
+                    name, scope = _parse_secret_name(entry)
                     task._managed_secret_refs.append(
-                        ManagedSecretRef(name=entry))
+                        ManagedSecretRef(name=name,
+                                        scope_override=scope))
                 elif isinstance(entry, dict):
-                    for name, opts in entry.items():
+                    for raw_name, opts in entry.items():
+                        name, scope = _parse_secret_name(raw_name)
                         task._managed_secret_refs.append(
                             ManagedSecretRef(
                                 name=name,
                                 mount_path=opts.get('mount_path'),
+                                scope_override=scope,
                             ))
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -1815,11 +1832,15 @@ class Task:
         if self._managed_secret_refs:
             managed_secrets = []
             for ref in self._managed_secret_refs:
+                prefix = (f'{ref.scope_override}.'
+                          if ref.scope_override else '')
                 if ref.mount_path is not None:
                     managed_secrets.append(
-                        {ref.name: {'mount_path': ref.mount_path}})
+                        {f'{prefix}{ref.name}': {
+                            'mount_path': ref.mount_path
+                        }})
                 else:
-                    managed_secrets.append(ref.name)
+                    managed_secrets.append(f'{prefix}{ref.name}')
             config['managed_secrets'] = managed_secrets
 
         add_if_not_none('file_mounts', {})
