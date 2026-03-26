@@ -97,7 +97,7 @@ class TestFunctionSerialization:
         new_names = set(deserialized.__code__.co_names)
 
         # Key names should be present in both
-        key_names = {'sky', 'batch', 'load', 'save_results'}
+        key_names = {'sky.batch', 'batch', 'load', 'save_results'}
         assert key_names.issubset(orig_names)
         assert key_names.issubset(new_names)
 
@@ -111,13 +111,16 @@ class TestSerializationErrorHandling:
             utils.serialize_function(len)
 
     def test_cannot_serialize_lambda(self):
-        """Test that lambda functions raise appropriate error."""
-        # Lambdas can be serialized if defined in a file, but
-        # we test the error path here
-        lambda_fn = lambda x: x * 2  # noqa: E731
+        """Test that dynamically-created functions raise appropriate error."""
+        # Lambdas defined in source files CAN be serialized via
+        # inspect.getsource(), so we use exec() to create one without
+        # a backing source file.
+        ns = {}
+        exec('fn = lambda x: x * 2', ns)  # pylint: disable=exec-used
+        dynamic_fn = ns['fn']
 
         with pytest.raises(TypeError, match='unable to retrieve source code'):
-            utils.serialize_function(lambda_fn)
+            utils.serialize_function(dynamic_fn)
 
     def test_invalid_deserialization(self):
         """Test that invalid serialized data raises error."""
