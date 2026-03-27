@@ -593,10 +593,15 @@ class Slurm(clouds.Cloud):
             gpu_task_cpus = slurm_instance_type.cpus
             if resources.cpus is None:
                 gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
-            # Special handling to bump up memory multiplier for GPU instances
-            gpu_task_memory = (float(resources.memory.strip('+')) if
-                               resources.memory is not None else gpu_task_cpus *
-                               self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
+            if resources.memory is not None:
+                gpu_task_memory = float(resources.memory.strip('+'))
+            elif slurm_instance_type.memory == 0:
+                # The default instance type already determined that memory
+                # scheduling is disabled, so keep memory as 0.
+                gpu_task_memory = 0
+            else:
+                gpu_task_memory = (gpu_task_cpus *
+                                   self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
 
             chosen_instance_type = (
                 slurm_utils.SlurmInstanceType.from_resources(
@@ -611,10 +616,60 @@ class Slurm(clouds.Cloud):
             region=resources.region,
             zone=resources.zone)
         if not available_regions:
-            return resources_utils.FeasibleResources([], [], None)
+            hint = self._get_memory_hint(resources)
+            return resources_utils.FeasibleResources([], [], hint)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
+
+    @staticmethod
+    def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
+        """Return a hint when memory-related scheduling fails."""
+        for cluster in slurm_utils.get_all_slurm_cluster_names():
+            try:
+                mem_tracked = slurm_utils.is_memory_scheduling_enabled(cluster)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check memory scheduling for '
+                             f'{cluster}: {e}')
+                continue
+
+            if not mem_tracked and resources.memory is not None:
+                # Memory not tracked (CR_CPU/CR_Core/CR_Socket) but user
+                # explicitly requested it.
+                return (f'{colorama.Fore.YELLOW}'
+                        f'Cluster {cluster!r} does not track memory '
+                        f'as a consumable resource. Specifying '
+                        f'--memory may cause failures when '
+                        f'RealMemory is not set in slurm.conf. '
+                        f'Try omitting --memory.'
+                        f'{colorama.Style.RESET_ALL}')
+
+            if mem_tracked:
+                # Memory is tracked but nodes may report zero memory
+                # (RealMemory not set in slurm.conf).
+                try:
+                    nodes = slurm_utils.get_slurm_nodes_info(cluster)
+                    # RealMemory defaults to 1 MB when unset in slurm.conf,
+                    # and 0 MB when explicitly set to 0. Both convert to
+                    # near-zero GB (0.0 or ~0.001), so < 0.01 catches both.
+                    zero_nodes = sorted(
+                        set(n.node for n in nodes if n.memory_gb < 0.01))
+                    if zero_nodes:
+                        sample = zero_nodes[:5]
+                        node_str = ', '.join(sample)
+                        if len(zero_nodes) > 5:
+                            node_str += f' (and {len(zero_nodes) - 5} more)'
+                        return (f'{colorama.Fore.YELLOW}'
+                                f'{len(zero_nodes)} node(s) in cluster '
+                                f'{cluster!r} report zero memory: {node_str}. '
+                                f'Please ask your cluster administrator to set '
+                                f'RealMemory in slurm.conf.'
+                                f'{colorama.Style.RESET_ALL}')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to get node info for cluster '
+                                 f'{cluster!r}: '
+                                 f'{common_utils.format_exception(e)}')
+        return None
 
     @classmethod
     def _check_compute_credentials(

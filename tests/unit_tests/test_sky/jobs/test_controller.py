@@ -5,11 +5,8 @@ Tests cover controller recovery during rolling upgrades for:
 - Pipeline jobs (sequential multi-task): Recovery with task skip logic
 - JobGroups (parallel tasks): Recovery with independent task states
 
-<<<<<<< HEAD
-Tests also cover file mount cleanup in task_cleanup().
-=======
-Also tests the cancelled job log download feature in ControllerManager.
->>>>>>> master
+Also tests the cancelled job log download feature in ControllerManager
+and file mount cleanup in task_cleanup().
 """
 import asyncio
 from typing import Dict, List, Optional, Tuple

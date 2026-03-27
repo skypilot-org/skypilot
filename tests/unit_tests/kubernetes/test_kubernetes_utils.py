@@ -3,12 +3,14 @@
 """
 
 import collections
+import copy
 import os
 import re
 import tempfile
 from typing import Optional
 import unittest
 from unittest import mock
+from unittest.mock import call
 from unittest.mock import patch
 
 import kubernetes
@@ -1423,18 +1425,28 @@ def test_combine_pod_config_fields_ssh_cloud():
 
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = pod_config_for_context
+
+        def _side_effect_ssh(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return pod_config_for_context
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_ssh
         result = utils.combine_pod_config_fields(cluster_yaml_obj,
                                                  cluster_config_overrides,
                                                  cloud=ssh_cloud,
                                                  context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
-        # and context without the "ssh-" prefix
-        mock_get_config.assert_called_once_with(cloud='ssh',
-                                                region='my-cluster',
-                                                keys=('pod_config',),
-                                                default_value={})
+        # and context without the "ssh-" prefix for pod_config.
+        assert mock_get_config.call_count == 1
+        mock_get_config.assert_has_calls([
+            call(cloud='ssh',
+                 region='my-cluster',
+                 keys=('pod_config',),
+                 default_value={}),
+        ],
+                                         any_order=False)
 
         # Verify the pod config was merged
         node_config = result['available_node_types']['ray_head_default'][
@@ -1480,18 +1492,28 @@ def test_combine_pod_config_fields_kubernetes_cloud():
 
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = pod_config_for_context
+
+        def _side_effect_k8s(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return pod_config_for_context
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_k8s
         result = utils.combine_pod_config_fields(cluster_yaml_obj,
                                                  cluster_config_overrides,
                                                  cloud=k8s_cloud,
                                                  context=k8s_context)
 
-        # Verify that get_effective_region_config was called with 'kubernetes' cloud
-        # and the context as-is
-        mock_get_config.assert_called_once_with(cloud='kubernetes',
-                                                region=k8s_context,
-                                                keys=('pod_config',),
-                                                default_value={})
+        # Verify that get_effective_region_config was called with 'kubernetes'
+        # cloud and the context as-is for pod_config.
+        assert mock_get_config.call_count == 1
+        mock_get_config.assert_has_calls([
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('pod_config',),
+                 default_value={}),
+        ],
+                                         any_order=False)
 
         # Verify the pod config was merged
         node_config = result['available_node_types']['ray_head_default'][
@@ -1950,7 +1972,13 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
     # Test SSH cloud gets SSH config
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = ssh_pod_config
+
+        def _side_effect_isolation_ssh(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return ssh_pod_config
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_isolation_ssh
 
         result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
                                                  cloud=ssh_cloud,
@@ -1965,15 +1993,25 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "Kubernetes config leaked to SSH!"
 
         # Verify get_effective_region_config was called with 'ssh'
-        mock_get_config.assert_called_with(cloud='ssh',
-                                           region='test-cluster',
-                                           keys=('pod_config',),
-                                           default_value={})
+        assert mock_get_config.call_count == 1
+        mock_get_config.assert_has_calls([
+            call(cloud='ssh',
+                 region='test-cluster',
+                 keys=('pod_config',),
+                 default_value={}),
+        ],
+                                         any_order=False)
 
     # Test Kubernetes cloud gets Kubernetes config
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = k8s_pod_config
+
+        def _side_effect_isolation_k8s(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return k8s_pod_config
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_isolation_k8s
 
         result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
                                                  cloud=k8s_cloud,
@@ -1988,10 +2026,14 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "SSH config leaked to Kubernetes!"
 
         # Verify get_effective_region_config was called with 'kubernetes'
-        mock_get_config.assert_called_with(cloud='kubernetes',
-                                           region=k8s_context,
-                                           keys=('pod_config',),
-                                           default_value={})
+        assert mock_get_config.call_count == 1
+        mock_get_config.assert_has_calls([
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('pod_config',),
+                 default_value={}),
+        ],
+                                         any_order=False)
 
 
 def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
@@ -2925,3 +2967,1171 @@ class TestGetHandledTaintKeys(unittest.TestCase):
             assert 'custom.io/gpu' in keys
             assert utils.TPU_RESOURCE_KEY in keys
             assert 'nvidia.com/gpu' in keys
+
+
+class TestAllowedNodesFiltering:
+    """Tests for _filter_allowed_nodes() discovery filtering."""
+
+    def _create_node(self,
+                     name: str,
+                     labels: Optional[dict] = None,
+                     internal_ip: Optional[str] = None,
+                     external_ip: Optional[str] = None) -> utils.V1Node:
+        """Helper to create a V1Node with addresses for filtering tests."""
+        addresses = []
+        if internal_ip:
+            addresses.append(
+                utils.V1NodeAddress(type='InternalIP', address=internal_ip))
+        if external_ip:
+            addresses.append(
+                utils.V1NodeAddress(type='ExternalIP', address=external_ip))
+        return utils.V1Node(
+            metadata=utils.V1ObjectMeta(name=name, labels=labels or {}),
+            status=utils.V1NodeStatus(
+                allocatable={
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                capacity={
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                addresses=addresses,
+                conditions=[utils.V1NodeCondition(type='Ready',
+                                                  status='True')]),
+            spec=utils.V1NodeSpec(unschedulable=False, taints=[]))
+
+    def _make_nodes(self):
+        """Create a standard set of test nodes."""
+        return [
+            self._create_node('gpu-node-1',
+                              labels={
+                                  'pool': 'gpu',
+                                  'team': 'research'
+                              },
+                              internal_ip='10.0.1.1'),
+            self._create_node('gpu-node-2',
+                              labels={
+                                  'pool': 'gpu',
+                                  'team': 'platform'
+                              },
+                              internal_ip='10.0.1.2'),
+            self._create_node('cpu-node-1',
+                              labels={
+                                  'pool': 'cpu',
+                                  'team': 'research'
+                              },
+                              internal_ip='10.0.2.1'),
+            self._create_node('cpu-node-2',
+                              labels={
+                                  'pool': 'cpu',
+                                  'team': 'platform'
+                              },
+                              internal_ip='10.0.2.2',
+                              external_ip='203.0.113.5'),
+        ]
+
+    def test_filter_no_config(self):
+        """No allowed_nodes config returns all nodes."""
+        nodes = self._make_nodes()
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=None):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert len(result) == 4
+
+    def test_filter_empty_config(self):
+        """allowed_nodes: {} returns all nodes."""
+        nodes = self._make_nodes()
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value={}):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert len(result) == 4
+
+    def test_filter_label_selector_single(self):
+        """Single label matches nodes with that label."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'gpu'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['gpu-node-1', 'gpu-node-2']
+
+    def test_filter_label_selector_multiple_or(self):
+        """Multiple labels are OR'd: pool=gpu OR team=research."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        # gpu-node-1 (pool=gpu), gpu-node-2 (pool=gpu), cpu-node-1 (team=research)
+        assert sorted(n.metadata.name for n in result) == [
+            'cpu-node-1', 'gpu-node-1', 'gpu-node-2'
+        ]
+
+    def test_filter_names(self):
+        """Names list matches by node name."""
+        nodes = self._make_nodes()
+        config = {'names': ['gpu-node-1', 'cpu-node-2']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['cpu-node-2', 'gpu-node-1']
+
+    def test_filter_ips_internal(self):
+        """IPs match against InternalIP addresses."""
+        nodes = self._make_nodes()
+        config = {'ips': ['10.0.1.1', '10.0.2.2']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['cpu-node-2', 'gpu-node-1']
+
+    def test_filter_ips_external(self):
+        """IPs match against ExternalIP addresses."""
+        nodes = self._make_nodes()
+        config = {'ips': ['203.0.113.5']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert [n.metadata.name for n in result] == ['cpu-node-2']
+
+    def test_filter_combined_or(self):
+        """Labels + names + IPs all OR'd together."""
+        nodes = self._make_nodes()
+        # pool=gpu -> gpu-node-1, gpu-node-2
+        # names=[cpu-node-1]
+        # ips=[10.0.2.2] -> cpu-node-2
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['cpu-node-1'],
+            'ips': ['10.0.2.2'],
+        }
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(n.metadata.name for n in result) == [
+            'cpu-node-1', 'cpu-node-2', 'gpu-node-1', 'gpu-node-2'
+        ]
+
+    def test_filter_no_matches(self):
+        """Config set but nothing matches returns empty list."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'nonexistent'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert not result
+
+    def test_filter_no_duplicates(self):
+        """Node matching multiple criteria is only included once."""
+        nodes = self._make_nodes()
+        # gpu-node-1 matches both label and name
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['gpu-node-1'],
+        }
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        names = [n.metadata.name for n in result]
+        assert names.count('gpu-node-1') == 1
+        assert sorted(names) == ['gpu-node-1', 'gpu-node-2']
+
+
+class TestAllowedNodesScheduling:
+    """Tests for allowed_nodes scheduling enforcement (nodeAffinity injection).
+
+    These test the logic that injects nodeAffinity constraints into pod specs
+    to ensure pods only land on allowed nodes. Pod specs are modeled after
+    what the kubernetes-ray.yml.j2 template actually generates.
+    """
+
+    def _make_pod_spec_gpu(self):
+        """A GPU workload pod spec as generated by the template.
+
+        The template produces:
+        - requiredDuringScheduling with GPU label matchExpression
+        - podAffinity for GPU binpacking (co-locate on same node)
+        - GPU resource limits
+        """
+        return {
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'nvidia.com/gpu': '1'
+                        }
+                    }
+                }],
+                'affinity': {
+                    'nodeAffinity': {
+                        'requiredDuringSchedulingIgnoredDuringExecution': {
+                            'nodeSelectorTerms': [{
+                                'matchExpressions': [{
+                                    'key': 'cloud.google.com/gke-accelerator',
+                                    'operator': 'In',
+                                    'values': ['nvidia-a100'],
+                                }]
+                            }]
+                        }
+                    },
+                    'podAffinity': {
+                        'preferredDuringSchedulingIgnoredDuringExecution': [{
+                            'weight': 1,
+                            'podAffinityTerm': {
+                                'labelSelector': {
+                                    'matchExpressions': [{
+                                        'key': 'skypilot-binpack',
+                                        'operator': 'In',
+                                        'values': ['gpu'],
+                                    }]
+                                },
+                                'topologyKey': 'kubernetes.io/hostname',
+                            },
+                        }]
+                    },
+                },
+            },
+        }
+
+    def _make_pod_spec_cpu_on_gpu_cluster(self):
+        """A CPU-only workload on a cluster that has GPUs.
+
+        The template produces:
+        - NO requiredDuringScheduling (no GPU constraint)
+        - preferredDuringScheduling to AVOID GPU nodes (DoesNotExist)
+        - NO podAffinity (no binpacking needed)
+        - CPU-only resource limits
+        """
+        return {
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'cpu': '4',
+                            'memory': '8Gi'
+                        }
+                    }
+                }],
+                'affinity': {
+                    'nodeAffinity': {
+                        'preferredDuringSchedulingIgnoredDuringExecution': [{
+                            'weight': 1,
+                            'preference': {
+                                'matchExpressions': [{
+                                    'key': 'cloud.google.com/gke-accelerator',
+                                    'operator': 'DoesNotExist',
+                                }]
+                            },
+                        }]
+                    }
+                },
+            },
+        }
+
+    def _make_pod_spec_cpu_no_gpus_in_cluster(self):
+        """A CPU-only workload on a cluster with no GPUs at all.
+
+        The template produces NO affinity block at all when there are no
+        GPU labels to avoid and no GPUs to require.
+        """
+        return {
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'cpu': '4',
+                            'memory': '8Gi'
+                        }
+                    }
+                }],
+            },
+        }
+
+    def _make_filtered_nodes(self):
+        """Create mock filtered nodes with kubernetes.io/hostname labels."""
+        nodes = []
+        for name, hostname, ip in [
+            ('node-a', 'node-a', '10.0.1.1'),
+            ('node-b', 'node-b', '10.0.1.2'),
+        ]:
+            nodes.append(
+                utils.V1Node(metadata=utils.V1ObjectMeta(
+                    name=name,
+                    labels={
+                        'kubernetes.io/hostname': hostname,
+                        'pool': 'gpu'
+                    }),
+                             status=utils.V1NodeStatus(
+                                 allocatable={
+                                     'cpu': '4',
+                                     'memory': '16Gi'
+                                 },
+                                 capacity={
+                                     'cpu': '4',
+                                     'memory': '16Gi'
+                                 },
+                                 addresses=[
+                                     utils.V1NodeAddress(type='InternalIP',
+                                                         address=ip)
+                                 ],
+                                 conditions=[
+                                     utils.V1NodeCondition(type='Ready',
+                                                           status='True')
+                                 ]),
+                             spec=utils.V1NodeSpec(unschedulable=False,
+                                                   taints=[])))
+        return nodes
+
+    # Shared sub-expressions used in expected outputs.
+    _GPU_EXPR = {
+        'key': 'cloud.google.com/gke-accelerator',
+        'operator': 'In',
+        'values': ['nvidia-a100'],
+    }
+    _HOSTNAME_EXPR = {
+        'key': 'kubernetes.io/hostname',
+        'operator': 'In',
+        'values': ['node-a', 'node-b'],
+    }
+    _POD_AFFINITY = {
+        'podAffinity': {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': 'skypilot-binpack',
+                            'operator': 'In',
+                            'values': ['gpu'],
+                        }]
+                    },
+                    'topologyKey': 'kubernetes.io/hostname',
+                },
+            }]
+        }
+    }
+    _PREFERRED_AVOID_GPU = {
+        'preferredDuringSchedulingIgnoredDuringExecution': [{
+            'weight': 1,
+            'preference': {
+                'matchExpressions': [{
+                    'key': 'cloud.google.com/gke-accelerator',
+                    'operator': 'DoesNotExist',
+                }]
+            },
+        }]
+    }
+
+    def test_scheduling_labels_only_gpu_workload(self):
+        """Label-only config + GPU pod: cross-product with existing GPU term."""
+        pod_spec = self._make_pod_spec_gpu()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     config,
+                                                     context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'pool',
+                                        'operator': 'In',
+                                        'values': ['gpu']
+                                    },
+                                ]
+                            },
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'team',
+                                        'operator': 'In',
+                                        'values': ['research']
+                                    },
+                                ]
+                            },
+                        ]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
+
+    def test_scheduling_labels_only_cpu_on_gpu_cluster(self):
+        """Label-only config + CPU pod on GPU cluster."""
+        pod_spec = self._make_pod_spec_cpu_on_gpu_cluster()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     config,
+                                                     context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    **self._PREFERRED_AVOID_GPU,
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            {
+                                'matchExpressions': [{
+                                    'key': 'pool',
+                                    'operator': 'In',
+                                    'values': ['gpu']
+                                },]
+                            },
+                            {
+                                'matchExpressions': [{
+                                    'key': 'team',
+                                    'operator': 'In',
+                                    'values': ['research']
+                                },]
+                            },
+                        ]
+                    },
+                },
+            },
+        }
+
+    def test_scheduling_labels_only_cpu_no_gpus(self):
+        """Label-only config + CPU pod on cluster with no GPUs."""
+        pod_spec = self._make_pod_spec_cpu_no_gpus_in_cluster()
+        config = {'label_selector': {'pool': 'cpu'}}
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     config,
+                                                     context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [{
+                                'key': 'pool',
+                                'operator': 'In',
+                                'values': ['cpu']
+                            },]
+                        },]
+                    },
+                },
+            },
+        }
+
+    def test_scheduling_with_names_gpu_workload(self):
+        """Names config + GPU pod: hostname added to existing GPU term."""
+        pod_spec = self._make_pod_spec_gpu()
+        config = {'names': ['node-a', 'node-b']}
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [
+                                self._GPU_EXPR,
+                                self._HOSTNAME_EXPR,
+                            ]
+                        }]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
+
+    def test_scheduling_with_ips_cpu_on_gpu_cluster(self):
+        """IPs config + CPU pod on GPU cluster: hostname term created."""
+        pod_spec = self._make_pod_spec_cpu_on_gpu_cluster()
+        config = {'ips': ['10.0.1.1', '10.0.1.2']}
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    **self._PREFERRED_AVOID_GPU,
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [self._HOSTNAME_EXPR]
+                        }]
+                    },
+                },
+            },
+        }
+
+    def test_scheduling_labels_and_names_gpu_workload(self):
+        """Labels + names combined with GPU pod.
+
+        Labels produce dynamic terms, names produce a hostname term
+        (only for the named node). All are cross-producted with the
+        existing GPU term.
+        """
+        pod_spec = self._make_pod_spec_gpu()
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['node-a'],
+        }
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            # Label term: GPU AND pool=gpu (dynamic)
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'pool',
+                                        'operator': 'In',
+                                        'values': ['gpu']
+                                    },
+                                ]
+                            },
+                            # Hostname term: GPU AND hostname=node-a
+                            # (only node-a, not node-b, because names
+                            # only listed node-a)
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'kubernetes.io/hostname',
+                                        'operator': 'In',
+                                        'values': ['node-a'],
+                                    },
+                                ]
+                            },
+                        ]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
+
+    def test_scheduling_no_config(self):
+        """No allowed_nodes config leaves affinity unchanged."""
+        pod_spec = self._make_pod_spec_gpu()
+        original = copy.deepcopy(pod_spec['spec'])
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     None,
+                                                     context='test')
+
+        assert result == original
+
+
+# ---------------------------------------------------------------------------
+# Tests for kubernetes.enable_docker shorthand config
+# ---------------------------------------------------------------------------
+
+_BASE_CLUSTER_YAML = {
+    'provider': {
+        'type': 'external',
+        'module': 'sky.provision.kubernetes',
+        'namespace': 'default',
+    },
+    'available_node_types': {
+        'ray_head_default': {
+            'node_config': {
+                'metadata': {
+                    'name': 'test-cluster-head',
+                    'namespace': 'default',
+                    'labels': {},
+                },
+                'spec': {
+                    'containers': [{
+                        'name': 'ray-node',
+                        'image': 'skypilot:latest',
+                    }],
+                },
+            }
+        }
+    },
+}
+
+
+class TestDockerSidecarDefaults(unittest.TestCase):
+    """Tests for DOCKER_SIDECAR_DEFAULTS."""
+
+    def test_defaults_returns_valid_dind(self):
+        defaults = utils.DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.ALL]
+        assert isinstance(defaults, utils.DockerSidecarDefaults)
+        assert defaults.image
+        assert defaults.cli_image
+        assert defaults.cache_vol_name
+        assert defaults.cache_mount
+
+    def test_defaults_returns_valid_buildkit(self):
+        defaults = utils.DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.BUILD]
+        assert isinstance(defaults, utils.DockerSidecarDefaults)
+        assert defaults.cli_image
+        assert defaults.cache_mount == '/home/user/.local/share/buildkit'
+
+    def test_defaults_unknown_mode_raises(self):
+        with self.assertRaises(ValueError):
+            utils.DockerMode('unknown')
+
+
+class TestNormalizeEnableDockerConfig(unittest.TestCase):
+    """Tests for normalize_enable_docker_config()."""
+
+    # ---- disabled / None ----
+
+    def test_none_returns_none(self):
+        assert utils.normalize_enable_docker_config(None) is None
+
+    def test_false_returns_none(self):
+        assert utils.normalize_enable_docker_config(False) is None
+
+    # ---- simple bool / string ----
+
+    def test_true_returns_all(self):
+        result = utils.normalize_enable_docker_config(True)
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
+
+    def test_string_all_returns_all(self):
+        result = utils.normalize_enable_docker_config('ALL')
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
+
+    def test_string_build_returns_build(self):
+        result = utils.normalize_enable_docker_config('BUILD')
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD)
+
+    # ---- dict form ----
+
+    def test_dict_mode_all(self):
+        result = utils.normalize_enable_docker_config({'mode': 'ALL'})
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
+
+    def test_dict_mode_build(self):
+        result = utils.normalize_enable_docker_config({'mode': 'BUILD'})
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD)
+
+    def test_dict_with_cache_volume(self):
+        result = utils.normalize_enable_docker_config({
+            'mode': 'ALL',
+            'cache_volume': 'my-cache',
+        })
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL,
+                                            cache_volume='my-cache')
+
+    def test_dict_build_with_cache_volume(self):
+        result = utils.normalize_enable_docker_config({
+            'mode': 'BUILD',
+            'cache_volume': 'bk-cache',
+        })
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD,
+                                            cache_volume='bk-cache')
+
+    # ---- edge cases ----
+
+    def test_empty_dict_returns_none(self):
+        """Empty dict (e.g. from config default_value) is treated as disabled."""
+        assert utils.normalize_enable_docker_config({}) is None
+
+    def test_dict_without_mode_key_returns_none(self):
+        """Dict missing 'mode' key is treated as disabled."""
+        assert utils.normalize_enable_docker_config({'cache_volume': 'vol'
+                                                    }) is None
+
+    def test_invalid_type_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            utils.normalize_enable_docker_config(42)
+        assert 'Invalid enable_docker value' in str(ctx.exception)
+
+    def test_invalid_string_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            utils.normalize_enable_docker_config('abcd')
+        assert 'Invalid enable_docker value' in str(ctx.exception)
+
+
+class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
+    """Tests for combine_pod_config_fields() after docker sidecar refactor.
+
+    Docker sidecar injection is now handled by the Jinja2 template
+    (kubernetes-ray.yml.j2), not by combine_pod_config_fields().  These tests
+    verify that combine_pod_config_fields() no longer injects docker sidecars,
+    and that pod_config merging still works correctly when sidecars are
+    already present in the rendered template.
+    """
+
+    def _base_yaml(self):
+        import copy
+        return copy.deepcopy(_BASE_CLUSTER_YAML)
+
+    def _base_yaml_with_dind(self):
+        """Simulate a template-rendered YAML that already has a dind sidecar."""
+        import copy
+        yaml_obj = copy.deepcopy(_BASE_CLUSTER_YAML)
+        node_cfg = yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']
+        node_cfg['spec']['containers'].append({
+            'name': 'dind',
+            'image': 'docker:29.3-dind',
+            'securityContext': {
+                'privileged': True
+            },
+        })
+        node_cfg['spec']['volumes'] = [{'name': 'docker-sock', 'emptyDir': {}}]
+        yaml_obj['provider']['docker_config'] = {
+            'mode': 'ALL',
+            'cache_volume': None,
+        }
+        return yaml_obj
+
+    def test_combine_does_not_inject_docker_sidecars(self):
+        """combine_pod_config_fields no longer injects docker sidecars."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'dind' not in container_names
+        assert 'buildkitd' not in container_names
+
+    def test_pod_config_can_override_template_rendered_dind(self):
+        """pod_config merging can override dind container from template."""
+        cluster_yaml = self._base_yaml_with_dind()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('pod_config',):
+                return {
+                    'spec': {
+                        'containers': [{
+                            'name': 'dind',
+                            'image': 'docker:custom-image',
+                        }]
+                    }
+                }
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        dind = next(
+            c for c in node_cfg['spec']['containers'] if c['name'] == 'dind')
+        assert dind['image'] == 'docker:custom-image'
+
+    def test_pod_config_can_add_extra_sidecar(self):
+        """pod_config merging can add an extra container alongside dind."""
+        cluster_yaml = self._base_yaml_with_dind()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('pod_config',):
+                return {
+                    'spec': {
+                        'containers': [{
+                            'name': 'my-sidecar',
+                            'image': 'busybox:latest',
+                        }]
+                    }
+                }
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'dind' in container_names
+        assert 'my-sidecar' in container_names
+        assert 'ray-node' in container_names
+
+
+class TestInjectDockerCacheVolume(unittest.TestCase):
+    """Tests for inject_docker_cache_volume()."""
+
+    _DIND_CFG = utils.DockerConfig(mode=utils.DockerMode.ALL)
+    _BUILDKIT_CFG = utils.DockerConfig(mode=utils.DockerMode.BUILD)
+
+    def _make_pod_spec(self,
+                       ctr_name='dind',
+                       existing_mounts=None,
+                       existing_volumes=None):
+        """Build a minimal pod spec with one sidecar container."""
+        ctr = {'name': ctr_name}
+        if existing_mounts is not None:
+            ctr['volumeMounts'] = existing_mounts
+        spec: dict = {
+            'metadata': {
+                'name': 'test-pod'
+            },
+            'spec': {
+                'containers': [
+                    {
+                        'name': 'ray-node'
+                    },
+                    ctr,
+                ],
+            },
+        }
+        if existing_volumes is not None:
+            spec['spec']['volumes'] = existing_volumes
+        return spec
+
+    # ---- DinD: emptyDir (no PVC) ----
+
+    def test_dind_no_pvc_adds_emptydir(self):
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name=None,
+                                         context='ctx',
+                                         namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['name'] == 'dind-storage'
+        assert vols[0]['emptyDir'] == {}
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert len(dind_ctr['volumeMounts']) == 1
+        assert dind_ctr['volumeMounts'][0]['mountPath'] == '/var/lib/docker'
+        assert 'subPath' not in dind_ctr['volumeMounts'][0]
+
+    # ---- BuildKit: emptyDir (no PVC) ----
+
+    def test_buildkit_no_pvc_adds_emptydir(self):
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name=None,
+                                         context='ctx',
+                                         namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['name'] == 'buildkit-cache'
+        assert vols[0]['emptyDir'] == {}
+
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        assert bk_ctr['volumeMounts'][0]['mountPath'] == (
+            '/home/user/.local/share/buildkit')
+
+    # ---- DinD: PVC with subPath ----
+
+    def test_dind_pvc_adds_volume_and_subpath(self):
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        vm = dind_ctr['volumeMounts'][0]
+        assert vm['mountPath'] == '/var/lib/docker'
+        assert vm['subPath'].startswith('var_lib_docker_')
+        assert len(vm['subPath']) == len('var_lib_docker_') + 12
+
+    def test_dind_pvc_no_fsgroup(self):
+        """DinD runs privileged — no fsGroup needed."""
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        assert 'securityContext' not in pod['spec']
+
+    # ---- BuildKit: PVC with subPath + fsGroup ----
+
+    def test_buildkit_pvc_adds_volume_and_fsgroup(self):
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
+
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        vm = bk_ctr['volumeMounts'][0]
+        assert vm['mountPath'] == '/home/user/.local/share/buildkit'
+        assert vm['subPath'].startswith('buildkit_cache_')
+
+        sec = pod['spec']['securityContext']
+        assert sec['fsGroup'] == 1000
+        assert sec['fsGroupChangePolicy'] == 'OnRootMismatch'
+
+    def test_buildkit_pvc_preserves_existing_fsgroup(self):
+        """If user already set fsGroup, don't override it."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        pod['spec']['securityContext'] = {'fsGroup': 2000}
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        assert pod['spec']['securityContext']['fsGroup'] == 2000
+
+    # ---- subPath hashing ----
+
+    def test_subpath_varies_by_pod_name(self):
+        pod1 = self._make_pod_spec(ctr_name='dind')
+        pod1['metadata']['name'] = 'pod-1'
+        pod2 = self._make_pod_spec(ctr_name='dind')
+        pod2['metadata']['name'] = 'pod-2'
+
+        utils.inject_docker_cache_volume(pod1,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
+        utils.inject_docker_cache_volume(pod2,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        sp1 = pod1['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        sp2 = pod2['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        assert sp1 != sp2
+
+    def test_subpath_varies_by_context_and_namespace(self):
+        pod_a = self._make_pod_spec(ctr_name='dind')
+        pod_b = self._make_pod_spec(ctr_name='dind')
+
+        utils.inject_docker_cache_volume(pod_a,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx-a',
+                                         namespace='ns')
+        utils.inject_docker_cache_volume(pod_b,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx-b',
+                                         namespace='ns')
+
+        sp_a = pod_a['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        sp_b = pod_b['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        assert sp_a != sp_b
+
+    # ---- User-provided mount: no-op ----
+
+    def test_noop_when_user_already_mounted_cache_path(self):
+        """If user already has a volumeMount at the cache path, skip."""
+        existing = [{'name': 'user-vol', 'mountPath': '/var/lib/docker'}]
+        pod = self._make_pod_spec(ctr_name='dind', existing_mounts=existing)
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        # No new volumes or mounts added.
+        assert 'volumes' not in pod['spec']
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert len(dind_ctr['volumeMounts']) == 1
+        assert dind_ctr['volumeMounts'][0]['name'] == 'user-vol'
+
+    # ---- Duplicate PVC reuse ----
+
+    def test_reuses_existing_pvc_volume_entry(self):
+        """If the same PVC is already in spec.volumes, reuse it."""
+        existing_vols = [{
+            'name': 'task-data',
+            'persistentVolumeClaim': {
+                'claimName': 'shared-pvc'
+            },
+        }]
+        pod = self._make_pod_spec(ctr_name='dind',
+                                  existing_volumes=existing_vols)
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='shared-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        # Should NOT add a second volume entry.
+        assert len(pod['spec']['volumes']) == 1
+        assert pod['spec']['volumes'][0]['name'] == 'task-data'
+
+        # The volumeMount should reference the existing volume name.
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert dind_ctr['volumeMounts'][0]['name'] == 'task-data'
+
+    def test_adds_new_volume_when_pvc_differs(self):
+        """Different PVC -> new volume entry added."""
+        existing_vols = [{
+            'name': 'other-vol',
+            'persistentVolumeClaim': {
+                'claimName': 'other-pvc'
+            },
+        }]
+        pod = self._make_pod_spec(ctr_name='dind',
+                                  existing_volumes=existing_vols)
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='cache-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        assert len(pod['spec']['volumes']) == 2
+        pvc_names = [
+            v.get('persistentVolumeClaim', {}).get('claimName')
+            for v in pod['spec']['volumes']
+        ]
+        assert 'cache-pvc' in pvc_names
+
+    # ---- context=None ----
+
+    def test_pvc_subpath_with_none_context(self):
+        """context=None should not crash; subPath uses empty string."""
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context=None,
+                                         namespace='ns')
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        vm = dind_ctr['volumeMounts'][0]
+        assert vm['subPath'].startswith('var_lib_docker_')
+        # Verify a different context produces a different subPath.
+        pod2 = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod2,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='real-ctx',
+                                         namespace='ns')
+        vm2 = next(c for c in pod2['spec']['containers']
+                   if c['name'] == 'dind')['volumeMounts'][0]
+        assert vm['subPath'] != vm2['subPath']

@@ -1298,3 +1298,41 @@ secrets:
             assert value.get_secret_value() == expected_secrets[key]
     finally:
         os.unlink(yaml_path)
+
+
+def test_multinode_rwo_volume_raises():
+    """multi-node task with ReadWriteOnce volume raises."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'rwo-vol'}
+    t.resources = [make_mock_resource()]
+    t.num_nodes = 2
+
+    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('sky.skypilot_config.get_nested', return_value=None):
+        get_vol.return_value = {
+            'handle': make_mock_volume_config(
+                name='rwo-vol',
+                cloud='aws',
+                config={'access_mode': 'ReadWriteOnce'})
+        }
+        with pytest.raises(ValueError, match='ReadWriteOnce.*multi-node'):
+            t.resolve_and_validate_volumes()
+
+
+def test_multinode_rwx_volume_passes():
+    """Multi-node with ReadWriteMany volume should pass."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'rwx-vol'}
+    t.resources = [make_mock_resource()]
+    t.num_nodes = 2
+
+    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('sky.skypilot_config.get_nested', return_value=None):
+        get_vol.return_value = {
+            'handle': make_mock_volume_config(
+                name='rwx-vol',
+                cloud='aws',
+                config={'access_mode': 'ReadWriteMany'})
+        }
+        t.resolve_and_validate_volumes()
+        assert len(t.volume_mounts) == 1
