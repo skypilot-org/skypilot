@@ -31,6 +31,7 @@ class Spheron(clouds.Cloud):
     """
 
     _REPR = 'Spheron'
+    name = 'spheron'
 
     # Spheron doesn't have explicit cluster name limits, but conservative
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -224,12 +225,13 @@ class Spheron(clouds.Cloud):
 
         resources.assert_launchable()
         instance_type = resources.instance_type
+        assert instance_type is not None, resources
 
         # For Spheron, instance_type IS the offerId.
         # Look up provider-specific metadata from the catalog.
         offer_info = spheron_catalog.get_instance_info(instance_type,
-                                                        region.name,
-                                                        resources.use_spot)
+                                                       region.name,
+                                                       resources.use_spot)
         resources_vars: Dict[str, Any] = {
             'instance_type': instance_type,
             'region': region.name,
@@ -240,7 +242,7 @@ class Spheron(clouds.Cloud):
             'operating_system': offer_info.get('OperatingSystem',
                                                'ubuntu-22.04'),
             'spheron_instance_type': offer_info.get('SpheronInstanceType',
-                                                     'DEDICATED'),
+                                                    'DEDICATED'),
         }
 
         # Add accelerator resources for Ray
@@ -254,9 +256,7 @@ class Spheron(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Get credential files that need to be mounted."""
-        return {
-            f'~/.spheron/{f}': f'~/.spheron/{f}' for f in _CREDENTIAL_FILES
-        }
+        return {f'~/.spheron/{f}': f'~/.spheron/{f}' for f in _CREDENTIAL_FILES}
 
     @classmethod
     def get_current_user_identity_str(cls) -> Optional[str]:

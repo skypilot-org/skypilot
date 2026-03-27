@@ -19,9 +19,8 @@ def get_api_key() -> str:
     """Get Spheron API key from file."""
     api_key_path = os.path.expanduser(SPHERON_API_KEY_PATH)
     if not os.path.exists(api_key_path):
-        raise FileNotFoundError(
-            f'Spheron API key not found at {api_key_path}. '
-            'Please save your API key to this file.')
+        raise FileNotFoundError(f'Spheron API key not found at {api_key_path}. '
+                                'Please save your API key to this file.')
 
     with open(api_key_path, 'r', encoding='utf-8') as f:
         api_key = f.read().strip()
@@ -40,8 +39,11 @@ def make_request(method: str, endpoint: str, **kwargs) -> Any:
         'Content-Type': 'application/json',
     }
 
-    response = requests.request(method, url, headers=headers, timeout=30,
-                               **kwargs)
+    response = requests.request(method,
+                                url,
+                                headers=headers,
+                                timeout=30,
+                                **kwargs)
     response.raise_for_status()
 
     # Some APIs (like delete) return empty responses with just 200 status

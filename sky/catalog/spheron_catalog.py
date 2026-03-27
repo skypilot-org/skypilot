@@ -5,7 +5,7 @@ and can be used to query instance types and pricing information for Spheron.
 """
 
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
@@ -70,8 +70,9 @@ def _call_or_default(func, default):
         raise
 
 
-def get_instance_info(instance_type: str, region: str,
-                      use_spot: bool = False) -> Dict[str, Optional[str]]:
+def get_instance_info(instance_type: str,
+                      region: str,
+                      use_spot: bool = False) -> Dict[str, Any]:
     """Get Spheron-specific metadata for a given instance type and region.
 
     Returns a dict with Provider, OperatingSystem, SpheronInstanceType,
@@ -149,9 +150,8 @@ def get_default_instance_type(
     del disk_tier, local_disk  # Spheron doesn't support custom disk tiers
     return _call_or_default(
         lambda: common.get_instance_type_for_cpus_mem_impl(
-            _get_df_for_pricing(use_spot), cpus, memory, region, zone,
-            use_spot, max_hourly_cost),
-        None)
+            _get_df_for_pricing(use_spot), cpus, memory, region, zone, use_spot,
+            max_hourly_cost), None)
 
 
 def get_accelerators_from_instance_type(

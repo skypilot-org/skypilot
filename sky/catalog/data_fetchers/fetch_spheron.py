@@ -11,7 +11,7 @@ import argparse
 import csv
 import json
 import os
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import requests
 
@@ -147,6 +147,8 @@ def create_catalog(api_key: str, output_path: str) -> None:
                 gpuinfo = json.dumps(gpuinfo_dict)
 
                 # For SPOT instances, put price in SpotPrice column
+                csv_price: Union[str, float]
+                csv_spot_price: Union[str, float]
                 if spheron_instance_type.upper() == 'SPOT':
                     csv_price = ''
                     csv_spot_price = price
@@ -191,8 +193,7 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
                 api_key = f.read().strip()
         else:
             # Read from ~/.spheron/api_key
-            with open(DEFAULT_SPHERON_API_KEY_PATH,
-                      mode='r',
+            with open(DEFAULT_SPHERON_API_KEY_PATH, mode='r',
                       encoding='utf-8') as f:
                 api_key = f.read().strip()
     assert api_key is not None, (

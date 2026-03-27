@@ -32,9 +32,7 @@ def _get_cluster_instances(cluster_name_on_cloud: str) -> Dict[str, Any]:
             f'{cluster_name_on_cloud}-worker',
         }
         return {
-            d['id']: d
-            for d in deployments
-            if d.get('name') in possible_names
+            d['id']: d for d in deployments if d.get('name') in possible_names
         }
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get deployments: {e}')
@@ -121,14 +119,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 f'Cluster {cluster_name_on_cloud} has no head node')
         logger.info(f'Cluster already has {current_count} instances, '
                     f'no need to start more')
-        return common.ProvisionRecord(
-            provider_name='spheron',
-            cluster_name=cluster_name_on_cloud,
-            region=region,
-            zone=None,
-            head_instance_id=head_instance_id,
-            resumed_instance_ids=[],
-            created_instance_ids=[])
+        return common.ProvisionRecord(provider_name='spheron',
+                                      cluster_name=cluster_name_on_cloud,
+                                      region=region,
+                                      zone=None,
+                                      head_instance_id=head_instance_id,
+                                      resumed_instance_ids=[],
+                                      created_instance_ids=[])
 
     # Create new instances
     to_create = target_count - current_count
@@ -318,7 +315,7 @@ def get_cluster_info(
     ssh_user = 'ubuntu'
     if head_instance_id is not None:
         ssh_user = running_instances.get(head_instance_id,
-                                        {}).get('user', 'ubuntu')
+                                         {}).get('user', 'ubuntu')
 
     return common.ClusterInfo(instances=cluster_instances,
                               head_instance_id=head_instance_id,
