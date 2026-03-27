@@ -652,6 +652,195 @@ class TestVolumeConfigModel:
         assert unpickled_config._version == models.VolumeConfig._VERSION
 
 
+class TestSubPath:
+    """Tests for sub_path support."""
+
+    def test_sub_path_pattern_allows_tilde(self):
+        """Test that SUB_PATH_PATTERN allows ~ character."""
+        import re
+
+        from sky.skylet import constants
+        assert re.match(constants.SUB_PATH_PATTERN, '~/.cache/uv')
+        assert re.match(constants.SUB_PATH_PATTERN, '~/.cache/huggingface/hub')
+        assert re.match(constants.SUB_PATH_PATTERN, '.cache/uv')
+
+    def test_sub_path_pattern_rejects_invalid(self):
+        """Test that SUB_PATH_PATTERN rejects invalid paths."""
+        import re
+
+        from sky.skylet import constants
+        assert not re.match(constants.SUB_PATH_PATTERN, '/absolute/path')
+        assert not re.match(constants.SUB_PATH_PATTERN, '')
+
+    def test_volume_mount_resolve_with_sub_path(self):
+        """Test VolumeMount.resolve with sub_path."""
+        from sky.utils import volume as volume_utils
+        mock_record = {
+            'status': 'READY',
+            'handle': models.VolumeConfig(
+                name='test',
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region=None,
+                zone=None,
+                name_on_cloud='test-pvc',
+                size=None,
+            ),
+        }
+        with patch('sky.global_user_state.get_volume_by_name',
+                   return_value=mock_record):
+            mount = volume_utils.VolumeMount.resolve('/mnt/data',
+                                                     'test',
+                                                     sub_path='~/.cache/uv')
+            assert mount.sub_path == '~/.cache/uv'
+            assert mount.path == '/mnt/data'
+
+    def test_volume_mount_resolve_rejects_traversal(self):
+        """Test VolumeMount.resolve rejects directory traversal."""
+        from sky.utils import volume as volume_utils
+        with pytest.raises(ValueError, match='directory traversal'):
+            volume_utils.VolumeMount.resolve('/mnt/data',
+                                             'test',
+                                             sub_path='../etc/passwd')
+
+    def test_ephemeral_volume_mount_sub_path(self):
+        """Test ephemeral volume mount accepts sub_path."""
+        from sky.utils import volume as volume_utils
+        config = {
+            'size': '10Gi',
+            'sub_path': '.cache/uv',
+        }
+        mount = volume_utils.VolumeMount.resolve_ephemeral_config(
+            '/mnt/data', config)
+        assert mount.sub_path == '.cache/uv'
+        assert mount.is_ephemeral is True
+
+    def test_volume_mount_to_yaml_config_with_sub_path(self):
+        """Test VolumeMount serialization includes sub_path."""
+        from sky.utils import volume as volume_utils
+        mock_config = models.VolumeConfig(
+            name='test',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+        )
+        mount = volume_utils.VolumeMount('/mnt/data',
+                                         'test',
+                                         mock_config,
+                                         sub_path='~/.cache/uv')
+        yaml_config = mount.to_yaml_config()
+        assert yaml_config['sub_path'] == '~/.cache/uv'
+
+
+class TestSharedCachesSchema:
+    """Tests for shared_caches config schema validation."""
+
+    def test_valid_shared_caches_config(self):
+        """Test valid shared_caches config passes schema validation."""
+        config = {
+            'kubernetes': {
+                'shared_caches': [{
+                    'spec': {
+                        'name': 'my-volume',
+                    },
+                    'cache_paths': [
+                        '~/.cache/huggingface/hub',
+                        '~/.cache/huggingface/datasets',
+                    ],
+                }],
+            },
+        }
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid config: ')
+
+    def test_shared_caches_missing_spec(self):
+        """Test shared_caches without spec fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'shared_caches': [{
+                    'cache_paths': ['~/.cache/uv'],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_shared_caches_missing_cache_paths(self):
+        """Test shared_caches without cache_paths fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'shared_caches': [{
+                    'spec': {
+                        'name': 'my-volume',
+                    },
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_shared_caches_empty_cache_paths(self):
+        """Test shared_caches with empty cache_paths fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'shared_caches': [{
+                    'spec': {
+                        'name': 'my-volume',
+                    },
+                    'cache_paths': [],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_shared_caches_in_context_config(self):
+        """Test shared_caches works in context_configs."""
+        config = {
+            'kubernetes': {
+                'context_configs': {
+                    'my-context': {
+                        'shared_caches': [{
+                            'spec': {
+                                'name': 'ctx-volume',
+                            },
+                            'cache_paths': ['~/.cache/uv'],
+                        }],
+                    },
+                },
+            },
+        }
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid config: ')
+
+    def test_shared_caches_additional_properties_rejected(self):
+        """Test shared_caches rejects unknown properties."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'shared_caches': [{
+                    'spec': {
+                        'name': 'my-volume',
+                    },
+                    'cache_paths': ['~/.cache/uv'],
+                    'unknown_field': True,
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+
 class TestHostPathVolume:
     """Tests for HostPathVolume."""
 

@@ -43,6 +43,7 @@ from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
@@ -3095,6 +3096,104 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
         debug_cmd = 'kubectl describe pod'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
+
+
+def resolve_shared_caches(
+    context: Optional[str],
+    pod_spec: Dict[str, Any],
+) -> None:
+    """Resolves shared_caches config and injects volumes/volumeMounts.
+
+    Reads the shared_caches config from skypilot_config, resolves SkyPilot
+    volume names to PVC claimNames via DB lookup, and injects the corresponding
+    volume and volumeMount entries into the pod spec.
+
+    Args:
+        context: The Kubernetes context name.
+        pod_spec: The pod spec dict to inject volumes into (modified in-place).
+    """
+    shared_caches = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('shared_caches',),
+        default_value=None)
+    if not shared_caches:
+        return
+
+    if 'volumes' not in pod_spec['spec']:
+        pod_spec['spec']['volumes'] = []
+    if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+        pod_spec['spec']['containers'][0]['volumeMounts'] = []
+
+    # Track which volume names have already been added to avoid duplicates
+    # when multiple cache_paths reference the same volume.
+    added_volumes: Set[str] = set()
+
+    for cache_entry in shared_caches:
+        spec = cache_entry['spec']
+        volume_name = spec['name']
+        cache_paths = cache_entry['cache_paths']
+
+        # Resolve SkyPilot volume name to volume config
+        record = global_user_state.get_volume_by_name(volume_name)
+        if record is None:
+            logger.warning(
+                f'Shared cache volume {volume_name!r} not found in SkyPilot '
+                f'volume DB. Skipping. Create it with: sky volumes apply')
+            continue
+        volume_config: models.VolumeConfig = record['handle']
+
+        # Use a prefixed name to avoid conflicts with user volumes
+        k8s_volume_name = f'shared-cache-{volume_name}'
+
+        # Add volume entry (once per unique volume)
+        if volume_name not in added_volumes:
+            if volume_config.type == volume_lib.VolumeType.HOSTPATH.value:
+                host_path = volume_config.config.get('host_path')
+                pod_spec['spec']['volumes'].append({
+                    'name': k8s_volume_name,
+                    'hostPath': {
+                        'path': host_path,
+                        'type': 'DirectoryOrCreate',
+                    },
+                })
+            else:
+                pvc_claim_name = volume_config.name_on_cloud
+                pod_spec['spec']['volumes'].append({
+                    'name': k8s_volume_name,
+                    'persistentVolumeClaim': {
+                        'claimName': pvc_claim_name,
+                    },
+                })
+            added_volumes.add(volume_name)
+
+        # Add volumeMount entries for each cache path
+        for cache_path in cache_paths:
+            # Resolve mount_path based on the cache_path format
+            if cache_path.startswith('/'):
+                # Absolute paths mount directly
+                mount_path = cache_path
+                sub_path = cache_path.lstrip('/')
+            elif cache_path.startswith('~/'):
+                mount_path = (
+                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
+                    f'/{cache_path[2:]}')
+                sub_path = cache_path
+            elif cache_path == '~':
+                mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                sub_path = cache_path
+            else:
+                # Relative paths are relative to home directory
+                mount_path = (
+                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
+                    f'/{cache_path}')
+                sub_path = cache_path
+
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': k8s_volume_name,
+                'mountPath': mount_path,
+                'subPath': sub_path,
+            })
 
 
 # Sidecar container names.

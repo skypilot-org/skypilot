@@ -901,6 +901,24 @@ class GetConfigBody(RequestBody):
     pass
 
 
+class SharedCacheUpsertBody(RequestBody):
+    """The request body for upserting a shared cache entry."""
+    context: Optional[str] = None  # None = all contexts
+    spec: Dict[str, Any]  # {name: str}
+    cache_paths: List[str]
+
+
+class SharedCacheDeleteBody(RequestBody):
+    """The request body for deleting a shared cache entry."""
+    context: Optional[str] = None
+    volume_name: str  # spec.name to identify which cache to remove
+
+
+class SharedCacheStorageClassesBody(RequestBody):
+    """The request body for listing storage classes."""
+    context: Optional[str] = None
+
+
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
