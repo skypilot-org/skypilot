@@ -284,6 +284,7 @@ def _get_cluster_config_template(cloud):
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.SSH: 'kubernetes-ray.yml.j2',
         clouds.Shadeform: 'shadeform-ray.yml.j2',
+        clouds.Spheron: 'spheron-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',

@@ -32,6 +32,7 @@ from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.seeweb import Seeweb
 from sky.clouds.shadeform import Shadeform
+from sky.clouds.spheron import Spheron
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
@@ -55,6 +56,7 @@ __all__ = [
     'Slurm',
     'RunPod',
     'Shadeform',
+    'Spheron',
     'Vast',
     'OCI',
     'Verda',
