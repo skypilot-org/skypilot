@@ -20,6 +20,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
@@ -27,6 +28,7 @@ from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -132,8 +134,8 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
         resolved = asyncio.run(
             provider.resolve(
                 task.managed_secret_refs,
-                user_hash='',
-                workspace='default',
+                user_hash=common_utils.get_user_hash(),
+                workspace=skypilot_config.get_active_workspace(),
             ))
 
         # Merge resolved env vars into the task.
@@ -142,10 +144,9 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
 
         # Write resolved file mounts to temp files and add to task.
         if resolved.file_mounts:
-            tmp_dir = os.path.expanduser('~/.sky/plugins/secrets_manager/tmp')
-            os.makedirs(tmp_dir, exist_ok=True)
             for fm in resolved.file_mounts:
-                tmp_fd, tmp_path = tempfile.mkstemp(dir=tmp_dir)
+                tmp_fd, tmp_path = tempfile.mkstemp(
+                    prefix='skypilot-secret-')
                 with os.fdopen(tmp_fd, 'wb') as f:
                     f.write(fm.content)
                 os.chmod(tmp_path, 0o600)
