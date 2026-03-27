@@ -1318,7 +1318,10 @@ def _map_response_field_to_db_column(field: str):
     if field in job_info_table.c:
         return job_info_table.c[field]
 
-    raise ValueError(f'Unknown field: {field}')
+    # Gracefully handle unknown fields for backward compatibility.
+    # A newer client may request fields not yet known to this controller.
+    logger.warning(f'Unknown field requested: {field}, skipping.')
+    return None
 
 
 def get_managed_jobs_total() -> int:
@@ -1416,7 +1419,11 @@ def build_managed_jobs_with_filters_no_status_query(
     if not count_only and not status_count and fields:
         # Resolve requested field names to explicit ColumnElements from
         # the joined tables.
-        selected_columns = [_map_response_field_to_db_column(f) for f in fields]
+        selected_columns = [
+            _map_response_field_to_db_column(f) for f in fields
+        ]
+        # Filter out None values from unknown fields for backward compat.
+        selected_columns = [c for c in selected_columns if c is not None]
         query = query.with_only_columns(*selected_columns)
     if job_ids is not None:
         query = query.where(spot_table.c.spot_job_id.in_(job_ids))

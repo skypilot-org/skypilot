@@ -230,6 +230,10 @@ def queue_v2(
     if fields is not None and (remote_api_version is None or
                                remote_api_version < 31):
         fields = [f for f in fields if f != 'is_primary_in_job_group']
+    _BATCH_FIELDS = {'batch_total_batches', 'batch_completed_batches'}
+    if fields is not None and (remote_api_version is None or
+                               remote_api_version < 46):
+        fields = [f for f in fields if f not in _BATCH_FIELDS]
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
