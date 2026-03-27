@@ -817,25 +817,32 @@ export function ManagedJobsTable({
       });
     }
 
-    // Use cached users/workspaces data (preloaded by cache-preloader) for
-    // complete filter values, instead of deriving from current page only.
-    // Fall back to current page data if cache is not yet available.
-    const cachedUsers = dashboardCache.getCached(getUsers, []);
-    const allUsers = cachedUsers
-      ? [...new Set(cachedUsers.map((u) => u.username).filter(Boolean))].sort()
-      : Array.from(users).sort();
-
-    const cachedWorkspaces = dashboardCache.getCached(getWorkspaces, []);
-    const allWorkspaces = cachedWorkspaces
-      ? Object.keys(cachedWorkspaces).sort()
-      : Array.from(workspaces).sort();
-
     setValueList({
       name: Array.from(names).sort(),
-      user: allUsers,
-      workspace: allWorkspaces,
+      user: Array.from(users).sort(),
+      workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
       labels: Array.from(labels).sort(),
+    });
+
+    // Fetch full users/workspaces from cache (preloaded by cache-preloader).
+    // dashboardCache.get() returns cached data if fresh, or re-fetches if
+    // expired. Updates only user/workspace to avoid blocking other fields.
+    Promise.all([
+      dashboardCache.get(getUsers, []),
+      dashboardCache.get(getWorkspaces, []),
+    ]).then(([usersData, workspacesData]) => {
+      setValueList((prev) => ({
+        ...prev,
+        user: usersData
+          ? [
+              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
+            ].sort()
+          : prev.user,
+        workspace: workspacesData
+          ? Object.keys(workspacesData).sort()
+          : prev.workspace,
+      }));
     });
   }, [data, poolsData, setValueList]);
 
