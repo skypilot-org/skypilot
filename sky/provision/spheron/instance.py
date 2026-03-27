@@ -181,8 +181,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         except Exception as e:
             logger.error(f'Failed to create instance: {e}')
             # Clean up any created instances on failure.
-            # Use broad Exception since SpheronMinimumRuntimeError (RuntimeError)
-            # and HTTP errors can both occur during cleanup.
+            # Use broad Exception since SpheronMinimumRuntimeError
+            # (RuntimeError) and HTTP errors can both occur during cleanup.
             for iid in created_instance_ids:
                 try:
                     spheron_utils.delete_deployment(iid)
@@ -262,10 +262,8 @@ def terminate_instances(cluster_name_on_cloud: str,
                         f'Giving up on terminating {instance_id} after '
                         f'{max_retries} attempts: {e}')
                     break
-                logger.info(
-                    str(e) +
-                    f' Waiting 60s before retrying ({attempt + 1}/{max_retries})...'
-                )
+                logger.info('%s Waiting 60s before retrying (%d/%d)...', e,
+                            attempt + 1, max_retries)
                 time.sleep(60)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
@@ -286,8 +284,9 @@ def get_cluster_info(
                                   head_instance_id=None,
                                   provider_name='spheron')
 
-    # Only consider running instances for head detection — terminated deployments
-    # with a matching name (from prior runs) must not be selected as head.
+    # Only consider running instances for head detection - terminated
+    # deployments with a matching name (from prior runs) must not be
+    # selected as head.
     running_instances = {
         iid: inst
         for iid, inst in instances.items()
@@ -353,7 +352,8 @@ def query_instances(
                 f'resource reclamation, or a spot instance preemption. '
                 f'The cluster will need to be relaunched.')
 
-        if non_terminated_only and sky_status == status_lib.ClusterStatus.STOPPED:
+        if (non_terminated_only and
+                sky_status == status_lib.ClusterStatus.STOPPED):
             continue
 
         status_map[instance_id] = (sky_status, None)

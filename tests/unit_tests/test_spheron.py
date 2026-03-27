@@ -39,16 +39,16 @@ class TestSpheronUnsupportedFeatures:
     def test_unsupported_features_are_strings(self):
         cloud = spheron.Spheron()
         for feature, msg in cloud._CLOUD_UNSUPPORTED_FEATURES.items():
-            assert isinstance(msg, str), (
-                f'Feature {feature} message should be a string')
+            assert isinstance(
+                msg, str), (f'Feature {feature} message should be a string')
 
     def test_stop_is_unsupported(self):
-        assert (clouds.CloudImplementationFeatures.STOP in
-                spheron.Spheron._CLOUD_UNSUPPORTED_FEATURES)
+        assert (clouds.CloudImplementationFeatures.STOP
+                in spheron.Spheron._CLOUD_UNSUPPORTED_FEATURES)
 
     def test_multi_node_is_unsupported(self):
-        assert (clouds.CloudImplementationFeatures.MULTI_NODE in
-                spheron.Spheron._CLOUD_UNSUPPORTED_FEATURES)
+        assert (clouds.CloudImplementationFeatures.MULTI_NODE
+                in spheron.Spheron._CLOUD_UNSUPPORTED_FEATURES)
 
 
 class TestSpheronCredentials:
@@ -94,8 +94,8 @@ class TestSpheronCredentials:
         api_key_file.write_text('my-real-api-key')
 
         monkeypatch.setattr(
-            'os.path.expanduser',
-            lambda x: str(api_key_file) if 'spheron' in x else x)
+            'os.path.expanduser', lambda x: str(api_key_file)
+            if 'spheron' in x else x)
 
         valid, msg = spheron.Spheron._check_compute_credentials()
         assert valid
@@ -136,7 +136,7 @@ class TestSpheronCatalog:
         monkeypatch.setattr(spheron_catalog, '_get_df', lambda: empty_df)
 
         result = spheron_catalog.get_instance_info('nonexistent-type',
-                                                    'us-east-1')
+                                                   'us-east-1')
         assert result['Provider'] == ''
         assert result['SpheronInstanceType'] in ('SPOT', 'DEDICATED')
         assert result['AcceleratorCount'] == 1
@@ -152,8 +152,8 @@ class TestSpheronCatalog:
         monkeypatch.setattr(spheron_catalog, '_get_df', lambda: empty_df)
 
         result = spheron_catalog.get_instance_info('nonexistent-type',
-                                                    'us-east-1',
-                                                    use_spot=True)
+                                                   'us-east-1',
+                                                   use_spot=True)
         assert result['SpheronInstanceType'] == 'SPOT'
 
     def test_get_instance_info_on_demand_default_type(self, monkeypatch):
@@ -167,6 +167,6 @@ class TestSpheronCatalog:
         monkeypatch.setattr(spheron_catalog, '_get_df', lambda: empty_df)
 
         result = spheron_catalog.get_instance_info('nonexistent-type',
-                                                    'us-east-1',
-                                                    use_spot=False)
+                                                   'us-east-1',
+                                                   use_spot=False)
         assert result['SpheronInstanceType'] == 'DEDICATED'

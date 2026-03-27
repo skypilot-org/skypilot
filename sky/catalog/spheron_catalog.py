@@ -77,7 +77,8 @@ def get_instance_info(instance_type: str,
     """Get Spheron-specific metadata for a given instance type and region.
 
     Returns a dict with Provider, OperatingSystem, SpheronInstanceType,
-    AcceleratorName, AcceleratorCount for use in make_deploy_resources_variables.
+    AcceleratorName, AcceleratorCount for use in
+    make_deploy_resources_variables.
     """
     df = _get_df()
     mask = (df['InstanceType'] == instance_type) & (df['Region'] == region)
