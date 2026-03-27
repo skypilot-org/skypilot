@@ -381,17 +381,9 @@ export function useClusterDetails({ cluster, job = null }) {
     try {
       setLoadingClusterData(true);
 
-      // Try all-clusters cache first (populated by the cluster list page)
-      const cachedAll = dashboardCache.getCached(getClusters);
-      if (cachedAll) {
-        const found = cachedAll.find((c) => c.cluster === cluster);
-        if (found) {
-          setClusterData(found);
-          return found;
-        }
-      }
-
-      // Try per-cluster cache (populated by a prior visit to this detail page)
+      // Try per-cluster cache first (has full detail data including
+      // cluster_name_on_cloud, last_creation_command, last_creation_yaml,
+      // etc. that are omitted from summary responses)
       const cachedSingle = dashboardCache.getCached(getClusters, [
         { clusterNames: [cluster] },
       ]);
@@ -400,7 +392,21 @@ export function useClusterDetails({ cluster, job = null }) {
         return cachedSingle[0];
       }
 
-      // Fallback: fetch from API (direct URL navigation, first visit)
+      // Show summary data immediately from all-clusters cache while we
+      // fetch full detail below. The all-clusters cache uses
+      // summary_response=true which omits fields like
+      // cluster_name_on_cloud, last_creation_command, and
+      // last_creation_yaml, so we must not return early here.
+      const cachedAll = dashboardCache.getCached(getClusters);
+      if (cachedAll) {
+        const found = cachedAll.find((c) => c.cluster === cluster);
+        if (found) {
+          setClusterData(found);
+        }
+      }
+
+      // Fetch full detail data (summary_response=false when clusterNames
+      // is specified)
       const data = await dashboardCache.get(getClusters, [
         { clusterNames: [cluster] },
       ]);
