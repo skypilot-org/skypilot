@@ -1868,16 +1868,16 @@ def adjust_resources_to_allocatable(
         mem_matches = abs(node_cap_mem - mem) < 0.01
         if cpu_matches:
             alloc_cpu = parse_cpu_or_gpu_resource_to_float(
-                node.status.allocatable.get('cpu', '0'))
+                node.status.allocatable.get('cpu', '0')) - 0.01
             if min_alloc_cpu is None or alloc_cpu < min_alloc_cpu:
-                min_alloc_cpu = alloc_cpu - 0.01
+                min_alloc_cpu = alloc_cpu
         if mem_matches:
             alloc_mem = parse_memory_resource(
                 node.status.allocatable.get('memory', '0'),
                 unit='G',
-            )
+            ) - 0.01
             if min_alloc_mem is None or alloc_mem < min_alloc_mem:
-                min_alloc_mem = alloc_mem - 0.01
+                min_alloc_mem = alloc_mem
 
     adjusted_cpus = min(cpus,
                         min_alloc_cpu) if min_alloc_cpu is not None else cpus
