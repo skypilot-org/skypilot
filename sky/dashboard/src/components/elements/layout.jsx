@@ -10,6 +10,10 @@ import {
 } from '@/hooks/useUpgradeDetection';
 import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  EVENT_NAVIGATION_READY,
+  EVENT_PLUGINS_LOADED,
+} from '@/data/connectors/constants';
 
 function DefaultNavbarLayout({ children }) {
   return (
@@ -47,14 +51,17 @@ function LayoutContent({ children, highlighted }) {
   // a chance to register before falling back to the default top bar.
   // A safety timeout prevents blocking indefinitely if plugin loading hangs.
   useEffect(() => {
-    const settle = () => setPluginsSettled(true);
-    const timer = setTimeout(settle, 5000);
-    window.addEventListener('skydashboard:navigation-ready', settle);
-    window.addEventListener('skydashboard:plugins-loaded', settle);
+    const timer = setTimeout(() => setPluginsSettled(true), 5000);
+    const handler = () => {
+      clearTimeout(timer);
+      setPluginsSettled(true);
+    };
+    window.addEventListener(EVENT_NAVIGATION_READY, handler, { once: true });
+    window.addEventListener(EVENT_PLUGINS_LOADED, handler, { once: true });
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('skydashboard:navigation-ready', settle);
-      window.removeEventListener('skydashboard:plugins-loaded', settle);
+      window.removeEventListener(EVENT_NAVIGATION_READY, handler);
+      window.removeEventListener(EVENT_PLUGINS_LOADED, handler);
     };
   }, []);
 

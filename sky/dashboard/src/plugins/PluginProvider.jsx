@@ -9,7 +9,11 @@ import React, {
   useRef,
 } from 'react';
 import { useRouter } from 'next/router';
-import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
+import {
+  BASE_PATH,
+  ENDPOINT,
+  EVENT_PLUGINS_LOADED,
+} from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
@@ -843,7 +847,7 @@ export function PluginProvider({ children }) {
         // Signal that all plugin scripts have finished loading.
         // layout.jsx listens for this to avoid showing the fallback top bar
         // before the sidebar plugin has had a chance to register.
-        window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
+        window.dispatchEvent(new CustomEvent(EVENT_PLUGINS_LOADED));
       }
     };
     void bootstrapPlugins();
