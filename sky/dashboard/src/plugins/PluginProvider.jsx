@@ -842,6 +842,10 @@ export function PluginProvider({ children }) {
       if (!cancelled) {
         pluginsLoadedRef.current = true;
         dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+        // Signal that all plugin scripts have finished loading.
+        // layout.jsx listens for this to avoid showing the fallback top bar
+        // before the sidebar plugin has had a chance to register.
+        window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
       }
     };
     void bootstrapPlugins();
