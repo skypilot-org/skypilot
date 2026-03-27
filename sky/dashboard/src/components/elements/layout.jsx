@@ -51,7 +51,7 @@ function LayoutContent({ children, highlighted }) {
   // a chance to register before falling back to the default top bar.
   // A safety timeout prevents blocking indefinitely if plugin loading hangs.
   useEffect(() => {
-    const timer = setTimeout(() => setPluginsSettled(true), 5000);
+    const timer = setTimeout(() => setPluginsSettled(true), 1000);
     const handler = () => {
       clearTimeout(timer);
       setPluginsSettled(true);
