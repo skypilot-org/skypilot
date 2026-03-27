@@ -744,6 +744,8 @@ function createPluginApi(dispatch) {
         id: String(config.id),
         name: config.name || config.id,
         useHook: config.useHook,
+        hooks: config.hooks || {},
+        components: config.components || {},
       };
       dispatch({
         type: actions.REGISTER_DATA_PROVIDER,
