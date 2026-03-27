@@ -29,6 +29,7 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -816,10 +817,23 @@ export function ManagedJobsTable({
       });
     }
 
+    // Use cached users/workspaces data (preloaded by cache-preloader) for
+    // complete filter values, instead of deriving from current page only.
+    // Fall back to current page data if cache is not yet available.
+    const cachedUsers = dashboardCache.getCached(getUsers, []);
+    const allUsers = cachedUsers
+      ? [...new Set(cachedUsers.map((u) => u.username).filter(Boolean))].sort()
+      : Array.from(users).sort();
+
+    const cachedWorkspaces = dashboardCache.getCached(getWorkspaces, []);
+    const allWorkspaces = cachedWorkspaces
+      ? Object.keys(cachedWorkspaces).sort()
+      : Array.from(workspaces).sort();
+
     setValueList({
       name: Array.from(names).sort(),
-      user: Array.from(users).sort(),
-      workspace: Array.from(workspaces).sort(),
+      user: allUsers,
+      workspace: allWorkspaces,
       pool: Array.from(pools).sort(),
       labels: Array.from(labels).sort(),
     });
