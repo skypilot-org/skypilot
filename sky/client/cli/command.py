@@ -822,6 +822,11 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     return None
 
 
+# TODO(zhwu): All CLI command handlers should be wrapped with
+# @annotations.client_api so that is_on_api_server is False during
+# YAML parsing and schema validation. For now, we wrap this common
+# entry point to cover the majority of cases.
+@annotations.client_api
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,

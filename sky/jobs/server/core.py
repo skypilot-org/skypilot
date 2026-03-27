@@ -3,6 +3,7 @@ import ipaddress
 import os
 import pathlib
 import tempfile
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
@@ -1463,6 +1464,110 @@ def tail_logs(name: Optional[str],
                                          controller=controller,
                                          tail=tail,
                                          task=task)
+
+
+def wait(name: Optional[str],
+         job_id: Optional[int],
+         timeout: Optional[int],
+         poll_interval: int,
+         task: Optional[Union[str, int]] = None) -> int:
+    """Waits for a managed job to reach a terminal state.
+
+    Polls the job status via queue_v2_api at the given interval until the job
+    reaches a terminal state or the timeout is exceeded.
+
+    For JobGroups (jobs with multiple tasks), if ``task`` is specified, waits
+    only for that specific task. Otherwise, waits until all tasks in the job
+    are in a terminal state. The returned exit code reflects the worst outcome
+    across all tasks (i.e. if any task failed, returns FAILED).
+
+    Args:
+        name: Name of the managed job to wait for.
+        job_id: ID of the managed job to wait for.
+        timeout: Maximum time to wait in seconds. None means wait forever.
+        poll_interval: Time between status polls in seconds.
+        task: Task identifier for a specific task in a JobGroup. If an int,
+            matched against task_id. If a str, matched against task_name.
+            If None, waits for all tasks.
+
+    Returns:
+        Exit code based on the terminal job status. See
+        exceptions.JobExitCode for possible values.
+
+    Raises:
+        ValueError: if neither or both name and job_id are provided, or if
+            poll_interval < 5, or if the job/task is not found.
+        TimeoutError: if the timeout is exceeded before the job finishes.
+    """
+    if name is not None and job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+    if name is None and job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Must specify either name or job_id.')
+    if poll_interval < 5:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'poll_interval must be at least 5 seconds, got '
+                             f'{poll_interval}.')
+
+    # Resolve name to job_id on the first call.
+    if name is not None:
+        records, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        matching = [r for r in records if r.job_name == name]
+        if not matching:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No managed job found with name {name!r}.')
+        # If multiple jobs share the name, pick the latest (highest job_id).
+        matching.sort(key=lambda r: r.job_id or 0, reverse=True)
+        job_id = matching[0].job_id
+
+    assert job_id is not None
+    start_time = time.time()
+
+    while True:
+        records, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        if not records:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Managed job {job_id} not found.')
+
+        # Filter to the requested task if specified.
+        if task is not None:
+            if isinstance(task, int):
+                filtered = [r for r in records if r.task_id == task]
+            else:
+                filtered = [r for r in records if r.task_name == task]
+            if not filtered:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'No task matching {task!r} in job {job_id}.')
+            records = filtered
+
+        # Check if all relevant tasks are terminal.
+        statuses = [r.status for r in records]
+        if all(s is not None and s.is_terminal() for s in statuses):
+            # Return the worst exit code across tasks: any failure dominates.
+            worst = exceptions.JobExitCode.SUCCEEDED
+            for s in statuses:
+                code = exceptions.JobExitCode.from_managed_job_status(s)
+                if code > worst:
+                    worst = code
+            return worst
+
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                non_terminal = [
+                    s for s in statuses if s is None or not s.is_terminal()
+                ]
+                status_str = ', '.join(
+                    s.value if s else 'unknown' for s in non_terminal)
+                with ux_utils.print_exception_no_traceback():
+                    raise TimeoutError(
+                        f'Timed out waiting for managed job {job_id} after '
+                        f'{timeout} seconds. Non-terminal status(es): '
+                        f'{status_str}.')
+
+        time.sleep(poll_interval)
 
 
 @usage_lib.entrypoint
