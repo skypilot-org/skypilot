@@ -2625,6 +2625,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out batch fields for older controllers (< 17)
+        _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
+        if managed_job_version < 17 and _fields is not None:
+            _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
