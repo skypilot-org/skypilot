@@ -1821,18 +1821,21 @@ def adjust_resources_to_allocatable(
     mem: float,
     context: Optional[str],
 ) -> Tuple[float, float]:
-    """Adjusts resource requests by subtracting system overhead when the
-    request matches the maximum node capacity.
+    """Clamps resource requests to the minimum allocatable values across
+    nodes whose capacity matches the request.
 
-    Each K8s node reserves a portion of its resources for system services
-    (kubelet, kube-system pods, eviction thresholds). This overhead is
-    computed as (capacity - allocatable) and is stable — it is determined
-    by kubelet configuration, not runtime state. We avoid using
-    allocatable directly as a target because it can vary over time; instead
-    we compute the overhead delta and subtract it from the request.
+    Each K8s node reserves resources for system services (kubelet,
+    kube-system pods, eviction thresholds). When a user requests
+    resources that match a node's total capacity, the pod may fail to
+    schedule because the allocatable amount is less than capacity.
 
-    If a larger node exists, no adjustment is made — the K8s scheduler
-    can place the pod on the larger node where the full request fits.
+    CPU and memory are evaluated independently. A node contributes its
+    allocatable CPU if its CPU capacity matches the request, and its
+    allocatable memory if its memory capacity matches the request.
+    Nodes that don't match either resource are ignored. The final
+    clamped values are the minimums across all contributing nodes for
+    each resource, ensuring the pod can schedule on the node with the
+    most system overhead.
 
     Args:
         cpus: Requested CPU count.
@@ -1845,28 +1848,11 @@ def adjust_resources_to_allocatable(
     nodes = get_kubernetes_nodes(context=context)
     ready_nodes = [n for n in nodes if n.is_ready()]
 
-    # Check if any node has strictly more capacity for both CPU and
-    # memory than requested. Both must be satisfied on the same node —
-    # a node with more CPU but less memory (or vice versa) cannot fit
-    # the full request.
-    has_larger_node = False
-    for node in ready_nodes:
-        node_cpus = parse_cpu_or_gpu_resource_to_float(
-            node.status.capacity.get('cpu', '0'))
-        node_mem = parse_memory_resource(
-            node.status.capacity.get('memory', '0'),
-            unit='G',
-        )
-        if node_cpus > cpus + 0.01 and node_mem > mem + 0.01:
-            has_larger_node = True
-            break
-    if has_larger_node:
-        return cpus, mem
-
-    # No larger node exists. If the request matches a node's capacity
-    # for both CPU and memory, subtract the system overhead
-    # (capacity - allocatable) so the pod fits within what the node
-    # can actually schedule.
+    # Collect allocatable values independently: a node contributes its
+    # allocatable CPU if its CPU capacity matches the request, and its
+    # allocatable memory if its memory capacity matches the request.
+    min_alloc_cpu: Optional[float] = None
+    min_alloc_mem: Optional[float] = None
     for node in ready_nodes:
         node_cap_cpu = parse_cpu_or_gpu_resource_to_float(
             node.status.capacity.get('cpu', '0'))
@@ -1874,29 +1860,35 @@ def adjust_resources_to_allocatable(
             node.status.capacity.get('memory', '0'),
             unit='G',
         )
-        if (abs(node_cap_cpu - cpus) < 0.01 and abs(node_cap_mem - mem) < 0.01):
+        # Skip nodes that cannot fit the pod (capacity below request
+        # for either resource).
+        if node_cap_cpu < cpus - 0.01 or node_cap_mem < mem - 0.01:
+            continue
+        cpu_matches = abs(node_cap_cpu - cpus) < 0.01
+        mem_matches = abs(node_cap_mem - mem) < 0.01
+        if cpu_matches:
             alloc_cpu = parse_cpu_or_gpu_resource_to_float(
                 node.status.allocatable.get('cpu', '0'))
+            if min_alloc_cpu is None or alloc_cpu < min_alloc_cpu:
+                min_alloc_cpu = alloc_cpu - 0.01
+        if mem_matches:
             alloc_mem = parse_memory_resource(
                 node.status.allocatable.get('memory', '0'),
                 unit='G',
             )
-            # System overhead: resources reserved by kubelet and
-            # system components. This is stable across scheduling
-            # cycles since it is set by kubelet configuration
-            # (--system-reserved, --kube-reserved, eviction thresholds).
-            cpu_overhead = node_cap_cpu - alloc_cpu + 0.05
-            mem_overhead = node_cap_mem - alloc_mem + 0.05
-            adjusted_cpus = cpus - cpu_overhead
-            adjusted_mem = mem - mem_overhead
-            if cpu_overhead > 0 or mem_overhead > 0:
-                logger.info(f'Node system overhead: {cpu_overhead} CPUs, '
-                            f'{mem_overhead}G memory. Adjusted resource '
-                            f'request from {cpus} CPUs, {mem}G memory '
-                            f'to {adjusted_cpus} CPUs, {adjusted_mem}G memory.')
-            return adjusted_cpus, adjusted_mem
+            if min_alloc_mem is None or alloc_mem < min_alloc_mem:
+                min_alloc_mem = alloc_mem - 0.01
 
-    return cpus, mem
+    adjusted_cpus = min(cpus,
+                        min_alloc_cpu) if min_alloc_cpu is not None else cpus
+    adjusted_mem = min(mem, min_alloc_mem) if min_alloc_mem is not None else mem
+
+    if adjusted_cpus < cpus or adjusted_mem < mem:
+        logger.info(f'Clamping resource request to node allocatable capacity. '
+                    f'Requested: {cpus} CPUs, {mem}G memory. '
+                    f'Adjusted: {adjusted_cpus} CPUs, {adjusted_mem}G memory.')
+
+    return adjusted_cpus, adjusted_mem
 
 
 def check_instance_fits(context: Optional[str],
