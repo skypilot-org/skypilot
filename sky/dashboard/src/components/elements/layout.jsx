@@ -40,16 +40,21 @@ function LayoutContent({ children, highlighted }) {
     installUpgradeInterceptor(reportUpgrade, clearUpgrade);
   }, [reportUpgrade, clearUpgrade]);
 
-  // Wait briefly for navigation plugins to register before showing layout.
+  // Wait for navigation plugins to register before showing layout.
   // A navigation plugin (e.g. sidebar) dispatches 'skydashboard:navigation-ready'
-  // to cut the wait short. Otherwise we fall back after a timeout.
+  // to cut the wait short. Otherwise we wait until all plugin scripts have
+  // finished loading ('skydashboard:plugins-loaded') so the sidebar plugin has
+  // a chance to register before falling back to the default top bar.
+  // A safety timeout prevents blocking indefinitely if plugin loading hangs.
   useEffect(() => {
-    const timer = setTimeout(() => setPluginsSettled(true), 200);
-    const handler = () => setPluginsSettled(true);
-    window.addEventListener('skydashboard:navigation-ready', handler);
+    const settle = () => setPluginsSettled(true);
+    const timer = setTimeout(settle, 5000);
+    window.addEventListener('skydashboard:navigation-ready', settle);
+    window.addEventListener('skydashboard:plugins-loaded', settle);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('skydashboard:navigation-ready', handler);
+      window.removeEventListener('skydashboard:navigation-ready', settle);
+      window.removeEventListener('skydashboard:plugins-loaded', settle);
     };
   }, []);
 
