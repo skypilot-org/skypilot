@@ -576,11 +576,11 @@ OR
 ``resources.ephemeral_storage``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Integer ephemeral storage size in GB to request for Kubernetes pods, OR specify units.
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
 
 This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
-When ``set_pod_resource_limits`` is configured in the SkyPilot config, it also sets
-``resources.limits.ephemeral-storage`` with the corresponding multiplier.
+When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+``resources.limits.ephemeral-storage`` using the multiplier defined there.
 
 This field is **only effective on Kubernetes**. It is ignored on other clouds.
 
@@ -597,7 +597,7 @@ Units supported (case-insensitive):
 
 .. warning::
 
-   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte.
+   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
