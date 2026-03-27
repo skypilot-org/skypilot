@@ -1152,8 +1152,8 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
-    def get_user_identity_from_context(
-            cls, context: str) -> Optional[List[str]]:
+    def get_user_identity_from_context(cls,
+                                       context: str) -> Optional[List[str]]:
         """Returns the user identity for a specific Kubernetes context.
 
         Args:
@@ -1171,6 +1171,10 @@ class Kubernetes(clouds.Cloud):
         try:
             all_contexts, _ = kubernetes.list_kube_config_contexts()
         except k8s.config.config_exception.ConfigException:
+            return None
+        if context == kubernetes.in_cluster_context_name():
+            # Need to return None here as in-cluster doesn't support
+            # owner identity.
             return None
         context_map = {ctx['name']: ctx for ctx in all_contexts}
         if context not in context_map:
