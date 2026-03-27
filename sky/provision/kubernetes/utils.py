@@ -1820,6 +1820,7 @@ def adjust_resources_to_allocatable(
     cpus: float,
     mem: float,
     context: Optional[str],
+    dryrun: bool = False,
 ) -> Tuple[float, float]:
     """Clamps resource requests to the minimum allocatable values across
     nodes whose capacity matches the request.
@@ -1841,10 +1842,13 @@ def adjust_resources_to_allocatable(
         cpus: Requested CPU count.
         mem: Requested memory in GB.
         context: Kubernetes context.
+        dryrun: Is a dry run.
 
     Returns:
         Tuple of (adjusted_cpus, adjusted_mem).
     """
+    if dryrun:
+        return cpus, mem
     nodes = get_kubernetes_nodes(context=context)
     ready_nodes = [n for n in nodes if n.is_ready()]
 
@@ -1928,8 +1932,8 @@ def check_instance_fits(context: Optional[str],
                 max_mem = node_memory_gb
             # When the request equals node capacity, the actual pod
             # CPU/memory request is adjusted down to the allocatable
-            # amount in _make_deploy_variables() to account for
-            # kube-system resource consumption.
+            # amount in make_deploy_resources_variables() to account
+            # for kube-system resource consumption.
             if (node_cpus >= candidate_instance_type.cpus and
                     node_memory_gb >= candidate_instance_type.memory):
                 return True, None
