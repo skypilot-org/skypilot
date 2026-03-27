@@ -752,7 +752,6 @@ function ProvisionLogs({ clusterName, numNodes, status }) {
 
   const handleWorkerChange = (val) => {
     setSelectedWorker(val === 'head' ? null : Number(val));
-    setLogsRefreshToken((t) => t + 1);
   };
 
   // Build worker options: Head, Worker 1 .. Worker N-1
