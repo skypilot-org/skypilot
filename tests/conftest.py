@@ -159,6 +159,10 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='Only run tests for TPU.')
+    parser.addoption('--batch',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for sky batch.')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -294,6 +298,7 @@ def pytest_configure(config):
     config.addinivalue_line(
         'markers', 'no_auto_retry: mark test to disable automatic retries '
         'in Buildkite CI (manual retries still allowed)')
+    config.addinivalue_line('markers', 'batch: mark test as sky batch specific')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -359,6 +364,8 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
+    skip_marks['batch'] = pytest.mark.skip(
+        reason='skipped, because --batch option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
     skip_marks['no_remote_server'] = pytest.mark.skip(
@@ -413,6 +420,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+        if (not 'batch' in item.keywords) and config.getoption('--batch'):
+            item.add_marker(skip_marks['batch'])
         if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
             item.add_marker(skip_marks['postgres'])
 
