@@ -783,17 +783,26 @@ export function PluginProvider({ children }) {
     }
   }, []);
 
-  // Expose state reference for getDataEnhancements to access outside React context
+  // Expose state reference for plugins to access outside React context.
+  // Use a stable ref updated during render (not in useEffect) so that child
+  // components' effects always read the latest state — even on the same commit
+  // that first mounts them.  The previous approach (useEffect with [state] dep)
+  // deleted and recreated __pluginStateRef on every state change; because React
+  // runs all cleanups before all new effects (children-first), a child mounting
+  // on the same render would read undefined during its effect.
+  const pluginStateRef = useRef(state);
+  pluginStateRef.current = state;
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.__pluginStateRef = { current: state };
+      window.__pluginStateRef = pluginStateRef;
       return () => {
-        if (window.__pluginStateRef) {
+        if (window.__pluginStateRef === pluginStateRef) {
           delete window.__pluginStateRef;
         }
       };
     }
-  }, [state]);
+  }, []);
 
   // Persist nav links to localStorage after plugins have fully loaded
   useEffect(() => {
