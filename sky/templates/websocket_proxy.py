@@ -17,7 +17,6 @@ import sys
 import time
 from typing import Dict, Optional
 
-import requests
 import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
@@ -305,20 +304,9 @@ async def _handle_redirect(redirect_info: dict,
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    # TODO(aylei): remove the separate /api/health call and use the header
-    # during websocket handshake to determine the server version.
-    health_url = f'{server_url}/api/health'
-    cookie_hdr = server_common.get_cookie_header_for_url(health_url)
-    health_response = requests.get(health_url, headers=cookie_hdr)
-    health_data = health_response.json()
-    server_api_version = int(health_data.get('api_version', 0))
 
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    if disable_latency_measurement:
-        timestamps_are_supported = False
-    else:
-        timestamps_are_supported = server_api_version > 21
 
     # Capture the original API server URL for login hint if authentication
     # is required.
@@ -328,9 +316,7 @@ if __name__ == '__main__':
     if server_proto == 'https':
         websocket_proto = 'wss'
     server_url = f'{websocket_proto}://{server_fqdn}'
-
-    client_version_str = (f'&client_version={constants.API_VERSION}'
-                          if timestamps_are_supported else '')
+    client_version_str = f'&client_version={constants.API_VERSION}'
 
     # For backwards compatibility, fallback to kubernetes-pod-ssh-proxy if
     # no endpoint is provided.
@@ -342,9 +328,6 @@ if __name__ == '__main__':
                      f'&worker={worker_idx}'
                      f'{client_version_str}')
 
-    if server_api_version >= constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION:
-        asyncio.run(
-            _connect_with_redirect(websocket_url, timestamps_are_supported,
-                                   _login_url))
-    else:
-        asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))
+    asyncio.run(
+        _connect_with_redirect(websocket_url, not disable_latency_measurement,
+                               _login_url))

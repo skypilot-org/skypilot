@@ -29,6 +29,10 @@ def register_ssh_redirect_hook(
     accepted but before the backend connection is established.
     """
     global ssh_redirect_hook
+    if ssh_redirect_hook is not None:
+        raise ValueError(
+            'SSH redirect hook already registered by '
+            f'{ssh_redirect_hook.__module__}.{ssh_redirect_hook.__qualname__}')
     ssh_redirect_hook = hook
 
 
