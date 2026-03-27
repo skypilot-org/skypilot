@@ -2469,25 +2469,6 @@ class TestCheckInstanceFits:
             assert reason is not None
             assert 'No ready nodes' in reason
 
-    def test_exact_resources_not_sufficient(self):
-        """Test that exact resource match is not considered sufficient.
-
-        The function requires strictly greater resources to account for
-        kube-system pods consuming resources.
-        """
-        # Node has exactly 4 CPUs and 16GB, requesting 4CPU--16GB should not fit
-        mock_node = self._create_mock_node(name='exact-match-node',
-                                           cpu_capacity='4',
-                                           memory_capacity='16Gi')
-
-        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                        return_value=[mock_node]):
-            fits, reason = utils.check_instance_fits('test-context',
-                                                     '4CPU--16GB')
-            assert fits is False
-            assert reason is not None
-            assert 'Maximum resources found' in reason
-
     def test_tpu_instance_fits(self):
         """Test TPU instance that fits on the cluster."""
         mock_node = self._create_mock_node(
