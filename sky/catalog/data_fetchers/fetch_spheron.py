@@ -196,9 +196,10 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
             with open(DEFAULT_SPHERON_API_KEY_PATH, mode='r',
                       encoding='utf-8') as f:
                 api_key = f.read().strip()
-    assert api_key is not None, (
-        f'API key not found. Please provide via --api-key or place in '
-        f'{DEFAULT_SPHERON_API_KEY_PATH}')
+    if api_key is None:
+        raise ValueError(
+            f'API key not found. Please provide via --api-key or place in '
+            f'{DEFAULT_SPHERON_API_KEY_PATH}')
     return api_key
 
 
