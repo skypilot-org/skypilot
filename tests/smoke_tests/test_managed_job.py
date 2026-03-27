@@ -55,6 +55,7 @@ from sky.utils import yaml_utils
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
@@ -102,6 +103,7 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
     """Test that logs are accessible after a managed job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -144,6 +146,7 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_pipeline_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible after a pipeline job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -194,6 +197,7 @@ def test_pipeline_cancelled_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
     name = smoke_tests_utils.get_cluster_name()
@@ -247,6 +251,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
@@ -352,6 +357,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
@@ -386,6 +392,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
@@ -696,6 +703,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
@@ -1001,6 +1009,7 @@ def test_managed_jobs_cancellation_gcp():
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_hyperbolic  # Uses other clouds
 @pytest.mark.no_shadeform  # Uses other clouds
+@pytest.mark.no_spheron  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
@@ -1053,6 +1062,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.managed_jobs
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -1392,6 +1402,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.no_hyperbolic  # The test uses other clouds
 @pytest.mark.no_shadeform  # The test uses other clouds
+@pytest.mark.no_spheron  # The test uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -2637,6 +2648,7 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_job_group_primary_auxiliary(generic_cloud: str):
     """Test JobGroup with primary/auxiliary tasks termination behavior.
 
@@ -2694,6 +2706,7 @@ def test_job_group_primary_auxiliary(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
     """Test that auxiliary tasks are terminated immediately when primary fails.
 
@@ -2745,6 +2758,7 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_job_node_names_single_node(generic_cloud: str):
     """Test that node_names is populated for a single-node managed job."""
     with smoke_tests_utils.override_sky_config():
@@ -2777,6 +2791,7 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_job_node_names_multi_node(generic_cloud: str):
     """Test that node_names contains multiple nodes for a multi-node job."""
     with smoke_tests_utils.override_sky_config():
@@ -2984,6 +2999,7 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_jobs_wait_timeout(generic_cloud: str):
     """Test that jobs.wait raises TimeoutError when timeout is exceeded."""
     name = smoke_tests_utils.get_cluster_name()
@@ -3022,6 +3038,7 @@ def test_managed_jobs_wait_timeout(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_spheron  # Spheron does not support host controllers
 def test_managed_jobs_wait_success(generic_cloud: str):
     """Test that jobs.wait returns successfully for a completed job."""
     name = smoke_tests_utils.get_cluster_name()

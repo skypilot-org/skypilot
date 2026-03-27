@@ -26,8 +26,9 @@ _CREDENTIAL_FILES = [
 class Spheron(clouds.Cloud):
     """Spheron GPU Cloud
 
-    Spheron is a GPU marketplace providing access to GPU instances across
-    multiple cloud providers through a unified API.
+    Spheron is a unified GPU cloud platform that aggregates enterprise-grade
+    GPU compute from certified global data centers, providing on-demand access
+    to NVIDIA GPUs across multiple providers through a single platform.
     """
 
     _REPR = 'Spheron'

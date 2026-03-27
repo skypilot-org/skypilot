@@ -58,7 +58,8 @@ def _get_df_for_pricing(use_spot: bool) -> 'pd.DataFrame':
 
 def _is_not_found_error(err: ValueError) -> bool:
     msg = str(err).lower()
-    return 'not found' in msg or 'not supported' in msg
+    return 'not found' in msg or 'not supported' in msg or (
+        'no instance type' in msg and 'found' in msg)
 
 
 def _call_or_default(func, default):
@@ -125,8 +126,9 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
-                                       region, zone)
+    return _call_or_default(
+        lambda: common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
+                                            region, zone), 0.0)
 
 
 def get_vcpus_mem_from_instance_type(
