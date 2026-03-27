@@ -2,6 +2,7 @@
 
 from contextlib import suppress
 import os
+import shlex
 import select
 import socket
 import tempfile
@@ -374,6 +375,9 @@ def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
 
 def test_kubernetes_runner_rsync_sets_exec_container_envvar() -> None:
     captured = {}
+    helper_path = os.path.join(os.path.abspath(os.path.dirname(
+        command_runner.__file__)), 'kubernetes', 'rsync_helper.sh')
+    expected_rsh = shlex.quote(f'bash {shlex.quote(helper_path)}')
 
     def fake_run_with_log(command: str, *args, **kwargs):
         captured['command'] = command
@@ -387,8 +391,7 @@ def test_kubernetes_runner_rsync_sets_exec_container_envvar() -> None:
         runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
 
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=sidecar0' in captured['command']
-    assert 'bash ' in captured['command']
-    assert 'rsync_helper.sh' in captured['command']
+    assert f'-e {expected_rsh}' in captured['command']
     assert 'chmod +x' not in captured['command']
     assert 'rsync' in captured['command']
 
@@ -396,6 +399,9 @@ def test_kubernetes_runner_rsync_sets_exec_container_envvar() -> None:
 def test_kubernetes_runner_rsync_does_not_set_exec_container_envvar_by_default(
 ) -> None:
     captured = {}
+    helper_path = os.path.join(os.path.abspath(os.path.dirname(
+        command_runner.__file__)), 'kubernetes', 'rsync_helper.sh')
+    expected_rsh = shlex.quote(f'bash {shlex.quote(helper_path)}')
 
     def fake_run_with_log(command: str, *args, **kwargs):
         captured['command'] = command
@@ -408,8 +414,7 @@ def test_kubernetes_runner_rsync_does_not_set_exec_container_envvar_by_default(
         runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
 
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=' not in captured['command']
-    assert 'bash ' in captured['command']
-    assert 'rsync_helper.sh' in captured['command']
+    assert f'-e {expected_rsh}' in captured['command']
     assert 'chmod +x' not in captured['command']
 
 

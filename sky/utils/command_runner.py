@@ -1658,9 +1658,8 @@ class KubernetesCommandRunner(CommandRunner):
         """
 
         # Build command.
-        helper_path = shlex.quote(
-            os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                         'kubernetes', 'rsync_helper.sh'))
+        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                                   'kubernetes', 'rsync_helper.sh')
         namespace_context = f'{self.namespace}+{self.context}'
         # Avoid rsync interpreting :, /, and + in namespace_context as the
         # default delimiter for options and arguments.
@@ -1677,7 +1676,7 @@ class KubernetesCommandRunner(CommandRunner):
             target,
             node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
-            rsh_option=f'bash {helper_path}',
+            rsh_option=f'bash {shlex.quote(helper_path)}',
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
