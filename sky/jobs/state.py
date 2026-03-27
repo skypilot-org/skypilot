@@ -1419,9 +1419,7 @@ def build_managed_jobs_with_filters_no_status_query(
     if not count_only and not status_count and fields:
         # Resolve requested field names to explicit ColumnElements from
         # the joined tables.
-        selected_columns = [
-            _map_response_field_to_db_column(f) for f in fields
-        ]
+        selected_columns = [_map_response_field_to_db_column(f) for f in fields]
         # Filter out None values from unknown fields for backward compat.
         selected_columns = [c for c in selected_columns if c is not None]
         query = query.with_only_columns(*selected_columns)
