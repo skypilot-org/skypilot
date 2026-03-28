@@ -569,13 +569,13 @@ class TestBackwardCompatibility:
         where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
@@ -653,13 +653,13 @@ class TestBackwardCompatibility:
         where the API server is running a newer version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
@@ -702,7 +702,36 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
-            f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
+        ]
+
+        # Test AUTOSTOPPING backward compat: set autostop with a
+        # long-running hook so the cluster stays in AUTOSTOPPING long
+        # enough to observe. Old clients (< 29) should see UP; newer
+        # clients should see AUTOSTOPPING.
+        # Skipped on Kubernetes as autostop is not supported.
+        if generic_cloud != 'kubernetes':
+            commands.extend([
+                # Set autostop with hook via SDK (CLI doesn't expose --hook).
+                f'{self.ACTIVATE_CURRENT} && python -c "'
+                'import sky; '
+                f'rid = sky.autostop(\\\"{cluster_name}\\\", '
+                'idle_minutes=1, hook=\\\"sleep 120\\\"); '
+                'sky.get(rid)"',
+                # Wait for AUTOSTOPPING (new server understands this)
+                f'{self.ACTIVATE_CURRENT} && ' +
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=cluster_name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=300),
+                # Old client: sky status should show INIT (mapped from
+                # AUTOSTOPPING) for clients < 29, or AUTOSTOPPING for >= 29.
+                f'{self.ACTIVATE_BASE} && result="$(sky status '
+                f'{cluster_name})"; echo "$result"; '
+                f'echo "$result" | grep {cluster_name} | grep '
+                f'{"INIT" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
+            ])
+
+        commands.extend([
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
@@ -712,7 +741,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky serve logs --controller {cluster_name}-0 --no-follow',
             f'{self.ACTIVATE_BASE} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
             f'{self.ACTIVATE_BASE} && sky serve down {cluster_name}-0 -y',
-        ]
+        ])
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
 

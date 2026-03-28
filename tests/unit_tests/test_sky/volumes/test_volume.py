@@ -650,3 +650,107 @@ class TestVolumeConfigModel:
         assert unpickled_config.name_on_cloud == 'test-pvc'
         assert unpickled_config.id_on_cloud is None
         assert unpickled_config._version == models.VolumeConfig._VERSION
+
+
+class TestHostPathVolume:
+    """Tests for HostPathVolume."""
+
+    def test_hostpath_volume_creation(self):
+        """Test creating a valid hostPath volume."""
+        vol = volume_lib.HostPathVolume(
+            name='my-host-vol',
+            type='k8s-hostpath',
+            infra='k8s',
+            use_existing=True,
+            config={'host_path': '/mnt/skypilot/data'},
+        )
+        assert vol.name == 'my-host-vol'
+        assert vol.type == 'k8s-hostpath'
+        assert vol.config['host_path'] == '/mnt/skypilot/data'
+
+    def test_hostpath_volume_missing_host_path(self):
+        """Test hostPath volume without host_path raises error."""
+        with pytest.raises(ValueError, match='host_path is required'):
+            vol = volume_lib.HostPathVolume(
+                name='my-host-vol',
+                type='k8s-hostpath',
+                infra='k8s',
+                use_existing=True,
+                config={},
+            )
+            vol.validate()
+
+    def test_hostpath_volume_relative_host_path(self):
+        """Test hostPath volume with relative path raises error."""
+        with pytest.raises(ValueError, match='absolute path'):
+            vol = volume_lib.HostPathVolume(
+                name='my-host-vol',
+                type='k8s-hostpath',
+                infra='k8s',
+                use_existing=True,
+                config={'host_path': 'relative/path'},
+            )
+            vol.validate()
+
+    def test_hostpath_volume_root_path(self):
+        """Test hostPath volume with root path raises error."""
+        with pytest.raises(ValueError, match='must not be the root directory'):
+            vol = volume_lib.HostPathVolume(
+                name='my-host-vol',
+                type='k8s-hostpath',
+                infra='k8s',
+                use_existing=True,
+                config={'host_path': '/'},
+            )
+            vol.validate()
+
+    def test_hostpath_volume_no_size_required(self):
+        """Test that hostPath volumes don't require size."""
+        vol = volume_lib.HostPathVolume(
+            name='my-host-vol',
+            type='k8s-hostpath',
+            infra='k8s',
+            use_existing=True,
+            config={'host_path': '/mnt/data'},
+        )
+        vol.validate_size()  # Should not raise
+
+    def test_hostpath_volume_invalid_cloud(self):
+        """Test hostPath volume on non-k8s cloud raises error."""
+        with pytest.raises(ValueError, match='Invalid cloud'):
+            volume_lib.HostPathVolume(
+                name='my-host-vol',
+                type='k8s-hostpath',
+                infra='runpod',
+                use_existing=True,
+                config={'host_path': '/mnt/data'},
+            )
+
+    def test_hostpath_volume_from_yaml_config(self):
+        """Test creating hostPath volume via from_yaml_config factory."""
+        config = {
+            'name': 'my-host-vol',
+            'type': 'k8s-hostpath',
+            'infra': 'k8s',
+            'use_existing': True,
+            'config': {
+                'host_path': '/mnt/data',
+                'cleanup_on_deletion': True,
+            },
+        }
+        vol = volume_lib.Volume.from_yaml_config(config)
+        assert isinstance(vol, volume_lib.HostPathVolume)
+        assert vol.config['host_path'] == '/mnt/data'
+        assert vol.config['cleanup_on_deletion'] is True
+
+    def test_volume_info_with_hostpath_fields(self):
+        """Test VolumeInfo with volume_type and host_path fields."""
+        from sky.utils import volume as volume_utils
+        info = volume_utils.VolumeInfo(
+            name='my-host-vol',
+            path='/mnt/data',
+            volume_type='k8s-hostpath',
+            host_path='/mnt/skypilot/data',
+        )
+        assert info.volume_type == 'k8s-hostpath'
+        assert info.host_path == '/mnt/skypilot/data'

@@ -164,6 +164,7 @@ curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
 - Use `class MyClass:` not `class MyClass(object):`
 - Use `abc` module for abstract classes
 - Use Python typing with `if typing.TYPE_CHECKING:` for type-only imports
+- Always place imports at the top of the file, not inside function definitions. If this causes a circular dependency, try to resolve it (e.g., restructure modules or use `if typing.TYPE_CHECKING:`). Only as a last resort, place the import inside the function with a comment explaining why. Import performance is not a valid reason for in-function imports; use `LazyImport` instead (see below).
 
 ### TODOs and FIXMEs
 

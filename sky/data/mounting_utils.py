@@ -96,28 +96,63 @@ def get_s3_mount_install_cmd() -> str:
 
 
 # pylint: disable=invalid-name
-def get_s3_mount_cmd(bucket_name: str,
-                     mount_path: str,
-                     _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount an S3 bucket (goofys by default, rclone for
-    ARM64)"""
+def _get_s3_compatible_mount_cmd(bucket_name: str,
+                                 mount_path: str,
+                                 _bucket_sub_path: Optional[str] = None,
+                                 endpoint_url: Optional[str] = None,
+                                 cred_env: str = '',
+                                 rclone_extra_flags: str = '',
+                                 goofys_extra_flags: str = '') -> str:
+    """Returns a command to mount an S3-compatible bucket.
+
+    Uses goofys by default (x86_64) and rclone for ARM64. Handles both
+    native AWS S3 and third-party S3-compatible providers (R2, Nebius,
+    CoreWeave, VastData, etc.).
+
+    Args:
+        bucket_name: Name of the bucket to mount.
+        mount_path: Local path to mount the bucket at.
+        _bucket_sub_path: Optional sub-path within the bucket.
+        endpoint_url: S3-compatible endpoint URL. If None, uses the
+            default AWS S3 endpoint.
+        cred_env: Credential environment variable prefix string
+            (e.g., 'AWS_SHARED_CREDENTIALS_FILE=... AWS_PROFILE=... ').
+        rclone_extra_flags: Extra flags for rclone mount command
+            (e.g., '--s3-force-path-style=false').
+        goofys_extra_flags: Extra flags for goofys mount command
+            (e.g., '--subdomain').
+    """
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Use rclone for ARM64 architectures since goofys doesn't support them
+    # Ensure trailing space for clean concatenation.
+    if cred_env and not cred_env.endswith(' '):
+        cred_env += ' '
+    if rclone_extra_flags and not rclone_extra_flags.endswith(' '):
+        rclone_extra_flags += ' '
+    if goofys_extra_flags and not goofys_extra_flags.endswith(' '):
+        goofys_extra_flags += ' '
+
+    # Add endpoint flags for S3-compatible providers.
+    if endpoint_url:
+        rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
+        goofys_extra_flags += f'--endpoint {endpoint_url} '
+
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'{cred_env}'
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        # Have to add --s3-env-auth=true to allow rclone to access private
-        # buckets.
-        '--daemon --allow-other --s3-env-auth=true')
-    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other '
+        f'{rclone_extra_flags}'
+        '--daemon --allow-other')
+    goofys_mount = (f'{cred_env}{_GOOFYS_WRAPPER} '
+                    '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'{goofys_extra_flags}'
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
     mount_cmd = (f'{arch_check}'
@@ -129,40 +164,30 @@ def get_s3_mount_cmd(bucket_name: str,
     return mount_cmd
 
 
+# pylint: disable=invalid-name
+def get_s3_mount_cmd(bucket_name: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount an S3 bucket."""
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        rclone_extra_flags='--s3-env-auth=true')
+
+
+# Backward-compatible wrappers for existing callers.
 def get_nebius_mount_cmd(nebius_profile_name: str,
                          bucket_name: str,
                          endpoint_url: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount Nebius bucket (goofys by default, rclone for
-    ARM64)."""
-    if _bucket_sub_path is None:
-        _bucket_sub_path = ''
-    else:
-        _bucket_sub_path = f':{_bucket_sub_path}'
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
-    arch_check = 'ARCH=$(uname -m) && '
-    rclone_mount = (
-        f'{FUSE3_INSTALL_CMD} && '
-        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_PROFILE={nebius_profile_name} '
-        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                    '-o allow_other '
-                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                    f'--endpoint {endpoint_url} '
-                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
-
-    mount_cmd = (f'{arch_check}'
-                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                 f'  {rclone_mount}; '
-                 f'else '
-                 f'  {goofys_mount}; '
-                 f'fi')
-    return mount_cmd
+    """Returns a command to mount Nebius bucket."""
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=f'AWS_PROFILE={nebius_profile_name}')
 
 
 def get_coreweave_mount_cmd(cw_credentials_path: str,
@@ -171,38 +196,33 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
                             endpoint_url: str,
                             mount_path: str,
                             _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount CoreWeave bucket"""
-    if _bucket_sub_path is None:
-        _bucket_sub_path = ''
-    else:
-        _bucket_sub_path = f':{_bucket_sub_path}'
+    """Returns a command to mount CoreWeave bucket."""
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
+                f'AWS_PROFILE={coreweave_profile_name}')
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=cred_env,
+        rclone_extra_flags='--s3-force-path-style=false',
+        goofys_extra_flags='--subdomain')
 
-    # Use rclone for ARM64 architectures since goofys doesn't support them
-    arch_check = 'ARCH=$(uname -m) && '
-    rclone_mount = (
-        f'{FUSE3_INSTALL_CMD} && '
-        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
-        f'AWS_PROFILE={coreweave_profile_name} '
-        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'--s3-force-path-style=false '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
-                    f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
-                    '-o allow_other '
-                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                    f'--subdomain '
-                    f'--endpoint {endpoint_url} '
-                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
-    mount_cmd = (f'{arch_check}'
-                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                 f'  {rclone_mount}; '
-                 f'else '
-                 f'  {goofys_mount}; '
-                 f'fi')
-    return mount_cmd
+def get_vastdata_mount_cmd(vastdata_credentials_path: str,
+                           vastdata_profile_name: str,
+                           bucket_name: str,
+                           endpoint_url: str,
+                           mount_path: str,
+                           _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount VastData bucket."""
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={vastdata_credentials_path} '
+                f'AWS_PROFILE={vastdata_profile_name}')
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        endpoint_url=endpoint_url,
+                                        cred_env=cred_env)
 
 
 def get_gcs_mount_install_cmd() -> str:
@@ -420,37 +440,14 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to mount R2 bucket (goofys by default, rclone for
-    ARM64)."""
-    if _bucket_sub_path is None:
-        _bucket_sub_path = ''
-    else:
-        _bucket_sub_path = f':{_bucket_sub_path}'
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
-    arch_check = 'ARCH=$(uname -m) && '
-    rclone_mount = (
-        f'{FUSE3_INSTALL_CMD} && '
-        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-        f'AWS_PROFILE={r2_profile_name} '
-        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-                    f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                    '-o allow_other '
-                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                    f'--endpoint {endpoint_url} '
-                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
-
-    mount_cmd = (f'{arch_check}'
-                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                 f'  {rclone_mount}; '
-                 f'else '
-                 f'  {goofys_mount}; '
-                 f'fi')
-    return mount_cmd
+    """Returns a command to mount R2 bucket."""
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+                f'AWS_PROFILE={r2_profile_name}')
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        endpoint_url=endpoint_url,
+                                        cred_env=cred_env)
 
 
 def get_cos_mount_cmd(rclone_config: str,

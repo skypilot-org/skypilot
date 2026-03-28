@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, OCI Object Storage or IBM COS.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage or IBM COS.
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, cos://<region>/<bucket>, oci://<bucket_name>
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -68,7 +68,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci
+              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -183,6 +183,65 @@ Important considerations for :code:`MOUNT_CACHED` mode:
 Files only begin uploading after they are closed by all processes.
 When a task completes, SkyPilot ensures all cached data from the `run` section of the SkyPilot YAML is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
 
+.. _mount_cached_workload_types:
+
+Workload types
+^^^^^^^^^^^^^^
+
+SkyPilot provides pre-tuned workload types that optimize :code:`MOUNT_CACHED` performance
+for common use cases.
+
+.. code-block:: yaml
+
+  file_mounts:
+    /data:
+      source: s3://my-model-weights
+      mode: MOUNT_CACHED
+      type: MODEL_CHECKPOINT_RO
+
+The following workload types are available:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Type
+     - Use case
+     - Read/Write
+   * - ``MODEL_CHECKPOINT_RO``
+     - Loading model weights/checkpoints
+     - Read-only
+   * - ``MODEL_CHECKPOINT_RW``
+     - Saving and loading model checkpoints
+     - Read-write
+   * - ``DATASET_RO``
+     - Reading datasets
+     - Read-only
+   * - ``DATASET_RW``
+     - Reading and writing datasets
+     - Read-write
+
+You can also finetune storage parameters on top of a workload type via ``config.mount_cached``.
+See the :ref:`Storage YAML reference <storage-yaml-reference>` for the full list of configurable parameters.
+
+.. code-block:: yaml
+
+  file_mounts:
+    /data:
+      source: s3://my-checkpoint-bucket
+      mode: MOUNT_CACHED
+      type: MODEL_CHECKPOINT_RW
+      config:
+        mount_cached:
+          transfers: 16  # Override the default number of parallel transfers
+
+.. note::
+    Workload types do not set ``vfs_cache_max_size``, as the optimal value depends on
+    the size of your data and the available disk space on your VM. This parameter controls the
+    maximum total size of the local VFS cache on disk (e.g., ``"10G"``, ``"100G"``).
+    Ideally, it should be roughly equal to the size of the data being accessed. Ensure
+    the underlying machine has enough disk space to accommodate the cache — if the cache
+    exceeds available storage, writes may fail. You can set it via ``config.mount_cached.vfs_cache_max_size``.
+
 
 Common patterns
 ---------------
@@ -204,6 +263,11 @@ remote VM.
 .. tip::
     If your dataset can fit on the VM's disk, you can use :code:`mode: COPY` to
     improve the I/O performance of your task. See :ref:`storage-mounting-modes` for more details.
+
+.. tip::
+    When using :code:`MOUNT_CACHED` mode for datasets, specify
+    :code:`type: DATASET_RO` for read-only access or :code:`type: DATASET_RW` for
+    read-write access to get pre-tuned performance settings.
 
 Storing task outputs
 ~~~~~~~~~~~~~~~~~~~~
@@ -282,6 +346,12 @@ without blocking the training loop.
       name: my-sky-bucket
       store: gcs
       mode: MOUNT_CACHED
+      type: MODEL_CHECKPOINT_RW
+
+.. tip::
+    Use :code:`type: MODEL_CHECKPOINT_RW` for saving checkpoints, or
+    :code:`type: MODEL_CHECKPOINT_RO` for read-only access to pre-trained weights.
+    These workload types provide pre-tuned rclone parameters for checkpoint I/O.
 
 .. note::
     When using MOUNT_CACHED for checkpoints, ensure your checkpoint frequency allows each checkpoint to be completely flushed to the remote bucket before the next one is written. Otherwise, the local cache will continue to grow and may eventually fill the disk. New files will be automatically synced to the bucket in the background.
@@ -335,7 +405,7 @@ FAQ
 * **Which architectures are supported?**
 
   S3 storage mounting (including S3-compatible services like Cloudflare R2,
-  CoreWeave Object Storage, and Nebius) works on all architectures including
+  CoreWeave Object Storage, VastData Object Storage, and Nebius) works on all architectures including
   ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
   optimal mounting tool for each architecture: goofys for x86_64 and rclone for
   ARM64.
@@ -346,6 +416,8 @@ FAQ
   Therefore, SkyPilot does not automatically create them. Please manually create
   your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
 
+
+.. _storage-yaml-reference:
 
 Storage YAML reference
 ----------------------
@@ -370,14 +442,15 @@ Storage YAML reference
             - https://<azure_storage_account>.blob.core.windows.net/<container_name>
             - r2://<bucket_name>
             - cw://<bucket_name>
+            - vastdata://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, coreweave, oci, or ibm). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, or ibm). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave','ibm', 'oci'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.
@@ -388,10 +461,52 @@ Storage YAML reference
           in subsequent runs (at the cost of storing your data in the cloud). If
           files change between runs, new files are synced to the bucket.
 
-        mode: str; either of MOUNT or COPY; default: MOUNT
-          Whether attach the bucket by copying files, or mounting the remote
-          bucket. With MOUNT mode, files are streamed from the remote bucket
-          and writes are replicated to the object store (and consequently, to
-          other workers mounting the same Storage). With COPY mode, files are
-          copied at VM initialization and any writes to the mount path will
-          not be replicated on the bucket.
+        mode: str; either of MOUNT, COPY, or MOUNT_CACHED; default: MOUNT
+          Whether to attach the bucket by copying files, mounting the remote
+          bucket, or mounting with a local VFS cache.
+          - MOUNT: Files are streamed from the remote bucket and writes are
+            replicated to the object store (and consequently, to other workers
+            mounting the same Storage).
+          - COPY: Files are copied at VM initialization and any writes to the
+            mount path will not be replicated on the bucket.
+          - MOUNT_CACHED: The bucket is mounted with a local VFS cache backed by
+            rclone. Writes are cached locally and asynchronously uploaded to the
+            bucket. See MOUNT_CACHED mode in detail above.
+
+        type: str; either of MODEL_CHECKPOINT_RO, MODEL_CHECKPOINT_RW, DATASET_RO, or DATASET_RW
+          Optional. Only valid when mode is MOUNT_CACHED. Specifies a pre-tuned
+          workload type that sets optimized rclone parameters. Individual
+          parameters can still be overridden via config.mount_cached.
+          - MODEL_CHECKPOINT_RO: Read-only model weights/checkpoints. Optimized
+            for large sequential reads with parallel chunk streams.
+          - MODEL_CHECKPOINT_RW: Read-write model checkpoints. Same read
+            optimizations, plus parallel transfers for writing.
+          - DATASET_RO: Read-only datasets. Optimized for smaller sequential reads.
+          - DATASET_RW: Read-write datasets. Same read optimizations, plus
+            parallel transfers for writing.
+
+        config: dict
+          Optional advanced configuration. Currently supports:
+          - mount_cached: dict of rclone parameters for MOUNT_CACHED mode.
+            Any parameters set here override the defaults from the workload type.
+            Available parameters:
+            - transfers: int; default: 4
+                Number of parallel file transfers.
+            - buffer_size: str; e.g. "64M"
+                In-memory buffer size per open file.
+            - vfs_cache_max_size: str; e.g. "10G"
+                Maximum total size of the VFS cache on disk.
+            - vfs_cache_max_age: str; e.g. "1h"
+                Maximum age of objects in the VFS cache.
+            - vfs_read_ahead: str; e.g. "512M"
+                Read-ahead bytes beyond what was requested.
+            - vfs_read_chunk_size: str; e.g. "32M"
+                Initial chunk size for each read.
+            - vfs_read_chunk_streams: int; e.g. 16
+                Number of parallel streams for chunked reading.
+            - vfs_write_back: str; default: "1s"
+                Delay before uploading dirty files to remote.
+            - read_only: bool; default: false
+                Whether the mount is read-only.
+            Size values accept suffixes: K, M, G, T, P (e.g. "64M", "10G").
+            Duration values accept suffixes: ns, us, ms, s, m, h (e.g. "5s", "1h").

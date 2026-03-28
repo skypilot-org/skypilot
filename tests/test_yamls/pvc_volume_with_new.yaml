@@ -11,6 +11,9 @@ volumes:
   /mnt/data3: pvc1
   /mnt/data4:
     size: 1Gi
+envs:
+  HAVE_SUB_DIR: "false"
+  NEW_LAUNCH: "false"
 setup: |
   echo "running setup"
 
@@ -26,15 +29,20 @@ run: |
   df -h /mnt/data1 || (echo "df failed for data1" && exit 1)
   touch /mnt/data1/1.txt || (echo "touch failed for data1" && exit 1)
   ls -lart /mnt/data1 || (echo "ls failed for data1" && exit 1)
-  # The following should fail since pvc1 won't be mounted
-  if df -h /mnt/data3 2>/dev/null; then
-    echo "ERROR: /mnt/data3 should not be mounted!" && exit 1
-  else
-    echo "Expected: /mnt/data3 is not mounted (as warned)"
+  if [ "$HAVE_SUB_DIR" = "true" ]; then
+    ls -lart /mnt/data1/subdir/path || (echo "ls failed for data1/subdir/path" && exit 1)
   fi
-  # The following should fail since /mnt/data4 won't be mounted
-  if df -h /mnt/data4 2>/dev/null; then
-    echo "ERROR: /mnt/data4 should not be mounted!" && exit 1
-  else
-    echo "Expected: /mnt/data4 is not mounted (as warned)"
+  if [ "$NEW_LAUNCH" = "false" ]; then
+    # The following should fail since pvc1 won't be mounted
+    if df -h /mnt/data3 2>/dev/null; then
+      echo "ERROR: /mnt/data3 should not be mounted!" && exit 1
+    else
+      echo "Expected: /mnt/data3 is not mounted (as warned)"
+    fi
+    # The following should fail since /mnt/data4 won't be mounted
+    if df -h /mnt/data4 2>/dev/null; then
+      echo "ERROR: /mnt/data4 should not be mounted!" && exit 1
+    else
+      echo "Expected: /mnt/data4 is not mounted (as warned)"
+    fi
   fi

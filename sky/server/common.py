@@ -106,6 +106,11 @@ logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
 _upgrade_hint_shown = False
+# Cached from the latest health check response. Used to determine whether
+# to include client user hash in usage reports and request env vars.
+basic_auth_enabled: bool = False
+# Cached client user hash (machine-local identity), computed once.
+client_user_hash: Optional[str] = None
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -532,8 +537,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         version_on_disk = result.get('version_on_disk')
         commit = result.get('commit')
         user = result.get('user')
-        basic_auth_enabled = result.get('basic_auth_enabled')
         latest_version = result.get('latest_version')
+        # Cache basic_auth_enabled and set client user hash on the
+        # client-side usage singleton.
+        global basic_auth_enabled, client_user_hash
+        basic_auth_enabled = bool(result.get('basic_auth_enabled'))
+        if basic_auth_enabled:
+            if client_user_hash is None:
+                client_user_hash = common_utils.generate_user_hash()
+            usage_lib.messages.usage.client_user_hash = client_user_hash
         server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                     api_version=api_version,
                                     version=version,
@@ -652,28 +664,23 @@ def _start_api_server(deploy: bool = False,
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
-        # Check available memory before starting the server.
-        # Skip this warning if postgres is used, as:
-        #   1) that's almost certainly a remote API server;
-        #   2) the actual consolidation mode config is stashed in the database,
-        #      and the value of `job_utils.is_consolidation_mode` will not be
-        #      the actual value in the db, but only None as in this case, the
-        #      whole YAML config is really just `db: <URI>`.
-        if skypilot_config.get_nested(('db',), None) is None:
-            avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-            # pylint: disable=import-outside-toplevel
-            import sky.jobs.utils as job_utils
-            max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                          if job_utils.is_consolidation_mode(
-                              on_api_restart=True) else
-                          server_constants.MIN_AVAIL_MEM_GB)
-            if avail_mem_size_gb <= max_memory:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
-                    f'only has {avail_mem_size_gb:.1f}GB memory available. '
-                    f'At least {max_memory}GB is recommended to support higher '
-                    'load with better performance.'
-                    f'{colorama.Style.RESET_ALL}')
+        # At this point, we cannot reliably tell if we will be using
+        # consolidation mode, because that requires accessing the db
+        # 1) to pull config if we are using postgres
+        # 2) to check if there is an existing jobs controller
+        # See job_utils.setup_consolidation_mode_on_startup for the logic...
+        # Instead, we will just assume consolidation mode is enabled if using
+        # deploy mode. This only affects the warning message.
+        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if deploy else server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
+                f'has {avail_mem_size_gb:.1f}GB memory available. '
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
+                f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:
@@ -924,8 +931,37 @@ def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
     return cast(Callable[P, T], wrapper)
 
 
-def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
-                                         workdir_only: bool) -> 'dag_lib.Dag':
+def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
+    """Resolve the shared extraction directory for a blob.
+
+    Returns the extraction directory path. The extraction dir is created
+    at upload time by the server handler (/upload_v2).
+
+    Args:
+        blob_id: The content-addressed blob ID (64-char hex string).
+        user_hash: The user hash for locating the client directory.
+
+    Raises:
+        ValueError: If blob_id is not a valid 64-char hex string.
+        FileNotFoundError: If the blob directory does not exist.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
+    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+                  'file_mounts')
+    extraction_dir = client_dir / 'blobs' / blob_id
+    if not extraction_dir.is_dir():
+        raise FileNotFoundError(
+            f'Blob not found: {extraction_dir}. The file mounts blob may '
+            'have been garbage collected before execution started.')
+    return str(extraction_dir)
+
+
+def process_mounts_in_task_on_api_server(
+        task: str,
+        env_vars: Dict[str, str],
+        workdir_only: bool,
+        file_mounts_blob_id: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -939,6 +975,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
+        file_mounts_blob_id: If set, resolve file mount paths relative to the
+            blob directory instead of the default client_file_mounts_dir.
 
     Returns:
         The translated task as a single-task dag.
@@ -962,9 +1000,17 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
+    # Use the blob directory for file mounts, if a blob ID is provided.
+    if file_mounts_blob_id is not None:
+        file_mounts_base = pathlib.Path(
+            resolve_blob_dir(file_mounts_blob_id, user_hash))
+    else:
+        file_mounts_base = client_file_mounts_dir
+    file_mounts_base.mkdir(parents=True, exist_ok=True)
+
     def _get_client_file_mounts_path(
             original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(client_file_mounts_dir /
+        return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
@@ -980,8 +1026,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             workdir = task_config['workdir']
             if isinstance(workdir, str):
                 task_config['workdir'] = str(
-                    client_file_mounts_dir /
-                    file_mounts_mapping[workdir].lstrip('/'))
+                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

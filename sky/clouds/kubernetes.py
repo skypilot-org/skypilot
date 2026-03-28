@@ -59,7 +59,9 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+    # Limit the length of the volume name to match the label value
+    # limit (63 characters)
+    _MAX_VOLUME_NAME_LEN_LIMIT = 63
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -319,7 +321,7 @@ class Kubernetes(clouds.Cloud):
                          f'{context}. Reason: {reason}')
 
             autoscaler_type = skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
+                cloud=cls._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -381,16 +383,20 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional['resources_utils.DiskTier'] = None,
-            local_disk: Optional[str] = None,
-            region: Optional[str] = None,
-            zone: Optional[str] = None) -> str:
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier, region, zone, local_disk  # Unused.
+        del disk_tier, region, zone, local_disk, use_spot  # Unused.
+        del max_hourly_cost  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -724,7 +730,7 @@ class Kubernetes(clouds.Cloud):
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
-                cloud='kubernetes',
+                cloud=self._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -816,6 +822,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
         }
 
+        # Add ephemeral storage to deploy vars if specified.
+        ephemeral_storage = resources.ephemeral_storage
+        if ephemeral_storage is not None:
+            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
         # number -> that multiplier
@@ -826,6 +837,9 @@ class Kubernetes(clouds.Cloud):
                 multiplier = float(set_pod_resource_limits_config)
             deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
             deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
+            if ephemeral_storage is not None:
+                deploy_vars['k8s_ephemeral_storage_limit'] = round(
+                    ephemeral_storage * multiplier, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
@@ -851,6 +865,33 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
+
+        # Docker sidecar (DinD / BuildKit) support.
+        raw_docker_cfg = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('enable_docker',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides)
+        docker_cfg = kubernetes_utils.normalize_enable_docker_config(
+            raw_docker_cfg)
+        if docker_cfg is not None:
+            docker_mode = docker_cfg.mode
+            dind_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.ALL]
+            build_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.BUILD]
+            deploy_vars['k8s_enable_docker_all'] = (
+                docker_mode == kubernetes_utils.DockerMode.ALL)
+            deploy_vars['k8s_enable_docker_build'] = (
+                docker_mode == kubernetes_utils.DockerMode.BUILD)
+            deploy_vars['k8s_docker_dind_image'] = dind_defaults.image
+            deploy_vars['k8s_docker_buildkit_image'] = build_defaults.image
+            deploy_vars['k8s_docker_config_dict'] = docker_cfg.to_dict()
+        else:
+            deploy_vars['k8s_enable_docker_all'] = False
+            deploy_vars['k8s_enable_docker_build'] = False
+            deploy_vars['k8s_docker_config_dict'] = None
 
         return deploy_vars
 
@@ -909,7 +950,9 @@ class Kubernetes(clouds.Cloud):
             disk_tier=resources.disk_tier,
             local_disk=resources.local_disk,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            use_spot=resources.use_spot,
+            max_hourly_cost=resources.max_hourly_cost)
 
         if accelerators is None:
             # For CPU only clusters, need no special handling
@@ -1348,7 +1391,7 @@ class Kubernetes(clouds.Cloud):
         # Check if the cluster has any node pools with autoscaling enabled
         # with machine types that support high perf networking for GKE.
         autoscaler_type = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)

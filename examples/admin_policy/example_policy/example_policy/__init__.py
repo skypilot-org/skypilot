@@ -11,4 +11,6 @@ from example_policy.skypilot_policy import GPUStaticQuotaPolicy
 from example_policy.skypilot_policy import RateLimitLaunchPolicy
 from example_policy.skypilot_policy import RejectAllPolicy
 from example_policy.skypilot_policy import SetMaxAutostopIdleMinutesPolicy
+from example_policy.skypilot_policy import SlurmFilesystemRoutingPolicy
+from example_policy.skypilot_policy import SlurmPartitionRoutingPolicy
 from example_policy.skypilot_policy import UseSpotForGpuPolicy

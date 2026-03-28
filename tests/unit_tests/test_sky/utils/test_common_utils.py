@@ -280,6 +280,50 @@ class TestCgroupFunctions:
             assert common_utils.get_mem_size_gb() == 2.0
 
 
+class TestGetPrettyEntrypointCmd:
+    """Test entrypoint command formatting with shlex.join.
+
+    Entrypoint commands are displayed in the dashboard for copy-pasting.
+    shlex.join() ensures args with shell metacharacters are properly quoted.
+    """
+
+    @pytest.mark.parametrize(
+        'argv, expected',
+        [
+            # Basic sky command: basename is extracted
+            (['/usr/bin/sky', 'launch', 'app.yaml'], 'sky launch app.yaml'),
+            # Semicolons are quoted
+            ([
+                '/usr/bin/sky', 'jobs', 'launch', '-n', 'test',
+                'nvidia-smi; sleep 1000'
+            ], "sky jobs launch -n test 'nvidia-smi; sleep 1000'"),
+            # Pipes are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'cat file | grep pattern'
+             ], "sky exec cluster 'cat file | grep pattern'"),
+            # Ampersands are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'cmd1 && cmd2'
+             ], "sky exec cluster 'cmd1 && cmd2'"),
+            # Spaces are quoted
+            (['/usr/bin/sky', 'launch', '--name', 'my cluster name'
+             ], "sky launch --name 'my cluster name'"),
+            # Redirection chars are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'echo hello > output.txt'
+             ], "sky exec cluster 'echo hello > output.txt'"),
+            # Non-sky basename is preserved as-is
+            (['examples/app.py', '--flag', 'value'
+             ], 'examples/app.py --flag value'),
+            # Secrets are redacted; <redacted> contains
+            # < and > so it gets quoted
+            ([
+                '/usr/bin/sky', 'launch', '--secret', 'HF_TOKEN=secret123',
+                'app.yaml'
+            ], "sky launch --secret 'HF_TOKEN=<redacted>' app.yaml"),
+        ])
+    def test_entrypoint_quoting(self, argv, expected):
+        with mock.patch('sys.argv', argv):
+            assert common_utils.get_pretty_entrypoint_cmd() == expected
+
+
 class TestRedactSecretsValues:
     """Test secret value redaction in command lines."""
 
@@ -461,6 +505,60 @@ class TestRedactSecretsValues:
         # Should return original argv when error occurs
         expected = ['sky', 'launch', '--secret', 'KEY=value']
         assert result == expected
+
+
+class TestCheckWorkspaceNameIsValid:
+
+    @pytest.mark.parametrize('name', [
+        'a',
+        'dev',
+        'my-workspace',
+        'my_workspace',
+        'team-alpha-2',
+        'a1',
+        'default',
+        'a' * 63,
+        'abc-def_ghi-123',
+    ])
+    def test_valid_names(self, name):
+        """Valid workspace names should pass validation."""
+        common_utils.check_workspace_name_is_valid(name)
+
+    @pytest.mark.parametrize('name', [
+        '',
+        '1workspace',
+        '-workspace',
+        '_workspace',
+        'MyWorkspace',
+        'my.workspace',
+        'workspace-',
+        'workspace_',
+        'a' * 64,
+        'ALLCAPS',
+        'has space',
+        'has@symbol',
+        '123',
+    ])
+    def test_invalid_names(self, name):
+        """Invalid workspace names should raise InvalidWorkspaceNameError."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError):
+            common_utils.check_workspace_name_is_valid(name)
+
+    def test_none_name(self):
+        """None workspace name should pass (no-op)."""
+        common_utils.check_workspace_name_is_valid(None)
+
+    def test_too_long_error_message(self):
+        """Error message for too-long names should mention the length limit."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError,
+                           match='too long'):
+            common_utils.check_workspace_name_is_valid('a' * 64)
+
+    def test_invalid_chars_error_message(self):
+        """Error message for invalid chars should mention allowed characters."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError,
+                           match='lowercase'):
+            common_utils.check_workspace_name_is_valid('MyWorkspace')
 
 
 @pytest.mark.asyncio

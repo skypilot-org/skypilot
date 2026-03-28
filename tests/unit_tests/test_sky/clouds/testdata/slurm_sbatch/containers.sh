@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=test-cluster
-#SBATCH --output=.sky_provision/slurm-%j.out
-#SBATCH --error=.sky_provision/slurm-%j.out
+#SBATCH --output=/home/testuser/.sky_provision/slurm-%j.out
+#SBATCH --error=/home/testuser/.sky_provision/slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --time=7-00:00:00
 #SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem=16384M
 #SBATCH --gres=gpu:A100:2
 
 # Cleanup function to remove cluster dirs on job termination.

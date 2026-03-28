@@ -293,12 +293,8 @@ export async function downloadJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -381,28 +377,52 @@ export function useClusterDetails({ cluster, job = null }) {
   const clusterJobsLoading = loadingClusterJobData;
 
   const fetchClusterData = useCallback(async () => {
-    if (cluster) {
-      try {
-        setLoadingClusterData(true);
-        // Use dashboard cache for cluster data
-        const data = await dashboardCache.get(getClusters, [
-          { clusterNames: [cluster] },
-        ]);
-        if (data.length > 0) {
-          setClusterData(data[0]); // Assuming getClusters returns an array
-          return data[0]; // Return the data for use in fetchClusterJobData
-        } else {
-          console.error('No cluster data found for cluster:', cluster);
-          return null;
-        }
-      } catch (error) {
-        console.error('Error fetching cluster data:', error);
-        return null;
-      } finally {
-        setLoadingClusterData(false);
+    if (!cluster) return null;
+    try {
+      setLoadingClusterData(true);
+
+      // Try per-cluster cache first (has full detail data including
+      // cluster_name_on_cloud, last_creation_command, last_creation_yaml,
+      // etc. that are omitted from summary responses)
+      const cachedSingle = dashboardCache.getCached(getClusters, [
+        { clusterNames: [cluster] },
+      ]);
+      if (cachedSingle && cachedSingle.length > 0) {
+        setClusterData(cachedSingle[0]);
+        return cachedSingle[0];
       }
+
+      // Show summary data immediately from all-clusters cache while we
+      // fetch full detail below. The all-clusters cache uses
+      // summary_response=true which omits fields like
+      // cluster_name_on_cloud, last_creation_command, and
+      // last_creation_yaml, so we must not return early here.
+      const cachedAll = dashboardCache.getCached(getClusters);
+      if (cachedAll) {
+        const found = cachedAll.find((c) => c.cluster === cluster);
+        if (found) {
+          setClusterData(found);
+        }
+      }
+
+      // Fetch full detail data (summary_response=false when clusterNames
+      // is specified)
+      const data = await dashboardCache.get(getClusters, [
+        { clusterNames: [cluster] },
+      ]);
+      if (data.length > 0) {
+        setClusterData(data[0]);
+        return data[0];
+      } else {
+        console.error('No cluster data found for cluster:', cluster);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error fetching cluster data:', error);
+      return null;
+    } finally {
+      setLoadingClusterData(false);
     }
-    return null;
   }, [cluster]);
 
   const fetchClusterJobData = useCallback(
@@ -410,13 +430,22 @@ export function useClusterDetails({ cluster, job = null }) {
       if (cluster) {
         try {
           setLoadingClusterJobData(true);
-          // Use dashboard cache for cluster jobs
-          const data = await dashboardCache.get(getClusterJobs, [
+          const cacheArgs = [
             {
               clusterName: cluster,
               workspace: workspace || 'default',
             },
-          ]);
+          ];
+
+          // Try synchronous cache first to avoid background refresh
+          const cached = dashboardCache.getCached(getClusterJobs, cacheArgs);
+          if (cached) {
+            setClusterJobData(cached);
+            return;
+          }
+
+          // Fallback: fetch from API (direct navigation or cache miss)
+          const data = await dashboardCache.get(getClusterJobs, cacheArgs);
           setClusterJobData(data);
         } catch (error) {
           console.error('Error fetching cluster job data:', error);
@@ -429,7 +458,9 @@ export function useClusterDetails({ cluster, job = null }) {
   );
 
   const refreshData = useCallback(async () => {
-    // Invalidate cache for fresh data
+    // Invalidate both all-clusters cache (used by list page lookup) and
+    // per-cluster cache (used by direct URL fallback) for fresh data
+    dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getClusters, [{ clusterNames: [cluster] }]);
 
     const clusterInfo = await fetchClusterData();

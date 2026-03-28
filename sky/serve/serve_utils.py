@@ -1249,9 +1249,9 @@ def wait_service_registration(service_name: str, job_id: int,
                 if (constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR
                         in log_content):
                     with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError('Max number of services reached. '
-                                           'To spin up more services, please '
-                                           'tear down some existing services.')
+                        raise RuntimeError(
+                            controller_utils.get_max_services_error_message(
+                                pool))
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.

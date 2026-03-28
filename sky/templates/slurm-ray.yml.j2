@@ -11,8 +11,8 @@ provider:
   type: external
   module: sky.provision.slurm
 
-  cluster: {{slurm_cluster}}
-  partition: {{slurm_partition}}
+  cluster: "{{slurm_cluster}}"
+  partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
 
   ssh:
@@ -47,6 +47,9 @@ available_node_types:
       accelerator_count: {{accelerator_count}}
 {% if image_id is not none %}
       image_id: {{image_id}}
+{% endif %}
+{% if sbatch_options is defined and sbatch_options %}
+      sbatch_options: {{sbatch_options | tojson}}
 {% endif %}
 
       # TODO: more configs that is required by the provisioner to create new

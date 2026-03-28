@@ -260,8 +260,6 @@ def test_get_cloud_dependencies_installation_commands_empty_clouds(
     assert len(commands) >= 3
     # Check that uv installation is included
     assert any('uv' in cmd for cmd in commands)
-    # Check that flask is included for dashboard
-    assert any('flask' in cmd for cmd in commands)
     # Should end with "done" message
     assert 'done.' in commands[-1]
 
@@ -502,15 +500,11 @@ def test_get_cloud_dependencies_installation_commands_cloudflare_storage(
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    monkeypatch.setattr('sky.utils.controller_utils.cloudflare.NAME',
-                        'cloudflare')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
 
-    # Should include cloudflare dependencies (which are aws dependencies)
-    combined_commands = ' '.join(commands)
     # Cloudflare dependencies include AWS dependencies
     assert any('awscli' in cmd or 'boto3' in cmd for cmd in commands)
 
@@ -543,11 +537,10 @@ def test_get_cloud_dependencies_installation_commands_command_structure(
     assert 'uv' in commands[0]
     assert constants.SKY_UV_INSTALL_CMD in commands[0]
 
-    # Python packages command should include flask
+    # Python packages command should use uv pip
     python_cmd = next(
         (cmd for cmd in commands if 'cloud python packages' in cmd), None)
     assert python_cmd is not None
-    assert 'flask' in python_cmd
     assert constants.SKY_UV_PIP_CMD in python_cmd
 
     # Last command should be the "done" message

@@ -21,20 +21,43 @@ from sky.utils.db import db_utils
 def test_job_nonexist_strategy():
     """Test the nonexist recovery strategy.
 
-    This function is testing for the core functions on server side.
+    On the server side (annotations.is_on_api_server=True), unknown strategies
+    raise ValueError during task validation. On the client side, validation is
+    deferred to the server so plugin-provided strategies can pass through.
     """
+    from sky.utils import annotations
+
     task_yaml = textwrap.dedent("""\
         resources:
             cloud: aws
             use_spot: true
             job_recovery: nonexist""")
-    with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(task_yaml)
-        f.flush()
-        with pytest.raises(ValueError,
-                           match='is not a valid jobs recovery strategy among'):
+
+    # Client side (is_on_api_server=False): should NOT raise.
+    original = annotations.is_on_api_server
+    annotations.is_on_api_server = False
+    try:
+        with tempfile.NamedTemporaryFile(mode='w') as f:
+            f.write(task_yaml)
+            f.flush()
             task = sky.Task.from_yaml(f.name)
             task.validate()
+    finally:
+        annotations.is_on_api_server = original
+
+    # Server side (is_on_api_server=True): should raise ValueError.
+    annotations.is_on_api_server = True
+    try:
+        with tempfile.NamedTemporaryFile(mode='w') as f:
+            f.write(task_yaml)
+            f.flush()
+            with pytest.raises(
+                    ValueError,
+                    match='is not a valid jobs recovery strategy among'):
+                task = sky.Task.from_yaml(f.name)
+                task.validate()
+    finally:
+        annotations.is_on_api_server = original
 
 
 @pytest.fixture
@@ -44,7 +67,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
 
     sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+    monkeypatch.setattr(global_user_state._db_manager, '_engine',
                         sqlalchemy_engine)
 
     global_user_state.create_table(sqlalchemy_engine)
@@ -69,7 +92,7 @@ def _generate_tmp_yaml(tmp_path, filename: str) -> str:
 
 @pytest.fixture
 def _mock_cluster_state(_mock_db_conn, tmp_path):
-    assert 'state.db' not in global_user_state._SQLALCHEMY_ENGINE.url
+    assert 'state.db' not in str(global_user_state._db_manager.get_engine().url)
     # Mock an empty /tmp/cluster1.yaml using tmp_path
 
     handle = backends.CloudVmRayResourceHandle(

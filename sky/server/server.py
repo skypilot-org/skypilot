@@ -22,6 +22,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
@@ -34,6 +35,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import filelock
 import jwt as pyjwt
 import starlette.middleware.base
 import uvloop
@@ -62,6 +64,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import csp_utils
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -563,6 +566,57 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def cleanup_unreferenced_file_mounts():
+    """Delete file mounts not referenced by any active request."""
+
+    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
+    # blocking the event loop.
+    def _do_cleanup():
+        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        # Get all blob_id referenced by active requests.
+        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+        if not clients_dir.exists():
+            return
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            try:
+                blobs_dir = user_dir / 'file_mounts' / 'blobs'
+                if not blobs_dir.exists():
+                    continue
+                # Delete unreferenced extraction dirs older than grace period.
+                grace_cutoff = time.time() - 3600  # 1 hour grace
+                for entry in blobs_dir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    if entry.name in ('.locks', '.staging'):
+                        continue
+                    blob_id = entry.name
+                    if (blob_id not in active_blob_ids and
+                            entry.stat().st_mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_dir.name}')
+                        shutil.rmtree(entry, ignore_errors=True)
+                # Clean up stale staging directories from interrupted uploads.
+                staging_base = blobs_dir / '.staging'
+                if staging_base.exists():
+                    for staging in staging_base.iterdir():
+                        if staging.is_dir():
+                            if staging.stat().st_mtime < grace_cutoff:
+                                shutil.rmtree(staging, ignore_errors=True)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
+                             f'{common_utils.format_exception(e)}')
+
+    while True:
+        await asyncio.sleep(3600)  # Run every hour
+        try:
+            await asyncio.to_thread(_do_cleanup)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in cleanup_unreferenced_file_mounts: '
+                         f'{common_utils.format_exception(e)}')
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -635,6 +689,74 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
+
+
+class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add security headers to all HTTP responses.
+
+    Adds Content-Security-Policy and other security headers to mitigate
+    XSS, clickjacking, and content-type sniffing attacks.
+
+    Reference: OWASP A02:2025 - Security Misconfiguration (CWE-1021).
+    """
+
+    # Content-Security-Policy directives:
+    # - default-src 'self': Only allow resources from the same origin
+    # - script-src: For HTML responses a per-request nonce is used
+    #   ('nonce-<value>') so inline scripts are allowed only when they
+    #   carry the matching nonce attribute.  Non-HTML responses get a
+    #   strict 'self'-only policy (no inline allowance needed).
+    # - style-src: Uses 'unsafe-inline' because CSS-in-JS libraries
+    #   (Emotion, react-remove-scroll-bar) dynamically create <style>
+    #   elements that cannot easily carry nonces.  CSS cannot execute
+    #   scripts, so the risk is negligible.
+    # - font-src 'self': Only allow same-origin fonts
+    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
+    #   needed by the /token page's legacy auth callback flow (the page's
+    #   JavaScript POSTs the auth token to a local HTTP server started by
+    #   the CLI on localhost)
+    # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
+    # - img-src 'self' data:: Allow same-origin images and data URIs
+    # - object-src 'none': Block all plugin content (Flash, Java, etc.)
+    # - base-uri 'self': Restrict <base> element to same origin
+    # - form-action 'self': Restrict form submissions to same origin
+    # - frame-ancestors 'self': Prevent clickjacking via framing
+    _CSP_TEMPLATE = ('default-src \'self\'; '
+                     'script-src {script_src}; '
+                     'style-src \'self\' \'unsafe-inline\'; '
+                     'font-src \'self\'; '
+                     'connect-src \'self\' http://localhost:* '
+                     'http://127.0.0.1:*; '
+                     'frame-src \'self\'; '
+                     'img-src \'self\' data:; '
+                     'object-src \'none\'; '
+                     'base-uri \'self\'; '
+                     'form-action \'self\'; '
+                     'frame-ancestors \'self\'')
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        response = await call_next(request)
+        # Endpoints that serve HTML set request.state.csp_nonce so the
+        # CSP header can reference the nonce that was injected into the
+        # HTML body.  Non-HTML responses get a strict policy with no
+        # inline allowance.
+        nonce = getattr(request.state, 'csp_nonce', None)
+        if nonce:
+            script_src = f'\'self\' \'nonce-{nonce}\''
+        else:
+            script_src = '\'self\''
+        csp = self._CSP_TEMPLATE.format(script_src=script_src)
+        response.headers['Content-Security-Policy'] = csp
+        # X-Frame-Options for legacy browsers that don't support CSP
+        # frame-ancestors directive.
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = (
+            'strict-origin-when-cross-origin')
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=()')
+        return response
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
@@ -777,6 +899,9 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# SecurityHeadersMiddleware is the outermost middleware to ensure security
+# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
@@ -845,6 +970,10 @@ async def token(request: fastapi.Request,
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
+
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,
@@ -942,6 +1071,10 @@ async def authorize_page(
 
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
 
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
     return fastapi.responses.HTMLResponse(
         content=html_content,
         headers={'Cache-Control': 'no-cache, no-transform'})
@@ -972,6 +1105,30 @@ async def enabled_clouds(request: fastapi.Request,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
                                                 expand=expand),
         func=core.enabled_clouds,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.get('/enabled_clouds/batch')
+async def enabled_clouds_batch(request: fastapi.Request,
+                               workspaces: str = '',
+                               expand: bool = False) -> None:
+    """Gets enabled clouds for multiple workspaces in a single request."""
+    workspace_list = [w.strip() for w in workspaces.split(',') if w.strip()]
+    # API-layer authorization: filter out workspaces the caller cannot access
+    # before the request reaches the core function (defense-in-depth).
+    auth_user = request.state.auth_user
+    if auth_user is not None and workspace_list:
+        workspace_list = list(
+            permission.permission_service.get_accessible_workspace_names(
+                auth_user.id, set(workspace_list)))
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
+        request_body=payloads.EnabledCloudsBatchBody(workspaces=workspace_list,
+                                                     expand=expand),
+        func=core.enabled_clouds_batch,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -1167,25 +1324,33 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
-@app.post('/upload')
-async def upload_zip_file(request: fastapi.Request, user_hash: str,
-                          upload_id: str, chunk_index: int,
-                          total_chunks: int) -> payloads.UploadZipFileResponse:
-    """Uploads a zip file to the API server.
+async def _prepare_client_mount_dir(user_hash: str,
+                                    request: fastapi.Request) -> pathlib.Path:
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
-    This endpoints can be called multiple times for the same upload_id with
-    different chunk_index. The server will merge the chunks and unzip the file
-    when all chunks are uploaded.
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+        'file_mounts')
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
+    return client_file_mounts_dir
 
-    This implementation is simplified and may need to be improved in the future,
-    e.g., adopting S3-style multipart upload.
 
-    Args:
-        user_hash: The user hash.
-        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
-            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-        chunk_index: The chunk index, starting from 0.
-        total_chunks: The total number of chunks.
+async def _receive_and_assemble_chunks(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    request: fastapi.Request,
+    chunk_index: int,
+    total_chunks: int,
+) -> Optional[payloads.UploadZipFileResponse]:
+    """Receive chunks, assemble into a zip file, and extract.
+
+    Returns:
+        None if the upload is completed,
+        A response to tell the client to upload more chunks otherwise.
     """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
@@ -1196,29 +1361,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # Add the upload id to the cleanup list.
-    upload_ids_to_cleanup[(upload_id,
-                           user_hash)] = (datetime.datetime.now() +
-                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
     # TODO(SKY-1271): We need to double check security of uploading zip file.
-    client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-        'file_mounts')
-    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
-
-    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
-    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-    if not re.match(
-            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
-            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
-        raise ValueError(
-            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -1228,11 +1371,11 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
-
     if total_chunks == 1:
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        zip_file_path = base_dir / f'{zip_name}.zip'
     else:
-        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
@@ -1266,22 +1409,141 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        zip_file_path = base_dir / f'{zip_name}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
                 async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
-                        # Use 64KB buffer to avoid memory overflow, same size as
-                        # shutil.copyfileobj.
+                        # Use 64KB buffer to avoid memory overflow, same size
+                        # as shutil.copyfileobj.
                         data = await f.read(64 * 1024)
                         if not data:
                             break
                         await zip_file.write(data)
-
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
+    return None
+
+
+# TODO(aylei): for backward compatibility, remove after v0.14.0
+@app.post('/upload')
+async def upload_zip_file(request: fastapi.Request, user_hash: str,
+                          upload_id: str, chunk_index: int,
+                          total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Uploads a zip file to the API server.
+
+    This endpoints can be called multiple times for the same upload_id with
+    different chunk_index. The server will merge the chunks and unzip the file
+    when all chunks are uploaded.
+
+    This implementation is simplified and may need to be improved in the future,
+    e.g., adopting S3-style multipart upload.
+
+    Args:
+        user_hash: The user hash.
+        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
+            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+        chunk_index: The chunk index, starting from 0.
+        total_chunks: The total number of chunks.
+    """
+    # Add the upload id to the cleanup list.
+    upload_ids_to_cleanup[(upload_id,
+                           user_hash)] = (datetime.datetime.now() +
+                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
+    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.match(
+            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
+        raise ValueError(
+            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+
+    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    missing_chunks = await _receive_and_assemble_chunks(
+        base_dir=base_dir,
+        zip_name=upload_id,
+        request=request,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks)
+    if missing_chunks is not None:
+        return missing_chunks
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
+
+
+@app.get('/upload_v2/blob')
+async def check_blob_exists(request: fastapi.Request, user_hash: str,
+                            blob_id: str) -> Dict[str, bool]:
+    """Check if a file mount blob already exists."""
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid blob_id: {blob_id}')
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+                'file_mounts' / 'blobs' / blob_id)
+    if blob_dir.is_dir():
+        # Refresh mtime to claim a longer lifetime of the blob cache
+        os.utime(blob_dir)
+        return {'exists': True}
+    return {'exists': False}
+
+
+@app.post('/upload_v2')
+async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
+                      chunk_index: int,
+                      total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Upload a file mount blob (chunked).
+
+    Unlike /upload, this endpoint receives chunks, assembles and extracts
+    into a staging directory, then atomically renames to a shared extraction
+    directory (blobs/{upload_id}/) so all requests can reuse it.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
+    # Here we still isolate the blobs between users, as the upload_id is
+    # provided by the client and we want to be careful about cross-user
+    # blob sharing.
+    mount_dir = await _prepare_client_mount_dir(user_hash, request)
+    blobs_dir = mount_dir / 'blobs'
+    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
+    target_dir = blobs_dir / upload_id
+
+    if target_dir.exists():
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.COMPLETED.value)
+
+    # Per-blob filelock to prevent concurrent uploads of the same blob.
+    locks_dir = blobs_dir / '.locks'
+    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
+    lock = filelock.AsyncFileLock(
+        lock_file=str(locks_dir / f'{upload_id}.lock'),
+        executor=executor.get_request_thread_executor())
+
+    async with lock:
+        # Re-check after acquiring the lock: another upload may have
+        # completed while we were waiting.
+        if target_dir.exists():
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.COMPLETED.value)
+
+        # Receive chunks, assemble, and extract into staging dir.
+        staging_dir = blobs_dir / '.staging' / upload_id
+        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                    zip_name='staging',
+                                                    request=request,
+                                                    chunk_index=chunk_index,
+                                                    total_chunks=total_chunks)
+        if result is not None:
+            return result
+        # Atomic rename of the extracted staging dir to the final
+        # directory (same filesystem).
+        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -1962,8 +2224,14 @@ async def stream(
         html_dir = pathlib.Path(__file__).parent / 'html'
         with open(html_dir / 'log.html', 'r', encoding='utf-8') as file:
             html_content = file.read()
+        html_content = html_content.replace('{stream_url}', str(stream_url))
+
+        nonce = csp_utils.generate_nonce()
+        request.state.csp_nonce = nonce
+        html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
         return fastapi.responses.HTMLResponse(
-            html_content.replace('{stream_url}', str(stream_url)),
+            html_content,
             headers={
                 'Cache-Control': 'no-cache, no-transform',
                 'X-Accel-Buffering': 'no'
@@ -2085,6 +2353,10 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                exclude_request_names=[
+                    server_constants.REQUEST_NAME_PREFIX + d.value
+                    for d in daemons.HIDDEN_REQUEST_NAMES
+                ],
                 limit=limit,
                 fields=fields,
                 sort=True,
@@ -2214,14 +2486,27 @@ async def _get_cluster_and_validate(
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
     # Run core.status in another thread to avoid blocking the event loop.
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
     # It is ok for now, as users with limited access will not get the ssh config
     # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
+            thread_pool_executor,
+            core.status,
+            cluster_name,
+            all_users=True,
+            summary_response=True)
+
+    if not cluster_records:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Cluster {cluster_name} not found')
     cluster_record = cluster_records[0]
+
     if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
                                         status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):
@@ -2707,49 +2992,132 @@ async def complete_api_request(incomplete: str,) -> List[str]:
     return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
+def _load_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:
+    """Load dynamic route patterns from the Next.js routes manifest.
+
+    Returns a list of ``(compiled_regex, page_path)`` tuples parsed from the
+    ``routes-manifest.json`` file generated by ``next build``.  The manifest is
+    read once and cached for the lifetime of the process.
+    """
+    manifest_path = os.path.join(server_constants.DASHBOARD_DIR,
+                                 'routes-manifest.json')
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+        return [(re.compile(r['regex']), r['page'])
+                for r in manifest.get('dynamicRoutes', [])]
+    except (OSError, json.JSONDecodeError, KeyError) as e:
+        logger.warning(f'Failed to load routes manifest: {e}')
+        return []
+
+
+# Cached dynamic routes loaded from the Next.js routes manifest.
+_DYNAMIC_ROUTES: Optional[List[Tuple['re.Pattern[str]', str]]] = None
+
+
+def _get_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:
+    """Return the cached dynamic routes, loading them on first call."""
+    global _DYNAMIC_ROUTES
+    if _DYNAMIC_ROUTES is None:
+        _DYNAMIC_ROUTES = _load_dynamic_routes()
+    return _DYNAMIC_ROUTES
+
+
+def _resolve_dynamic_route(dashboard_dir: str, path: str) -> Optional[str]:
+    """Resolve a URL path to a Next.js dynamic-route HTML file.
+
+    Uses the ``routes-manifest.json`` generated by ``next build`` to match
+    the *path* against pre-compiled dynamic route regexes.  The manifest
+    already orders routes from most-specific to least-specific (catch-all
+    routes come last), so the first match wins.
+
+    Args:
+        dashboard_dir: Absolute path to the dashboard ``out/`` directory.
+        path: URL path without leading slash,
+            e.g. ``clusters/my-cluster``.
+
+    Returns:
+        Absolute path to the matching HTML file, or ``None``.
+    """
+    for pattern, page in _get_dynamic_routes():
+        if pattern.match('/' + path):
+            html_file = page.lstrip('/') + '.html'
+            html_path = os.path.join(dashboard_dir, html_file)
+            if os.path.isfile(html_path):
+                return html_path
+    return None
+
+
+def _serve_html_with_nonce(
+    request: fastapi.Request,
+    file_path: str,
+) -> fastapi.responses.HTMLResponse:
+    """Read an HTML file, inject a CSP nonce, and return as HTMLResponse.
+
+    The nonce is also stored in ``request.state.csp_nonce`` so that
+    :class:`SecurityHeadersMiddleware` can reference it in the CSP header.
+    """
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    content = csp_utils.inject_nonce_into_html(content, nonce)
+    return fastapi.responses.HTMLResponse(content=content)
+
+
 @app.get('/dashboard/{full_path:path}')
-async def serve_dashboard(full_path: str):
+async def serve_dashboard(request: fastapi.Request, full_path: str):
     """Serves the Next.js dashboard application.
 
     Args:
+        request: The incoming HTTP request (used to attach the CSP nonce).
         full_path: The path requested by the client.
         e.g. /clusters, /jobs
 
     Returns:
-        FileResponse for static files or index.html for client-side routing.
+        FileResponse for static files, or nonce-injected HTMLResponse for
+        HTML pages.
 
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # Reject path traversal attempts before any filesystem access.
+    safe_full_path = full_path.lstrip('/')
+    if '..' in safe_full_path.split('/'):
+        raise fastapi.HTTPException(status_code=400, detail='Invalid path')
+
+    # Try to serve the static file directly e.g. /skypilot.svg,
     # /favicon.ico, and /_next/, etc.
-    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
+    file_path = os.path.join(server_constants.DASHBOARD_DIR, safe_full_path)
     if os.path.isfile(file_path):
+        if file_path.endswith('.html'):
+            return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
-    # Serve plugin catch-all page for any /plugins/* paths so client-side
-    # routing can bootstrap correctly.
-    if full_path == 'plugins' or full_path.startswith('plugins/'):
-        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
-                                       'plugins', '[...slug].html')
-        if os.path.isfile(plugin_catchall):
-            return fastapi.responses.FileResponse(plugin_catchall)
+    # Try serving a pre-rendered HTML page for the path.
+    # e.g. /clusters -> clusters.html, /jobs -> jobs.html
+    html_path = os.path.join(server_constants.DASHBOARD_DIR,
+                             f'{safe_full_path}.html')
+    if os.path.isfile(html_path):
+        return _serve_html_with_nonce(request, html_path)
 
-    # Serve recipe detail page for any /recipes/* paths (dynamic route)
-    if full_path.startswith('recipes/') and full_path != 'recipes/':
-        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
-                                   '[recipe].html')
-        if os.path.isfile(recipe_page):
-            return fastapi.responses.FileResponse(recipe_page)
+    # Resolve Next.js dynamic routes using the routes manifest.
+    # Handles patterns like:
+    #   /clusters/my-cluster  -> clusters/[cluster].html
+    #   /jobs/123/456         -> jobs/[job]/[task].html
+    #   /plugins/foo/bar      -> plugins/[...slug].html
+    if safe_full_path:
+        resolved = _resolve_dynamic_route(server_constants.DASHBOARD_DIR,
+                                          safe_full_path)
+        if resolved is not None:
+            return _serve_html_with_nonce(request, resolved)
 
-    # Serve index.html for client-side routing
-    # e.g. /clusters, /jobs
+    # Serve index.html as a last resort.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
-        with open(index_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        return fastapi.responses.HTMLResponse(content=content)
+        return _serve_html_with_nonce(request, index_path)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
@@ -2828,19 +3196,6 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    # Maybe touch the signal file on API server startup. Do it again here even
-    # if we already touched it in the sky/server/common.py::_start_api_server.
-    # This is because the sky/server/common.py::_start_api_server function call
-    # is running outside the skypilot API server process tree. The process tree
-    # starts within that function (see the `subprocess.Popen` call in
-    # sky/server/common.py::_start_api_server). When pg is used, the
-    # _start_api_server function will not load the config file from db, which
-    # will ignore the consolidation mode config. Here, inside the process tree,
-    # we already reload the config as a server (with env var _start_api_server),
-    # so we will respect the consolidation mode config.
-    # Refers to #7717 for more details.
-    managed_job_utils.is_consolidation_mode(on_api_restart=True)
-
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -2855,6 +3210,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Set up consolidation mode signal file. Needs global user state DB access
+    # to check for existing controller clusters. Placed after user hash restore
+    # to avoid accidentally using the wrong server hash.
+    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Pre-load plugin RBAC rules before initializing permission service.
     # This ensures plugin RBAC rules are available when policies are created.
     logger.info('Pre-loading plugin RBAC rules')
@@ -2890,6 +3249,7 @@ if __name__ == '__main__':
     try:
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics.maybe_register_managed_jobs_collector()
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))
@@ -2901,6 +3261,10 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 managed_job_state.job_event_retention_daemon()))
+        # Unreferenced file mounts cleanup is based on database so should
+        # be a singleton task.
+        global_tasks.append(
+            background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

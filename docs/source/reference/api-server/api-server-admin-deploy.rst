@@ -1160,6 +1160,30 @@ Following tabs describe how to configure credentials for different clouds on the
                   kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.coreweave/cw.config
                   kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.coreweave/cw.credentials
 
+    .. tab-item:: VastData
+        :sync: vastdata-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`VastData Object Storage installation <vastdata-installation>` to authenticate with VastData Object Storage.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic vastdata-credentials \
+              --namespace $NAMESPACE \
+              --from-file=vastdata.config=$HOME/.vastdata/vastdata.config \
+              --from-file=vastdata.credentials=$HOME/.vastdata/vastdata.credentials
+
+        When installing or upgrading the Helm chart, enable VastData credentials by setting ``vastdataCredentials.enabled=true``:
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set vastdataCredentials.enabled=true
+
     .. tab-item:: DigitalOcean
         :sync: digitalocean-creds-tab
 
@@ -1443,7 +1467,7 @@ To enable debug logging for all requests on server side, set
       --set-string 'apiService.extraEnvs[0].value=true'
 
 
-Debug level logs for each request are saved to ``~/sky_logs/request_debug/<request_id>.log`` on the API server.
+Debug level logs for each request are saved to ``~/.sky/api_server/request_debug_logs/<request_id>.log`` on the API server.
 Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server

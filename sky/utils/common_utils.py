@@ -14,6 +14,7 @@ import os
 import platform
 import random
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -36,11 +37,14 @@ from sky.utils import ux_utils
 from sky.utils import validator
 
 if typing.TYPE_CHECKING:
+    import webbrowser
+
     import jinja2
     import psutil
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
+    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -218,6 +222,36 @@ def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
                 f'Recipe name "{recipe_name}" is invalid; '
                 'ensure it is fully matched by regex (e.g., '
                 'only contains letters, numbers, and dashes).')
+
+
+def check_workspace_name_is_valid(workspace_name: Optional[str]) -> None:
+    """Errors out on invalid workspace names.
+
+    Workspace names must:
+    - Start with a lowercase letter
+    - Contain only lowercase letters, numbers, dashes, and underscores
+    - End with a lowercase letter or number
+    - Be at most constants.WORKSPACE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidWorkspaceNameError: If the workspace name is invalid.
+    """
+    if workspace_name is None:
+        return
+    if len(workspace_name) > constants.WORKSPACE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is too long; '
+                f'maximum length is {constants.WORKSPACE_NAME_MAX_LENGTH} '
+                f'characters, got {len(workspace_name)}')
+    valid_regex = constants.WORKSPACE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, workspace_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is invalid; '
+                'ensure it starts with a lowercase letter, ends with '
+                'a lowercase letter or number, and contains only '
+                'lowercase letters, numbers, dashes, and underscores.')
 
 
 def make_cluster_name_on_cloud(display_name: str,
@@ -448,7 +482,7 @@ def get_pretty_entrypoint_cmd() -> str:
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
 
-    return ' '.join(argv)
+    return shlex.join(argv)
 
 
 def read_last_n_lines(file_path: str,
@@ -755,6 +789,43 @@ def remove_file_if_exists(path: Optional[str]):
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
     return 'microsoft' in platform.uname().release.lower()
+
+
+def open_browser(url: str) -> bool:
+    """Open a URL in the default browser, with WSL support.
+
+    On WSL, Python's webbrowser module tries xdg-open which fails because
+    there are no GUI browsers in the Linux environment. This function detects
+    WSL and uses Windows-side browser opening instead.
+
+    Returns:
+        True if the browser was likely opened successfully, False otherwise.
+    """
+    if is_wsl():
+        # On WSL, use Windows-side browser opening.
+        # Try wslview (from wslu package) first, then powershell.exe.
+        for cmd in [
+            ['wslview', url],
+            ['powershell.exe', '/c', 'start', url],
+            ['cmd.exe', '/c', 'start', url],
+        ]:
+            try:
+                logger.debug(f'trying to open browser via {cmd}')
+                result = subprocess.run(cmd,
+                                        capture_output=True,
+                                        timeout=10,
+                                        check=False)
+                if result.returncode == 0:
+                    return True
+            except FileNotFoundError:
+                logger.debug(f'{cmd[0]} failed', exc_info=True)
+                continue
+            except Exception:  # pylint: disable=broad-except
+                logger.debug('failed', exc_info=True)
+                continue
+        return False
+
+    return webbrowser.open(url)
 
 
 def find_free_port(start_port: int) -> int:

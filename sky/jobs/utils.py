@@ -45,6 +45,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
@@ -107,13 +108,6 @@ _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 # Content written to the jobs cancel signal file.
 _JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
 
-# After enabling consolidation mode, we need to restart the API server to get
-# the jobs refresh deamon and correct number of executors. We use this file to
-# indicate that the API server has been restarted after enabling consolidation
-# mode.
-_JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
-    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
-
 # The response fields for managed jobs that require cluster handle
 _CLUSTER_HANDLE_FIELDS = [
     'cluster_resources',
@@ -125,6 +119,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
+    # Network endpoint information (extracted from cluster handle)
+    'internal_external_ips',
+    'internal_services',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -232,47 +229,95 @@ def _validate_consolidation_mode_config(
                     f'lose the job history.{colorama.Style.RESET_ALL}')
 
 
+def setup_consolidation_mode_on_startup(deploy: bool) -> None:
+    """Set up consolidation mode signal file on API server startup.
+
+    Must be called AFTER global_user_state DB is initialized and
+    server user hash is restored, so we can query for existing controller
+    clusters.
+
+    For explicit config (True/False): touches or removes signal file.
+    For unset config (None):
+      - in local mode (deploy=False): default to disabled
+      - in deploy mode: default to enabled if no existing controller clusters
+        found in DB, otherwise disabled (to continue using existing controller)
+    """
+    config_value = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+    signal_file = pathlib.Path(
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+
+    if config_value is not None:
+        assert isinstance(config_value, bool), config_value
+        enabled = config_value
+    else:
+        # config_value is None — not explicitly set
+        if deploy:
+            # Deploy mode, config not set: auto-enable unless controllers exist
+            existing = global_user_state.get_cluster_names_start_with(
+                common_lib.JOB_CONTROLLER_PREFIX)
+            if existing:
+                logger.info(
+                    'Found existing jobs controller cluster(s): '
+                    f'{existing}. Not auto-enabling consolidation mode.')
+                enabled = False
+            else:
+                logger.info('Auto-enabling jobs consolidation mode for deploy '
+                            'mode server.')
+                enabled = True
+        else:
+            # Local API server: don't auto-enable
+            enabled = False
+
+    _validate_consolidation_mode_config(enabled)
+
+    if enabled:
+        signal_file.touch()
+    elif signal_file.exists():
+        signal_file.unlink()
+
+
 # Whether to use consolidation mode or not. When this is enabled, the managed
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=2)
-def is_consolidation_mode(on_api_restart: bool = False) -> bool:
+# The signal file is the source of truth, managed by
+# setup_consolidation_mode_on_startup() at server start. Config changes
+# (enabling or disabling) require a server restart to take effect.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
-    config_consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
     signal_file = pathlib.Path(
-        _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
-
-    if on_api_restart:
-        if config_consolidation_mode:
-            signal_file.touch()
-    else:
-        restart_signal_file_exists = signal_file.exists()
-        if not restart_signal_file_exists:
-            if config_consolidation_mode:
-                logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
-                               'managed jobs is enabled in the server config, '
-                               'but the API server has not been restarted yet. '
-                               'Please restart the API server to enable it.'
-                               f'{colorama.Style.RESET_ALL}')
-                return False
-        elif not config_consolidation_mode:
-            # Cleanup the signal file if the consolidation mode is disabled in
-            # the config. This allow the user to disable the consolidation mode
-            # without restarting the API server.
-            signal_file.unlink()
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+    effective = signal_file.exists()
 
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(config_consolidation_mode)
-    return config_consolidation_mode
+        # Warn if explicit config disagrees with actual state — the admin
+        # needs to restart the server for the config change to take effect.
+        config_value = skypilot_config.get_nested(
+            ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+        if config_value is not None and config_value != effective:
+            expected = 'enabled' if config_value else 'disabled'
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
+                f'is {expected} in the server config, but the API server has '
+                'not been restarted yet. Please restart the API server to '
+                f'apply the change.{colorama.Style.RESET_ALL}')
+        # Validation may print a warning. Run validation against the intended
+        # (config) value to print warnings that should be addressed before the
+        # server is restarted.
+        if config_value is not None:
+            assert isinstance(config_value, bool), config_value
+            _validate_consolidation_mode_config(config_value)
+
+    return effective
 
 
 def ha_recovery_for_consolidation_mode() -> None:
@@ -532,6 +577,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
+            cluster_name: Optional[str] = None
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -539,6 +585,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             else:
                 cluster_name, _ = (
                     managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is None:
+                continue
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -1189,19 +1237,21 @@ def stream_logs_by_id(
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
+        latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
         # If a task filter was specified, use the filtered task_id instead of
         # the latest task_id. This allows viewing logs for a specific task in
         # a JobGroup with parallel execution.
         if filtered_task_id is not None:
-            task_id = filtered_task_id
+            latest_task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
-        assert managed_job_status is not None, (job_id, task_id,
+        assert managed_job_status is not None, (job_id, latest_task_id,
                                                 managed_job_status)
+        assert latest_task_id is not None, (job_id, latest_task_id)
+        task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
             handle = None
@@ -1238,13 +1288,15 @@ def stream_logs_by_id(
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
+                latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
                 if filtered_task_id is not None:
-                    task_id = filtered_task_id
-                assert managed_job_status is not None, (job_id, task_id,
+                    latest_task_id = filtered_task_id
+                assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
+                assert latest_task_id is not None, (job_id, latest_task_id)
+                task_id = latest_task_id
                 continue
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
@@ -1331,13 +1383,16 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
+                        latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if original_task_id != task_id:
+                        if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    assert managed_job_status is not None, (job_id, task_id,
+                    assert managed_job_status is not None, (job_id,
+                                                            latest_task_id,
                                                             managed_job_status)
+                    assert latest_task_id is not None, (job_id, latest_task_id)
+                    task_id = latest_task_id
                     continue
 
                 # The job can be cancelled by the user or the controller (when
@@ -1694,6 +1749,18 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+    # Network endpoint information
+    job['internal_external_ips'] = handle.stable_internal_external_ips
+    # Extract internal_svc entries if available
+    internal_services = None
+    if handle.cached_cluster_info is not None:
+        internal_services = {}
+        for instance_id, instance_infos in (
+                handle.cached_cluster_info.instances.items()):
+            for info in instance_infos:
+                if info.internal_svc is not None:
+                    internal_services[instance_id] = info.internal_svc
+    job['internal_services'] = internal_services
 
 
 def get_managed_job_queue(
@@ -1831,6 +1898,8 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
+                job['internal_services'] = None
+                job['internal_external_ips'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 
@@ -2433,6 +2502,22 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Convert internal_external_ips from list of dicts to list of tuples
+    # MessageToDict converts IpPair messages to dicts like
+    # {"internal_ip": "...", "external_ip": "..."}, but ManagedJobRecord
+    # expects a list of (internal_ip, external_ip) tuples.
+    if 'internal_external_ips' in job_dict:
+        ip_pairs = job_dict['internal_external_ips']
+        if ip_pairs:
+            job_dict['internal_external_ips'] = [
+                (ip_pair.get('internal_ip', ''), ip_pair.get('external_ip', ''))
+                for ip_pair in ip_pairs
+            ]
+        else:
+            job_dict['internal_external_ips'] = None
+    # Convert empty internal_services dict to None for consistency
+    if 'internal_services' in job_dict and not job_dict['internal_services']:
+        job_dict['internal_services'] = None
     return job_dict
 
 

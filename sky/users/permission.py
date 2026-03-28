@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 import threading
-from typing import Generator, List, Optional
+from typing import Generator, List, Optional, Set
 
 import casbin
 import filelock
@@ -37,7 +37,7 @@ class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        self.enforcer: Optional[casbin.Enforcer] = None
+        self.enforcer: Optional[casbin.SyncedEnforcer] = None
         self._lock = threading.Lock()
 
     def initialize(self):
@@ -59,7 +59,13 @@ class PermissionService:
                     engine, db_class=sqlalchemy_adapter.CasbinRule)
                 model_path = os.path.join(os.path.dirname(__file__),
                                           'model.conf')
-                enforcer = casbin.Enforcer(model_path, adapter)
+                # Use SyncedEnforcer for thread safety. It uses a
+                # read-write lock internally: concurrent reads (enforce,
+                # get_roles_for_user) take a shared read lock, while
+                # writes (load_policy, add_policy) take an exclusive
+                # write lock. This prevents the RuntimeError from
+                # concurrent iteration/mutation of RoleManager.all_roles.
+                enforcer = casbin.SyncedEnforcer(model_path, adapter)
                 self.enforcer = enforcer
                 # Only set the enforcer instance once the enforcer
                 # is successfully initialized, if we change it and then fail
@@ -73,7 +79,7 @@ class PermissionService:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
 
-    def _ensure_enforcer(self) -> casbin.Enforcer:
+    def _ensure_enforcer(self) -> casbin.SyncedEnforcer:
         """Ensure enforcer is initialized and return it."""
         self._lazy_initialize()
         assert self.enforcer is not None, (
@@ -237,9 +243,7 @@ class PermissionService:
     def delete_user(self, user_id: str) -> None:
         """Delete user role relationship."""
         with _policy_lock():
-            # Get current roles
             self._load_policy_no_lock()
-            # Avoid calling get_user_roles, as it will require the lock.
             enforcer = self._ensure_enforcer()
             current_roles = enforcer.get_roles_for_user(user_id)
             if not current_roles:
@@ -251,9 +255,7 @@ class PermissionService:
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
         with _policy_lock():
-            # Get current roles
             self._load_policy_no_lock()
-            # Avoid calling get_user_roles, as it will require the lock.
             enforcer = self._ensure_enforcer()
             current_roles = enforcer.get_roles_for_user(user_id)
             if not current_roles:
@@ -293,6 +295,34 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         return enforcer.get_users_for_role(role)
 
+    def get_accessible_workspace_names(self, user_id: str,
+                                       workspace_names: Set[str]) -> Set[str]:
+        """Return workspace names the user can access (batch, O(1) enforcer).
+
+        Use instead of check_workspace_permission in a loop when filtering
+        many workspaces, to avoid N enforcer calls.
+        """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            return workspace_names
+        roles = self.get_user_roles(user_id)
+        if rbac.RoleName.ADMIN.value in roles:
+            return workspace_names
+        enforcer = self._ensure_enforcer()
+        # Scan policy rules directly for workspace access.
+        # NOTE: this only matches direct (user_id, workspace, '*') and wildcard
+        # ('*', workspace, '*') policies.  It does NOT traverse casbin role
+        # hierarchies (the g() function in the model matcher).  If role-based
+        # workspace grants are ever added, this method must be updated to use
+        # enforcer.enforce() per workspace or expand roles via
+        # enforcer.get_implicit_permissions_for_user().
+        accessible = set()
+        for rule in enforcer.get_policy():
+            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
+                                                      rule[0] == '*'):
+                if rule[1] in workspace_names:
+                    accessible.add(rule[1])
+        return accessible
+
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission."""
@@ -315,9 +345,9 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    # Right now, not a lot of users are using multiple workspaces,
-    # so 5 should be more than enough.
-    @annotations.lru_cache(scope='request', maxsize=5)
+    # Allow many cached (user, workspace) pairs so hot paths with many
+    # workspaces stay fast when batch get_accessible_workspace_names isn't used.
+    @annotations.lru_cache(scope='request', maxsize=256)
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.

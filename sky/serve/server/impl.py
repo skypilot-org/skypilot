@@ -380,9 +380,8 @@ def up(
                 backend.cancel_jobs(controller_handle, [controller_job_id])
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        'Max number of services reached. '
-                        'To spin up more services, please '
-                        'tear down some existing services.') from None
+                        controller_utils.get_max_services_error_message(
+                            pool)) from None
             else:
                 # Possible cases:
                 # (1) name conflict;

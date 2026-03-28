@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 
@@ -130,6 +130,8 @@ class StatusResponse(ResponseBaseModel):
     labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
     node_names: Optional[str] = None
+    priority: Optional[int] = None
+    priority_class: Optional[str] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -203,6 +205,7 @@ class ManagedJobRecord(ResponseBaseModel):
     last_recovered_at: Optional[float] = None
     run_timestamp: Optional[str] = None
     priority: Optional[int] = None
+    priority_class: Optional[str] = None
     original_user_yaml_path: Optional[str] = None
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
@@ -222,6 +225,12 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Network endpoint information (extracted from cluster handle)
+    # List of (internal_ip, external_ip) tuples for all nodes
+    internal_external_ips: Optional[List[Tuple[str, str]]] = None
+    # K8s DNS entries mapping Pod name to internal_svc
+    # Only populated for Kubernetes clusters
+    internal_services: Optional[Dict[str, Optional[str]]] = None
 
 
 class VolumeRecord(ResponseBaseModel):
@@ -248,3 +257,5 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # YAML configuration used to create the volume
+    creation_yaml: Optional[str] = None
