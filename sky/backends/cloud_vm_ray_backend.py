@@ -1225,7 +1225,8 @@ class RetryingVmProvisioner(object):
                             cluster_yaml=handle.cluster_yaml,
                             prev_cluster_ever_up=prev_cluster_ever_up,
                             log_dir=self.log_dir,
-                            ports_to_open_on_launch=ports_to_open_on_launch)
+                            ports_to_open_on_launch=ports_to_open_on_launch,
+                            warm_nodes=warm_nodes)
                         # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                         # in 'provision_utils.post_provision_runtime_setup()' in the
                         # caller.
@@ -5776,7 +5777,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
-                prev_config_hash=prev_config_hash)
+                prev_config_hash=prev_config_hash,
+                warm_nodes=task.warm_nodes)
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.

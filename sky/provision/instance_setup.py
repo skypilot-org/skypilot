@@ -420,11 +420,11 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     worker_instances = cluster_info.get_worker_instances()
 
     # Filter out warm pods — they should NOT start Ray workers.
-    # Warm pods are identified by having 'warm' in the instance_id (pod name).
-    # They are pre-provisioned spares that idle until activated during recovery.
+    # Warm pods are identified by the skypilot.co/role=warm label (not
+    # by name), so promoted warm pods pass this filter correctly.
     active_indices = [
         i for i, inst in enumerate(worker_instances)
-        if '-warm' not in inst.instance_id
+        if inst.tags.get('skypilot.co/role') != 'warm'
     ]
     if len(active_indices) < len(worker_instances):
         warm_count = len(worker_instances) - len(active_indices)

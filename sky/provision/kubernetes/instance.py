@@ -4,6 +4,7 @@ import datetime
 import json
 import re
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -1083,6 +1084,21 @@ def _wait_for_deployment_pod(context,
         'ready.')
 
 
+def _promote_warm_to_active(pod_name: str, namespace: str,
+                            context: Optional[str]) -> None:
+    """Promote a warm pod to active by removing the warm role label.
+
+    Uses a strategic merge patch with the label set to None, which
+    tells the K8s API to remove the label.
+    """
+    kubernetes.core_api(context).patch_namespaced_pod(
+        pod_name,
+        namespace,
+        body={'metadata': {'labels': {'skypilot.co/role': None}}},
+        _request_timeout=kubernetes.API_TIMEOUT,
+    )
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -1189,11 +1205,13 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{running_pod_statuses}')
 
-    # Separate running pods into active and warm categories.
+    # Separate running pods into active and warm worker categories.
+    # Exclude head pod from both — it's tracked separately.
     active_running_pods = {
         name: pod
         for name, pod in running_pods.items()
-        if pod.metadata.labels.get('skypilot.co/role') != 'warm'
+        if (pod.metadata.labels.get('skypilot.co/role') != 'warm' and
+            not _is_head(pod))
     }
     warm_running_pods = {
         name: pod
@@ -1210,6 +1228,27 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
     warm_to_start_count = config.warm_nodes - len(warm_running_pods)
+
+    # --- Warm-to-active promotion ---
+    # If active pods are missing and warm pods are ready, promote warm
+    # pods to active by removing the warm role label. This avoids
+    # creating new pods from scratch (saving 30+ min of setup time).
+    promoted_pods: List[str] = []
+    if to_start_count > 0 and warm_running_pods:
+        ready_warm = [
+            (name, pod) for name, pod in warm_running_pods.items()
+            if pod.status.phase == 'Running'
+        ]
+        to_promote = ready_warm[:to_start_count]
+        for pod_name, pod in to_promote:
+            _promote_warm_to_active(pod_name, namespace, context)
+            promoted_pods.append(pod_name)
+            logger.info(f'Promoted warm pod {pod_name} to active.')
+        # Adjust counts after promotion.
+        to_start_count -= len(promoted_pods)
+        for name in promoted_pods:
+            active_running_pods[name] = warm_running_pods.pop(name)
+        warm_to_start_count = config.warm_nodes - len(warm_running_pods)
 
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
@@ -1243,13 +1282,22 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}, warm={warm_to_start_count}).')
 
+    # Thread-safe counters for need-based role assignment.
+    # After promotion, the "hole" left by a dead active pod may need to
+    # be filled as a warm pod (not active), so we cannot use a fixed
+    # index-to-role mapping.
+    _lock = threading.Lock()
+    _active_remaining = to_start_count
+    _warm_remaining = warm_to_start_count
+
     def _create_resource_thread(i: int):
         """Create a single pod. Index mapping:
         - i == 0: head pod
-        - 1 <= i < config.count: active worker pods
-        - config.count <= i < config.count + config.warm_nodes: warm pods
+        - 1 <= i < config.count + config.warm_nodes: worker pods
+        Role (active vs warm) is assigned based on current need, not
+        index range, so that replenishment slots are filled correctly.
         """
-        is_warm = i >= config.count
+        nonlocal _active_remaining, _warm_remaining
         pod_spec_copy = copy.deepcopy(pod_spec)
         # 0 is for head pod, while 1+ is for worker pods.
         if i == 0:
@@ -1264,50 +1312,60 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             else:
                 # If head pod already exists, we skip creating it.
                 return
-        elif is_warm:
-            # Warm spare pods — same spec as workers but with warm role label.
-            warm_index = i - config.count
-            pod_spec_copy['metadata']['labels'].update(
-                constants.WORKER_NODE_TAGS)
-            pod_name = f'{cluster_name_on_cloud}-warm{warm_index}'
-            if pod_name in running_pods:
-                return
-            pod_spec_copy['metadata']['name'] = pod_name
-            pod_spec_copy['metadata']['labels']['component'] = pod_name
-            pod_spec_copy['metadata']['labels']['skypilot.co/role'] = 'warm'
-            # Add env var so setup scripts can detect warm node.
-            for container in pod_spec_copy['spec']['containers']:
-                env_list = container.setdefault('env', [])
-                env_list.append({
-                    'name': 'SKYPILOT_WARM_NODE',
-                    'value': '1',
-                })
         else:
-            # Active worker pods
-            pod_spec_copy['metadata']['labels'].update(
-                constants.WORKER_NODE_TAGS)
+            # All workers (active and warm) use the same naming scheme.
             pod_name = f'{cluster_name_on_cloud}-worker{i}'
             if pod_name in running_pods:
-                # If the pod is already running, we skip creating it.
+                # Pod already exists, skip creating it.
                 return
+
+            # Decide role based on current need (thread-safe).
+            is_warm = False
+            with _lock:
+                if _active_remaining > 0:
+                    _active_remaining -= 1
+                elif _warm_remaining > 0:
+                    _warm_remaining -= 1
+                    is_warm = True
+                else:
+                    return  # No more pods needed.
+
+            pod_spec_copy['metadata']['labels'].update(
+                constants.WORKER_NODE_TAGS)
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
-            # If there are already running pods, this is a replacement
-            # pod for node replenishment. Defer ray start to the
-            # provisioner to avoid a race condition where ray dispatches
-            # tasks to the new worker before the SkyPilot runtime setup
-            # completes on it.
-            if running_pods:
+            if is_warm:
+                # Warm spare pod — same spec as worker but with warm
+                # role label and deferred Ray start.
+                pod_spec_copy['metadata']['labels'][
+                    'skypilot.co/role'] = 'warm'
                 for container in pod_spec_copy['spec']['containers']:
+                    env_list = container.setdefault('env', [])
+                    env_list.append({
+                        'name': 'SKYPILOT_WARM_NODE',
+                        'value': '1',
+                    })
                     if container['name'] == 'ray-node':
-                        env_list = container.get('env', [])
                         env_list.append({
                             'name': 'SKYPILOT_DEFER_RAY_START',
-                            'value': '1'
+                            'value': '1',
                         })
-                        container['env'] = env_list
-                        break
+            else:
+                # Active worker pod. Defer Ray start if this is a
+                # replacement pod for node replenishment to avoid a
+                # race where Ray dispatches tasks before SkyPilot
+                # runtime setup completes.
+                if running_pods:
+                    for container in pod_spec_copy['spec']['containers']:
+                        if container['name'] == 'ray-node':
+                            env_list = container.get('env', [])
+                            env_list.append({
+                                'name': 'SKYPILOT_DEFER_RAY_START',
+                                'value': '1'
+                            })
+                            container['env'] = env_list
+                            break
 
         # Inject cache volume + volumeMount for the Docker sidecar container.
         if docker_config:
@@ -1460,7 +1518,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             raise exceptions.InconsistentHighAvailabilityError(message)
 
     created_resources = []
-    total_pod_count = config.count + config.warm_nodes
+    # +1 because index 0 is the head pod and workers start at index 1.
+    total_pod_count = config.count + config.warm_nodes + 1
     if to_start_count > 0 or warm_to_start_count > 0:
         # Create pods in parallel.
         # Use `config.count` (+ warm_nodes) instead of `to_start_count` to
@@ -1537,6 +1596,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  f'{[pod.metadata.name for pod in active_pods]}')
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
+    # Include promoted warm pods in created_instance_ids so the
+    # post-provision setup starts Ray on them (they had deferred
+    # Ray start).
+    all_created_ids = list(created_pods.keys()) + promoted_pods
     return common.ProvisionRecord(
         provider_name='kubernetes',
         region=region,
@@ -1544,7 +1607,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         cluster_name=cluster_name_on_cloud,
         head_instance_id=head_pod_name,
         resumed_instance_ids=[],
-        created_instance_ids=list(created_pods.keys()),
+        created_instance_ids=all_created_ids,
     )
 
 
