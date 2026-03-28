@@ -191,22 +191,27 @@ class NvidiaGpuDoctorPlugin(AcceleratorDoctorPlugin):
             parts = [p.strip() for p in line.split(',')]
             if len(parts) < 5:
                 continue
-            sbe_vol, dbe_vol, _, dbe_agg, mode = parts[:5]
+            sbe_vol, dbe_vol, sbe_agg, dbe_agg, mode = parts[:5]
             if mode.lower() in ('disabled', 'n/a', '[n/a]'):
                 continue
             try:
                 dbe_v = int(dbe_vol) if dbe_vol not in ('N/A', '[N/A]') else 0
                 dbe_a = int(dbe_agg) if dbe_agg not in ('N/A', '[N/A]') else 0
                 sbe_v = int(sbe_vol) if sbe_vol not in ('N/A', '[N/A]') else 0
+                sbe_a = int(sbe_agg) if sbe_agg not in ('N/A', '[N/A]') else 0
             except ValueError:
                 continue
             if dbe_v > 0 or dbe_a > 0:
                 failed_gpus.append(f'GPU {idx}: {dbe_v} uncorrected volatile, '
                                    f'{dbe_a} uncorrected aggregate DBEs')
-            elif sbe_v > 0:
+            elif sbe_v > 0 or sbe_a > 0:
+                msg_parts = []
+                if sbe_v > 0:
+                    msg_parts.append(f'{sbe_v} corrected volatile')
+                if sbe_a > 0:
+                    msg_parts.append(f'{sbe_a} corrected aggregate')
                 warned_gpus.append(
-                    f'GPU {idx}: {sbe_v} corrected single-bit errors '
-                    '(volatile)')
+                    f'GPU {idx}: {", ".join(msg_parts)} single-bit errors')
 
         if failed_gpus:
             return CheckResult.fail(

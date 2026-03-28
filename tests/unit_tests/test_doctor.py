@@ -175,11 +175,21 @@ class TestNvidiaGpuChecks:
         result = p._check_ecc_errors()
         assert result.status == CheckStatus.FAIL
 
-    def test_ecc_single_bit_warning(self):
-        smi_out = '3, 0, 10, 0, Enabled\n'
+    def test_ecc_single_bit_warning_volatile(self):
+        # Volatile SBE only
+        smi_out = '3, 0, 0, 0, Enabled\n'
         p = self._plugin({'ecc.errors': (0, smi_out, '')})
         result = p._check_ecc_errors()
         assert result.status == CheckStatus.WARNING
+        assert 'volatile' in result.details
+
+    def test_ecc_single_bit_warning_aggregate(self):
+        # Aggregate SBE only (no volatile)
+        smi_out = '0, 0, 10, 0, Enabled\n'
+        p = self._plugin({'ecc.errors': (0, smi_out, '')})
+        result = p._check_ecc_errors()
+        assert result.status == CheckStatus.WARNING
+        assert 'aggregate' in result.details
 
     def test_ecc_disabled(self):
         smi_out = '0, 0, 0, 0, Disabled\n'

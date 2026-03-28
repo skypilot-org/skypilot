@@ -107,6 +107,7 @@ def _make_remote_runner(
             require_outputs=True,
             stream_logs=False,
             ssh_mode=SshMode.NON_INTERACTIVE,
+            connect_timeout=30,
         )
         return rc, stdout, stderr
 
