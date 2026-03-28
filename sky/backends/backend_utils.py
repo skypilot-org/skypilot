@@ -2069,8 +2069,7 @@ def _query_cluster_status_via_cloud_api(
     # correctly yet.
     ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     if ray_config is None:
-        yaml_str = global_user_state.get_cluster_yaml_str(
-            handle.cluster_yaml)
+        yaml_str = global_user_state.get_cluster_yaml_str(handle.cluster_yaml)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Cluster {cluster_name_in_hint} has an empty or invalid '
