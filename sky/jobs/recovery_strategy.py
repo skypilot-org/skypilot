@@ -62,6 +62,12 @@ class StrategyExecutor:
 
     RETRY_INIT_GAP_SECONDS = 60
 
+    # Subclasses can set True to enable background replenishment
+    # while the job is RUNNING (elastic pool mode). When True, the
+    # controller calls replenish() proactively instead of waiting
+    # for the job to fail.
+    supports_background_replenishment: bool = False
+
     def __init__(
         self,
         cluster_name: Optional[str],
@@ -126,6 +132,17 @@ class StrategyExecutor:
         if config:
             logger.debug('Unused job_recovery config keys for strategy '
                          f'{type(self).__name__}: {list(config.keys())}')
+
+    async def replenish(self) -> None:
+        """Replenish missing nodes without entering recovery.
+
+        Called by the controller when the job is still RUNNING but
+        the node count may be below the desired maximum. Only called
+        when supports_background_replenishment is True.
+
+        Override in subclasses to implement background replenishment.
+        """
+        raise NotImplementedError
 
     @classmethod
     def make(

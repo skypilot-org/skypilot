@@ -390,6 +390,7 @@ class Task:
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
+        self._num_nodes_min = 1
         self.num_nodes = num_nodes  # type: ignore
 
         self.inputs: Optional[str] = None
@@ -952,15 +953,50 @@ class Task:
     def num_nodes(self) -> int:
         return self._num_nodes
 
+    @property
+    def num_nodes_min(self) -> int:
+        """Minimum nodes for the job to stay RUNNING (elastic pool).
+
+        Defaults to num_nodes (exact count required). When set via
+        the "min:max" syntax, allows the job to tolerate node losses
+        down to this threshold before entering RECOVERING.
+        """
+        return self._num_nodes_min
+
     @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
+    def num_nodes(self, num_nodes) -> None:
         if num_nodes is None:
             num_nodes = 1
+        if isinstance(num_nodes, str) and ':' in num_nodes:
+            # Elastic range: "min:max"
+            parts = num_nodes.split(':')
+            if len(parts) != 2:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'num_nodes range must be "min:max". '
+                        f'Got: {num_nodes}')
+            try:
+                min_nodes, max_nodes = int(parts[0]), int(parts[1])
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'num_nodes range must be "min:max" with '
+                        f'integer values. Got: {num_nodes}')
+            if min_nodes < 0 or max_nodes <= 0 or min_nodes > max_nodes:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'num_nodes range invalid: '
+                        f'min={min_nodes}, max={max_nodes}. '
+                        'Need 0 <= min <= max, max > 0.')
+            self._num_nodes = max_nodes
+            self._num_nodes_min = min_nodes
+            return
         if not isinstance(num_nodes, int) or num_nodes <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+        self._num_nodes_min = num_nodes
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -1764,7 +1800,11 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
-        add_if_not_none('num_nodes', self.num_nodes)
+        if self._num_nodes_min != self._num_nodes:
+            add_if_not_none('num_nodes',
+                            f'{self._num_nodes_min}:{self._num_nodes}')
+        else:
+            add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
             add_if_not_none('inputs',

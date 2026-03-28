@@ -562,6 +562,17 @@ class JobController:
             force_transit_to_recovering=force_transit_to_recovering,
         )
 
+    async def _do_replenish(
+            self,
+            executor: 'recovery_strategy.StrategyExecutor') -> None:
+        """Run background replenishment for elastic pool strategies."""
+        try:
+            await executor.replenish()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Background replenishment failed: {e}')
+        finally:
+            self._replenish_in_progress = False
+
     async def _monitor_one_task(
         self,
         task_id: int,
@@ -797,7 +808,16 @@ class JobController:
             else:
                 # Cluster is UP
                 if job_status is not None and not job_status.is_terminal():
-                    # The multi-node job is still running, continue monitoring.
+                    # The multi-node job is still running.
+                    # If the strategy supports background replenishment
+                    # (elastic pool), proactively replenish missing nodes
+                    # while the job stays RUNNING.
+                    if (executor.supports_background_replenishment and
+                            not getattr(self, '_replenish_in_progress',
+                                        False)):
+                        self._replenish_in_progress = True
+                        asyncio.create_task(
+                            self._do_replenish(executor))
                     continue
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or

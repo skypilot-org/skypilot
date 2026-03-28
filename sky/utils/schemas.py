@@ -1001,7 +1001,13 @@ def get_task_schema():
                 'type': 'string',
             },
             'num_nodes': {
-                'type': 'integer',
+                'oneOf': [{
+                    'type': 'integer',
+                    'minimum': 1,
+                }, {
+                    'type': 'string',
+                    'pattern': '^\\d+:\\d+$',
+                }],
             },
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
