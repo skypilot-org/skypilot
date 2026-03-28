@@ -63,11 +63,15 @@ def generate_images():
 
 def ensure_pool(pool_name: str, pool_yaml: str) -> None:
     """Create the pool if it doesn't already exist."""
-    request_id = sky.jobs.pool_status([pool_name])
-    pool_statuses = sky.stream_and_get(request_id)
-    if pool_statuses:
-        print(f'Pool {pool_name} already exists, skipping pool apply.')
-        return
+    try:
+        request_id = sky.jobs.pool_status([pool_name])
+        pool_statuses = sky.stream_and_get(request_id)
+        if pool_statuses:
+            print(f'Pool {pool_name} already exists, skipping pool apply.')
+            return
+    except sky.exceptions.ClusterNotUpError:
+        # No jobs controller running yet — pool definitely doesn't exist.
+        pass
 
     print(f'Pool {pool_name} not found. Creating from {pool_yaml}...')
     task = sky.Task.from_yaml(pool_yaml)
