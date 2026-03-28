@@ -3687,6 +3687,92 @@ def check(infra_list: Tuple[str],
         click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
 
 
+@cli.command(cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('cluster',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_cluster_name))
+@flags.verbose_option(
+    'Show detailed output for each check, including raw command output.')
+@usage_lib.entrypoint
+def doctor(cluster: str, verbose: bool) -> None:
+    """Run accelerator health diagnostics on a cluster.
+
+    Connects to CLUSTER via SSH and runs a suite of hardware and software
+    health checks appropriate for the detected accelerator type:
+
+    .. code-block:: bash
+
+      # NVIDIA GPU checks: driver/CUDA compatibility, ECC errors, NVLink,
+      # PCIe link width, memory utilization, clock throttle, NCCL env.
+      sky doctor my-cluster
+      \b
+      # Show detailed output (raw command output) for each check.
+      sky doctor my-cluster --verbose
+
+    Supported accelerator types:
+
+    - **NVIDIA GPU** — detected via ``nvidia-smi``
+    - **AMD GPU (ROCm)** — detected via ``rocm-smi``
+    - **Google Cloud TPU** — detected via ``/dev/accel0`` or ``tpu-info``
+
+    Additional accelerator backends can be added by subclassing
+    ``sky.utils.doctor.AcceleratorDoctorPlugin``.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Run diagnostics on a specific cluster.
+      sky doctor my-gpu-cluster
+      \b
+      # Show verbose check output.
+      sky doctor my-gpu-cluster -v
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.doctor.runner import run_doctor
+
+    cluster_records = _get_cluster_records_and_set_ssh_config(
+        [cluster],
+        refresh=common.StatusRefreshMode.NONE,
+        verbose=verbose,
+    )
+
+    if not cluster_records:
+        with ux_utils.print_exception_no_traceback():
+            raise click.BadParameter(
+                f'Cluster {cluster!r} not found. '
+                'Run `sky status` to list available clusters.',
+                param_hint='CLUSTER')
+
+    record = cluster_records[0]
+    handle = record['handle']
+    cluster_status = record['status']
+
+    if handle is None or cluster_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise click.ClickException(
+                f'Cluster {cluster!r} exists but has no active handle. '
+                'It may have been stopped or terminated.')
+
+    if cluster_status != status_lib.ClusterStatus.UP:
+        with ux_utils.print_exception_no_traceback():
+            raise click.ClickException(
+                f'Cluster {cluster!r} is not UP (current status: '
+                f'{cluster_status.value}). '
+                'Start the cluster first with `sky start`.')
+
+    if not record['credentials']:
+        with ux_utils.print_exception_no_traceback():
+            raise click.ClickException(
+                f'No SSH credentials available for cluster {cluster!r}.')
+
+    success = run_doctor(record, verbose=verbose)
+    if not success:
+        sys.exit(1)
+
+
 @cli.command()
 @flags.config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
