@@ -301,7 +301,7 @@ def _format_option(param) -> str:
         _ARG_DESCRIPTIONS = {
             'cluster': 'Name of the cluster to diagnose.',
         }
-        description = _ARG_DESCRIPTIONS.get(param.name, None) or param.type.name
+        description = _ARG_DESCRIPTIONS.get(param.name, param.type.name)
         return f'- `{param.human_readable_name}` — {description}'
 
     # It's an Option
