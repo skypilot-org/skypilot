@@ -288,6 +288,10 @@ def _get_single_resources_schema():
                                     },
                                 ],
                             },
+                            'min_nodes': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
                             # Plugin-registered strategy-specific
                             # properties (validated on server side
                             # where plugins are loaded).
@@ -2308,7 +2312,15 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(),
+            'jobs': {
+                **_get_controller_schema(),
+                'properties': {
+                    **_get_controller_schema()['properties'],
+                    'use_v1': {
+                        'type': 'boolean',
+                    },
+                },
+            },
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,

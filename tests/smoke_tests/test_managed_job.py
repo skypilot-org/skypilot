@@ -3084,3 +3084,167 @@ def test_managed_jobs_api_access(generic_cloud: str):
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing elastic training with DYNAMIC_NODE_SET ----------
+_ELASTIC_EXAMPLE = 'examples/managed_jobs/elastic_training/job.yaml'
+_ELASTIC_ENV = smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV
+_ELASTIC_CONFIG = {'jobs': {'use_v1': True}}
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_elastic_training_basic(generic_cloud: str):
+    """Test elastic training job group completes without failures."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'elastic-training-basic',
+        [
+            f'sky jobs launch -n {name} -y -d '
+            f'--env TOTAL_EPOCHS=5 {_ELASTIC_EXAMPLE}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+            f's=$(sky jobs logs -n {name} 0 --no-follow); '
+            f'echo "$s"; echo "$s" | grep "TRAINING COMPLETE"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=_ELASTIC_ENV,
+        config_dict=_ELASTIC_CONFIG,
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_elastic_training_kill_head(generic_cloud: str):
+    """Test recovery after killing the worker head pod (rank 0)."""
+    name = smoke_tests_utils.get_cluster_name()
+    job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                  f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'elastic-training-kill-head',
+        [
+            f'sky jobs launch -n {name} -y -d '
+            f'--env TOTAL_EPOCHS=15 {_ELASTIC_EXAMPLE}',
+            # Wait for workers to be running
+            f'JID=$({job_id_cmd}); '
+            f'for i in $(seq 1 30); do '
+            f'  CNT=$(kubectl get pods '
+            f'    -l skypilot-managed-job-name=workers-$JID '
+            f'    --no-headers 2>/dev/null | grep Running | wc -l); '
+            f'  [ "$CNT" -ge 8 ] && break; sleep 3; done; '
+            f'echo "$CNT workers running"',
+            # Let training start
+            'sleep 30',
+            # Kill rank 0 (head) + rank 2
+            f'JID=$({job_id_cmd}); '
+            f'kubectl delete pod workers-$JID-0 workers-$JID-2 '
+            f'  --force --grace-period=0',
+            # Wait for job to succeed
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+            # Verify recovery happened in logs
+            f's=$(sky jobs logs -n {name} 0 --no-follow); '
+            f'echo "$s"; '
+            f'echo "$s" | grep "Lost active" && '
+            f'echo "$s" | grep "Promoted" && '
+            f'echo "$s" | grep "TRAINING COMPLETE"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=_ELASTIC_ENV,
+        config_dict=_ELASTIC_CONFIG,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_elastic_training_kill_all_active(generic_cloud: str):
+    """Test recovery after killing all 4 active workers."""
+    name = smoke_tests_utils.get_cluster_name()
+    job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                  f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'elastic-training-kill-all-active',
+        [
+            f'sky jobs launch -n {name} -y -d '
+            f'--env TOTAL_EPOCHS=15 {_ELASTIC_EXAMPLE}',
+            f'JID=$({job_id_cmd}); '
+            f'for i in $(seq 1 30); do '
+            f'  CNT=$(kubectl get pods '
+            f'    -l skypilot-managed-job-name=workers-$JID '
+            f'    --no-headers 2>/dev/null | grep Running | wc -l); '
+            f'  [ "$CNT" -ge 8 ] && break; sleep 3; done',
+            'sleep 30',
+            # Kill all 4 initial active workers (ranks 0-3)
+            f'JID=$({job_id_cmd}); '
+            f'kubectl delete pod '
+            f'  workers-$JID-0 workers-$JID-1 '
+            f'  workers-$JID-2 workers-$JID-3 '
+            f'  --force --grace-period=0',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+            f's=$(sky jobs logs -n {name} 0 --no-follow); '
+            f'echo "$s"; '
+            f'echo "$s" | grep "Promoted" && '
+            f'echo "$s" | grep "TRAINING COMPLETE"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=_ELASTIC_ENV,
+        config_dict=_ELASTIC_CONFIG,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_elastic_training_kill_majority(generic_cloud: str):
+    """Test recovery after killing 6 of 8 workers (below min_nodes)."""
+    name = smoke_tests_utils.get_cluster_name()
+    job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                  f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'elastic-training-kill-majority',
+        [
+            f'sky jobs launch -n {name} -y -d '
+            f'--env TOTAL_EPOCHS=15 {_ELASTIC_EXAMPLE}',
+            f'JID=$({job_id_cmd}); '
+            f'for i in $(seq 1 30); do '
+            f'  CNT=$(kubectl get pods '
+            f'    -l skypilot-managed-job-name=workers-$JID '
+            f'    --no-headers 2>/dev/null | grep Running | wc -l); '
+            f'  [ "$CNT" -ge 8 ] && break; sleep 3; done',
+            'sleep 30',
+            # Kill 6 of 8 workers
+            f'JID=$({job_id_cmd}); '
+            f'kubectl delete pod '
+            f'  workers-$JID-0 workers-$JID-1 workers-$JID-2 '
+            f'  workers-$JID-3 workers-$JID-4 workers-$JID-5 '
+            f'  --force --grace-period=0',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f's=$(sky jobs logs -n {name} 0 --no-follow); '
+            f'echo "$s"; '
+            f'echo "$s" | grep "TRAINING COMPLETE"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=_ELASTIC_ENV,
+        config_dict=_ELASTIC_CONFIG,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

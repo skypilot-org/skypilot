@@ -1,0 +1,143 @@
+# Elastic Training with Dynamic Worker Pool
+#
+# This example shows a single managed job that acts as both controller
+# and worker fleet. The rank-0 node acts as the controller, discovering
+# and coordinating workers via the sidecar endpoint.
+#
+# Architecture:
+#   - Node 0 (controller): discovers workers via sidecar, assigns
+#     active/standby roles, detects failures, swaps in replacements
+#   - Nodes 1-N (workers): run training, report status via sidecar
+#   - min_nodes ensures the fleet stays above minimum viable size
+#
+# Usage:
+#   # Add to ~/.sky/config.yaml: jobs: {use_v1: true}
+#   sky api start --deploy
+#   sky jobs launch -n elastic-train --infra kubernetes elastic_training.yaml
+#
+# To test recovery while running:
+#   # Kill some workers (not node 0 / controller)
+#   kubectl delete pod elastic-train-<id>-{5..10} --force --grace-period=0
+#   # Watch controller detect and swap in replacements
+
+---
+resources:
+  cloud: kubernetes
+  cpus: 0.1
+  memory: 0.1
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    min_nodes: 8
+
+num_nodes: 16
+
+run: |
+  set -eo pipefail
+
+  ACTIVE_COUNT=8  # First 8 workers are active (excluding controller)
+  TOTAL_EPOCHS=3
+
+  if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
+    # ============================================================
+    # CONTROLLER (rank 0)
+    # ============================================================
+    echo "=== CONTROLLER started (rank 0) ==="
+
+    get_peers() {
+      skypilot_peers 2>/dev/null | python3 -c "
+  import sys, json
+  try:
+      data = json.load(sys.stdin)
+      peers = data.get('ready', [])
+      # Exclude self (rank 0)
+      workers = [p for p in peers if p['rank'] != 0]
+      print(json.dumps({'count': len(workers), 'workers': workers}))
+  except:
+      print(json.dumps({'count': 0, 'workers': []}))
+  " 2>/dev/null || echo '{"count":0,"workers":[]}'
+    }
+
+    # Wait for workers
+    echo "Waiting for workers..."
+    while true; do
+      INFO=$(get_peers)
+      COUNT=$(echo "$INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])")
+      [ "$COUNT" -ge "$ACTIVE_COUNT" ] && break
+      echo "  $COUNT workers available, need $ACTIVE_COUNT..."
+      sleep 3
+    done
+    echo "$COUNT workers ready"
+
+    # Training loop
+    PREV_WORKERS=""
+    for epoch in $(seq 1 $TOTAL_EPOCHS); do
+      echo ""
+      echo "=========================================="
+      echo "  EPOCH $epoch / $TOTAL_EPOCHS"
+      echo "=========================================="
+
+      INFO=$(get_peers)
+      TOTAL=$(echo "$INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])")
+
+      # Show active vs standby
+      echo "$INFO" | python3 -c "
+  import sys, json
+  data = json.load(sys.stdin)
+  workers = data['workers']
+  active = workers[:$ACTIVE_COUNT]
+  standby = workers[$ACTIVE_COUNT:]
+  print(f'  Active:  {len(active)} workers {[w[\"rank\"] for w in active]}')
+  print(f'  Standby: {len(standby)} workers {[w[\"rank\"] for w in standby]}')
+  # Detect changes from previous epoch
+  current_ips = set(w['ip'] for w in active)
+  print(f'  Active IPs: {[w[\"ip\"] for w in active[:3]]}...')
+  "
+
+      for step in $(seq 1 3); do
+        echo ""
+        echo "--- Epoch $epoch Step $step ---"
+
+        # Check for worker changes
+        NEW_INFO=$(get_peers)
+        NEW_COUNT=$(echo "$NEW_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])")
+
+        if [ "$NEW_COUNT" -lt "$TOTAL" ]; then
+          LOST=$((TOTAL - NEW_COUNT))
+          echo "  ⚠ $LOST workers lost! ($NEW_COUNT remaining, swapping standbys)"
+          TOTAL=$NEW_COUNT
+        else
+          echo "  ✓ All $NEW_COUNT workers healthy"
+        fi
+
+        echo "  Training on $ACTIVE_COUNT active workers..."
+        sleep 10
+      done
+
+      echo "Epoch $epoch complete ✓"
+    done
+
+    echo ""
+    echo "=========================================="
+    echo "  TRAINING COMPLETE ✓"
+    echo "=========================================="
+
+  else
+    # ============================================================
+    # WORKER (rank 1+)
+    # ============================================================
+    ROLE="standby"
+    [ "$SKYPILOT_NODE_RANK" -le "$ACTIVE_COUNT" ] && ROLE="active"
+
+    echo "Worker $SKYPILOT_NODE_RANK ($ROLE) started"
+
+    # Simulate long-running training
+    STEP=0
+    while true; do
+      STEP=$((STEP + 1))
+      if [ $((STEP % 12)) -eq 0 ]; then
+        PEERS=$(skypilot_peers 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('count','?'))" 2>/dev/null || echo "?")
+        echo "Worker $SKYPILOT_NODE_RANK ($ROLE) min $((STEP/12)) peers=$PEERS"
+      fi
+      sleep 5
+    done
+  fi
