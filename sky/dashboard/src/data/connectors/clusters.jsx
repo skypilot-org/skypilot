@@ -377,46 +377,28 @@ export function useClusterDetails({ cluster, job = null }) {
   const clusterJobsLoading = loadingClusterJobData;
 
   const fetchClusterData = useCallback(async () => {
-    if (!cluster) return null;
-    try {
-      setLoadingClusterData(true);
-
-      // Try all-clusters cache first (populated by the cluster list page)
-      const cachedAll = dashboardCache.getCached(getClusters);
-      if (cachedAll) {
-        const found = cachedAll.find((c) => c.cluster === cluster);
-        if (found) {
-          setClusterData(found);
-          return found;
+    if (cluster) {
+      try {
+        setLoadingClusterData(true);
+        // Use dashboard cache for cluster data
+        const data = await dashboardCache.get(getClusters, [
+          { clusterNames: [cluster] },
+        ]);
+        if (data.length > 0) {
+          setClusterData(data[0]); // Assuming getClusters returns an array
+          return data[0]; // Return the data for use in fetchClusterJobData
+        } else {
+          console.error('No cluster data found for cluster:', cluster);
+          return null;
         }
-      }
-
-      // Try per-cluster cache (populated by a prior visit to this detail page)
-      const cachedSingle = dashboardCache.getCached(getClusters, [
-        { clusterNames: [cluster] },
-      ]);
-      if (cachedSingle && cachedSingle.length > 0) {
-        setClusterData(cachedSingle[0]);
-        return cachedSingle[0];
-      }
-
-      // Fallback: fetch from API (direct URL navigation, first visit)
-      const data = await dashboardCache.get(getClusters, [
-        { clusterNames: [cluster] },
-      ]);
-      if (data.length > 0) {
-        setClusterData(data[0]);
-        return data[0];
-      } else {
-        console.error('No cluster data found for cluster:', cluster);
+      } catch (error) {
+        console.error('Error fetching cluster data:', error);
         return null;
+      } finally {
+        setLoadingClusterData(false);
       }
-    } catch (error) {
-      console.error('Error fetching cluster data:', error);
-      return null;
-    } finally {
-      setLoadingClusterData(false);
     }
+    return null;
   }, [cluster]);
 
   const fetchClusterJobData = useCallback(
@@ -424,22 +406,13 @@ export function useClusterDetails({ cluster, job = null }) {
       if (cluster) {
         try {
           setLoadingClusterJobData(true);
-          const cacheArgs = [
+          // Use dashboard cache for cluster jobs
+          const data = await dashboardCache.get(getClusterJobs, [
             {
               clusterName: cluster,
               workspace: workspace || 'default',
             },
-          ];
-
-          // Try synchronous cache first to avoid background refresh
-          const cached = dashboardCache.getCached(getClusterJobs, cacheArgs);
-          if (cached) {
-            setClusterJobData(cached);
-            return;
-          }
-
-          // Fallback: fetch from API (direct navigation or cache miss)
-          const data = await dashboardCache.get(getClusterJobs, cacheArgs);
+          ]);
           setClusterJobData(data);
         } catch (error) {
           console.error('Error fetching cluster job data:', error);
@@ -452,9 +425,7 @@ export function useClusterDetails({ cluster, job = null }) {
   );
 
   const refreshData = useCallback(async () => {
-    // Invalidate both all-clusters cache (used by list page lookup) and
-    // per-cluster cache (used by direct URL fallback) for fresh data
-    dashboardCache.invalidate(getClusters);
+    // Invalidate cache for fresh data
     dashboardCache.invalidate(getClusters, [{ clusterNames: [cluster] }]);
 
     const clusterInfo = await fetchClusterData();

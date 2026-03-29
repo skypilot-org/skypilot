@@ -814,6 +814,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
         }
 
+        # Add ephemeral storage to deploy vars if specified.
+        ephemeral_storage = resources.ephemeral_storage
+        if ephemeral_storage is not None:
+            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
         # number -> that multiplier. Limits are calculated with unclamped
@@ -837,6 +842,9 @@ class Kubernetes(clouds.Cloud):
             else:
                 deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
                 deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
+            if ephemeral_storage is not None:
+                deploy_vars['k8s_ephemeral_storage_limit'] = round(
+                    ephemeral_storage * mul, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
