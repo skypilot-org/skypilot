@@ -195,10 +195,10 @@ class NvidiaGpuDoctorPlugin(AcceleratorDoctorPlugin):
             if mode.lower() in ('disabled', 'n/a', '[n/a]'):
                 continue
             try:
-                dbe_v = int(dbe_vol) if dbe_vol not in ('N/A', '[N/A]') else 0
-                dbe_a = int(dbe_agg) if dbe_agg not in ('N/A', '[N/A]') else 0
-                sbe_v = int(sbe_vol) if sbe_vol not in ('N/A', '[N/A]') else 0
-                sbe_a = int(sbe_agg) if sbe_agg not in ('N/A', '[N/A]') else 0
+                dbe_v, dbe_a, sbe_v, sbe_a = [
+                    int(v) if v not in ('N/A', '[N/A]') else 0
+                    for v in (dbe_vol, dbe_agg, sbe_vol, sbe_agg)
+                ]
             except ValueError:
                 continue
             if dbe_v > 0 or dbe_a > 0:
