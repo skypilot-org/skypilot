@@ -758,6 +758,20 @@ class JobController:
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
             if cluster_status != status_lib.ClusterStatus.UP:
+                # When background replenishment is in progress, its
+                # sky.launch() holds the cluster lock and temporarily
+                # sets the DB status to INIT.  The monitoring loop may
+                # time out waiting for the lock and see stale INIT.
+                # Skip recovery in that case — replenishment will
+                # finish and restore the cluster to UP.
+                if (executor.supports_background_replenishment and
+                        getattr(self, '_replenish_in_progress', False) and
+                        cluster_status == status_lib.ClusterStatus.INIT):
+                    logger.info(
+                        'Cluster shows INIT but background replenishment '
+                        'is in progress — skipping recovery.')
+                    continue
+
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
                 # the cloud. Spot recovery is needed (will be done later in the

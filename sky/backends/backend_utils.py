@@ -2322,9 +2322,16 @@ def _update_cluster_status(
     node_statuses = _query_cluster_status_via_cloud_api(
         handle, retry_if_missing=retry_if_missing)
 
-    all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
-                        for status in node_statuses) and
-                    len(node_statuses) == handle.launched_nodes)
+    min_healthy_nodes = getattr(handle, 'min_launched_nodes',
+                                handle.launched_nodes)
+    num_nodes_up = sum(1 for status in node_statuses
+                       if status[0] == status_lib.ClusterStatus.UP)
+    all_nodes_up = num_nodes_up >= min_healthy_nodes
+    logger.debug(f'Cluster {cluster_name}: num_nodes_up={num_nodes_up}, '
+                 f'min_healthy_nodes={min_healthy_nodes}, '
+                 f'launched_nodes={handle.launched_nodes}, '
+                 f'all_nodes_up={all_nodes_up}, '
+                 f'node_statuses={node_statuses}')
 
     external_cluster_failures = ExternalFailureSource.get(
         cluster_hash=record['cluster_hash'])
@@ -2372,6 +2379,8 @@ def _update_cluster_status(
             head_runner = runners[0]
 
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
+            min_nodes = getattr(handle, 'min_launched_nodes',
+                                handle.launched_nodes) * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
             # Initialize variables in case all retries fail
@@ -2416,7 +2425,20 @@ def _update_cluster_status(
                     # transient network issue.
                     time.sleep(1)
                     continue
-                if ready_head + ready_workers == total_nodes:
+                ready = ready_head + ready_workers
+                if ready == total_nodes:
+                    return True
+                elif ready > total_nodes:
+                    logger.debug(
+                        f'Ray cluster has more nodes than expected '
+                        f'({ready}/{total_nodes}). '
+                        f'This may be due to node replenishment.')
+                    return True
+                elif ready >= min_nodes:
+                    logger.debug(
+                        f'Ray cluster has fewer nodes than launched '
+                        f'({ready}/{total_nodes}) but meets minimum '
+                        f'threshold ({min_nodes}). Treating as healthy.')
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
                              f'{i}: ray status not showing all nodes '

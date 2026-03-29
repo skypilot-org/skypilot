@@ -748,11 +748,13 @@ class RetryingVmProvisioner(object):
             prev_handle: Optional['CloudVmRayResourceHandle'],
             prev_cluster_ever_up: bool,
             prev_config_hash: Optional[str],
+            min_nodes: Optional[int] = None,
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
+            self.min_nodes = min_nodes if min_nodes is not None else num_nodes
             self.prev_cluster_status = prev_cluster_status
             self.prev_handle = prev_handle
             self.prev_cluster_ever_up = prev_cluster_ever_up
@@ -953,6 +955,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         volume_mounts: Optional[List[volume_lib.VolumeMount]],
+        min_nodes: Optional[int] = None,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1145,6 +1148,7 @@ class RetryingVmProvisioner(object):
                     stable_internal_external_ips=prev_cluster_ips,
                     stable_ssh_ports=prev_ssh_ports,
                     cluster_info=prev_cluster_info,
+                    min_launched_nodes=min_nodes,
                 )
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
@@ -1674,6 +1678,7 @@ class RetryingVmProvisioner(object):
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
+        min_nodes = to_provision_config.min_nodes
         prev_cluster_status = to_provision_config.prev_cluster_status
         prev_handle = to_provision_config.prev_handle
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
@@ -1743,6 +1748,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     volume_mounts=task.volume_mounts,
+                    min_nodes=min_nodes,
                 )
                 if dryrun:
                     return config_dict
@@ -1899,7 +1905,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+            cluster_info: Optional[provision_common.ClusterInfo] = None,
+            min_launched_nodes: Optional[int] = None,
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -1918,6 +1925,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cached_cluster_info = cluster_info
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
+        # Minimum nodes for the cluster to be considered healthy.
+        # When set (elastic pool), the cluster stays UP as long as
+        # ready_nodes >= min_launched_nodes, even if < launched_nodes.
+        self.min_launched_nodes = (min_launched_nodes
+                                  if min_launched_nodes is not None
+                                  else launched_nodes)
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
 
@@ -5771,7 +5784,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
-                prev_config_hash=prev_config_hash)
+                prev_config_hash=prev_config_hash,
+                min_nodes=handle.min_launched_nodes)
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
@@ -5821,7 +5835,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,
-            prev_config_hash=prev_config_hash)
+            prev_config_hash=prev_config_hash,
+            min_nodes=task.num_nodes_min)
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Optional[Dict[Path, Path]]):
