@@ -1484,9 +1484,129 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     )
 
 
+def _create_managed_job(region: str, cluster_name: str,
+                        cluster_name_on_cloud: str,
+                        config: common.ProvisionConfig,
+                        managed_job_config: dict) -> common.ProvisionRecord:
+    """Create a K8s Job for a managed job, bypassing the full pod setup."""
+    from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+
+    provider_config = config.provider_config
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    pod_spec = copy.deepcopy(config.node_config)
+    num_nodes = config.count
+
+    setup_commands = managed_job_config.get('setup')
+    run_commands = managed_job_config.get('run')
+    envs = managed_job_config.get('envs', {})
+    num_gpus = managed_job_config.get('num_gpus_per_node', 0)
+    workdir_config = managed_job_config.get('workdir')
+    file_mounts = managed_job_config.get('file_mounts')
+
+    # Add ephemeral volumes (PVCs) to pod spec
+    ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
+    if ephemeral_volumes:
+        for vol in ephemeral_volumes:
+            if 'volumes' not in pod_spec['spec']:
+                pod_spec['spec']['volumes'] = []
+            pod_spec['spec']['volumes'].append({
+                'name': vol.name,
+                'persistentVolumeClaim': {
+                    'claimName': vol.volume_name_on_cloud,
+                },
+            })
+            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+                pod_spec['spec']['containers'][0]['volumeMounts'] = []
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': vol.name,
+                'mountPath': vol.path,
+            })
+
+    # Upload local workdir/file_mounts to a ConfigMap if needed
+    cm_name = k8s_managed_job.upload_local_files_to_configmap(
+        job_name=cluster_name_on_cloud,
+        namespace=namespace,
+        context=context,
+        workdir=workdir_config,
+        file_mounts=file_mounts,
+    )
+    if cm_name:
+        if 'volumes' not in pod_spec['spec']:
+            pod_spec['spec']['volumes'] = []
+        pod_spec['spec']['volumes'].append({
+            'name': 'skypilot-files',
+            'configMap': {
+                'name': cm_name,
+            },
+        })
+        if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+            pod_spec['spec']['containers'][0]['volumeMounts'] = []
+        pod_spec['spec']['containers'][0]['volumeMounts'].append({
+            'name': 'skypilot-files',
+            'mountPath': k8s_managed_job.FILEMOUNT_MOUNT_PATH,
+        })
+
+    job_manifest, service_manifest, rbac_manifests = (
+        k8s_managed_job.build_job_manifest(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            namespace=namespace,
+            pod_spec=pod_spec,
+            num_nodes=num_nodes,
+            setup_commands=setup_commands,
+            run_commands=run_commands,
+            envs=envs,
+            num_gpus_per_node=num_gpus,
+            workdir=workdir_config,
+            file_mounts=file_mounts,
+        ))
+
+    k8s_managed_job.apply_managed_job(
+        namespace=namespace,
+        context=context,
+        job_manifest=job_manifest,
+        service_manifest=service_manifest,
+        rbac_manifests=rbac_manifests,
+    )
+
+    pod_names = k8s_managed_job.wait_for_pods_running(
+        job_name=cluster_name_on_cloud,
+        namespace=namespace,
+        context=context,
+        num_nodes=num_nodes,
+        timeout=provider_config.get('timeout', 600),
+    )
+
+    logger.info(f'K8s managed job {cluster_name_on_cloud} launched '
+                f'with {num_nodes} pods.')
+
+    head_instance_id = pod_names[0] if pod_names else cluster_name_on_cloud
+    return common.ProvisionRecord(
+        provider_name='kubernetes',
+        region=region,
+        zone=None,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=head_instance_id,
+        resumed_instance_ids=[],
+        created_instance_ids=pod_names,
+    )
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    managed_job_config = config.provider_config.get('managed_job_config')
+    if managed_job_config is not None:
+        try:
+            return _create_managed_job(region, cluster_name,
+                                       cluster_name_on_cloud, config,
+                                       managed_job_config)
+        except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
+            e_msg = common_utils.format_exception(e)
+            logger.warning(
+                'run_instances: Error creating K8s managed job:\n'
+                f'{e_msg}')
+            raise
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
@@ -1683,12 +1803,89 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
+def _get_managed_job_cluster_info(
+        cluster_name_on_cloud: str,
+        provider_config: Dict[str, Any]) -> Optional[common.ClusterInfo]:
+    """Get cluster info for V1 K8s managed job pods.
+
+    Returns None if no managed job pods found (falls back to standard path).
+    """
+    from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+
+    label = f'{k8s_managed_job.TAG_MANAGED_JOB_NAME}={cluster_name_on_cloud}'
+    try:
+        pod_list = kubernetes.core_api(context).list_namespaced_pod(
+            namespace, label_selector=label)
+    except kubernetes.api_exception():
+        return None
+
+    if not pod_list.items:
+        return None
+
+    pods: Dict[str, List[common.InstanceInfo]] = {}
+    head_pod_name = None
+    cpu_request = None
+
+    for pod in pod_list.items:
+        pod_name = pod.metadata.name
+        if pod.status.phase not in ('Running', 'Succeeded', 'Failed'):
+            continue
+        internal_ip = pod.status.pod_ip or ''
+        k8s_node_name = getattr(pod.spec, 'node_name', None)
+        idx = int(pod.metadata.labels.get(
+            'skypilot-node-index',
+            pod.metadata.labels.get(
+                'batch.kubernetes.io/job-completion-index', '0')))
+        pods[pod_name] = [
+            common.InstanceInfo(
+                instance_id=pod_name,
+                internal_ip=internal_ip,
+                external_ip=None,
+                ssh_port=22,
+                tags=pod.metadata.labels or {},
+                node_name=k8s_node_name,
+            )
+        ]
+        if idx == 0:
+            head_pod_name = pod_name
+            primary = pod.spec.containers[0] if pod.spec.containers else None
+            if primary:
+                resources = getattr(primary, 'resources', None)
+                requests = (getattr(resources, 'requests', None)
+                            if resources else None)
+                cpu_request = (requests or {}).get('cpu')
+
+    if not head_pod_name or cpu_request is None:
+        return None
+
+    return common.ClusterInfo(
+        instances=pods,
+        head_instance_id=head_pod_name,
+        docker_user=None,
+        ssh_user='sky',
+        custom_ray_options={},
+        provider_name='kubernetes',
+        provider_config=provider_config,
+    )
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region  # unused
     assert provider_config is not None
+
+    # Try V1 managed job path first
+    managed_job_config = provider_config.get('managed_job_config')
+    if managed_job_config is not None:
+        info = _get_managed_job_cluster_info(cluster_name_on_cloud,
+                                             provider_config)
+        if info is not None:
+            return info
+
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
 

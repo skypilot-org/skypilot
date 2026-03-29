@@ -1,0 +1,146 @@
+# Elastic Training — SkyPilot Job Group
+#
+# Two jobs: controller (1 node) + workers (DYNAMIC_NODE_SET)
+# The controller discovers workers via /nodes and pushes training state.
+#
+# Launch:
+#   # Add to ~/.sky/config.yaml: jobs: {use_v1: true}
+#   sky api start --deploy
+#   sky jobs launch -n elastic-train --infra kubernetes job.yaml
+#
+# Test recovery (kill workers while training runs):
+#   kubectl delete pod <workers-pod-name>-{3..5} --force --grace-period=0
+
+# Job group header: run controller and workers in parallel
+---
+name: elastic-train
+execution: parallel
+primary_tasks:
+  - controller
+
+---
+name: controller
+
+resources:
+  infra: kubernetes
+  cpus: 1
+
+envs:
+  TOTAL_EPOCHS: 20
+  MIN_WORKERS: 4
+
+run: |
+  python3 -c "
+  import concurrent.futures, datetime, json, os, sys, time, urllib.request
+  NODES_URL = f'http://localhost:{os.environ.get(\"SKYPILOT_DISCOVERY_PORT\", 9876)}/nodes'
+  EPOCHS = int(os.environ.get('TOTAL_EPOCHS', 20))
+  T0 = time.time()
+  def ts(): return f'[{time.time()-T0:6.1f}s]'
+  MIN_W = int(os.environ.get('MIN_WORKERS', 4))
+  def get_workers():
+      try: data = json.loads(urllib.request.urlopen(NODES_URL, timeout=5).read())
+      except: return []
+      nodes = data.get('workers', data.get('nodes', []))
+      return sorted(nodes, key=lambda n: n['rank'])
+  def get_ready():
+      return [n for n in get_workers() if n.get('app_status')=='ready']
+  def get_alive():
+      return [n for n in get_workers() if n.get('status') in ('PENDING','SETTING_UP','RUNNING')]
+  def send_state(w, state):
+      req = urllib.request.Request(f'http://{w[\"ip\"]}:8080/start',
+          data=json.dumps(state).encode(), method='POST')
+      req.add_header('Content-Type','application/json')
+      try: return json.loads(urllib.request.urlopen(req, timeout=10).read())
+      except Exception as e: return {'error':str(e),'rank':w.get('rank','?')}
+  print(f'{ts()} === CONTROLLER started ===', flush=True)
+  with open(os.environ['SKYPILOT_APP_STATUS'],'w') as f: f.write('controller')
+  while True:
+      ready = get_ready()
+      if len(ready) >= MIN_W: break
+      print(f'{ts()}   {len(ready)}/{MIN_W} workers ready', flush=True); time.sleep(2)
+  active_ranks = {w['rank'] for w in ready[:MIN_W]}
+  print(f'{ts()} Active: ranks {sorted(active_ranks)}, Standby: {len(ready)-MIN_W}', flush=True)
+  for ep in range(1, EPOCHS+1):
+      ep_start = time.time()
+      print(f'\n{ts()} ===== EPOCH {ep}/{EPOCHS} =====', flush=True)
+      alive = get_alive()
+      alive_ranks = {w['rank'] for w in alive}
+      dead = active_ranks - alive_ranks
+      if dead:
+          print(f'{ts()}   Lost active: ranks {sorted(dead)}', flush=True)
+          active_ranks -= dead
+          for w in alive:
+              if w['rank'] not in active_ranks and len(active_ranks) < MIN_W:
+                  active_ranks.add(w['rank']); print(f'{ts()}   Promoted rank {w[\"rank\"]} to active', flush=True)
+      while len(active_ranks) < MIN_W:
+          time.sleep(2); alive = get_alive()
+          for w in alive:
+              if w['rank'] not in active_ranks and len(active_ranks) < MIN_W:
+                  active_ranks.add(w['rank']); print(f'{ts()}   Promoted rank {w[\"rank\"]} to active', flush=True)
+      alive = get_alive()
+      active = [w for w in alive if w['rank'] in active_ranks]
+      standby_ct = len(alive) - len(active)
+      n = len(active)
+      peers = [w['ip'] for w in active]
+      tasks = [(w, {'epoch':ep,'rank':w['rank'],'partition':i,'total_partitions':n,'peers':peers}) for i,w in enumerate(active)]
+      print(f'{ts()}   Active: {n} (ranks {sorted(w[\"rank\"] for w in active)}), Standby: {standby_ct}', flush=True)
+      results = []
+      with concurrent.futures.ThreadPoolExecutor(max_workers=n) as pool:
+          futs = {pool.submit(send_state, w, s): w for w, s in tasks}
+          for f in concurrent.futures.as_completed(futs):
+              r = f.result()
+              if 'error' in r:
+                  rk = r.get('rank','?'); print(f'{ts()}   rank {rk}: FAILED ({r[\"error\"][:50]})', flush=True)
+                  if isinstance(rk, int): active_ranks.discard(rk)
+              else: results.append(r)
+      ep_dur = time.time() - ep_start
+      if results:
+          avg=sum(r['loss'] for r in results)/len(results); total=sum(r['samples'] for r in results)
+          print(f'{ts()}   Epoch {ep}: {len(results)}/{n} workers, {total} samples, avg_loss={avg:.4f} ({ep_dur:.1f}s)', flush=True)
+  print(f'\n{ts()} ===== TRAINING COMPLETE ({time.time()-T0:.1f}s total) =====', flush=True)
+  "
+
+  # Ensure output is flushed
+  sync
+
+---
+name: workers
+
+resources:
+  infra: kubernetes
+  cpus: 0.1
+  memory: 0.1
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    min_nodes: 4
+
+num_nodes: 8
+
+run: |
+  python3 -c "
+  import http.server, json, os, random, threading, time
+  RANK = int(os.environ.get('SKYPILOT_NODE_RANK', -1))
+  SF = os.environ.get('SKYPILOT_APP_STATUS', '/tmp/skypilot_app_status')
+  done = 0
+  def ss(s):
+      with open(SF,'w') as f: f.write(s)
+  class H(http.server.BaseHTTPRequestHandler):
+      def do_POST(self):
+          global done
+          if self.path=='/start':
+              b=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))))
+              print(f'  Epoch {b[\"epoch\"]}: partition {b[\"partition\"]}/{b[\"total_partitions\"]}, {len(b.get(\"peers\",[]))} peers')
+              ss('training')
+              samples=1000//b['total_partitions']
+              time.sleep(random.uniform(3.0,6.0))
+              loss=2.0/b['epoch']+random.uniform(-0.1,0.1); done+=1
+              ss('ready')
+              r=json.dumps({'rank':RANK,'epoch':b['epoch'],'partition':b['partition'],'loss':loss,'samples':samples,'epochs_done':done}).encode()
+              self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(r)
+          else: self.send_response(404); self.end_headers()
+      def log_message(self,*a): pass
+  srv=http.server.HTTPServer(('0.0.0.0',8080),H)
+  threading.Thread(target=srv.serve_forever,daemon=True).start()
+  ss('ready'); print(f'Worker {RANK} ready on :8080')
+  while True: time.sleep(30); print(f'Worker {RANK}: {done} epochs done')
+  "

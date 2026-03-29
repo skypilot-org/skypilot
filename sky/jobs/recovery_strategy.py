@@ -8,9 +8,10 @@ resources:
 import asyncio
 import logging
 import os
+import time
 import traceback
 import typing
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -23,6 +24,7 @@ from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
+from sky.provision.kubernetes import managed_job as k8s_mj
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -75,6 +77,7 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        **kwargs,
     ) -> None:
         """Initialize the strategy executor.
 
@@ -90,7 +93,10 @@ class StrategyExecutor:
             starting_signal: Condition to signal when a job can start.
             recover_on_exit_codes: List of exit codes that should trigger
                 recovery regardless of max_restarts_on_errors limit.
+            **kwargs: Strategy-specific arguments (e.g., min_nodes for
+                DYNAMIC_NODE_SET). Ignored by base class.
         """
+        del kwargs  # Subclasses handle strategy-specific args
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
         self.dag = dag_lib.Dag()
@@ -295,29 +301,40 @@ class StrategyExecutor:
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
-            try:
-                cluster_status, _ = (await asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    self.cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
-            except Exception as e:  # pylint: disable=broad-except
-                # If any unexpected error happens, retry the job checking
-                # loop.
-                # TODO(zhwu): log the unexpected error to usage collection
-                # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'refresh the cluster status. Retrying.')
-                continue
-            if cluster_status not in (status_lib.ClusterStatus.UP,
-                                      status_lib.ClusterStatus.AUTOSTOPPING):
-                # The cluster can be preempted before the job is
-                # launched.
-                # Break to let the retry launch kick in.
-                logger.info('The cluster is preempted before the job '
-                            'is submitted.')
-                # TODO(zhwu): we should recover the preemption with the
-                # recovery strategy instead of the current while loop.
-                break
+
+            # For K8s managed jobs, skip cluster status refresh (no
+            # SSH/skylet to query) and go straight to K8s API status.
+            # Check config first (fast), then YAML (reliable).
+            from sky.provision.kubernetes import managed_job as k8s_mj  # pylint: disable=import-outside-toplevel
+            is_k8s_v1 = k8s_mj.is_managed_jobs_v1_enabled()
+            if not is_k8s_v1 and self.cluster_name is not None:
+                _handle = await asyncio.to_thread(
+                    global_user_state.get_handle_from_cluster_name,
+                    self.cluster_name)
+                if _handle is not None:
+                    is_k8s_v1 = managed_job_utils._is_v1_k8s_managed_job(
+                        _handle)
+            if not is_k8s_v1:
+                try:
+                    cluster_status, _ = (await asyncio.to_thread(
+                        backend_utils.refresh_cluster_status_handle,
+                        self.cluster_name,
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+                except Exception as e:  # pylint: disable=broad-except
+                    # If any unexpected error happens, retry the job
+                    # checking loop.
+                    logger.info(f'Unexpected exception: {e}\nFailed to get '
+                                'the refresh the cluster status. Retrying.')
+                    continue
+                if cluster_status not in (
+                        status_lib.ClusterStatus.UP,
+                        status_lib.ClusterStatus.AUTOSTOPPING):
+                    # The cluster can be preempted before the job is
+                    # launched.
+                    # Break to let the retry launch kick in.
+                    logger.info('The cluster is preempted before the '
+                                'job is submitted.')
+                    break
 
             try:
                 status, transient_error_reason = (
@@ -343,6 +360,10 @@ class StrategyExecutor:
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
+                if is_k8s_v1:
+                    # K8s managed jobs: no skylet to query for
+                    # timestamp. Use current time.
+                    return time.time()
                 try:
                     job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
@@ -744,10 +765,11 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        **kwargs,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal, recover_on_exit_codes)
+                         starting_signal, recover_on_exit_codes, **kwargs)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -926,6 +948,312 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                 continue
 
             return job_submitted_at
+
+
+@registry.JOBS_RECOVERY_STRATEGY_REGISTRY.type_register(name='DYNAMIC_NODE_SET',
+                                                        default=False)
+class DynamicNodeSetExecutor(StrategyExecutor):
+    """Dynamic node set: elastic pod management with per-pod replacement.
+
+    Instead of launching a full SkyPilot cluster via sdk.launch(), this
+    strategy creates individual K8s pods directly. When a pod fails, only
+    that pod is replaced -- other pods keep running.
+
+    Job status:
+      - RUNNING: >= min_nodes pods are alive
+      - RECOVERING: < min_nodes pods are alive (SkyPilot is replenishing)
+      - SUCCEEDED: all pods have exited successfully
+
+    YAML usage:
+        resources:
+          cloud: kubernetes
+          job_recovery:
+            strategy: DYNAMIC_NODE_SET
+            min_nodes: 2
+        num_nodes: 16
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.min_nodes = 1
+
+    def set_strategy_config(self, config: dict) -> None:
+        self.min_nodes = int(config.get('min_nodes', 1))
+        self._namespace: Optional[str] = None
+        self._context: Optional[str] = None
+        self._image: str = 'python:3.11-slim'
+        self._setup_commands: Optional[str] = None
+        self._run_commands: Optional[str] = None
+        self._envs: Dict[str, str] = {}
+        self._num_gpus: int = 0
+        self._gpu_resource_key: str = 'nvidia.com/gpu'
+        self._tolerations: List[Dict[str, str]] = []
+        self._node_selector: Dict[str, str] = {}
+
+    async def _launch(self,
+                      max_retry: Optional[int] = 3,
+                      raise_on_failure: bool = True,
+                      recovery: bool = False) -> Optional[float]:
+        """Launch pods directly via K8s API (bypass sdk.launch)."""
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        # The executor's DAG contains only this task (at index 0),
+        # even though task_id may be >0 in a job group.
+        task = self.dag.tasks[0]
+        self._setup_commands = task.setup
+        self._run_commands = task.run
+        from sky import task as task_lib
+        self._envs = task_lib.get_plaintext_envs_and_secrets(
+            task.envs_and_secrets)
+        num_nodes = task.num_nodes
+
+        # Get K8s context from task resources (region = K8s context name)
+        resource = list(task.resources)[0]
+        from sky.adaptors import kubernetes as k8s_adaptor
+        context_name = resource.region
+        if context_name is None:
+            context_name = (
+                kubernetes_utils.get_current_kube_config_context_name())
+        if context_name == k8s_adaptor.in_cluster_context_name():
+            self._context = None
+        else:
+            self._context = context_name
+        self._namespace = kubernetes_utils.get_kube_config_context_namespace(
+            self._context)
+
+        assert self.cluster_name is not None
+        job_name = self.cluster_name
+
+        # Build pod spec from task resources
+        pod_spec = self._build_pod_spec_from_task(task)
+        self._image = (pod_spec.get('spec', {}).get('containers', [{}])[0].get(
+            'image', 'python:3.11-slim'))
+
+        # Serialize workdir for V1 path
+        workdir_config: Optional[Dict[str, Any]] = None
+        if task.workdir is not None:
+            if isinstance(task.workdir, dict):
+                workdir_config = {'git': task.workdir}
+            else:
+                workdir_config = {'path': str(task.workdir)}
+
+        # Serialize file_mounts
+        file_mounts = dict(task.file_mounts) if task.file_mounts else None
+
+        # Upload local workdir/file_mounts to a ConfigMap if needed
+        cm_name = k8s_managed_job.upload_local_files_to_configmap(
+            job_name=job_name,
+            namespace=self._namespace,
+            context=self._context,
+            workdir=workdir_config,
+            file_mounts=file_mounts,
+        )
+        if cm_name:
+            if 'volumes' not in pod_spec['spec']:
+                pod_spec['spec']['volumes'] = []
+            pod_spec['spec']['volumes'].append({
+                'name': 'skypilot-files',
+                'configMap': {
+                    'name': cm_name,
+                },
+            })
+
+        # Build and apply all manifests
+        pod_manifests, service_manifest, rbac_manifests = (
+            k8s_managed_job.build_elastic_job_manifests(
+                cluster_name=job_name,
+                namespace=self._namespace,
+                pod_spec=pod_spec,
+                num_nodes=num_nodes,
+                min_nodes=self.min_nodes,
+                setup_commands=self._setup_commands,
+                run_commands=self._run_commands,
+                envs=self._envs,
+                num_gpus_per_node=self._num_gpus,
+                tolerations=self._tolerations,
+                node_selector=self._node_selector,
+                workdir=workdir_config,
+                file_mounts=file_mounts,
+            ))
+
+        try:
+            k8s_managed_job.apply_elastic_job(
+                namespace=self._namespace,
+                context=self._context,
+                pod_manifests=pod_manifests,
+                service_manifest=service_manifest,
+                rbac_manifests=rbac_manifests,
+            )
+        except Exception as e:
+            logger.error(f'Failed to create elastic job: {e}')
+            if raise_on_failure:
+                raise
+            return None
+
+        # Wait for min_nodes pods to be running
+        start = time.time()
+        timeout = 300
+        while time.time() - start < timeout:
+            status, running, _, _ = (k8s_managed_job.get_elastic_job_status(
+                job_name, self._namespace, self._context, self.min_nodes))
+            if running >= self.min_nodes:
+                logger.info(f'Elastic job {job_name}: {running} pods running '
+                            f'(min_nodes={self.min_nodes})')
+                return time.time()
+            logger.debug(f'Waiting for min_nodes={self.min_nodes} pods: '
+                         f'{running} running')
+            await asyncio.sleep(2)
+
+        logger.error(f'Timed out waiting for {self.min_nodes} pods to start')
+        if raise_on_failure:
+            raise TimeoutError(f'Elastic job {job_name}: timed out waiting for '
+                               f'{self.min_nodes} pods')
+        return None
+
+    async def recover(self) -> float:
+        """Replace failed or missing pods individually."""
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+
+        assert self.cluster_name is not None
+        assert self._namespace is not None
+        task = self.dag.tasks[0]
+        indices_to_replace = k8s_managed_job.get_pods_to_replace(
+            self.cluster_name, self._namespace, self._context, task.num_nodes)
+
+        for idx in indices_to_replace:
+            try:
+                k8s_managed_job.create_replacement_pod(
+                    job_name=self.cluster_name,
+                    namespace=self._namespace,
+                    context=self._context,
+                    index=idx,
+                    num_nodes=task.num_nodes,
+                    min_nodes=self.min_nodes,
+                    image=self._image,
+                    setup_commands=self._setup_commands,
+                    run_commands=self._run_commands,
+                    envs=self._envs,
+                    num_gpus_per_node=self._num_gpus,
+                    gpu_resource_key=self._gpu_resource_key,
+                    tolerations=self._tolerations,
+                    node_selector=self._node_selector,
+                )
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to replace pod index {idx}: {e}')
+
+        return time.time()
+
+    def _cleanup_cluster(self) -> None:
+        """Delete all elastic job resources."""
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        if self.cluster_name is None:
+            return
+        k8s_managed_job.delete_elastic_job(self.cluster_name, self._namespace or
+                                           'default', self._context)
+
+    def _build_pod_spec_from_task(self,
+                                  task: 'task_lib.Task') -> Dict[str, Any]:
+        """Build a minimal K8s pod spec from task resources.
+
+        Mirrors the image/GPU/toleration logic in
+        sky.provision.kubernetes.instance and sky.clouds.kubernetes.
+        """
+        from sky.catalog import kubernetes_catalog
+        from sky.clouds import kubernetes as kubernetes_cloud
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        resource = list(task.resources)[0]
+
+        # --- Accelerator count ---
+        acc_count = 0
+        if resource.accelerators is not None:
+            acc_count = sum(resource.accelerators.values())
+
+        # --- Image resolution (mirrors Kubernetes._get_image_id) ---
+        image_id_dict = resource.image_id
+        if image_id_dict is not None:
+            if None in image_id_dict:
+                image = image_id_dict[None]
+            else:
+                assert resource.region in image_id_dict, image_id_dict
+                image = image_id_dict[resource.region]
+            if image.startswith('docker:'):
+                image = image[len('docker:'):]
+        else:
+            if acc_count > 0:
+                image_tag = kubernetes_cloud.Kubernetes.IMAGE_GPU
+            else:
+                image_tag = kubernetes_cloud.Kubernetes.IMAGE_CPU
+            image = kubernetes_catalog.get_image_id_from_tag(
+                image_tag, region=None) or 'python:3.11-slim'
+
+        # --- Container resource requests/limits ---
+        resources_requests: Dict[str, str] = {}
+        resources_limits: Dict[str, str] = {}
+        if resource.cpus is not None:
+            cpu_str = str(resource.cpus)
+            if cpu_str.endswith('+'):
+                cpu_str = cpu_str[:-1]
+            resources_requests['cpu'] = cpu_str
+        if resource.memory is not None:
+            mem_str = str(resource.memory)
+            if mem_str.endswith('+'):
+                mem_str = mem_str[:-1]
+            resources_requests['memory'] = f'{mem_str}Gi'
+
+        # --- GPU resources and tolerations ---
+        tolerations: List[Dict[str, str]] = []
+        if acc_count > 0:
+            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
+                self._context)
+            resources_requests[gpu_resource_key] = str(int(acc_count))
+            resources_limits[gpu_resource_key] = str(int(acc_count))
+            self._num_gpus = int(acc_count)
+            self._gpu_resource_key = gpu_resource_key
+            # GPU toleration so pods can schedule on GPU-tainted nodes
+            tolerations.append({
+                'key': gpu_resource_key,
+                'operator': 'Exists',
+                'effect': 'NoSchedule',
+            })
+
+        self._tolerations = tolerations
+
+        # --- Node selector for GPU type matching ---
+        self._node_selector = {}
+        if acc_count > 0 and resource.accelerators:
+            acc_type = list(resource.accelerators.keys())[0]
+            try:
+                label_key, label_values, _, _ = (
+                    kubernetes_utils.get_accelerator_label_key_values(
+                        self._context, acc_type, acc_count))
+                if label_key and label_values:
+                    self._node_selector = {label_key: label_values[0]}
+            except Exception:  # pylint: disable=broad-except
+                pass  # Fall back to no node selector
+
+        container_spec: Dict[str, Any] = {
+            'name': 'main',
+            'image': image,
+            'resources': {
+                'requests': resources_requests
+            },
+        }
+        if resources_limits:
+            container_spec['resources']['limits'] = resources_limits
+
+        pod_spec: Dict[str, Any] = {
+            'metadata': {
+                'labels': {},
+                'annotations': {}
+            },
+            'spec': {
+                'containers': [container_spec],
+                'restartPolicy': 'Never',
+            },
+        }
+        return pod_spec
 
 
 def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:

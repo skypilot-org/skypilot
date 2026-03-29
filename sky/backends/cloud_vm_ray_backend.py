@@ -53,6 +53,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import managed_job as k8s_mj
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
@@ -780,6 +781,44 @@ class RetryingVmProvisioner(object):
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
         self._is_managed = is_managed
+        self._task: Optional[task_lib.Task] = None
+
+    def _inject_managed_job_config_to_yaml(self, cluster_yaml: str,
+                                           cluster_name: str) -> None:
+        """Inject managed job task info into the cluster YAML provider config."""
+        if self._task is None:
+            return
+        config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
+        provider = config.get('provider', {})
+        envs = task_lib.get_plaintext_envs_and_secrets(
+            self._task.envs_and_secrets)
+        # Serialize workdir for V1 path
+        workdir = self._task.workdir
+        workdir_config: Optional[Dict[str, Any]] = None
+        if workdir is not None:
+            if isinstance(workdir, dict):
+                # Git workdir: {ref: 'branch', ...}
+                workdir_config = {'git': workdir}
+            else:
+                workdir_config = {'path': str(workdir)}
+
+        # Serialize file_mounts for V1 path
+        file_mounts = None
+        if self._task.file_mounts:
+            file_mounts = dict(self._task.file_mounts)
+
+        provider['managed_job_config'] = {
+            'setup': self._task.setup,
+            'run': self._task.run,
+            'envs': envs,
+            'num_nodes': self._task.num_nodes,
+            'num_gpus_per_node': 0,
+            'workdir': workdir_config,
+            'file_mounts': file_mounts,
+        }
+        config['provider'] = provider
+        yaml_str = yaml_utils.dump_yaml_str(config)
+        global_user_state.set_cluster_yaml(cluster_name, yaml_str)
 
     def _yield_zones(
             self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -1211,6 +1250,15 @@ class RetryingVmProvisioner(object):
                                     f'{region.name}{colorama.Style.RESET_ALL}'
                                     f'{zone_str}.'))
                         assert handle.cluster_yaml is not None
+                        # For K8s managed jobs, inject task commands
+                        # into the cluster YAML so the K8s provisioner
+                        # can create a Job manifest with user commands
+                        # baked into the pod spec.
+                        if (k8s_mj.is_managed_jobs_v1_enabled()
+                                is not None and self._is_managed and isinstance(
+                                    to_provision.cloud, clouds.Kubernetes)):
+                            self._inject_managed_job_config_to_yaml(
+                                handle.cluster_yaml, cluster_name)
                         provision_record = provisioner.bulk_provision(
                             to_provision.cloud,
                             region,
@@ -1671,6 +1719,7 @@ class RetryingVmProvisioner(object):
         Returns the config_dict from _retry_zones() - see its docstring for
         details.
         """
+        self._task = task
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
@@ -3263,27 +3312,59 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 resources_vars = config_dict['resources_vars']
                 config_hash = config_dict.get('config_hash', None)
 
-                # Setup SkyPilot runtime after the cluster is provisioned
-                # 1. Wait for SSH to be ready.
-                # 2. Mount the cloud credentials, skypilot wheel,
-                #    and other necessary files to the VM.
-                # 3. Run setup commands to install dependencies.
-                # 4. Starting ray cluster and skylet.
+                is_k8s = isinstance(handle.launched_resources.cloud,
+                                    clouds.Kubernetes)
+                is_k8s_managed_job = (
+                    k8s_mj.is_managed_jobs_v1_enabled() and is_k8s and
+                    self._is_managed)
 
-                # Add cluster event for runtime setup start
-                global_user_state.add_cluster_event(
-                    handle.cluster_name, status_lib.ClusterStatus.INIT,
-                    'Setting up SkyPilot runtime on cluster',
-                    global_user_state.ClusterEventType.STATUS_CHANGE)
+                if is_k8s_managed_job:
+                    # Fast path for K8s managed jobs: skip the entire
+                    # post-provision runtime setup (Ray, Skylet, file
+                    # mounts, etc.). The K8s Job manifest already has
+                    # user commands baked into the pod spec.
+                    logger.info('K8s managed job: skipping runtime setup.')
+                    logger.info(
+                        ux_utils.finishing_message(
+                            f'Cluster launched: {handle.cluster_name}.',
+                            cluster_name=str(handle.cluster_name)))
+                    config_from_yaml = (global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml))
+                    provider_config = config_from_yaml.get('provider')
+                    try:
+                        cluster_info = provision_lib.get_cluster_info(
+                            repr(handle.launched_resources.cloud),
+                            provision_record.region,
+                            handle.cluster_name_on_cloud,
+                            provider_config=provider_config)
+                    except Exception as e:
+                        logger.error(f'Failed to get cluster info for V1 K8s '
+                                     f'managed job: {e}')
+                        import traceback as tb
+                        logger.error(tb.format_exc())
+                        raise
+                else:
+                    # Setup SkyPilot runtime after the cluster is provisioned
+                    # 1. Wait for SSH to be ready.
+                    # 2. Mount the cloud credentials, skypilot wheel,
+                    #    and other necessary files to the VM.
+                    # 3. Run setup commands to install dependencies.
+                    # 4. Starting ray cluster and skylet.
 
-                cluster_info = provisioner.post_provision_runtime_setup(
-                    handle.launched_resources,
-                    resources_utils.ClusterName(handle.cluster_name,
-                                                handle.cluster_name_on_cloud),
-                    handle.cluster_yaml,
-                    provision_record=provision_record,
-                    custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir)
+                    # Add cluster event for runtime setup start
+                    global_user_state.add_cluster_event(
+                        handle.cluster_name, status_lib.ClusterStatus.INIT,
+                        'Setting up SkyPilot runtime on cluster',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
+
+                    cluster_info = provisioner.post_provision_runtime_setup(
+                        handle.launched_resources,
+                        resources_utils.ClusterName(
+                            handle.cluster_name, handle.cluster_name_on_cloud),
+                        handle.cluster_yaml,
+                        provision_record=provision_record,
+                        custom_resource=resources_vars.get('custom_resources'),
+                        log_dir=self.log_dir)
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
                 # are up-to-date.
@@ -3291,11 +3372,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's IPs can be retrieved
                 # from cluster_info.
-                handle.cached_cluster_info = cluster_info
-                handle.docker_user = cluster_info.docker_user
-                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          cluster_info=cluster_info)
-                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+                try:
+                    handle.cached_cluster_info = cluster_info
+                    handle.docker_user = cluster_info.docker_user
+                    handle.update_cluster_ips(
+                        max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                        cluster_info=cluster_info)
+                except Exception as e:
+                    logger.error(f'V1 post-provision failed at '
+                                 f'update_cluster_ips: {e}')
+                    import traceback as tb
+                    logger.error(tb.format_exc())
+                    raise
+                if not is_k8s_managed_job:
+                    handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
@@ -3392,9 +3482,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
+        # K8s managed jobs don't have skylet - skip job queue updates.
+        is_k8s_managed = (
+            k8s_mj.is_managed_jobs_v1_enabled() and
+            isinstance(handle.launched_resources.cloud, clouds.Kubernetes) and
+            self._is_managed)
+
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
-        if prev_cluster_status == status_lib.ClusterStatus.INIT:
+        if (prev_cluster_status == status_lib.ClusterStatus.INIT and
+                not is_k8s_managed):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
@@ -3418,7 +3515,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         handle, cmd, require_outputs=True)
                     subprocess_utils.handle_returncode(
                         returncode, cmd, 'Failed to update job status.', stderr)
-        if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
+        if (prev_cluster_status == status_lib.ClusterStatus.STOPPED and
+                not is_k8s_managed):
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
             # An edge case here due to racing:
@@ -3488,16 +3586,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 status_lib.ClusterStatus.UP)
             # We still add the cluster to ssh config file on API server, this
             # is helpful for people trying to use `sky launch`'ed cluster for
-            # ssh proxy jump.
-            auth_config = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml,
-                ssh_user=handle.ssh_user,
-                docker_user=handle.docker_user)
-            cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cluster_name_on_cloud,
-                handle.cached_external_ips, auth_config,
-                handle.cached_external_ssh_ports, handle.docker_user,
-                handle.ssh_user)
+            # ssh proxy jump. Skip for V1 K8s managed jobs (no SSH).
+            if not is_k8s_managed:
+                auth_config = backend_utils.ssh_credential_from_yaml(
+                    handle.cluster_yaml,
+                    ssh_user=handle.ssh_user,
+                    docker_user=handle.docker_user)
+                cluster_utils.SSHConfigHelper.add_cluster(
+                    handle.cluster_name, handle.cluster_name_on_cloud,
+                    handle.cached_external_ips, auth_config,
+                    handle.cached_external_ssh_ports, handle.docker_user,
+                    handle.ssh_user)
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
@@ -3644,6 +3743,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                detach_setup: bool) -> None:
 
         start = time.time()
+
+        # K8s managed jobs have setup baked into the pod spec.
+        if (k8s_mj.is_managed_jobs_v1_enabled() and
+                isinstance(handle.launched_resources.cloud,
+                           clouds.Kubernetes) and self._is_managed):
+            logger.info('K8s managed job: skipping SSH-based setup.')
+            return
 
         if task.setup is None:
             return
@@ -4148,6 +4254,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
+        # K8s managed jobs run commands directly in pods - no Ray submission.
+        # We still need to return a job_id so the managed jobs controller
+        # can track the job. We use job_id=1 as a convention.
+        if (k8s_mj.is_managed_jobs_v1_enabled() and
+                isinstance(handle.launched_resources.cloud,
+                           clouds.Kubernetes) and self._is_managed):
+            logger.info('K8s managed job: pods already running user commands. '
+                        'Waiting for completion via K8s API.')
+            return 1  # Dummy job_id; monitoring uses K8s API directly
+
         if task.run is None and self._setup_cmd is None:
             # This message is fine without mentioning setup, as there are two
             # cases when run section is empty:

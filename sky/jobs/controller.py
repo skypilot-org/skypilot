@@ -27,6 +27,8 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
+# pylint: disable=line-too-long
+# pylint: disable=line-too-long
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
@@ -265,30 +267,215 @@ class JobController:
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
-        log_file = controller_utils.download_and_stream_job_log(
-            self._backend,
-            handle,
-            managed_job_logs_dir,
-            job_ids=[str(job_id_on_pool_cluster)]
-            if job_id_on_pool_cluster is not None else None)
+
+        # K8s managed jobs: download logs via K8s API
+        log_file = self._maybe_download_k8s_managed_job_logs(
+            handle, managed_job_logs_dir, task_id)
+        if log_file is None:
+            log_file = controller_utils.download_and_stream_job_log(
+                self._backend,
+                handle,
+                managed_job_logs_dir,
+                job_ids=[str(job_id_on_pool_cluster)]
+                if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  log_file)
-        else:
-            logger.warning(
-                f'No log file was downloaded for job {self._job_id}, '
-                f'task {task_id}')
 
-        logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+    async def _download_k8s_logs_direct(
+        self,
+        cluster_name: str,
+        task_id: int,
+    ) -> None:
+        """Download pod logs via K8s API and save to local log file."""
+        from sky.adaptors import kubernetes as k8s_adaptor
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
+        if handle is None:
+            # Handle not found — use kubeconfig defaults. This can happen
+            # for cancelled tasks in job groups where the handle was
+            # already removed.
+            logger.info(f'No handle for {cluster_name}, using '
+                        f'kubeconfig defaults for log download.')
+            context_name = (
+                kubernetes_utils.get_current_kube_config_context_name())
+            context = (None if context_name ==
+                       k8s_adaptor.in_cluster_context_name()
+                       else context_name)
+            cloud_name = cluster_name
+        else:
+            cloud_name = handle.cluster_name_on_cloud
+            context = handle.launched_resources.region
+            if context == k8s_adaptor.in_cluster_context_name():
+                context = None
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+
+        try:
+            logs = await asyncio.to_thread(k8s_managed_job.get_pod_logs,
+                                           cloud_name, namespace, context)
+            logger.info(f'K8s logs for {cloud_name}: '
+                        f'{len(logs) if logs else 0} chars')
+            if logs:
+                local_dir = os.path.expanduser(
+                    os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                 'managed_jobs',
+                                 f'job-id-{self._job_id}'))
+                os.makedirs(local_dir, exist_ok=True)
+                log_file = os.path.join(local_dir,
+                                        f'task-{task_id}.log')
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write(logs)
+                managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                     log_file)
+                exists = os.path.exists(log_file)
+                size = os.path.getsize(log_file) if exists else -1
+                logger.info(f'Saved K8s pod logs to {log_file} '
+                            f'(exists={exists}, {size} bytes)')
+            else:
+                logger.info(f'No logs found for {cloud_name}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to download K8s logs for '
+                           f'{cloud_name}: {e}')
+            import traceback as tb
+            logger.warning(tb.format_exc())
+
+    def _maybe_download_k8s_managed_job_logs(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+        local_dir: str,
+        task_id: Optional[int],
+    ) -> Optional[str]:
+        """Download logs from K8s managed job pods if applicable."""
+        if not managed_job_utils._is_v1_k8s_managed_job(handle):
+            return None
+        from sky import clouds
+        if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            return None
+
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        # Get namespace/context with fallback to kubeconfig defaults
+        namespace = kubernetes_utils.get_kube_config_context_namespace()
+        context = kubernetes_utils.get_current_kube_config_context_name()
+        try:
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = config.get('provider', {})
+            namespace = kubernetes_utils.get_namespace_from_config(
+                provider_config)
+            context = kubernetes_utils.get_context_from_config(provider_config)
+        except (ValueError, TypeError):
+            pass
+        cluster_name = handle.cluster_name_on_cloud
+
+        try:
+            logs = k8s_managed_job.get_pod_logs(cluster_name, namespace,
+                                                context)
+            os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
+            log_file = os.path.join(
+                os.path.expanduser(local_dir),
+                f'task-{task_id if task_id is not None else 0}.log')
+            with open(log_file, 'w') as f:
+                f.write(logs)
+            logger.info(f'Downloaded K8s managed job logs to {log_file}')
+            print(logs)
+            return log_file
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to download K8s managed job logs: {e}')
+            return None
 
     async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
         if cluster_name is None:
             return
         if self._pool is None:
+            # For V1 K8s managed jobs, directly delete K8s resources
+            # since core.down() may not find the cluster handle.
+            _h = await asyncio.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            if (_h is not None and
+                    managed_job_utils._is_v1_k8s_managed_job(_h)):
+                await self._cleanup_k8s_managed_job(cluster_name)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
+
+    async def _cleanup_k8s_managed_job(self, cluster_name: str) -> None:
+        """Directly clean up K8s managed job resources."""
+        from sky.adaptors import kubernetes as k8s_adaptor
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        handle = await asyncio.to_thread(
+            global_user_state.get_handle_from_cluster_name, cluster_name)
+        if handle is not None:
+            cloud_name = handle.cluster_name_on_cloud
+            # Get context from launched resources region
+            context = handle.launched_resources.region
+            if context == k8s_adaptor.in_cluster_context_name():
+                context = None
+            namespace = kubernetes_utils.get_kube_config_context_namespace(
+                context)
+        else:
+            cloud_name = cluster_name
+            context = None
+            namespace = kubernetes_utils.get_kube_config_context_namespace()
+
+        try:
+            await asyncio.to_thread(k8s_managed_job.delete_managed_job,
+                                    cloud_name, namespace, context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'K8s Job cleanup: {e}')
+        try:
+            await asyncio.to_thread(k8s_managed_job.delete_elastic_job,
+                                    cloud_name, namespace, context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Elastic job cleanup: {e}')
+
+    def _maybe_get_k8s_exit_codes(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> Optional[list]:
+        """Get exit codes from K8s managed job pods if applicable."""
+        if not managed_job_utils._is_v1_k8s_managed_job(handle):
+            return None
+        from sky import clouds
+        if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            return None
+        try:
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+        except (ValueError, TypeError):
+            return None
+        provider_config = config.get('provider', {})
+        if 'managed_job_config' not in provider_config:
+            return None
+
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import utils as kubernetes_utils
+        namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+        context = kubernetes_utils.get_context_from_config(provider_config)
+        cluster_name = handle.cluster_name_on_cloud
+
+        try:
+            exit_code_map = k8s_managed_job.get_pod_exit_codes(
+                cluster_name, namespace, context)
+            if not exit_code_map:
+                return None
+            # Return sorted by index, filtering None values
+            codes = [
+                exit_code_map[i]
+                for i in sorted(exit_code_map.keys())
+                if exit_code_map[i] is not None
+            ]
+            return codes if codes else None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get K8s exit codes: {e}')
+            return None
 
     async def _get_cluster_job_exit_codes(
         self, job_id: Optional[int],
@@ -303,6 +490,10 @@ class JobController:
         Returns:
             List of exit codes, or None if not available.
         """
+        # K8s managed jobs: get exit codes directly from K8s API.
+        k8s_exit_codes = self._maybe_get_k8s_exit_codes(handle)
+        if k8s_exit_codes is not None:
+            return k8s_exit_codes
         try:
             # Try gRPC first if enabled
             if handle.is_grpc_enabled_with_flag:
@@ -603,8 +794,26 @@ class JobController:
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id, task_id=task_id, task=task)
 
+        # Elastic monitoring for DYNAMIC_NODE_SET strategy
+        if isinstance(executor, recovery_strategy.DynamicNodeSetExecutor):
+            return await self._monitor_elastic_task(
+                task_id=task_id,
+                task=task,
+                cluster_name=cluster_name,
+                executor=executor,
+                callback_func=callback_func,
+            )
+
         transient_job_check_error_start_time = None
         job_check_backoff = None
+        # Detect V1: check env var first (fast), then YAML (reliable)
+        from sky.provision.kubernetes.managed_job import is_managed_jobs_v1_enabled
+        is_k8s_v1 = is_managed_jobs_v1_enabled()
+        if not is_k8s_v1:
+            _handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if _handle is not None:
+                is_k8s_v1 = managed_job_utils._is_v1_k8s_managed_job(_handle)
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -667,16 +876,18 @@ class JobController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Task {task_id} succeeded! '
                             'Getting end time and cleaning up')
-                try:
-                    success_end_time = await asyncio.to_thread(
-                        managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name, job_id_on_pool_cluster)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Failed to get job end time: '
-                        f'{common_utils.format_exception(e)}',
-                        exc_info=True)
-                    success_end_time = 0
+                success_end_time: float = time.time()
+                if not is_k8s_v1:
+                    try:
+                        success_end_time = await asyncio.to_thread(
+                            managed_job_utils.try_to_get_job_end_time,
+                            self._backend, cluster_name, job_id_on_pool_cluster)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.warning(
+                            f'Failed to get job end time: '
+                            f'{common_utils.format_exception(e)}',
+                            exc_info=True)
+                        success_end_time = 0
 
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
@@ -689,24 +900,30 @@ class JobController:
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
 
+                # Download logs before cleanup
                 try:
-                    logger.info(f'Downloading logs on cluster {cluster_name} '
-                                f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await asyncio.to_thread(
-                        backend_utils.get_clusters,
-                        cluster_names=[cluster_name],
-                        refresh=common.StatusRefreshMode.NONE,
-                        all_users=True,
-                        _include_is_managed=True)
-                    if clusters:
-                        assert len(clusters) == 1, (clusters, cluster_name)
-                        handle = clusters[0].get('handle')
-                        # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self.download_log_and_stream,
-                                                task_id, handle,
-                                                job_id_on_pool_cluster)
+                    if is_k8s_v1:
+                        # For V1 K8s jobs, download pod logs via K8s API
+                        # before pods get cleaned up.
+                        await self._download_k8s_logs_direct(
+                            cluster_name, task_id)
+                    else:
+                        logger.info(
+                            f'Downloading logs on cluster {cluster_name}'
+                            f' and job id {job_id_on_pool_cluster}.')
+                        clusters = await asyncio.to_thread(
+                            backend_utils.get_clusters,
+                            cluster_names=[cluster_name],
+                            refresh=common.StatusRefreshMode.NONE,
+                            all_users=True,
+                            _include_is_managed=True)
+                        if clusters:
+                            assert len(clusters) == 1, (clusters, cluster_name)
+                            handle = clusters[0].get('handle')
+                            await asyncio.to_thread(
+                                self.download_log_and_stream, task_id, handle,
+                                job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
-                    # We don't want to crash here, so just log and continue.
                     logger.warning(
                         f'Failed to download and stream logs: '
                         f'{common_utils.format_exception(e)}',
@@ -724,8 +941,10 @@ class JobController:
             # immediately (depending on user program) when only some of the
             # nodes are preempted or failed, need to check the actual cluster
             # status.
+            # For K8s managed jobs, the K8s API status is authoritative for
+            # both single and multi-node - skip the SSH-based cluster check.
             if (job_status is not None and not job_status.is_terminal() and
-                    task.num_nodes == 1):
+                (task.num_nodes == 1 or is_k8s_v1)):
                 continue
 
             if job_status in job_lib.JobStatus.user_code_failure_states():
@@ -805,9 +1024,11 @@ class JobController:
                     # The user code has probably crashed, fail immediately.
                     logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await asyncio.to_thread(
-                        managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name, job_id_on_pool_cluster)
+                    end_time: Optional[float] = None
+                    if not is_k8s_v1:
+                        end_time = await asyncio.to_thread(
+                            managed_job_utils.try_to_get_job_end_time,
+                            self._backend, cluster_name, job_id_on_pool_cluster)
                     logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
@@ -995,9 +1216,123 @@ class JobController:
             # Reset force flag after first recovery
             force_transit_to_recovering = False
 
+    async def _monitor_elastic_task(
+        self,
+        task_id: int,
+        task: 'sky.Task',
+        cluster_name: str,
+        executor: 'recovery_strategy.DynamicNodeSetExecutor',
+        callback_func: typing.Callable,
+    ) -> bool:
+        """Monitor an elastic (DYNAMIC_NODE_SET) task.
+
+        Instead of querying skylet/gRPC, this monitors K8s pod statuses
+        directly and replaces failed pods individually.
+        """
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+
+        min_nodes = executor.min_nodes
+        was_recovering = False
+        consecutive_replace_failures = 0
+        max_replace_failures = 10  # Give up after this many consecutive fails
+        # executor._namespace must be set before monitoring starts.
+        # Capture in local variables so mypy knows they are non-None.
+        namespace = executor._namespace  # pylint: disable=protected-access
+        assert namespace is not None
+        context = executor._context  # pylint: disable=protected-access
+
+        while True:
+            await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+
+            status, running, succeeded, failed = (await asyncio.to_thread(
+                k8s_managed_job.get_elastic_job_status, cluster_name, namespace,
+                context, min_nodes))
+
+            logger.info(
+                f'Elastic job {cluster_name}: status={status.value} '
+                f'running={running} succeeded={succeeded} failed={failed}')
+
+            # All pods succeeded
+            if status == k8s_managed_job.ManagedJobStatus.SUCCEEDED:
+                # If in RECOVERING state, must transition through RECOVERED
+                # before SUCCEEDED (state machine constraint).
+                if was_recovering:
+                    await managed_job_state.set_recovered_async(
+                        self._job_id,
+                        task_id,
+                        recovered_time=time.time(),
+                        callback_func=callback_func)
+                    was_recovering = False
+                await managed_job_state.set_succeeded_async(
+                    self._job_id,
+                    task_id,
+                    end_time=time.time(),
+                    callback_func=callback_func)
+                logger.info(f'Elastic job {cluster_name} SUCCEEDED')
+                # Best-effort log download
+                try:
+                    logs = k8s_managed_job.get_pod_logs(cluster_name, namespace,
+                                                        context)
+                    print(logs)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to get final logs: {e}')
+                executor._cleanup_cluster()
+                return True
+
+            # Replace failed or missing pods
+            num_nodes = task.num_nodes
+            to_replace = await asyncio.to_thread(
+                k8s_managed_job.get_pods_to_replace, cluster_name, namespace,
+                context, num_nodes)
+            if to_replace:
+                logger.info(f'Replacing pods at indices: {to_replace}')
+                try:
+                    await executor.recover()
+                    consecutive_replace_failures = 0
+                except Exception as e:  # pylint: disable=broad-except
+                    consecutive_replace_failures += 1
+                    logger.warning(
+                        f'Failed to recover pods ({consecutive_replace_failures}'
+                        f'/{max_replace_failures}): {e}')
+                    if consecutive_replace_failures >= max_replace_failures:
+                        failure_reason = (
+                            f'Failed to replace pods after '
+                            f'{max_replace_failures} consecutive attempts.')
+                        await managed_job_state.set_failed_async(
+                            self._job_id,
+                            task_id,
+                            failure_type=managed_job_state.ManagedJobStatus.
+                            FAILED,
+                            failure_reason=failure_reason,
+                            callback_func=callback_func)
+                        executor._cleanup_cluster()
+                        return False
+
+            # Update state based on running count vs min_nodes
+            if running < min_nodes:
+                if not was_recovering:
+                    await managed_job_state.set_recovering_async(
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        force_transit_to_recovering=True,
+                        callback_func=callback_func)
+                    was_recovering = True
+            else:
+                if was_recovering:
+                    await managed_job_state.set_recovered_async(
+                        self._job_id,
+                        task_id,
+                        recovered_time=time.time(),
+                        callback_func=callback_func)
+                    was_recovering = False
+
     async def _prepare_job_group_task_for_launch(
-        self, task: 'sky.Task', task_id: int, job_group_name: str,
-        other_job_names: List[str]
+        self,
+        task: 'sky.Task',
+        task_id: int,
+        job_group_name: str,
+        other_job_names: List[str],
+        all_tasks: Optional[List['sky.Task']] = None,
     ) -> Tuple[str, recovery_strategy.StrategyExecutor]:
         """Prepare a JobGroup task for launch.
 
@@ -1020,16 +1355,34 @@ class JobController:
         assert task_name is not None, f'Task {task_id} must have a name'
 
         # Inject wait script to ensure networking is ready before task runs.
-        # We inject this into task.run (not task.setup) because:
-        # - setup runs during cluster provisioning (Phase 1)
-        # - DNS mappings file is written in Phase 3 (after clusters are UP)
-        # - If we block in setup, it times out before Phase 3 can run
-        wait_script = job_group_networking.generate_wait_for_networking_script(
-            job_group_name, other_job_names)
-        if wait_script:
-            # Prepend wait script to task run
-            current_run = task.run or ''
-            task.run = wait_script + '\n\n' + current_run
+        # Skip for DYNAMIC_NODE_SET tasks — they use /nodes endpoint
+        # for discovery instead of /etc/hosts DNS mappings.
+        task_resources = list(task.resources)
+        task_recovery = (task_resources[0].job_recovery
+                         if task_resources else None)
+        is_dynamic_node_set = (isinstance(task_recovery, dict) and
+                               task_recovery.get('strategy')
+                               == 'DYNAMIC_NODE_SET')
+        if not is_dynamic_node_set:
+            wait_script = (
+                job_group_networking.generate_wait_for_networking_script(
+                    job_group_name, other_job_names))
+            if wait_script:
+                current_run = task.run or ''
+                task.run = wait_script + '\n\n' + current_run
+
+        # For job groups, set SKYPILOT_JOBGROUP_TASKS so the discovery
+        # server's /nodes endpoint can aggregate across all tasks.
+        all_task_mappings = []
+        for t in (all_tasks or []):
+            t_name = t.name
+            if t_name is None:
+                continue
+            t_cluster = (managed_job_utils.generate_managed_job_cluster_name(
+                t_name, self._job_id))
+            all_task_mappings.append(f'{t_name}:{t_cluster}')
+        if all_task_mappings:
+            task.envs['SKYPILOT_JOBGROUP_TASKS'] = ','.join(all_task_mappings)
 
         # JobGroups don't support pools, so cluster name is always deterministic
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
@@ -1215,10 +1568,17 @@ class JobController:
                     strategy_executors.append(None)  # type: ignore[arg-type]
                     continue
 
-                # Get list of other job names (excluding current task)
+                # Get list of other job names (excluding current task).
+                # DYNAMIC_NODE_SET tasks are included - they expose a
+                # headless service that resolves via K8s DNS, and their
+                # sidecar on port 9876 provides peer discovery.
                 other_job_names = [t.name for t in tasks if t.name != task.name]
                 name, executor = await self._prepare_job_group_task_for_launch(
-                    task, task_id, job_group_name, other_job_names)
+                    task,
+                    task_id,
+                    job_group_name,
+                    other_job_names,
+                    all_tasks=tasks)
                 cluster_names.append(name)
                 strategy_executors.append(executor)
 
@@ -1313,6 +1673,26 @@ class JobController:
             task_handle = handles[tid]
             if task_handle is not None:
                 tasks_handles.append((task, task_handle))
+
+        # For DYNAMIC_NODE_SET tasks, inject their headless service
+        # into the networking so other tasks can discover them via
+        # standard job group hostname: {task_name}-0.{job_group_name}
+        for tid, task in enumerate(tasks):
+            if handles[tid] is not None:
+                continue  # Already handled
+            executor = strategy_executors[tid]
+            if (executor is not None and isinstance(
+                    executor, recovery_strategy.DynamicNodeSetExecutor)):
+                # Create DNS mapping: the DYNAMIC_NODE_SET headless
+                # service is queryable at {cluster_name}.{ns}.svc...
+                # Map it to {task_name}-0.{job_group_name}
+                svc_name = executor.cluster_name
+                ns = executor._namespace or 'default'  # pylint: disable=protected-access
+                svc_dns = f'{svc_name}.{ns}.svc.cluster.local'
+                hostname = f'{task.name}-0.{job_group_name}'
+                job_group_networking.add_extra_dns_mapping(
+                    job_group_name, tasks_handles, svc_dns, hostname)
+                logger.info(f'DYNAMIC_NODE_SET DNS: {hostname} -> {svc_dns}')
 
         if tasks_handles:
             networking_success = await (
@@ -1831,10 +2211,37 @@ class ControllerManager:
             job_id_on_cluster: Optional[int] = None) -> None:
         """Download logs for a single task from its cluster.
 
-        Looks up the cluster by name and downloads logs via the controller's
-        download_log_and_stream method. Skips gracefully if the cluster is
-        not found.
+        For V1 K8s managed jobs, downloads logs directly from K8s API
+        since the pods may not have a standard cluster handle.
+        For standard jobs, looks up the cluster and downloads via SSH.
         """
+        from sky.provision.kubernetes import managed_job as k8s_mj
+        if k8s_mj.is_managed_jobs_v1_enabled():
+            # V1: download directly from K8s API
+            log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                   'managed_jobs',
+                                   f'job-id-{job_id}')
+            try:
+                from sky.provision.kubernetes import utils as k8s_utils  # pylint: disable=import-outside-toplevel
+                ns = k8s_utils.get_kube_config_context_namespace()
+                ctx = k8s_utils.get_current_kube_config_context_name()
+                logs = await asyncio.to_thread(
+                    k8s_mj.get_pod_logs, cluster_name, ns, ctx)
+                os.makedirs(os.path.expanduser(log_dir), exist_ok=True)
+                log_file = os.path.join(
+                    os.path.expanduser(log_dir),
+                    f'task-{task_id}.log')
+                with open(log_file, 'w') as f:
+                    f.write(logs)
+                logger.info(f'Downloaded K8s managed job logs to '
+                            f'{log_file}')
+                managed_job_state.set_local_log_file(
+                    job_id, task_id, log_file)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.info(
+                    f'No pods found for job {cluster_name}')
+            return
+
         clusters = await asyncio.to_thread(
             backend_utils.get_clusters,
             cluster_names=[cluster_name],

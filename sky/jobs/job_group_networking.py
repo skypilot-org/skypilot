@@ -24,7 +24,7 @@ import tempfile
 import textwrap
 import traceback
 import typing
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -417,24 +417,28 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        extra_dns_mappings: Optional[List[Tuple[str, str]]] = None,
     ) -> bool:
         """Set up network configuration for JobGroup.
 
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples.
+            extra_dns_mappings: Additional (k8s_dns, hostname) tuples for
+                DYNAMIC_NODE_SET tasks that provide sidecar discovery.
 
         Returns:
             True if all configuration succeeded, False otherwise.
         """
         return await NetworkConfigurator._inject_etc_hosts(
-            job_group_name, tasks_handles)
+            job_group_name, tasks_handles, extra_dns_mappings)
 
     @staticmethod
     async def _inject_etc_hosts(
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+        extra_dns_mappings: Optional[List[Tuple[str, str]]] = None,
     ) -> bool:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
@@ -445,6 +449,7 @@ class NetworkConfigurator:
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples for all jobs.
+            extra_dns_mappings: Additional DNS mappings for DYNAMIC_NODE_SET.
 
         Returns:
             True if all injections succeeded, False otherwise.
@@ -455,6 +460,11 @@ class NetworkConfigurator:
                                                     tasks_handles)
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
+        # Add DYNAMIC_NODE_SET headless service mappings
+        if extra_dns_mappings:
+            k8s_dns_mappings.extend(extra_dns_mappings)
+            logger.info(f'Added {len(extra_dns_mappings)} extra DNS '
+                        f'mappings for DYNAMIC_NODE_SET tasks')
 
         # Each entry: (coroutine, task_name, node_idx, is_k8s)
         setup_tasks: List[Tuple] = []
@@ -527,6 +537,32 @@ class NetworkConfigurator:
 # Layer 4: Public API
 # ============================================================================
 
+# Extra DNS mappings for DYNAMIC_NODE_SET tasks in job groups.
+# Populated by the controller before Phase 3 networking setup.
+_extra_dns_mappings: List[Tuple[str, str]] = []
+
+
+def add_extra_dns_mapping(
+    job_group_name: str,
+    tasks_handles: List[Tuple['task_lib.Task',
+                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+    k8s_dns: str,
+    hostname: str,
+) -> None:
+    """Add an extra DNS mapping for DYNAMIC_NODE_SET tasks.
+
+    This allows DYNAMIC_NODE_SET tasks to be discovered via standard
+    job group hostnames (e.g., workers-0.job-group-name), resolving
+    to their headless service which returns any running worker pod.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        tasks_handles: Existing tasks_handles (for context, unused).
+        k8s_dns: K8s service DNS name (e.g., workers-123.default.svc...)
+        hostname: Simple hostname (e.g., workers-0.job-group-name)
+    """
+    _extra_dns_mappings.append((k8s_dns, hostname))
+
 
 async def setup_job_group_networking(
     job_group_name: str,
@@ -536,6 +572,7 @@ async def setup_job_group_networking(
     """Set up networking for all tasks in a JobGroup.
 
     This is the main entry point for JobGroup networking setup.
+    Includes any extra DNS mappings added via add_extra_dns_mapping().
 
     Args:
         job_group_name: Name of the JobGroup.
@@ -544,8 +581,14 @@ async def setup_job_group_networking(
     Returns:
         True if setup succeeded, False otherwise.
     """
+    global _extra_dns_mappings
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
-    return await NetworkConfigurator.setup(job_group_name, tasks_handles)
+    result = await NetworkConfigurator.setup(
+        job_group_name,
+        tasks_handles,
+        extra_dns_mappings=list(_extra_dns_mappings))
+    _extra_dns_mappings = []  # Reset after use
+    return result
 
 
 def get_network_ready_marker_path(job_group_name: str) -> str:

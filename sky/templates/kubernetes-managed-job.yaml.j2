@@ -1,0 +1,248 @@
+{# Kubernetes Managed Job Pod Template
+   This template generates a single Pod manifest for elastic managed jobs.
+   It is rendered once per pod index by the managed_job module.
+
+   Variables:
+     job_name: str - unique name for the job (used as service name)
+     namespace: str - K8s namespace
+     index: int - pod ordinal index (0, 1, 2, ...)
+     num_nodes: int - total number of pods
+     min_nodes: int - minimum pods for RUNNING status
+     num_gpus_per_node: int - GPU count per node
+     image: str - container image
+     setup_commands: str|None - user setup commands
+     run_commands: str|None - user run commands
+     user_envs: dict - user environment variables
+     cpu_request: str|None - CPU request (e.g. "4")
+     memory_request: str|None - Memory request (e.g. "16Gi")
+     gpu_request: str|None - GPU request (e.g. "1")
+     gpu_resource_key: str - K8s GPU resource key (e.g. "nvidia.com/gpu")
+     discovery_port: int - discovery HTTP port (default 9876)
+     discovery_script_b64: str - base64-encoded discovery server Python script
+     restart_policy: str - Pod restart policy (default "Never")
+     service_account: str|None - K8s service account name
+     collocate: bool - whether to add pod affinity for colocation
+     anti_affinity: bool - whether to add pod anti-affinity
+     node_selector: dict|None - K8s node selector
+     tolerations: list|None - K8s tolerations
+     volumes: list|None - additional volume definitions
+     volume_mounts: list|None - additional volume mounts
+     jobgroup_tasks: str|None - comma-separated task_name:service pairs
+#}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ job_name }}-{{ index }}"
+  namespace: "{{ namespace }}"
+  labels:
+    skypilot-managed-job: "true"
+    skypilot-managed-job-name: "{{ job_name }}"
+    skypilot-node-index: "{{ index }}"
+    skypilot-cluster-name: "{{ job_name }}"
+  annotations:
+    skypilot-cluster-name: "{{ job_name }}"
+spec:
+  hostname: "{{ job_name }}-{{ index }}"
+  subdomain: "{{ job_name }}"
+  restartPolicy: "{{ restart_policy | default('Never') }}"
+{% if service_account %}
+  serviceAccountName: "{{ service_account }}"
+{% endif %}
+
+{% if collocate or anti_affinity %}
+  affinity:
+{% if collocate %}
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: skypilot-managed-job-name
+                  operator: In
+                  values:
+                    - "{{ job_name }}"
+            topologyKey: kubernetes.io/hostname
+{% endif %}
+{% if anti_affinity %}
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: skypilot-managed-job-name
+                  operator: In
+                  values:
+                    - "{{ job_name }}"
+            topologyKey: kubernetes.io/hostname
+{% endif %}
+{% endif %}
+
+{% if node_selector %}
+  nodeSelector:
+{% for key, value in node_selector.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+{% endif %}
+
+{% if tolerations %}
+  tolerations:
+{% for toleration in tolerations %}
+    - key: "{{ toleration.key }}"
+{% if toleration.operator is defined %}
+      operator: "{{ toleration.operator }}"
+{% endif %}
+{% if toleration.value is defined %}
+      value: "{{ toleration.value }}"
+{% endif %}
+{% if toleration.effect is defined %}
+      effect: "{{ toleration.effect }}"
+{% endif %}
+{% endfor %}
+{% endif %}
+
+  containers:
+    # === Single container: discovery server + user setup/run ===
+    - name: main
+      image: "{{ image }}"
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          #!/bin/bash
+          set -eo pipefail
+
+          # === SkyPilot Elastic Managed Job ===
+          export SKYPILOT_NODE_RANK={{ index }}
+          export SKYPILOT_NUM_NODES={{ num_nodes }}
+          export SKYPILOT_NUM_GPUS_PER_NODE={{ num_gpus_per_node }}
+          export SKYPILOT_APP_STATUS=/tmp/skypilot_app_status
+
+          # SkyPilot internal messages go to a file (hidden from log streaming)
+          _skylog() { echo "$@" >> /tmp/skypilot_internal.log; }
+
+          # Phase label: patch pod label to track entrypoint progress
+          _skypilot_set_phase() {
+            python3 -c "
+          import urllib.request, json, ssl, os
+          token = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read().strip()
+          ns = os.environ.get('SKYPILOT_NAMESPACE', 'default')
+          pod = os.environ.get('HOSTNAME', '')
+          url = f'https://kubernetes.default.svc/api/v1/namespaces/{ns}/pods/{pod}'
+          data = json.dumps({'metadata':{'labels':{'skypilot-node-phase':'$1'}}}).encode()
+          req = urllib.request.Request(url, data=data, method='PATCH')
+          req.add_header('Authorization', f'Bearer {token}')
+          req.add_header('Content-Type', 'application/strategic-merge-patch+json')
+          ctx = ssl.create_default_context(cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
+          urllib.request.urlopen(req, context=ctx)
+          " 2>/dev/null || true
+          }
+
+          # Helper: query discovery server for node list
+          skypilot_nodes() {
+            python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:{{ discovery_port }}/nodes').read().decode())" 2>/dev/null \
+              || curl -s "http://localhost:{{ discovery_port }}/nodes" 2>/dev/null \
+              || echo '{"error":"discovery server not ready"}'
+          }
+          export -f skypilot_nodes
+
+          # Start background discovery server
+          _skylog "Starting discovery server on port {{ discovery_port }}..."
+          echo '{{ discovery_script_b64 }}' | base64 -d > /tmp/skypilot_discovery.py
+          python3 /tmp/skypilot_discovery.py &
+          DISCOVERY_PID=$!
+          sleep 1
+
+          _skypilot_set_phase PENDING
+          _skylog "SkyPilot elastic job: node $SKYPILOT_NODE_RANK / $SKYPILOT_NUM_NODES"
+
+{% if workdir_block %}
+          {{ workdir_block | indent(10) }}
+{% endif %}
+{% if file_mounts_block %}
+          {{ file_mounts_block | indent(10) }}
+{% endif %}
+
+{% if setup_commands %}
+          # === User Setup ===
+          _skypilot_set_phase SETTING_UP
+          {{ setup_commands | indent(10) }}
+{% endif %}
+
+{% if run_commands %}
+          # === User Run ===
+          _skypilot_set_phase RUNNING
+          {{ run_commands | indent(10) }}
+{% endif %}
+      env:
+        - name: SKYPILOT_NODE_RANK
+          value: "{{ index }}"
+        - name: SKYPILOT_NUM_NODES
+          value: "{{ num_nodes }}"
+        - name: SKYPILOT_NUM_GPUS_PER_NODE
+          value: "{{ num_gpus_per_node }}"
+        - name: SKYPILOT_SERVICE_NAME
+          value: "{{ job_name }}"
+        - name: SKYPILOT_NAMESPACE
+          value: "{{ namespace }}"
+        - name: SKYPILOT_DISCOVERY_PORT
+          value: "{{ discovery_port }}"
+        - name: SKYPILOT_APP_STATUS
+          value: "/tmp/skypilot_app_status"
+{% if jobgroup_tasks %}
+        - name: SKYPILOT_JOBGROUP_TASKS
+          value: "{{ jobgroup_tasks }}"
+{% endif %}
+{% for key, value in user_envs.items() %}
+        - name: "{{ key }}"
+          value: "{{ value }}"
+{% endfor %}
+      resources:
+        requests:
+{% if cpu_request %}
+          cpu: "{{ cpu_request }}"
+{% endif %}
+{% if memory_request %}
+          memory: "{{ memory_request }}"
+{% endif %}
+{% if gpu_request %}
+          {{ gpu_resource_key }}: "{{ gpu_request }}"
+{% endif %}
+{% if gpu_request %}
+        limits:
+          {{ gpu_resource_key }}: "{{ gpu_request }}"
+{% endif %}
+      volumeMounts:
+{% if gpu_request %}
+        # NCCL requires /dev/shm backed by shared memory (default 64Mi is
+        # too small). Mirrors the dshm volume in kubernetes-ray.yml.j2.
+        - name: dshm
+          mountPath: /dev/shm
+{% endif %}
+{% if volume_mounts %}
+{% for vm in volume_mounts %}
+        - name: "{{ vm.name }}"
+          mountPath: "{{ vm.mountPath }}"
+{% endfor %}
+{% endif %}
+
+{% if gpu_request or volumes %}
+  volumes:
+{% if gpu_request %}
+    - name: dshm
+      emptyDir:
+        medium: Memory
+{% endif %}
+{% if volumes %}
+{% for vol in volumes %}
+    - name: "{{ vol.name }}"
+{% if vol.persistentVolumeClaim is defined %}
+      persistentVolumeClaim:
+        claimName: "{{ vol.persistentVolumeClaim.claimName }}"
+{% endif %}
+{% if vol.emptyDir is defined %}
+      emptyDir: {}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
