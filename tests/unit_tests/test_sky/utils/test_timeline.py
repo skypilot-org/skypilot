@@ -1,6 +1,9 @@
 """Test for sky.utils.timeline."""
 
+import contextvars
+import json
 import os
+import threading
 from unittest import mock
 
 import pytest
@@ -8,25 +11,139 @@ import pytest
 from sky.utils import timeline
 
 
-def test_save_timeline():
+@pytest.fixture(autouse=True)
+def _reset_timeline_state():
+    """Reset timeline module state between tests."""
+    timeline._process_events.clear()
+    # Reset context vars to defaults.
+    token_events = timeline._context_events.set(None)
+    token_rid = timeline._context_request_id.set(None)
+    token_path = timeline._context_save_path.set(None)
+    yield
+    timeline._process_events.clear()
+    timeline._context_events.reset(token_events)
+    timeline._context_request_id.reset(token_rid)
+    timeline._context_save_path.reset(token_path)
 
-    @timeline.event("test_save_timeline")
-    def test_save_timeline():
+
+def test_save_timeline_process_global(tmp_path):
+    """Events go to the process-global list and are saved correctly."""
+    out = str(tmp_path / 'timeline.json')
+
+    @timeline.event('test_save_timeline')
+    def traced_fn():
         pass
 
-    with mock.patch('sky.utils.timeline._get_events_file_path',
-                    return_value='/tmp/sky/timeline.json'):
-        test_save_timeline()
-        # one entry for function entry and
-        # one entry for function exit
-        assert len(timeline._events) == 2
+    with mock.patch.dict(os.environ, {'SKYPILOT_TIMELINE_FILE_PATH': out}):
+        traced_fn()
+        assert len(timeline._process_events) == 2
         timeline.save_timeline()
-        # after saving, the events should be empty
-        assert len(timeline._events) == 0
-        os.remove('/tmp/sky/timeline.json')
+        assert len(timeline._process_events) == 0
+        data = json.loads(open(out).read())
+        assert len(data['traceEvents']) == 2
 
-    with mock.patch('sky.utils.timeline._get_events_file_path',
-                    return_value=None):
-        test_save_timeline()
-        # no timeline file path, so no events should be recorded
-        assert len(timeline._events) == 0
+    # With no file path set, events should not be recorded.
+    with mock.patch.dict(os.environ, {}, clear=True):
+        os.environ.pop('SKYPILOT_TIMELINE_FILE_PATH', None)
+        traced_fn()
+        assert len(timeline._process_events) == 0
+
+
+def test_request_scoped_isolation(tmp_path):
+    """Events in different request contexts are isolated."""
+    path_a = str(tmp_path / 'a.json')
+    path_b = str(tmp_path / 'b.json')
+
+    # Simulate two request contexts running in the same process.
+    def run_in_context(request_id, save_path, event_name):
+        ctx = contextvars.copy_context()
+
+        def inner():
+            timeline.init_request_timeline(request_id, save_path)
+            with timeline.Event(event_name):
+                pass
+            timeline.save_timeline()
+
+        ctx.run(inner)
+
+    run_in_context('req-aaa', path_a, 'event_a')
+    run_in_context('req-bbb', path_b, 'event_b')
+
+    data_a = json.loads(open(path_a).read())
+    data_b = json.loads(open(path_b).read())
+
+    # Each file should only contain its own events.
+    assert all(e['name'] == 'event_a' for e in data_a['traceEvents'])
+    assert all(e['name'] == 'event_b' for e in data_b['traceEvents'])
+    # Events should be tagged with their request_id.
+    assert all(
+        e.get('args', {}).get('request_id') == 'req-aaa'
+        for e in data_a['traceEvents'])
+    assert all(
+        e.get('args', {}).get('request_id') == 'req-bbb'
+        for e in data_b['traceEvents'])
+
+
+def test_thread_safety(tmp_path):
+    """Concurrent appends from multiple threads do not lose events."""
+    out = str(tmp_path / 'threaded.json')
+    n_threads = 10
+    n_events_per_thread = 50
+
+    with mock.patch.dict(os.environ, {'SKYPILOT_TIMELINE_FILE_PATH': out}):
+        barrier = threading.Barrier(n_threads)
+
+        def worker():
+            barrier.wait()
+            for i in range(n_events_per_thread):
+                with timeline.Event(f'thread_event_{i}'):
+                    pass
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Each event produces 2 entries (begin + end).
+        expected = n_threads * n_events_per_thread * 2
+        assert len(timeline._process_events) == expected
+        timeline.save_timeline()
+        assert len(timeline._process_events) == 0
+
+        data = json.loads(open(out).read())
+        assert len(data['traceEvents']) == expected
+
+
+def test_add_events():
+    """add_events() appends external events to the current list."""
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_TIMELINE_FILE_PATH': '/tmp/x.json'}):
+        with timeline.Event('local'):
+            pass
+        assert len(timeline._process_events) == 2
+        timeline.add_events([{'name': 'server_event', 'ph': 'X'}])
+        assert len(timeline._process_events) == 3
+
+
+def test_set_request_id():
+    """set_request_id tags subsequent events with request_id."""
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_TIMELINE_FILE_PATH': '/tmp/x.json'}):
+        timeline.set_request_id('my-request-id')
+        with timeline.Event('tagged'):
+            pass
+        events = timeline._process_events
+        assert len(events) == 2
+        for e in events:
+            assert e['args']['request_id'] == 'my-request-id'
+
+
+def test_disabled_tracing_no_events():
+    """When tracing is disabled, events are not recorded."""
+    # Ensure no env var and no context save path.
+    with mock.patch.dict(os.environ, {}, clear=True):
+        os.environ.pop('SKYPILOT_TIMELINE_FILE_PATH', None)
+        with timeline.Event('should_skip'):
+            pass
+        assert len(timeline._process_events) == 0
