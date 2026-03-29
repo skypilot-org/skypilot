@@ -60,7 +60,7 @@ Execute a task or command on an existing cluster.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
-- `CLUSTER` — text
+- `CLUSTER` — Name of the cluster to diagnose.
 - `--cluster`, `-c` — This is the same as the positional argument, just for consistency.
 - `ENTRYPOINT` — text
 - `--detach-run`, `-d` — If True, as soon as a job is submitted, return from this call and do not stream execution logs.
@@ -212,7 +212,7 @@ Tail the log of a job.
 - `--status` — If specified, do not show logs but exit with a status code for the job's status: 0 for succeeded, or 1 for all other statuses.
 - `--follow`, `--no-follow` — Follow the logs of a job. If --no-follow is specified, print the log so far and exit. [default: --follow]
 - `--tail` (default: `0`) — The number of lines to display from the end of the log file. Default is 0, which means print all lines.
-- `CLUSTER` — text
+- `CLUSTER` — Name of the cluster to diagnose.
 - `JOB_IDS` — text
 
 ### `sky cancel`
@@ -222,7 +222,7 @@ Cancel job(s).
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
-- `CLUSTER` — text
+- `CLUSTER` — Name of the cluster to diagnose.
 - `--all`, `-a` — Cancel all jobs from current user on the specified cluster.
 - `--all-users`, `-u` — Cancel all jobs on the specified cluster for all users.
 - `--yes`, `-y` — Skip confirmation prompt.
@@ -373,7 +373,7 @@ Tail or sync down the log of a managed job.
 
 ### `sky jobs pool apply`
 
-Either apply a config to a pool for managed jobs submission     or update the number of workers in the pool. One of POOL_YAML or --workers     must be provided.
+Either apply a config to a pool for managed jobs submission or update the number of workers in the pool. One of POOL_YAML or --workers must be provided.
 
 **Options:**
 
@@ -737,7 +737,7 @@ Clean up a cluster set up with 'sky ssh up'.
 
 ### `sky ssh up`
 
-Set up a cluster using SSH targets from a file. If not specified,     ~/.sky/ssh_node_pools.yaml will be used.
+Set up a cluster using SSH targets from a file. If not specified, ~/.sky/ssh_node_pools.yaml will be used.
 
 **Options:**
 
@@ -754,5 +754,5 @@ Run accelerator health diagnostics on a cluster.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
-- `CLUSTER` — text
+- `CLUSTER` — Name of the cluster to diagnose.
 - `--verbose`, `-v` — Show detailed output for each check, including raw command output.

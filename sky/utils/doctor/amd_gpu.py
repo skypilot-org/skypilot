@@ -31,12 +31,14 @@ class AmdGpuDoctorPlugin(AcceleratorDoctorPlugin):
             return CheckResult.fail('rocm-smi',
                                     'rocm-smi failed or no AMD GPUs found.',
                                     details=(err or out).strip())
-        gpus = [
-            l.strip()
-            for l in out.splitlines()
-            if 'card' in l.lower() or 'gpu' in l.lower()
-        ]
-        summary = f'{len(gpus)} GPU(s) detected' if gpus else 'GPUs detected'
+        gpu_ids = set()
+        for line in out.splitlines():
+            line = line.strip()
+            lower = line.lower()
+            if lower.startswith('gpu[') or lower.startswith('card['):
+                gpu_ids.add(line.split(']')[0])
+        summary = (f'{len(gpu_ids)} GPU(s) detected'
+                   if gpu_ids else 'GPUs detected')
         return CheckResult.ok('rocm-smi', summary, details=out.strip()[:800])
 
     def _check_rocm_version(self) -> CheckResult:

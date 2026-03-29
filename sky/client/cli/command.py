@@ -3813,6 +3813,14 @@ def doctor(cluster: str, verbose: bool) -> None:
                 'Run `sky status` to list available clusters.',
                 param_hint='CLUSTER')
 
+    if len(cluster_records) > 1:
+        matched = [r['name'] for r in cluster_records]
+        with ux_utils.print_exception_no_traceback():
+            raise click.BadParameter(
+                f'Multiple clusters match {cluster!r}: {matched}. '
+                'Please specify a single cluster name.',
+                param_hint='CLUSTER')
+
     record = cluster_records[0]
     handle = record['handle']
     cluster_status = record['status']

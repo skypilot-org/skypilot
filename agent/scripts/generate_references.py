@@ -296,7 +296,13 @@ def _format_option(param) -> str:
     """Format a Click option/argument as markdown."""
     import click as click_module
     if isinstance(param, click_module.Argument):
-        return f'- `{param.human_readable_name}` — {param.type.name}'
+        # Use human_readable_name as display, type.name as description.
+        # Special-case well-known argument names to provide better descriptions.
+        _ARG_DESCRIPTIONS = {
+            'cluster': 'Name of the cluster to diagnose.',
+        }
+        description = _ARG_DESCRIPTIONS.get(param.name, None) or param.type.name
+        return f'- `{param.human_readable_name}` — {description}'
 
     # It's an Option
     opts = ', '.join(f'`{o}`' for o in param.opts)
