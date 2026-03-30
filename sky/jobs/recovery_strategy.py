@@ -1027,6 +1027,16 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             self._context)
 
         assert self.cluster_name is not None
+        # Note: job_name is cluster_name (no user hash), NOT
+        # cluster_name_on_cloud. This is safe because:
+        # 1. cluster_name is already sanitized (lowercase, hyphens only) and
+        #    truncated to <=27 chars by generate_managed_job_cluster_name(),
+        #    so it's a valid K8s DNS label / resource name.
+        # 2. job_id is auto-incremented per SkyPilot server, so even if two
+        #    users pick the same task name, they get different job_ids and
+        #    thus different job_names. No collision within a shared namespace.
+        # We intentionally avoid cluster_name_on_cloud here because the user
+        # hash suffix would make pod names harder to read and debug.
         job_name = self.cluster_name
 
         # Build pod spec from task resources
