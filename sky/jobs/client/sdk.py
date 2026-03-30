@@ -229,7 +229,7 @@ def queue_v2(
     # Maps minimum API version -> fields introduced in that version.
     version_to_fields = {
         31: {'is_primary_in_job_group'},
-        46: {'batch_total_batches', 'batch_completed_batches'},
+        47: {'batch_total_batches', 'batch_completed_batches'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()
