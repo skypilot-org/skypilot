@@ -3125,9 +3125,12 @@ def resolve_auto_mounts(
     if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
         pod_spec['spec']['containers'][0]['volumeMounts'] = []
 
-    # Track which volume names have already been added to avoid duplicates
-    # when multiple mount_paths reference the same volume.
-    added_volumes: Set[str] = set()
+    # Track k8s volume names already present in the pod spec to avoid
+    # duplicates (e.g. user added the same volume via pod_config, or this
+    # function is called more than once).
+    added_volumes: Set[str] = {
+        vol['name'] for vol in pod_spec['spec'].get('volumes', [])
+    }
 
     for mount_entry in auto_mounts:
         volume_name = mount_entry['volume_name']
@@ -3158,8 +3161,9 @@ def resolve_auto_mounts(
         # Use a prefixed name to avoid conflicts with user volumes
         k8s_volume_name = f'auto-mount-{volume_name}'
 
-        # Add volume entry (once per unique volume)
-        if volume_name not in added_volumes:
+        # Add volume entry (once per unique k8s volume name), also checking
+        # against volumes already present in the pod spec.
+        if k8s_volume_name not in added_volumes:
             if volume_config.type == volume_lib.VolumeType.HOSTPATH.value:
                 host_path = volume_config.config.get('host_path')
                 pod_spec['spec']['volumes'].append({
@@ -3177,10 +3181,18 @@ def resolve_auto_mounts(
                         'claimName': pvc_claim_name,
                     },
                 })
-            added_volumes.add(volume_name)
+            added_volumes.add(k8s_volume_name)
 
         # Add volumeMount entries for each mount path.
-        # mount_paths are validated by schema to start with '/' or '~'.
+        # mount_paths are validated by schema to be one of:
+        #   /path        — absolute path in the container
+        #   ~/path or ~  — relative to the SkyPilot container home dir
+        #                  (HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH).
+        #                  NOTE: this is a limitation — '~' expansion only
+        #                  works correctly for containers whose home dir is
+        #                  /home/sky (i.e. SkyPilot-based images). For custom
+        #                  images with a different home dir, use an absolute
+        #                  path instead.
         for path in mount_paths:
             if path.startswith('/'):
                 # Absolute path: mount directly, subPath is the path without
@@ -3188,7 +3200,7 @@ def resolve_auto_mounts(
                 mount_path = path
                 sub_path = path.lstrip('/')
             elif path.startswith('~/'):
-                # ~/relative: expand ~ to the container home directory.
+                # ~/relative: expand ~ to the SkyPilot container home dir.
                 mount_path = (
                     f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
                     f'/{path[2:]}')

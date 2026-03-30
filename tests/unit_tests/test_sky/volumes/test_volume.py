@@ -800,6 +800,23 @@ class TestAutoMountsSchema:
             common_utils.validate_schema(config, schemas.get_config_schema(),
                                          'Invalid config: ')
 
+    def test_auto_mounts_tilde_username_path_rejected(self):
+        """Test auto_mounts rejects ~user style paths."""
+        from sky import exceptions as sky_exceptions
+        for bad_path in ['~foo', '~username/.cache']:
+            config = {
+                'kubernetes': {
+                    'auto_mounts': [{
+                        'volume_name': 'my-volume',
+                        'mount_paths': [bad_path],
+                    }],
+                },
+            }
+            with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+                common_utils.validate_schema(config,
+                                             schemas.get_config_schema(),
+                                             'Invalid config: ')
+
     def test_auto_mounts_in_context_config(self):
         """Test auto_mounts works in context_configs."""
         config = {

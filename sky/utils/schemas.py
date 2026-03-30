@@ -1442,7 +1442,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                     'type': 'array',
                     'items': {
                         'type': 'string',
-                        'pattern': '^(/|~)',
+                        'pattern': '^(/|~/|~$)',
                     },
                     'minItems': 1,
                 },
