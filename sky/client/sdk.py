@@ -472,6 +472,7 @@ def validate(
     omit_file_mount_type = _omit(40)
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
+    omit_mount_config = _omit(46)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -496,6 +497,11 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
+        if omit_mount_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_config = None
+            logger.debug('`mount_config` is ignored because the server '
+                         'does not support it yet.')
         if omit_priority_class:
             for resource in task.resources:
                 if resource.priority_class:

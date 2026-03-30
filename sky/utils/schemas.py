@@ -697,6 +697,15 @@ def get_storage_schema():
                             },
                         },
                     },
+                    'mount': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
                 },
             },
             '_is_sky_managed': {
