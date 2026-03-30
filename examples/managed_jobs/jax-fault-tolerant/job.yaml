@@ -1,16 +1,16 @@
 resources:
-  cpus: 0.5
-  memory: 1
+  cpus: 0.1
+  memory: 0.2
   cloud: kubernetes
-  job_recovery:
-    strategy: DYNAMIC_NODE_SET
-    min_nodes: 3
+  # job_recovery:
+  #   strategy: DYNAMIC_NODE_SET
+  #   min_nodes: 3
 
 num_nodes: 5
 
 envs:
-  NUM_EPOCHS: 50
-  STEPS_PER_EPOCH: 20
+  NUM_EPOCHS: 1
+  STEPS_PER_EPOCH: 1
 
 workdir:
   url: https://github.com/skypilot-org/skypilot.git
