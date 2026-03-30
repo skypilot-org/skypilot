@@ -79,6 +79,7 @@ run: |
                   active_ranks.add(w['rank']); print(f'{ts()}   Promoted rank {w[\"rank\"]} to active', flush=True)
       alive = get_alive()
       active = [w for w in alive if w['rank'] in active_ranks]
+      if not active: print(f'{ts()}   No active alive, retrying...', flush=True); continue
       standby_ct = len(alive) - len(active)
       n = len(active)
       peers = [w['ip'] for w in active]

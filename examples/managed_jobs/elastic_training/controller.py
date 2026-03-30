@@ -111,8 +111,14 @@ def main():
                           flush=True)
 
         # Build active worker list — use alive workers in active set
+        # Re-check: some active-ranked pods may have died between
+        # the while loop above and now.
         alive = get_alive_workers()
         active = [w for w in alive if w['rank'] in active_ranks]
+        if not active:
+            print(f'  No active workers alive, retrying...',
+                  flush=True)
+            continue
         standby_count = len(alive) - len(active)
 
         n = len(active)
