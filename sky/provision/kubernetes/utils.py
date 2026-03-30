@@ -65,10 +65,11 @@ else:
 # to root:root.
 # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # pylint: disable=line-too-long
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
+DEFAULT_HOME_DIRECTORY = '/home/sky'
 # Path where the persistent volume for HA controller is mounted.
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
-HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = DEFAULT_HOME_DIRECTORY
 
 IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
@@ -3186,8 +3187,7 @@ def resolve_auto_mounts(
         # Add volumeMount entries for each mount path.
         # mount_paths are validated by schema to be one of:
         #   /path        — absolute path in the container
-        #   ~/path or ~  — relative to the SkyPilot container home dir
-        #                  (HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH).
+        #   ~/path or ~  — relative to the SkyPilot container home dir.
         #                  NOTE: this is a limitation — '~' expansion only
         #                  works correctly for containers whose home dir is
         #                  /home/sky (i.e. SkyPilot-based images). For custom
@@ -3201,13 +3201,12 @@ def resolve_auto_mounts(
                 sub_path = path.lstrip('/')
             elif path.startswith('~/'):
                 # ~/relative: expand ~ to the SkyPilot container home dir.
-                mount_path = (
-                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
-                    f'/{path[2:]}')
+                mount_path = (f'{DEFAULT_HOME_DIRECTORY}'
+                              f'/{path[2:]}')
                 sub_path = path[2:]
             else:
                 # path == '~': mount the entire volume at home directory.
-                mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                mount_path = DEFAULT_HOME_DIRECTORY
                 sub_path = ''
 
             volume_mount: Dict[str, Any] = {
