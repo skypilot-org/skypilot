@@ -88,7 +88,7 @@ def get_s3_mount_install_cmd() -> str:
         f'  {get_rclone_install_cmd()}; '
         'else '
         '  sudo wget -nc https://github.com/aylei/goofys/'
-        'releases/download/0.24.0-aylei-upstream/goofys '
+        'releases/download/0.24.0-ec7d1b84/goofys-linux-amd64 '
         '-O /usr/local/bin/goofys && '
         'sudo chmod 755 /usr/local/bin/goofys; '
         'fi')
