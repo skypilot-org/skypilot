@@ -4386,6 +4386,163 @@ def get_gpu_resource_key(context: Optional[str] = None) -> str:
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
 
 
+@dataclasses.dataclass
+class PodResourceSpec:
+    """Pod resource spec derived from SkyPilot resources.
+
+    Centralizes the image, GPU/TPU resources, tolerations, node selector,
+    and runtime class resolution logic so both the standard provisioner
+    (instance.py) and the V1 fast-path (recovery_strategy.py) share
+    a single code path.
+    """
+    image: str
+    resource_requests: Dict[str, str]
+    resource_limits: Dict[str, str]
+    tolerations: List[Dict[str, str]]
+    node_selector: Dict[str, str]
+    runtime_class_name: Optional[str]
+    acc_count: int
+    gpu_resource_key: Optional[str]
+
+
+def build_pod_resource_spec(
+    context: Optional[str],
+    resource: 'resources_lib.Resources',
+) -> 'PodResourceSpec':
+    """Build pod resource spec from SkyPilot Resources.
+
+    Resolves image, GPU/TPU resource requests/limits, tolerations,
+    node selector, and runtime class. This mirrors the logic spread
+    across Kubernetes._get_image_id(), make_deploy_variables(), and
+    _create_pods() in instance.py.
+
+    Args:
+        context: The Kubernetes context name (None for in-cluster).
+        resource: A single SkyPilot Resources object.
+
+    Returns:
+        PodResourceSpec with all scheduling-related fields populated.
+    """
+    from sky.catalog import kubernetes_catalog
+    from sky.clouds import kubernetes as kubernetes_cloud
+
+    # --- Accelerator info ---
+    acc_count = 0
+    acc_type: Optional[str] = None
+    if resource.accelerators is not None:
+        acc_type = list(resource.accelerators.keys())[0]
+        acc_count = int(sum(resource.accelerators.values()))
+
+    # --- Image resolution (mirrors Kubernetes._get_image_id) ---
+    image_id_dict = resource.image_id
+    if image_id_dict is not None:
+        if None in image_id_dict:
+            image = image_id_dict[None]
+        else:
+            assert resource.region in image_id_dict, image_id_dict
+            image = image_id_dict[resource.region]
+        if image.startswith('docker:'):
+            image = image[len('docker:'):]
+    else:
+        if acc_count > 0:
+            image_tag = kubernetes_cloud.Kubernetes.IMAGE_GPU
+        else:
+            image_tag = kubernetes_cloud.Kubernetes.IMAGE_CPU
+        image = kubernetes_catalog.get_image_id_from_tag(
+            image_tag, region=None) or 'python:3.11-slim'
+
+    # --- Resource requests/limits ---
+    resource_requests: Dict[str, str] = {}
+    resource_limits: Dict[str, str] = {}
+    if resource.cpus is not None:
+        cpu_str = str(resource.cpus)
+        if cpu_str.endswith('+'):
+            cpu_str = cpu_str[:-1]
+        resource_requests['cpu'] = cpu_str
+    if resource.memory is not None:
+        mem_str = str(resource.memory)
+        if mem_str.endswith('+'):
+            mem_str = mem_str[:-1]
+        resource_requests['memory'] = f'{mem_str}Gi'
+
+    # --- GPU/TPU resource key, requests, and tolerations ---
+    tolerations: List[Dict[str, str]] = []
+    gpu_resource_key: Optional[str] = None
+    tpu_requested = False
+
+    if acc_count > 0 and acc_type is not None:
+        # Determine if this is a TPU or GPU request
+        try:
+            label_key, _, _, _ = get_accelerator_label_key_values(
+                context, acc_type, acc_count)
+            if (label_key ==
+                    GKELabelFormatter.TPU_LABEL_KEY):
+                tpu_requested = True
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        if tpu_requested:
+            gpu_resource_key = TPU_RESOURCE_KEY
+            # TPU toleration
+            tolerations.append({
+                'key': TPU_RESOURCE_KEY,
+                'operator': 'Equal',
+                'value': 'present',
+                'effect': 'NoSchedule',
+            })
+        else:
+            gpu_resource_key = get_gpu_resource_key(context)
+            # GPU toleration for tainted nodes (e.g., DWS flex-start)
+            tolerations.append({
+                'key': gpu_resource_key,
+                'operator': 'Exists',
+                'effect': 'NoSchedule',
+            })
+
+        resource_requests[gpu_resource_key] = str(acc_count)
+        resource_limits[gpu_resource_key] = str(acc_count)
+
+    # --- Node selector for accelerator type matching ---
+    node_selector: Dict[str, str] = {}
+    if acc_count > 0 and acc_type is not None:
+        try:
+            label_key, label_values, _, _ = (
+                get_accelerator_label_key_values(
+                    context, acc_type, acc_count))
+            if label_key and label_values:
+                node_selector = {label_key: label_values[0]}
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to get accelerator label for '
+                f'{acc_type}: {e}. Pods may not be scheduled '
+                f'on correct GPU nodes.')
+
+    # --- Runtime class ---
+    runtime_class_name: Optional[str] = None
+    if acc_count > 0 and not tpu_requested:
+        try:
+            if check_nvidia_runtime_class(context=context):
+                runtime_class_name = 'nvidia'
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Error checking nvidia RuntimeClass: {e}')
+
+    # --- Allowed nodes affinity ---
+    # Note: allowed_nodes is not injected here because it modifies the
+    # pod spec's affinity in-place. Callers should call
+    # inject_allowed_nodes_affinity() separately on the full pod spec.
+
+    return PodResourceSpec(
+        image=image,
+        resource_requests=resource_requests,
+        resource_limits=resource_limits,
+        tolerations=tolerations,
+        node_selector=node_selector,
+        runtime_class_name=runtime_class_name,
+        acc_count=acc_count,
+        gpu_resource_key=gpu_resource_key,
+    )
+
+
 def get_kubeconfig_paths() -> List[str]:
     """Get the path to the kubeconfig files.
     Parses `KUBECONFIG` env var if present, else uses the default path.

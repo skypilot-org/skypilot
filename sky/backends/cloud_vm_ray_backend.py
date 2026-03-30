@@ -812,7 +812,7 @@ class RetryingVmProvisioner(object):
             'run': self._task.run,
             'envs': envs,
             'num_nodes': self._task.num_nodes,
-            'num_gpus_per_node': 0,
+            'num_gpus_per_node': backend_utils.get_num_gpus_per_node(self._task),
             'workdir': workdir_config,
             'file_mounts': file_mounts,
         }
@@ -1255,7 +1255,7 @@ class RetryingVmProvisioner(object):
                         # can create a Job manifest with user commands
                         # baked into the pod spec.
                         if (k8s_mj.is_managed_jobs_v1_enabled()
-                                is not None and self._is_managed and isinstance(
+                                and self._is_managed and isinstance(
                                     to_provision.cloud, clouds.Kubernetes)):
                             self._inject_managed_job_config_to_yaml(
                                 handle.cluster_yaml, cluster_name)
