@@ -277,11 +277,16 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[responses.ManagedJobRecord]): A list of dicts, with
-          each dict containing the information of a job.
-        total (int): Total number of jobs after filter.
-        status_counts (Dict[str, int]): Status counts after filter.
-        total_no_filter (int): Total number of jobs before filter.
+        If version=1 (deprecated):
+            List[responses.ManagedJobRecord]: A list of dicts, with each
+              dict containing the information of a job.
+        If version=2:
+            A tuple of (job_records, total, status_counts, total_no_filter):
+              job_records (List[responses.ManagedJobRecord]): A list of dicts,
+                with each dict containing the information of a job.
+              total (int): Total number of jobs after filter.
+              status_counts (Dict[str, int]): Status counts after filter.
+              total_no_filter (int): Total number of jobs before filter.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
