@@ -3098,13 +3098,13 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
-def resolve_shared_caches(
+def resolve_auto_mounts(
     context: Optional[str],
     pod_spec: Dict[str, Any],
 ) -> None:
-    """Resolves shared_caches config and injects volumes/volumeMounts.
+    """Resolves auto_mounts config and injects volumes/volumeMounts.
 
-    Reads the shared_caches config from skypilot_config, resolves SkyPilot
+    Reads the auto_mounts config from skypilot_config, resolves SkyPilot
     volume names to PVC claimNames via DB lookup, and injects the corresponding
     volume and volumeMount entries into the pod spec.
 
@@ -3112,12 +3112,12 @@ def resolve_shared_caches(
         context: The Kubernetes context name.
         pod_spec: The pod spec dict to inject volumes into (modified in-place).
     """
-    shared_caches = skypilot_config.get_effective_region_config(
+    auto_mounts = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
-        keys=('shared_caches',),
+        keys=('auto_mounts',),
         default_value=None)
-    if not shared_caches:
+    if not auto_mounts:
         return
 
     if 'volumes' not in pod_spec['spec']:
@@ -3126,25 +3126,24 @@ def resolve_shared_caches(
         pod_spec['spec']['containers'][0]['volumeMounts'] = []
 
     # Track which volume names have already been added to avoid duplicates
-    # when multiple cache_paths reference the same volume.
+    # when multiple mount_paths reference the same volume.
     added_volumes: Set[str] = set()
 
-    for cache_entry in shared_caches:
-        spec = cache_entry['spec']
-        volume_name = spec['name']
-        cache_paths = cache_entry['cache_paths']
+    for mount_entry in auto_mounts:
+        volume_name = mount_entry['volume_name']
+        mount_paths = mount_entry['mount_paths']
 
         # Resolve SkyPilot volume name to volume config
         record = global_user_state.get_volume_by_name(volume_name)
         if record is None:
             logger.warning(
-                f'Shared cache volume {volume_name!r} not found in SkyPilot '
+                f'Auto-mount volume {volume_name!r} not found in SkyPilot '
                 f'volume DB. Skipping. Create it with: sky volumes apply')
             continue
         volume_config: models.VolumeConfig = record['handle']
 
         # Use a prefixed name to avoid conflicts with user volumes
-        k8s_volume_name = f'shared-cache-{volume_name}'
+        k8s_volume_name = f'auto-mount-{volume_name}'
 
         # Add volume entry (once per unique volume)
         if volume_name not in added_volumes:
@@ -3167,33 +3166,33 @@ def resolve_shared_caches(
                 })
             added_volumes.add(volume_name)
 
-        # Add volumeMount entries for each cache path
-        for cache_path in cache_paths:
-            # Resolve mount_path based on the cache_path format
-            if cache_path.startswith('/'):
-                # Absolute paths mount directly
-                mount_path = cache_path
-                sub_path = cache_path.lstrip('/')
-            elif cache_path.startswith('~/'):
+        # Add volumeMount entries for each mount path.
+        # mount_paths are validated by schema to start with '/' or '~'.
+        for path in mount_paths:
+            if path.startswith('/'):
+                # Absolute path: mount directly, subPath is the path without
+                # leading slash so it's relative to the PVC/hostPath root.
+                mount_path = path
+                sub_path = path.lstrip('/')
+            elif path.startswith('~/'):
+                # ~/relative: expand ~ to the container home directory.
                 mount_path = (
                     f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
-                    f'/{cache_path[2:]}')
-                sub_path = cache_path
-            elif cache_path == '~':
-                mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
-                sub_path = cache_path
+                    f'/{path[2:]}')
+                sub_path = path[2:]
             else:
-                # Relative paths are relative to home directory
-                mount_path = (
-                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
-                    f'/{cache_path}')
-                sub_path = cache_path
+                # path == '~': mount the entire volume at home directory.
+                mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                sub_path = ''
 
-            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+            volume_mount: Dict[str, Any] = {
                 'name': k8s_volume_name,
                 'mountPath': mount_path,
-                'subPath': sub_path,
-            })
+            }
+            if sub_path:
+                volume_mount['subPath'] = sub_path
+            pod_spec['spec']['containers'][0]['volumeMounts'].append(
+                volume_mount)
 
 
 # Sidecar container names.

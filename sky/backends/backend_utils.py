@@ -972,25 +972,23 @@ def write_cluster_config(
         for vol in volume_mounts:
             if vol.is_ephemeral:
                 volume_mount_rw_paths.append(vol.path)
-    # From shared caches (resolved at template time; actual volume injection
-    # happens at pod-creation time in resolve_shared_caches)
-    shared_caches_config = skypilot_config.get_effective_region_config(
+    # From auto_mounts (resolved at template time; actual volume injection
+    # happens at pod-creation time in resolve_auto_mounts)
+    auto_mounts_config = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
-        keys=('shared_caches',),
+        keys=('auto_mounts',),
         default_value=None)
-    if shared_caches_config:
+    if auto_mounts_config:
         home = kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
-        for entry in shared_caches_config:
-            for cache_path in entry.get('cache_paths', []):
-                if cache_path.startswith('/'):
-                    volume_mount_rw_paths.append(cache_path)
-                elif cache_path.startswith('~/'):
-                    volume_mount_rw_paths.append(f'{home}/{cache_path[2:]}')
-                elif cache_path == '~':
+        for entry in auto_mounts_config:
+            for mount_path in entry.get('mount_paths', []):
+                if mount_path.startswith('/'):
+                    volume_mount_rw_paths.append(mount_path)
+                elif mount_path.startswith('~/'):
+                    volume_mount_rw_paths.append(f'{home}/{mount_path[2:]}')
+                elif mount_path == '~':
                     volume_mount_rw_paths.append(home)
-                else:
-                    volume_mount_rw_paths.append(f'{home}/{cache_path}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.

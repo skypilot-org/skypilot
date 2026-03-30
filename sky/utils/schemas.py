@@ -1428,27 +1428,21 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
-    'shared_caches': {
+    'auto_mounts': {
         'type': 'array',
         'items': {
             'type': 'object',
-            'required': ['spec', 'cache_paths'],
+            'required': ['volume_name', 'mount_paths'],
             'additionalProperties': False,
             'properties': {
-                'spec': {
-                    'type': 'object',
-                    'required': ['name'],
-                    'additionalProperties': False,
-                    'properties': {
-                        'name': {
-                            'type': 'string',
-                        },
-                    },
+                'volume_name': {
+                    'type': 'string',
                 },
-                'cache_paths': {
+                'mount_paths': {
                     'type': 'array',
                     'items': {
                         'type': 'string',
+                        'pattern': '^(/|~)',
                     },
                     'minItems': 1,
                 },

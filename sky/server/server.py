@@ -81,7 +81,6 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
-from sky.shared_caches import server as shared_caches_rest
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
@@ -921,9 +920,6 @@ app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
 app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
-app.include_router(shared_caches_rest.router,
-                   prefix='/shared_caches',
-                   tags=['shared_caches'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])

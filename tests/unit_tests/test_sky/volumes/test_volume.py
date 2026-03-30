@@ -735,18 +735,16 @@ class TestSubPath:
         assert yaml_config['sub_path'] == '~/.cache/uv'
 
 
-class TestSharedCachesSchema:
-    """Tests for shared_caches config schema validation."""
+class TestAutoMountsSchema:
+    """Tests for auto_mounts config schema validation."""
 
-    def test_valid_shared_caches_config(self):
-        """Test valid shared_caches config passes schema validation."""
+    def test_valid_auto_mounts_config(self):
+        """Test valid auto_mounts config passes schema validation."""
         config = {
             'kubernetes': {
-                'shared_caches': [{
-                    'spec': {
-                        'name': 'my-volume',
-                    },
-                    'cache_paths': [
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': [
                         '~/.cache/huggingface/hub',
                         '~/.cache/huggingface/datasets',
                     ],
@@ -756,13 +754,13 @@ class TestSharedCachesSchema:
         common_utils.validate_schema(config, schemas.get_config_schema(),
                                      'Invalid config: ')
 
-    def test_shared_caches_missing_spec(self):
-        """Test shared_caches without spec fails validation."""
+    def test_auto_mounts_missing_volume_name(self):
+        """Test auto_mounts without volume_name fails validation."""
         from sky import exceptions as sky_exceptions
         config = {
             'kubernetes': {
-                'shared_caches': [{
-                    'cache_paths': ['~/.cache/uv'],
+                'auto_mounts': [{
+                    'mount_paths': ['~/.cache/uv'],
                 }],
             },
         }
@@ -770,15 +768,13 @@ class TestSharedCachesSchema:
             common_utils.validate_schema(config, schemas.get_config_schema(),
                                          'Invalid config: ')
 
-    def test_shared_caches_missing_cache_paths(self):
-        """Test shared_caches without cache_paths fails validation."""
+    def test_auto_mounts_missing_mount_paths(self):
+        """Test auto_mounts without mount_paths fails validation."""
         from sky import exceptions as sky_exceptions
         config = {
             'kubernetes': {
-                'shared_caches': [{
-                    'spec': {
-                        'name': 'my-volume',
-                    },
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
                 }],
             },
         }
@@ -786,16 +782,14 @@ class TestSharedCachesSchema:
             common_utils.validate_schema(config, schemas.get_config_schema(),
                                          'Invalid config: ')
 
-    def test_shared_caches_empty_cache_paths(self):
-        """Test shared_caches with empty cache_paths fails validation."""
+    def test_auto_mounts_empty_mount_paths(self):
+        """Test auto_mounts with empty mount_paths fails validation."""
         from sky import exceptions as sky_exceptions
         config = {
             'kubernetes': {
-                'shared_caches': [{
-                    'spec': {
-                        'name': 'my-volume',
-                    },
-                    'cache_paths': [],
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': [],
                 }],
             },
         }
@@ -803,17 +797,30 @@ class TestSharedCachesSchema:
             common_utils.validate_schema(config, schemas.get_config_schema(),
                                          'Invalid config: ')
 
-    def test_shared_caches_in_context_config(self):
-        """Test shared_caches works in context_configs."""
+    def test_auto_mounts_relative_path_rejected(self):
+        """Test auto_mounts rejects relative paths (must start with / or ~)."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': ['relative/path'],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_in_context_config(self):
+        """Test auto_mounts works in context_configs."""
         config = {
             'kubernetes': {
                 'context_configs': {
                     'my-context': {
-                        'shared_caches': [{
-                            'spec': {
-                                'name': 'ctx-volume',
-                            },
-                            'cache_paths': ['~/.cache/uv'],
+                        'auto_mounts': [{
+                            'volume_name': 'ctx-volume',
+                            'mount_paths': ['~/.cache/uv'],
                         }],
                     },
                 },
@@ -822,16 +829,14 @@ class TestSharedCachesSchema:
         common_utils.validate_schema(config, schemas.get_config_schema(),
                                      'Invalid config: ')
 
-    def test_shared_caches_additional_properties_rejected(self):
-        """Test shared_caches rejects unknown properties."""
+    def test_auto_mounts_additional_properties_rejected(self):
+        """Test auto_mounts rejects unknown properties."""
         from sky import exceptions as sky_exceptions
         config = {
             'kubernetes': {
-                'shared_caches': [{
-                    'spec': {
-                        'name': 'my-volume',
-                    },
-                    'cache_paths': ['~/.cache/uv'],
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': ['~/.cache/uv'],
                     'unknown_field': True,
                 }],
             },

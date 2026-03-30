@@ -1139,8 +1139,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec['spec']['containers'][0]['volumeMounts'].append(
                 volume_mount_entry)
 
-    # Inject shared cache volumes from skypilot config
-    kubernetes_utils.resolve_shared_caches(context, pod_spec)
+    # Inject auto_mount volumes from skypilot config
+    kubernetes_utils.resolve_auto_mounts(context, pod_spec)
 
     # Docker sidecar cache volume injection: if a SkyPilot volume was
     # specified for the enable_docker cache, look up the PVC name. The actual

@@ -901,20 +901,20 @@ class GetConfigBody(RequestBody):
     pass
 
 
-class SharedCacheUpsertBody(RequestBody):
-    """The request body for upserting a shared cache entry."""
+class AutoMountUpsertBody(RequestBody):
+    """The request body for upserting an auto_mount entry."""
     context: Optional[str] = None  # None = all contexts
-    spec: Dict[str, Any]  # {name: str}
-    cache_paths: List[str]
+    volume_name: str
+    mount_paths: List[str]
 
 
-class SharedCacheDeleteBody(RequestBody):
-    """The request body for deleting a shared cache entry."""
+class AutoMountDeleteBody(RequestBody):
+    """The request body for deleting an auto_mount entry."""
     context: Optional[str] = None
-    volume_name: str  # spec.name to identify which cache to remove
+    volume_name: str
 
 
-class SharedCacheStorageClassesBody(RequestBody):
+class AutoMountStorageClassesBody(RequestBody):
     """The request body for listing storage classes."""
     context: Optional[str] = None
 
