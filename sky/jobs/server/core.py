@@ -1065,7 +1065,6 @@ def queue(refresh: bool,
     return jobs
 
 
-
 @usage_lib.entrypoint
 def queue_v2_api(
     refresh: bool,

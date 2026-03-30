@@ -277,16 +277,15 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        If version=1 (deprecated):
-            List[responses.ManagedJobRecord]: A list of dicts, with each
-              dict containing the information of a job.
-        If version=2:
-            A tuple of (job_records, total, status_counts, total_no_filter):
-              job_records (List[responses.ManagedJobRecord]): A list of dicts,
-                with each dict containing the information of a job.
-              total (int): Total number of jobs after filter.
-              status_counts (Dict[str, int]): Status counts after filter.
-              total_no_filter (int): Total number of jobs before filter.
+        If version=1 (deprecated), returns a list of managed job records.
+        If version=2, returns a tuple of
+        ``(job_records, total, status_counts, total_no_filter)`` where:
+
+        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
+          with each dict containing the information of a job.
+        - total (int): Total number of jobs after filter.
+        - status_counts (Dict[str, int]): Status counts after filter.
+        - total_no_filter (int): Total number of jobs before filter.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
@@ -297,10 +296,11 @@ def queue(
         raise ValueError(f'Invalid queue version: {version}. Must be 1 or 2.')
 
     if version == 2:
-        return queue_v2(refresh=refresh,  # type: ignore[return-value]
-                        skip_finished=skip_finished,
-                        all_users=all_users,
-                        job_ids=job_ids)
+        return queue_v2(
+            refresh=refresh,  # type: ignore[return-value]
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids)
 
     logger.warning('sky.jobs.queue(version=1) is deprecated and will be '
                    'removed in v0.13. Use sky.jobs.queue(version=2) or '
