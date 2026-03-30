@@ -161,6 +161,7 @@ def test_cli_auto_retry(generic_cloud: str):
     if parsed.username and parsed.password:
         api_proxy_url = f'http://{parsed.username}:{parsed.password}@127.0.0.1:{port}'
     run_command = 'for i in {1..120}; do echo "output $i" && sleep 1; done'
+    job_run_command = 'for i in {1..60}; do echo "job output $i" && sleep 1; done'
     test = smoke_tests_utils.Test(
         'cli_auto_retry',
         [
@@ -168,11 +169,17 @@ def test_cli_auto_retry(generic_cloud: str):
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
             # Both launch streaming and logs streaming should survive the chaos.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} \'{run_command}\'',
+            # Test managed job controller logs streaming through the chaos
+            # proxy. Launch a job that runs long enough (~60s) to survive at
+            # least one connection drop (30s interval), then verify
+            # sky jobs logs --controller in follow mode completes successfully.
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'{job_run_command}\'',
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --controller -n {name}',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
-        teardown=f'sky down -y {name}; kill $(cat /tmp/{name}-chaos.pid) || true'
-    )
+        teardown=(f'sky down -y {name}; sky jobs cancel -y -n {name};'
+                  f' kill $(cat /tmp/{name}-chaos.pid) || true'))
     smoke_tests_utils.run_one_test(test)
 
 

@@ -959,6 +959,13 @@ def write_cluster_config(
         keys=('post_provision_runcmd',),
         default_value=None)
 
+    # Build a list of read-write volume mount paths. The container startup
+    # script checks each path and fixes permissions if the current user cannot
+    # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
+    # dirs created as root, or NFS volumes that ignore fsGroup).
+    volume_mount_rw_paths: List[str] = ([vol.path for vol in volume_mounts]
+                                        if volume_mounts is not None else [])
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1079,6 +1086,7 @@ def write_cluster_config(
             # Volume mounts
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
+            'volume_mount_rw_paths': volume_mount_rw_paths,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
