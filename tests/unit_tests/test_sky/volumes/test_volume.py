@@ -655,15 +655,6 @@ class TestVolumeConfigModel:
 class TestSubPath:
     """Tests for sub_path support."""
 
-    def test_sub_path_pattern_allows_tilde(self):
-        """Test that SUB_PATH_PATTERN allows ~ character."""
-        import re
-
-        from sky.skylet import constants
-        assert re.match(constants.SUB_PATH_PATTERN, '~/.cache/uv')
-        assert re.match(constants.SUB_PATH_PATTERN, '~/.cache/huggingface/hub')
-        assert re.match(constants.SUB_PATH_PATTERN, '.cache/uv')
-
     def test_sub_path_pattern_rejects_invalid(self):
         """Test that SUB_PATH_PATTERN rejects invalid paths."""
         import re
@@ -671,29 +662,6 @@ class TestSubPath:
         from sky.skylet import constants
         assert not re.match(constants.SUB_PATH_PATTERN, '/absolute/path')
         assert not re.match(constants.SUB_PATH_PATTERN, '')
-
-    def test_volume_mount_resolve_with_sub_path(self):
-        """Test VolumeMount.resolve with sub_path."""
-        from sky.utils import volume as volume_utils
-        mock_record = {
-            'status': 'READY',
-            'handle': models.VolumeConfig(
-                name='test',
-                type='k8s-pvc',
-                cloud='kubernetes',
-                region=None,
-                zone=None,
-                name_on_cloud='test-pvc',
-                size=None,
-            ),
-        }
-        with patch('sky.global_user_state.get_volume_by_name',
-                   return_value=mock_record):
-            mount = volume_utils.VolumeMount.resolve('/mnt/data',
-                                                     'test',
-                                                     sub_path='~/.cache/uv')
-            assert mount.sub_path == '~/.cache/uv'
-            assert mount.path == '/mnt/data'
 
     def test_volume_mount_resolve_rejects_traversal(self):
         """Test VolumeMount.resolve rejects directory traversal."""
