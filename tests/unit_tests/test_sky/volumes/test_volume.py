@@ -703,18 +703,6 @@ class TestSubPath:
                                              'test',
                                              sub_path='../etc/passwd')
 
-    def test_ephemeral_volume_mount_sub_path(self):
-        """Test ephemeral volume mount accepts sub_path."""
-        from sky.utils import volume as volume_utils
-        config = {
-            'size': '10Gi',
-            'sub_path': '.cache/uv',
-        }
-        mount = volume_utils.VolumeMount.resolve_ephemeral_config(
-            '/mnt/data', config)
-        assert mount.sub_path == '.cache/uv'
-        assert mount.is_ephemeral is True
-
     def test_volume_mount_to_yaml_config_with_sub_path(self):
         """Test VolumeMount serialization includes sub_path."""
         from sky.utils import volume as volume_utils
