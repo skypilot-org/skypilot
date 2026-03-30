@@ -466,8 +466,6 @@ def validate(
     def _omit(version: int) -> bool:
         return remote_api_version is None or remote_api_version < version
 
-    # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = _omit(15)
     # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
