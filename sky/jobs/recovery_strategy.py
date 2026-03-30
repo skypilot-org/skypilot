@@ -92,8 +92,8 @@ class StrategyExecutor:
             starting_signal: Condition to signal when a job can start.
             recover_on_exit_codes: List of exit codes that should trigger
                 recovery regardless of max_restarts_on_errors limit.
-            **kwargs: Strategy-specific arguments (e.g., min_nodes for
-                DYNAMIC_NODE_SET). Ignored by base class.
+            **kwargs: Reserved for future strategy-specific arguments.
+                Currently unused by all strategies.
         """
         del kwargs  # Subclasses handle strategy-specific args
         assert isinstance(backend, backends.CloudVmRayBackend), (
@@ -978,6 +978,11 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
     def set_strategy_config(self, config: dict) -> None:
         self.min_nodes = int(config.get('min_nodes', 1))
+        task = self.dag.tasks[0]
+        if task.num_nodes is not None and self.min_nodes > task.num_nodes:
+            raise ValueError(
+                f'min_nodes ({self.min_nodes}) cannot exceed '
+                f'num_nodes ({task.num_nodes})')
         self._namespace: Optional[str] = None
         self._context: Optional[str] = None
         self._image: str = 'python:3.11-slim'

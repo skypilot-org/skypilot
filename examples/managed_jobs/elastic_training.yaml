@@ -44,13 +44,13 @@ run: |
     echo "=== CONTROLLER started (rank 0) ==="
 
     get_peers() {
-      skypilot_peers 2>/dev/null | python3 -c "
+      skypilot_nodes 2>/dev/null | python3 -c "
   import sys, json
   try:
       data = json.load(sys.stdin)
-      peers = data.get('ready', [])
+      nodes = data.get('nodes', [])
       # Exclude self (rank 0)
-      workers = [p for p in peers if p['rank'] != 0]
+      workers = [n for n in nodes if n['rank'] != 0]
       print(json.dumps({'count': len(workers), 'workers': workers}))
   except:
       print(json.dumps({'count': 0, 'workers': []}))
@@ -135,7 +135,7 @@ run: |
     while true; do
       STEP=$((STEP + 1))
       if [ $((STEP % 12)) -eq 0 ]; then
-        PEERS=$(skypilot_peers 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('count','?'))" 2>/dev/null || echo "?")
+        PEERS=$(skypilot_nodes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('nodes',[]))-1)" 2>/dev/null || echo "?")
         echo "Worker $SKYPILOT_NODE_RANK ($ROLE) min $((STEP/12)) peers=$PEERS"
       fi
       sleep 5

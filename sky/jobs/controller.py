@@ -353,9 +353,6 @@ class JobController:
         """Download logs from K8s managed job pods if applicable."""
         if not managed_job_utils._is_v1_k8s_managed_job(handle):
             return None
-        from sky import clouds
-        if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            return None
 
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
@@ -442,9 +439,6 @@ class JobController:
     ) -> Optional[list]:
         """Get exit codes from K8s managed job pods if applicable."""
         if not managed_job_utils._is_v1_k8s_managed_job(handle):
-            return None
-        from sky import clouds
-        if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             return None
         try:
             config = global_user_state.get_cluster_yaml_dict(
@@ -807,7 +801,7 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
-        # Detect V1: check env var first (fast), then YAML (reliable)
+        # Detect V1: check config first (fast), then YAML (reliable)
         from sky.provision.kubernetes.managed_job import is_managed_jobs_v1_enabled
         is_k8s_v1 = is_managed_jobs_v1_enabled()
         if not is_k8s_v1:

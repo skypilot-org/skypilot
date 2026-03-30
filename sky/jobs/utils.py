@@ -1139,7 +1139,7 @@ def _stream_k8s_managed_job_logs(
             namespace, label_selector=label_selector)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to list pods for log streaming: {e}')
-        return 0
+        return 1
 
     if not pods.items:
         logger.info(f'No pods found for {cloud_name}')

@@ -1126,7 +1126,7 @@ def build_elastic_job_manifests(
 
 def _build_rbac_manifests(job_name: str, namespace: str,
                           service_account: str) -> List[Dict[str, Any]]:
-    """Build Role + RoleBinding for Endpoints/Pods read access."""
+    """Build Role + RoleBinding for Endpoints read and Pods read/patch access."""
     role = {
         'apiVersion': 'rbac.authorization.k8s.io/v1',
         'kind': 'Role',
