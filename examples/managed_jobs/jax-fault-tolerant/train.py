@@ -16,8 +16,8 @@ import numpy as np
 CHECKPOINT_DIR = "/tmp/jax_ckpt"
 BATCH_SIZE = 64
 HIDDEN_DIM = 256
-NUM_EPOCHS = 50
-STEPS_PER_EPOCH = 20
+NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
+STEPS_PER_EPOCH = int(os.environ.get("STEPS_PER_EPOCH", 20))
 
 
 def get_peer_count():
