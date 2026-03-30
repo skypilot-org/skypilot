@@ -248,10 +248,7 @@ export function Volumes() {
           </Dialog>
         </>
       ) : (
-        <PluginSlot
-          name="volumes.tab-content"
-          context={{ activeTab }}
-        />
+        <PluginSlot name="volumes.tab-content" context={{ activeTab }} />
       )}
     </>
   );
