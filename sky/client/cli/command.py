@@ -7729,6 +7729,104 @@ def ssh_down(infra, async_call):
         sdk.stream_and_get(request_id)
 
 
+@cli.command('debug-dump', cls=_DocumentedCodeCommand)
+@click.option('--request-ids',
+              '-r',
+              multiple=True,
+              help='Request IDs or prefixes to include in the dump.')
+@click.option('--cluster-names',
+              '-c',
+              multiple=True,
+              help='Cluster names to include in the dump.')
+@click.option('--job-ids',
+              '-j',
+              multiple=True,
+              type=int,
+              help='Managed job IDs to include in the dump.')
+@click.option('--recent-minutes',
+              type=float,
+              default=None,
+              help='Include resources active within the last N minutes.')
+@click.option('--output', default=None, help='Output path for the dump file.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+@usage_lib.entrypoint
+def debug_dump(
+    request_ids: Tuple[str, ...],
+    cluster_names: Tuple[str, ...],
+    job_ids: Tuple[int, ...],
+    recent_minutes: Optional[float],
+    output: Optional[str],
+    async_call: bool,
+):
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+    Example usage:
+
+    \b
+    # Dump info for a specific cluster
+    $ sky debug-dump -c my-cluster
+
+    \b
+    # Dump info for a managed job
+    $ sky debug-dump -j 123
+
+    \b
+    # Dump info for a specific request
+    $ sky debug-dump -r abc123-def456
+
+    \b
+    # Dump resources from the last 60 minutes
+    $ sky debug-dump --recent-minutes 60
+
+    \b
+    # Combine multiple resources
+    $ sky debug-dump -c cluster1 -j 123 -r request-id
+
+    \b
+    # Save to a specific file
+    $ sky debug-dump -c my-cluster --output my-dump.zip
+    """
+    if (not request_ids and not cluster_names and not job_ids and
+            recent_minutes is None):
+        raise click.UsageError(
+            'At least one of --request-ids, --cluster-names, --job-ids, '
+            'or --recent-minutes must be provided.')
+    if recent_minutes is not None and recent_minutes <= 0:
+        raise click.UsageError('--recent-minutes must be a positive number.')
+
+    # Create the dump on the server
+    request_id = sdk.create_debug_dump(
+        request_ids=list(request_ids) if request_ids else None,
+        cluster_names=list(cluster_names) if cluster_names else None,
+        managed_job_ids=list(job_ids) if job_ids else None,
+        recent_minutes=recent_minutes,
+    )
+
+    if async_call:
+        click.echo(f'Request submitted with ID: {request_id}')
+        return
+
+    # Wait for the dump to be created
+    with rich_utils.client_status(
+            ux_utils.spinner_message('Creating debug dump')):
+        result = sdk.stream_and_get(request_id)
+
+    # Download the dump
+    dump_filename = pathlib.Path(result).name
+    local_path = output or dump_filename
+
+    click.echo(f'Downloading debug dump to {local_path}...')
+    sdk.download_debug_dump(dump_filename, local_path)
+    click.echo(f'Debug dump saved to: {local_path}')
+
+
 def main():
     return cli()
 
