@@ -75,8 +75,10 @@ def _patch_pod_label(label_key, label_value):
     req.add_header("Content-Type", "application/strategic-merge-patch+json")
     try:
         urllib.request.urlopen(req, context=_k8s_ssl_context(), timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        import sys
+        print(f'WARNING: failed to patch label {label_key}={label_value} '
+              f'on {hostname}: {e}', file=sys.stderr)
 
 
 def _query_pods_for_service(svc_name):
@@ -93,7 +95,10 @@ def _query_pods_for_service(svc_name):
     try:
         with urllib.request.urlopen(req, context=_k8s_ssl_context(), timeout=10) as resp:
             data = json.loads(resp.read())
-    except Exception:
+    except Exception as e:
+        import sys
+        print(f'WARNING: failed to query pods for service {svc_name}: {e}',
+              file=sys.stderr)
         return []
 
     nodes = []
@@ -204,8 +209,9 @@ def _app_status_watcher():
             if current and current != last_value:
                 _patch_pod_label("skypilot-app-status", current)
                 last_value = current
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f'WARNING: app status watcher error: {e}', file=sys.stderr)
         time.sleep(2)
 
 

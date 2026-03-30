@@ -24,7 +24,6 @@ from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
-from sky.provision.kubernetes import managed_job as k8s_mj
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1100,6 +1099,13 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             if running >= self.min_nodes:
                 logger.info(f'Elastic job {job_name}: {running} pods running '
                             f'(min_nodes={self.min_nodes})')
+                # Persist infra info for dashboard/CLI display
+                await asyncio.to_thread(
+                    state.set_job_infra,
+                    self.job_id,
+                    cloud='Kubernetes',
+                    region=context_name,
+                )
                 return time.time()
             logger.debug(f'Waiting for min_nodes={self.min_nodes} pods: '
                          f'{running} running')
@@ -1112,7 +1118,11 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         return None
 
     async def recover(self) -> float:
-        """Replace failed or missing pods individually."""
+        """Replace failed or missing pods individually.
+
+        Raises:
+            RuntimeError: If any pod replacement failed.
+        """
         from sky.provision.kubernetes import managed_job as k8s_managed_job
 
         assert self.cluster_name is not None
@@ -1121,6 +1131,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         indices_to_replace = k8s_managed_job.get_pods_to_replace(
             self.cluster_name, self._namespace, self._context, task.num_nodes)
 
+        failed_indices = []
         for idx in indices_to_replace:
             try:
                 k8s_managed_job.create_replacement_pod(
@@ -1141,7 +1152,12 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                 )
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Failed to replace pod index {idx}: {e}')
+                failed_indices.append(idx)
 
+        if failed_indices:
+            raise RuntimeError(
+                f'Failed to replace {len(failed_indices)} pod(s) at '
+                f'indices {failed_indices}')
         return time.time()
 
     def _cleanup_cluster(self) -> None:
@@ -1156,92 +1172,30 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                                   task: 'task_lib.Task') -> Dict[str, Any]:
         """Build a minimal K8s pod spec from task resources.
 
-        Mirrors the image/GPU/toleration logic in
-        sky.provision.kubernetes.instance and sky.clouds.kubernetes.
+        Uses the shared build_pod_resource_spec() helper to resolve image,
+        GPU/TPU resources, tolerations, node selector, and runtime class.
         """
-        from sky.catalog import kubernetes_catalog
-        from sky.clouds import kubernetes as kubernetes_cloud
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         resource = list(task.resources)[0]
+        spec = kubernetes_utils.build_pod_resource_spec(
+            self._context, resource)
 
-        # --- Accelerator count ---
-        acc_count = 0
-        if resource.accelerators is not None:
-            acc_count = sum(resource.accelerators.values())
-
-        # --- Image resolution (mirrors Kubernetes._get_image_id) ---
-        image_id_dict = resource.image_id
-        if image_id_dict is not None:
-            if None in image_id_dict:
-                image = image_id_dict[None]
-            else:
-                assert resource.region in image_id_dict, image_id_dict
-                image = image_id_dict[resource.region]
-            if image.startswith('docker:'):
-                image = image[len('docker:'):]
-        else:
-            if acc_count > 0:
-                image_tag = kubernetes_cloud.Kubernetes.IMAGE_GPU
-            else:
-                image_tag = kubernetes_cloud.Kubernetes.IMAGE_CPU
-            image = kubernetes_catalog.get_image_id_from_tag(
-                image_tag, region=None) or 'python:3.11-slim'
-
-        # --- Container resource requests/limits ---
-        resources_requests: Dict[str, str] = {}
-        resources_limits: Dict[str, str] = {}
-        if resource.cpus is not None:
-            cpu_str = str(resource.cpus)
-            if cpu_str.endswith('+'):
-                cpu_str = cpu_str[:-1]
-            resources_requests['cpu'] = cpu_str
-        if resource.memory is not None:
-            mem_str = str(resource.memory)
-            if mem_str.endswith('+'):
-                mem_str = mem_str[:-1]
-            resources_requests['memory'] = f'{mem_str}Gi'
-
-        # --- GPU resources and tolerations ---
-        tolerations: List[Dict[str, str]] = []
-        if acc_count > 0:
-            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
-                self._context)
-            resources_requests[gpu_resource_key] = str(int(acc_count))
-            resources_limits[gpu_resource_key] = str(int(acc_count))
-            self._num_gpus = int(acc_count)
-            self._gpu_resource_key = gpu_resource_key
-            # GPU toleration so pods can schedule on GPU-tainted nodes
-            tolerations.append({
-                'key': gpu_resource_key,
-                'operator': 'Exists',
-                'effect': 'NoSchedule',
-            })
-
-        self._tolerations = tolerations
-
-        # --- Node selector for GPU type matching ---
-        self._node_selector = {}
-        if acc_count > 0 and resource.accelerators:
-            acc_type = list(resource.accelerators.keys())[0]
-            try:
-                label_key, label_values, _, _ = (
-                    kubernetes_utils.get_accelerator_label_key_values(
-                        self._context, acc_type, acc_count))
-                if label_key and label_values:
-                    self._node_selector = {label_key: label_values[0]}
-            except Exception:  # pylint: disable=broad-except
-                pass  # Fall back to no node selector
+        # Store on self for use by recover() and _launch()
+        self._num_gpus = spec.acc_count
+        self._gpu_resource_key = spec.gpu_resource_key or 'nvidia.com/gpu'
+        self._tolerations = spec.tolerations
+        self._node_selector = spec.node_selector
 
         container_spec: Dict[str, Any] = {
             'name': 'main',
-            'image': image,
+            'image': spec.image,
             'resources': {
-                'requests': resources_requests
+                'requests': spec.resource_requests
             },
         }
-        if resources_limits:
-            container_spec['resources']['limits'] = resources_limits
+        if spec.resource_limits:
+            container_spec['resources']['limits'] = spec.resource_limits
 
         pod_spec: Dict[str, Any] = {
             'metadata': {
@@ -1253,6 +1207,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                 'restartPolicy': 'Never',
             },
         }
+        if spec.runtime_class_name:
+            pod_spec['spec']['runtimeClassName'] = spec.runtime_class_name
         return pod_spec
 
 

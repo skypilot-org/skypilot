@@ -4,6 +4,7 @@ from datetime import datetime
 import enum
 import fnmatch
 import hashlib
+import math
 import os
 import pathlib
 import pprint
@@ -3744,6 +3745,16 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     if resources is not None and resources.accelerators is not None:
         resources_dict.update(resources.accelerators)
     return resources_dict
+
+
+def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
+    """Returns the number of GPUs per node for the task."""
+    demands = get_task_demands_dict(task)
+    demands.pop('CPU', None)
+    if not demands:
+        return 0
+    acc_count = list(demands.values())[0]
+    return int(math.ceil(acc_count))
 
 
 def get_task_resources_str(task: 'task_lib.Task',

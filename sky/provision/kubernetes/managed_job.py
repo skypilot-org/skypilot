@@ -692,7 +692,7 @@ def get_job_status(
     try:
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace, label_selector=label_selector)
-    except Exception as e:
+    except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to get pods for job {job_name}: {e}')
         return ManagedJobStatus.UNKNOWN
 
@@ -1247,7 +1247,11 @@ def apply_elastic_job(
     results = subprocess_utils.run_in_parallel(_create_pod, pod_manifests,
                                                max_concurrent)
     pod_names = [r for r in results if r is not None]
+    failed_count = len(pod_manifests) - len(pod_names)
 
+    if failed_count > 0:
+        logger.warning(f'Failed to create {failed_count}/{len(pod_manifests)} '
+                       f'elastic job pods')
     logger.info(f'Created {len(pod_names)} elastic job pods')
     return pod_names
 
@@ -1277,11 +1281,22 @@ def create_replacement_pod(
     """
     pod_name = f'{job_name}-{index}'
 
-    # Delete existing pod if any
+    # Delete existing pod if any, then wait for it to be fully removed
     try:
         kubernetes.core_api(context).delete_namespaced_pod(
             pod_name, namespace, grace_period_seconds=0)
         logger.debug(f'Deleted existing pod {pod_name}')
+        # Wait for the old pod to be fully removed from etcd to avoid
+        # 409 Conflict when creating the replacement with the same name.
+        for _ in range(30):
+            try:
+                kubernetes.core_api(context).read_namespaced_pod(
+                    pod_name, namespace)
+                time.sleep(1)
+            except kubernetes.api_exception() as poll_e:
+                if poll_e.status == 404:
+                    break
+                raise
     except kubernetes.api_exception() as e:
         if e.status != 404:
             logger.warning(f'Failed to delete pod {pod_name}: {e}')
@@ -1360,7 +1375,7 @@ def get_elastic_job_status(
     try:
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace, label_selector=label_selector)
-    except Exception as e:
+    except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to list pods for {job_name}: {e}')
         return ManagedJobStatus.UNKNOWN, 0, 0, 0
 
@@ -1384,6 +1399,10 @@ def get_elastic_job_status(
     # All pods' main containers have succeeded (none pending/running/failed)
     if succeeded == total and total > 0:
         return ManagedJobStatus.SUCCEEDED, running, succeeded, failed
+
+    # All non-succeeded pods have failed — terminal failure
+    if failed > 0 and running == 0 and pending == 0:
+        return ManagedJobStatus.FAILED, running, succeeded, failed
 
     # Below min_nodes with main container still running
     if running < min_nodes:
@@ -1495,11 +1514,11 @@ def delete_elastic_job(
         logger.debug(f'Deleted role {rbac_name}')
     except kubernetes.api_exception() as e:
         if e.status != 404:
-            pass
+            logger.warning(f'Failed to delete role {rbac_name}: {e}')
     try:
         kubernetes.auth_api(context).delete_namespaced_role_binding(
             rbac_name, namespace)
         logger.debug(f'Deleted role binding {rbac_name}')
     except kubernetes.api_exception() as e:
         if e.status != 404:
-            pass
+            logger.warning(f'Failed to delete role binding {rbac_name}: {e}')

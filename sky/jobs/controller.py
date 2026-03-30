@@ -802,6 +802,7 @@ class JobController:
                 cluster_name=cluster_name,
                 executor=executor,
                 callback_func=callback_func,
+                on_recovery=on_recovery,
             )
 
         transient_job_check_error_start_time = None
@@ -1223,6 +1224,7 @@ class JobController:
         cluster_name: str,
         executor: 'recovery_strategy.DynamicNodeSetExecutor',
         callback_func: typing.Callable,
+        on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
     ) -> bool:
         """Monitor an elastic (DYNAMIC_NODE_SET) task.
 
@@ -1243,6 +1245,17 @@ class JobController:
 
         while True:
             await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+
+            # Check network connectivity to avoid false alarms from
+            # transient K8s API failures.
+            try:
+                await backend_utils.async_check_network_connection()
+            except exceptions.NetworkError:
+                logger.info(
+                    'Network is not available. Retrying again in '
+                    f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
+                    'seconds.')
+                continue
 
             status, running, succeeded, failed = (await asyncio.to_thread(
                 k8s_managed_job.get_elastic_job_status, cluster_name, namespace,
@@ -1269,15 +1282,26 @@ class JobController:
                     end_time=time.time(),
                     callback_func=callback_func)
                 logger.info(f'Elastic job {cluster_name} SUCCEEDED')
-                # Best-effort log download
-                try:
-                    logs = k8s_managed_job.get_pod_logs(cluster_name, namespace,
-                                                        context)
-                    print(logs)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to get final logs: {e}')
-                executor._cleanup_cluster()
+                # Persist logs to local file for `sky jobs logs`
+                await self._download_k8s_logs_direct(cluster_name, task_id)
+                executor._cleanup_cluster()  # pylint: disable=protected-access
                 return True
+
+            # All pods failed — terminal failure, don't attempt recovery
+            if status == k8s_managed_job.ManagedJobStatus.FAILED:
+                failure_reason = (
+                    f'All pods failed for elastic job {cluster_name}. '
+                    f'running={running} succeeded={succeeded} failed={failed}')
+                logger.error(failure_reason)
+                await self._download_k8s_logs_direct(cluster_name, task_id)
+                await managed_job_state.set_failed_async(
+                    self._job_id,
+                    task_id,
+                    failure_type=managed_job_state.ManagedJobStatus.FAILED,
+                    failure_reason=failure_reason,
+                    callback_func=callback_func)
+                executor._cleanup_cluster()  # pylint: disable=protected-access
+                return False
 
             # Replace failed or missing pods
             num_nodes = task.num_nodes
@@ -1289,6 +1313,10 @@ class JobController:
                 try:
                     await executor.recover()
                     consecutive_replace_failures = 0
+                    # Call on_recovery to re-setup networking (e.g.,
+                    # /etc/hosts for job groups).
+                    if on_recovery is not None:
+                        await on_recovery()
                 except Exception as e:  # pylint: disable=broad-except
                     consecutive_replace_failures += 1
                     logger.warning(
@@ -1305,7 +1333,7 @@ class JobController:
                             FAILED,
                             failure_reason=failure_reason,
                             callback_func=callback_func)
-                        executor._cleanup_cluster()
+                        executor._cleanup_cluster()  # pylint: disable=protected-access
                         return False
 
             # Update state based on running count vs min_nodes

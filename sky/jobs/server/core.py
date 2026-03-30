@@ -1603,8 +1603,8 @@ def _tail_logs_k8s_v1(
                 decoded = line.decode('utf-8', errors='replace')
                 with print_lock:
                     _write(f'{prefix}{decoded}')
-        except Exception:  # pylint: disable=broad-except
-            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Log stream ended for pod {pod_name}: {e}')
 
     threads = []
     for pod in pods.items:
