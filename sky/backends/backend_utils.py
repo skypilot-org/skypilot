@@ -963,13 +963,8 @@ def write_cluster_config(
     # script checks each path and fixes permissions if the current user cannot
     # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
     # dirs created as root, or NFS volumes that ignore fsGroup).
-    volume_mount_rw_paths: List[str] = []
-    for vi in volume_mount_vars:
-        volume_mount_rw_paths.append(vi.path)
-    if volume_mounts is not None:
-        for vol in volume_mounts:
-            if vol.is_ephemeral:
-                volume_mount_rw_paths.append(vol.path)
+    volume_mount_rw_paths: List[str] = ([vol.path for vol in volume_mounts]
+                                        if volume_mounts is not None else [])
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
