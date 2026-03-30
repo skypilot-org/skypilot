@@ -686,7 +686,6 @@ function ActiveTab({
           <ProvisionLogs
             clusterName={clusterData.cluster}
             numNodes={clusterData.num_nodes}
-            status={clusterData.status}
           />
         </div>
       )}
@@ -720,9 +719,8 @@ function ActiveTab({
   );
 }
 
-function ProvisionLogs({ clusterName, numNodes, status }) {
-  const isLaunching = status === 'LAUNCHING';
-  const [isExpanded, setIsExpanded] = useState(isLaunching);
+function ProvisionLogs({ clusterName, numNodes }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
 
