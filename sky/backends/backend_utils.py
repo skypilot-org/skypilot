@@ -953,6 +953,66 @@ def write_cluster_config(
                 )
                 volume_mount_vars.append(volume_info)
 
+    # Resolve auto_mounts from config and add them to volume_mount_vars so
+    # they go through the same Jinja2 template path as user volume mounts
+    # (volume definitions, volumeMounts, and permission fixes).
+    if isinstance(cloud, clouds.Kubernetes):
+        auto_mounts_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=to_provision.region,
+            keys=('auto_mounts',),
+            default_value=None)
+        if auto_mounts_config:
+            home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
+            for entry in auto_mounts_config:
+                volume_name = entry['volume_name']
+                mount_paths = entry.get('mount_paths', [])
+                record = global_user_state.get_volume_by_name(volume_name)
+                if record is None:
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} not found in '
+                        f'SkyPilot volume DB. Skipping. '
+                        f'Create it with: sky volumes apply')
+                    continue
+                volume_config = record['handle']
+                # Only hostPath and ReadWriteMany PVC volumes support
+                # concurrent multi-pod access required by auto_mounts.
+                if (volume_config.type == volume_utils.VolumeType.PVC.value and
+                        volume_config.config.get('access_mode') !=
+                        volume_utils.VolumeAccessMode.READ_WRITE_MANY.value):
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} has access '
+                        f'mode '
+                        f'{volume_config.config.get("access_mode")!r}, '
+                        f'which does not support concurrent multi-pod '
+                        f'access. Only hostPath volumes and '
+                        f'ReadWriteMany PVC volumes are supported for '
+                        f'auto_mounts. Skipping.')
+                    continue
+                k8s_volume_name = f'auto-mount-{volume_name}'
+                for path in mount_paths:
+                    if path.startswith('/'):
+                        mount_path = path
+                        sub_path = path.lstrip('/')
+                    elif path.startswith('~/'):
+                        mount_path = f'{home_dir}/{path[2:]}'
+                        sub_path = path[2:]
+                    elif path == '~':
+                        mount_path = home_dir
+                        sub_path = None
+                    else:
+                        continue
+                    volume_mount_vars.append(
+                        volume_utils.VolumeInfo(
+                            name=k8s_volume_name,
+                            path=mount_path,
+                            volume_name_on_cloud=(volume_config.name_on_cloud),
+                            volume_id_on_cloud=(volume_config.id_on_cloud),
+                            sub_path=sub_path if sub_path else None,
+                            volume_type=volume_config.type,
+                            host_path=volume_config.config.get('host_path'),
+                        ))
+
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
@@ -963,8 +1023,7 @@ def write_cluster_config(
     # script checks each path and fixes permissions if the current user cannot
     # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
     # dirs created as root, or NFS volumes that ignore fsGroup).
-    volume_mount_rw_paths: List[str] = ([vol.path for vol in volume_mounts]
-                                        if volume_mounts is not None else [])
+    volume_mount_rw_paths: List[str] = [v.path for v in volume_mount_vars]
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
