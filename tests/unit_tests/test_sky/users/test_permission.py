@@ -358,9 +358,13 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
-    def test_update_role_no_existing_role_no_invalidation(
+    def test_update_role_no_existing_role_still_invalidates(
             self, mock_policy_lock, mock_kv_cache):
-        """Test that update_role does not invalidate when user had no role."""
+        """Test that update_role invalidates even when user had no prior role.
+
+        A first role assignment can grant workspace access that was previously
+        denied and cached as '0', so we must always invalidate.
+        """
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
 
@@ -373,11 +377,14 @@ class TestPermissionService:
 
         service.update_role('user1', 'user')
 
-        # New role assignment (not a change), no invalidation needed
-        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
         mock_enforcer.add_grouping_policy.assert_called_once_with(
             'user1', 'user')
         mock_enforcer.save_policy.assert_called_once()
+        # Cache must be invalidated even for first role assignment
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
+        call_kwargs = (
+            mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
+        assert 'user1' in call_kwargs['suffix']
 
     def test_get_user_roles(self):
         """Test getting user roles."""

@@ -37,7 +37,7 @@ _enforcer_instance: Optional['PermissionService'] = None
 _WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
 _WORKSPACE_PERM_CACHE_KEY_SEP = ':'
 # Long TTL as safety net; primary freshness is explicit invalidation on update.
-_WORKSPACE_PERM_CACHE_TTL_SECONDS = 30 * 86400  # 30 days
+_WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
 
 
 class PermissionService:
@@ -262,7 +262,6 @@ class PermissionService:
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
-        role_changed = False
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
@@ -276,13 +275,13 @@ class PermissionService:
                     logger.debug(f'User {user_id} already has role {new_role}')
                     return
                 enforcer.remove_grouping_policy(user_id, current_role)
-                role_changed = True
 
             # Update user role
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
-            if role_changed:
-                self.invalidate_user_permission_cache(user_id)
+            # Always invalidate: even a first role assignment can grant
+            # workspace access that was previously denied and cached.
+            self.invalidate_user_permission_cache(user_id)
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get all roles for a user.
