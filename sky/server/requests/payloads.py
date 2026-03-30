@@ -901,24 +901,6 @@ class GetConfigBody(RequestBody):
     pass
 
 
-class AutoMountUpsertBody(RequestBody):
-    """The request body for upserting an auto_mount entry."""
-    context: Optional[str] = None  # None = all contexts
-    volume_name: str
-    mount_paths: List[str]
-
-
-class AutoMountDeleteBody(RequestBody):
-    """The request body for deleting an auto_mount entry."""
-    context: Optional[str] = None
-    volume_name: str
-
-
-class AutoMountStorageClassesBody(RequestBody):
-    """The request body for listing storage classes."""
-    context: Optional[str] = None
-
-
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30

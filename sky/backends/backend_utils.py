@@ -959,37 +959,6 @@ def write_cluster_config(
         keys=('post_provision_runcmd',),
         default_value=None)
 
-    # Build unified list of read-write volume mount paths. The container
-    # startup script will check each path and fix permissions if the current
-    # user cannot write to it (e.g. hostPath dirs created as root, PVC
-    # subPath dirs created as root, NFS volumes ignoring fsGroup).
-    volume_mount_rw_paths: List[str] = []
-    # From explicit volume mounts (hostPath, PVC, PVC+subPath)
-    for vi in volume_mount_vars:
-        volume_mount_rw_paths.append(vi.path)
-    # From ephemeral volumes
-    if volume_mounts is not None:
-        for vol in volume_mounts:
-            if vol.is_ephemeral:
-                volume_mount_rw_paths.append(vol.path)
-    # From auto_mounts (resolved at template time; actual volume injection
-    # happens at pod-creation time in resolve_auto_mounts)
-    auto_mounts_config = skypilot_config.get_effective_region_config(
-        cloud=str(to_provision.cloud).lower(),
-        region=to_provision.region,
-        keys=('auto_mounts',),
-        default_value=None)
-    if auto_mounts_config:
-        home = kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
-        for entry in auto_mounts_config:
-            for mount_path in entry.get('mount_paths', []):
-                if mount_path.startswith('/'):
-                    volume_mount_rw_paths.append(mount_path)
-                elif mount_path.startswith('~/'):
-                    volume_mount_rw_paths.append(f'{home}/{mount_path[2:]}')
-                elif mount_path == '~':
-                    volume_mount_rw_paths.append(home)
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1110,7 +1079,6 @@ def write_cluster_config(
             # Volume mounts
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
-            'volume_mount_rw_paths': volume_mount_rw_paths,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
