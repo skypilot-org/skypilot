@@ -19,6 +19,7 @@ import os
 from typing import Any, Dict, List, Optional, Union
 
 from sky.batch import utils
+from sky.utils import registry
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +30,32 @@ class InputFormat(ABC):
     def __init__(self, path: str):
         self.path = path
 
+    def _format_name(self) -> str:
+        for name, cls in registry.INPUT_FORMAT_REGISTRY.items():
+            if cls is type(self):
+                return name
+        raise ValueError(f'Unregistered input format: {type(self).__name__}')
+
     def to_dict(self) -> Dict[str, Any]:
-        raise NotImplementedError
+        return {'format': self._format_name(), 'path': self.path}
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'InputFormat':
         """Reconstruct an InputFormat from a dict."""
         fmt = d.get('format')
-        if fmt == 'json':
-            return JsonInput(d['path'])
-        raise ValueError(f'Unknown input format: {fmt}')
+        cls = registry.INPUT_FORMAT_REGISTRY.from_str(fmt)
+        assert cls is not None, f'Unregistered input format: {fmt}'
+        return cls.from_dict_args(d)
+
+    @classmethod
+    @abstractmethod
+    def from_dict_args(cls, d: Dict[str, Any]) -> 'InputFormat':
+        """Construct an instance from a serialized dict."""
+        raise NotImplementedError
 
     @abstractmethod
     def count_items(self, dataset_path: str) -> int:
         """Count total items in the dataset."""
-
-    @abstractmethod
-    def get_metadata(self, dataset_path: str) -> Dict[str, Any]:
-        """Get dataset metadata without downloading data."""
 
     @abstractmethod
     def download_chunk(self, dataset_path: str, start_idx: int, end_idx: int,
@@ -63,18 +72,28 @@ class OutputFormat(ABC):
     def __init__(self, path: str):
         self.path = path
 
+    def _format_name(self) -> str:
+        for name, cls in registry.OUTPUT_FORMAT_REGISTRY.items():
+            if cls is type(self):
+                return name
+        raise ValueError(f'Unregistered output format: {type(self).__name__}')
+
     def to_dict(self) -> Dict[str, Any]:
-        raise NotImplementedError
+        return {'format': self._format_name(), 'path': self.path}
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'OutputFormat':
         """Reconstruct an OutputFormat from a dict."""
         fmt = d.get('format')
-        if fmt == 'json':
-            return JsonOutput(d['path'], column=d.get('column'))
-        elif fmt == 'image':
-            return ImageOutput(d['path'], column=d.get('column', 'image'))
-        raise ValueError(f'Unknown output format: {fmt}')
+        cls = registry.OUTPUT_FORMAT_REGISTRY.from_str(fmt)
+        assert cls is not None, f'Unregistered output format: {fmt}'
+        return cls.from_dict_args(d)
+
+    @classmethod
+    @abstractmethod
+    def from_dict_args(cls, d: Dict[str, Any]) -> 'OutputFormat':
+        """Construct an instance from a serialized dict."""
+        raise NotImplementedError
 
     @abstractmethod
     def upload_chunk(self, results: List[Dict[str, Any]], output_path: str,
@@ -93,6 +112,7 @@ class OutputFormat(ABC):
 # ---- Concrete input formats ------------------------------------------------
 
 
+@registry.INPUT_FORMAT_REGISTRY.type_register(name='json')
 class JsonInput(InputFormat):
     """JSONL input format.
 
@@ -107,6 +127,10 @@ class JsonInput(InputFormat):
         super().__init__(path)
         self._validate()
 
+    @classmethod
+    def from_dict_args(cls, d: Dict[str, Any]) -> 'JsonInput':
+        return cls(d['path'])
+
     def _validate(self) -> None:
         if not self.path:
             raise ValueError('JsonInput path cannot be empty')
@@ -119,22 +143,11 @@ class JsonInput(InputFormat):
             raise ValueError(
                 f'JsonInput path must end with .jsonl: {self.path}')
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {'format': 'json', 'path': self.path}
-
     # -- InputDatasetFormat implementation ----------------------------------
 
     def count_items(self, dataset_path: str) -> int:
         data = utils.load_jsonl_from_cloud(dataset_path)
         return len(data)
-
-    def get_metadata(self, dataset_path: str) -> Dict[str, Any]:
-        total_items = self.count_items(dataset_path)
-        return {
-            'total_items': total_items,
-            'format': 'jsonl',
-            'path': dataset_path,
-        }
 
     def download_chunk(self, dataset_path: str, start_idx: int, end_idx: int,
                        cache_dir: str) -> List[Dict[str, Any]]:
@@ -166,6 +179,7 @@ class JsonInput(InputFormat):
 # ---- Concrete output formats -----------------------------------------------
 
 
+@registry.OUTPUT_FORMAT_REGISTRY.type_register(name='json')
 class JsonOutput(OutputFormat):
     """JSONL output format.
 
@@ -202,8 +216,12 @@ class JsonOutput(OutputFormat):
             raise ValueError(
                 f'JsonOutput path must end with .jsonl: {self.path}')
 
+    @classmethod
+    def from_dict_args(cls, d: Dict[str, Any]) -> 'JsonOutput':
+        return cls(d['path'], column=d.get('column'))
+
     def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {'format': 'json', 'path': self.path}
+        d = super().to_dict()
         if self.column is not None:
             d['column'] = self.column
         return d
@@ -236,6 +254,7 @@ class JsonOutput(OutputFormat):
         return f'JsonOutput(path={self.path!r})'
 
 
+@registry.OUTPUT_FORMAT_REGISTRY.type_register(name='image')
 class ImageOutput(OutputFormat):
     """Image directory output format.
 
@@ -265,12 +284,14 @@ class ImageOutput(OutputFormat):
         if not self.path.endswith('/'):
             raise ValueError(f'ImageOutput path must end with /: {self.path}')
 
+    @classmethod
+    def from_dict_args(cls, d: Dict[str, Any]) -> 'ImageOutput':
+        return cls(d['path'], column=d.get('column', 'image'))
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            'format': 'image',
-            'path': self.path,
-            'column': self.column,
-        }
+        d = super().to_dict()
+        d['column'] = self.column
+        return d
 
     # -- OutputDatasetFormat implementation ---------------------------------
 
