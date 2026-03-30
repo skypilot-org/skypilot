@@ -67,9 +67,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
-                    sky.ManagedJobStatus.PENDING,
-                    sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
-                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
+                    sky.ManagedJobStatus.PENDING, sky.ManagedJobStatus.STARTING,
+                    sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             smoke_tests_utils.
@@ -2764,7 +2763,8 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
-                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                result = sky.get(sky.jobs.queue_v2(refresh=False))
+                jobs_list = result[0] if isinstance(result, tuple) else result
                 job = [j for j in jobs_list if j['job_name'] == name][0]
                 node_names = job['node_names']
                 assert node_names, (f'node_names should not be empty, '
@@ -2796,7 +2796,8 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
-                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                result = sky.get(sky.jobs.queue_v2(refresh=False))
+                jobs_list = result[0] if isinstance(result, tuple) else result
                 job = [j for j in jobs_list if j['job_name'] == name][0]
                 node_names = job['node_names']
                 assert node_names, (f'node_names should not be empty, '

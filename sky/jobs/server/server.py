@@ -47,8 +47,8 @@ async def launch(request: fastapi.Request,
     )
 
 
-# For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
+# TODO(dev): Remove in v0.13.0 — kept for v0.11 clients using
+# sky.jobs.queue(), which calls POST /jobs/queue.
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
@@ -56,7 +56,7 @@ async def queue(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_QUEUE,
         request_body=jobs_queue_body,
-        func=core.queue,
+        func=core.queue_v2_api,
         schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
                        else api_requests.ScheduleType.SHORT),
         request_cluster_name=common.JOB_CONTROLLER_NAME,

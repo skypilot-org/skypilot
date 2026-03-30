@@ -1528,8 +1528,6 @@ def _handle_jobs_queue_request(
         str, Any]]]] = None,
     is_called_by_user: bool = False,
     only_in_progress: bool = False,
-    queue_result_version: cli_utils.QueueResultVersion = cli_utils.
-    QueueResultVersion.V1,
 ) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
@@ -1544,7 +1542,6 @@ def _handle_jobs_queue_request(
         is_called_by_user: If this function is called by user directly, or an
             internal call.
         only_in_progress: If True, only return the number of in-progress jobs.
-        queue_result_version: The version of the queue result.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1580,22 +1577,16 @@ def _handle_jobs_queue_request(
             result = jobs_future.result()
             pool_status_result = pool_status_future.result()
 
-        if queue_result_version.v2():
-            managed_jobs_, total, status_counts, _ = result
-            if only_in_progress:
-                num_in_progress_jobs = 0
-                if status_counts:
-                    for status_value, count in status_counts.items():
-                        status_enum = managed_jobs.ManagedJobStatus(
-                            status_value)
-                        if not status_enum.is_terminal():
-                            num_in_progress_jobs += count
-            else:
-                num_in_progress_jobs = total
+        managed_jobs_, total, status_counts, _ = result
+        if only_in_progress:
+            num_in_progress_jobs = 0
+            if status_counts:
+                for status_value, count in status_counts.items():
+                    status_enum = managed_jobs.ManagedJobStatus(status_value)
+                    if not status_enum.is_terminal():
+                        num_in_progress_jobs += count
         else:
-            managed_jobs_ = result
-            num_in_progress_jobs = len(
-                set(job['job_id'] for job in managed_jobs_))
+            num_in_progress_jobs = total
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -2040,7 +2031,6 @@ def status(verbose: bool,
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
 
     managed_jobs_queue_request_id = None
-    queue_result_version = cli_utils.QueueResultVersion.V1
     service_status_request_id = None
     workspace_request_id = None
     pool_status_request_id = None
@@ -2059,8 +2049,8 @@ def status(verbose: bool,
 
         # Get the request IDs
         if show_managed_jobs:
-            (managed_jobs_queue_request_id,
-             queue_result_version) = managed_jobs_request_future.result()
+            managed_jobs_queue_request_id = (
+                managed_jobs_request_future.result())
         if show_services:
             service_status_request_id = services_request_future.result()
         if show_pools:
@@ -2137,7 +2127,6 @@ def status(verbose: bool,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=queue_result_version,
                 )
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
@@ -3262,18 +3251,14 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
-            request_id, queue_result_version = cli_utils.get_managed_job_queue(
+            request_id = cli_utils.get_managed_job_queue(
                 refresh=False,
                 skip_finished=True,
                 all_users=True,
                 fields=fields,
             )
             result = sdk.stream_and_get(request_id)
-            if queue_result_version.v2():
-                managed_jobs_, _, status_counts, _ = result
-            else:
-                managed_jobs_ = typing.cast(List[responses.ManagedJobRecord],
-                                            result)
+            managed_jobs_, _, status_counts, _ = result
             request_id_pools = managed_jobs.pool_status(pool_names=None)
             pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
@@ -5780,16 +5765,12 @@ def jobs_queue(verbose: bool,
             managed_jobs_future = executor.submit(get_managed_jobs_queue)
             pool_status_future = executor.submit(get_pool_status)
 
-            (managed_jobs_request_id,
-             queue_result_version) = managed_jobs_future.result()
+            managed_jobs_request_id = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
 
         if output_format == flags.OUTPUT_FORMAT_JSON:
             result = sdk.stream_and_get(managed_jobs_request_id)
-            if queue_result_version.v2():
-                managed_jobs_, _, _, _ = result
-            else:
-                managed_jobs_ = result
+            managed_jobs_, _, _, _ = result
             click.echo(
                 json.dumps([r.model_dump(mode='json') for r in managed_jobs_],
                            indent=2))
@@ -5802,7 +5783,6 @@ def jobs_queue(verbose: bool,
             show_user=all_users,
             max_num_jobs_to_show=max_num_jobs_to_show,
             is_called_by_user=True,
-            queue_result_version=queue_result_version,
         )
     if not skip_finished:
         in_progress_only_hint = ''
@@ -6229,7 +6209,7 @@ def jobs_pool_down(
     def _get_nonterminal_jobs(pool_names: List[str],
                               all: bool) -> List[responses.ManagedJobRecord]:
         # Get nonterminal jobs for this pool using managed_jobs.queue
-        request_id, queue_result_version = cli_utils.get_managed_job_queue(
+        request_id = cli_utils.get_managed_job_queue(
             refresh=False,
             skip_finished=True,
             all_users=True,
@@ -6237,14 +6217,7 @@ def jobs_pool_down(
             fields=['job_id', 'status', 'pool'],
         )
         jobs_result = sdk.stream_and_get(request_id)
-
-        # Handle both tuple and list responses
-        jobs_list: List[responses.ManagedJobRecord]
-        if queue_result_version.v2():
-            jobs_list = jobs_result[0]
-        else:
-            jobs_list = typing.cast(List[responses.ManagedJobRecord],
-                                    jobs_result)
+        jobs_list, _, _, _ = jobs_result
 
         def _should_include_job(job: responses.ManagedJobRecord) -> bool:
             # Job must not be terminal.

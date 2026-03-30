@@ -466,8 +466,6 @@ def validate(
     def _omit(version: int) -> bool:
         return remote_api_version is None or remote_api_version < version
 
-    # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = _omit(15)
     # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
@@ -476,9 +474,6 @@ def validate(
     omit_max_hourly_cost = _omit(44)
 
     for task in dag.tasks:
-        if omit_user_specified_yaml:
-            # pylint: disable=protected-access
-            task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
@@ -667,38 +662,16 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
 
-    remote_api_version = versions.get_remote_api_version()
-    if wait_for is not None and (remote_api_version is None or
-                                 remote_api_version < 13):
-        logger.warning('wait_for is not supported in your API server. '
-                       'Please upgrade to a newer API server to use it.')
-
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
     for task in dag.tasks:
         for resource in task.resources:
-            if remote_api_version is None or remote_api_version < 13:
-                # An older server would not recognize the wait_for field
-                # in the schema, so we need to omit it.
-                resource.override_autostop_config(
-                    down=down, idle_minutes=idle_minutes_to_autostop)
-            else:
-                resource.override_autostop_config(
-                    down=down,
-                    idle_minutes=idle_minutes_to_autostop,
-                    wait_for=wait_for)
-            if resource.autostop_config is not None:
-                # For backward-compatibility, get the final autostop config for
-                # admin policy.
-                # TODO(aylei): remove this after 0.12.0
-                down = resource.autostop_config.down
-                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
-
-    request_options = admin_policy.RequestOptions(
-        cluster_name=cluster_name,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        dryrun=dryrun)
+            resource.override_autostop_config(
+                down=down,
+                idle_minutes=idle_minutes_to_autostop,
+                wait_for=wait_for)
+    request_options = admin_policy.RequestOptions(cluster_name=cluster_name,
+                                                  dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
@@ -1024,7 +997,6 @@ def tail_logs(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(17)
 @annotations.client_api
 @rest.retry_transient_errors()
 def tail_provision_logs(cluster_name: str,
@@ -1047,15 +1019,9 @@ def tail_provision_logs(cluster_name: str,
     body = payloads.ProvisionLogsBody(cluster_name=cluster_name)
 
     if worker is not None:
-        remote_api_version = versions.get_remote_api_version()
-        if remote_api_version is not None and remote_api_version >= 21:
-            if worker < 1:
-                raise ValueError('Worker must be a positive integer.')
-            body.worker = worker
-        else:
-            raise exceptions.APINotSupportedError(
-                'Worker node provision logs are not supported in your API '
-                'server. Please upgrade to a newer API server to use it.')
+        if worker < 1:
+            raise ValueError('Worker must be a positive integer.')
+        body.worker = worker
     params = {
         'follow': str(follow).lower(),
         'tail': tail,
@@ -1250,12 +1216,6 @@ def start(
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
-    remote_api_version = versions.get_remote_api_version()
-    if wait_for is not None and (remote_api_version is None or
-                                 remote_api_version < 13):
-        logger.warning('wait_for is not supported in your API server. '
-                       'Please upgrade to a newer API server to use it.')
-
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1461,10 +1421,6 @@ def autostop(
         raise ValueError('hook_timeout can only be set if hook is set.')
 
     remote_api_version = versions.get_remote_api_version()
-    if wait_for is not None and (remote_api_version is None or
-                                 remote_api_version < 13):
-        logger.warning('wait_for is not supported in your API server. '
-                       'Please upgrade to a newer API server to use it.')
 
     # Hook support requires API version 28 or higher
     if hook is not None and (remote_api_version is None or
@@ -3008,7 +2964,6 @@ def api_logout() -> None:
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(24)
 @annotations.client_api
 def realtime_slurm_gpu_availability(
         name_filter: Optional[str] = None,
@@ -3048,7 +3003,6 @@ def realtime_slurm_gpu_availability(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(24)
 @annotations.client_api
 def slurm_node_info(
         slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:

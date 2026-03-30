@@ -194,8 +194,6 @@ Optionally, the server can also be implemented in other languages as long as it 
           "skypilot_config": {},
           "request_options": {
             "cluster_name": "test",
-            "idle_minutes_to_autostop": null,
-            "down": false,
             "dryrun": false
           },
           "at_client_side": false

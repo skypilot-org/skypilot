@@ -10,18 +10,15 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 46  # debug dump endpoints
+API_VERSION = 47  # Remove deprecated idle_minutes_to_autostop and down fields
 
 # The minimum peer API version that the code should still work with.
-# Notes (dev):
-# - This value is maintained by the CI pipeline, DO NOT EDIT this manually.
-# - Compatibility code for versions lower than this can be safely removed.
+# Compatibility code for versions lower than this can be safely removed.
 # Refer to API_VERSION for more details.
 MIN_COMPATIBLE_API_VERSION = 24
 
 # The semantic version of the minimum compatible API version.
 # Refer to MIN_COMPATIBLE_API_VERSION for more details.
-# Note (dev): DO NOT EDIT this constant manually.
 MIN_COMPATIBLE_VERSION = '0.11.0'
 
 # The HTTP header name for the API version of the sender.

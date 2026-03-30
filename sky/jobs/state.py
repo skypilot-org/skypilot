@@ -353,12 +353,6 @@ class ManagedJobStatus(enum.Enum):
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
     PENDING = 'PENDING'
-    # SUBMITTED: This state used to be briefly set before immediately changing
-    # to STARTING. Its use was removed in #5682. We keep it for backwards
-    # compatibility, so we can still parse old jobs databases that may have jobs
-    # in this state.
-    # TODO(cooperc): remove this in v0.12.0
-    DEPRECATED_SUBMITTED = 'SUBMITTED'
     # The submitted_at timestamp of the managed job in the 'spot' table will be
     # set to the time when the job controller begins running.
     # STARTING: The controller process is launching the cluster for the managed
@@ -451,8 +445,6 @@ class ManagedJobStatus(enum.Enum):
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
-            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED:
-                cls.DEPRECATED_SUBMITTED,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
@@ -481,8 +473,6 @@ class ManagedJobStatus(enum.Enum):
         enum_to_protobuf = {
             ManagedJobStatus.PENDING:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
-            ManagedJobStatus.DEPRECATED_SUBMITTED:
-                managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED,
             ManagedJobStatus.STARTING:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
             ManagedJobStatus.RUNNING:
@@ -526,8 +516,6 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
     ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
-    # TODO(cooperc): backwards compatibility, remove this in v0.12.0
-    ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
 
@@ -2252,7 +2240,6 @@ async def set_starting_async(job_id: int,
                        f'({count} rows updated. {details})')
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
-    await callback_func('SUBMITTED')
     await callback_func('STARTING')
 
 

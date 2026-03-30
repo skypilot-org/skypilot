@@ -2231,10 +2231,7 @@ def load_managed_job_queue(
     all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = all_users_map.get(job['user_hash'])
+        job['user_name'] = all_users_map.get(job['user_hash'])
     return jobs, total, result_type, total_no_filter, status_counts
 
 
@@ -2603,10 +2600,10 @@ def format_job_table(
                 if infra_str is None:
                     cloud = task.get('cloud')
                     if cloud is None:
-                        # Backward compatibility for old jobs controller without
-                        # cloud info returned, we parse it from the cluster
-                        # resources
-                        # TODO(zhwu): remove this after 0.12.0
+                        # Backward compatibility for old jobs controller
+                        # without cloud info returned, we parse it from the
+                        # cluster resources.
+                        # TODO(zhwu): Remove this in v0.13.0.
                         cloud = task['cluster_resources'].split('(')[0].split(
                             'x')[-1]
                         task['cluster_resources'] = task[
@@ -2668,12 +2665,9 @@ def decode_managed_job_protos(
     jobs = []
     for job_proto in job_protos:
         job_dict = _job_proto_to_dict(job_proto)
-        user_hash = job_dict.get('user_hash', None)
-        if user_hash is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            user = user_hash_to_user.get(user_hash, None)
-            job_dict['user_name'] = user.name if user is not None else None
+        user_hash = job_dict.get('user_hash')
+        user = user_hash_to_user.get(user_hash, None)
+        job_dict['user_name'] = user.name if user is not None else None
         jobs.append(job_dict)
     return jobs
 
@@ -2795,7 +2789,7 @@ class ManagedJobCodeGen:
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
-            # TODO(hailong): Remove compatibility before 0.12.0
+            # TODO(hailong): Remove compatibility in v0.13.0.
             job_table = utils.dump_managed_job_queue()
         elif managed_job_version < 10:
             job_table = utils.dump_managed_job_queue(
@@ -2860,17 +2854,7 @@ class ManagedJobCodeGen:
                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
         else:
@@ -2892,12 +2876,7 @@ class ManagedJobCodeGen:
                            graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         else:
             msg = utils.cancel_job_by_name(
@@ -2981,11 +2960,7 @@ class ManagedJobCodeGen:
                     tail: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 6:
-            # Versions before 6 did not support tail parameter
-            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                    follow={follow}, controller={controller})
-        elif managed_job_version < 15:
+        if managed_job_version < 15:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
@@ -2993,15 +2968,9 @@ class ManagedJobCodeGen:
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
-        if managed_job_version < 3:
-            # Versions 2 and older did not return a retcode, so we just print
-            # the result.
-            # TODO: Remove compatibility before 0.12.0
-            print(result, flush=True)
-        else:
-            msg, retcode = result
-            print(msg, flush=True)
-            sys.exit(retcode)
+        msg, retcode = result
+        print(msg, flush=True)
+        sys.exit(retcode)
         """)
         return cls._build(code)
 
@@ -3020,11 +2989,10 @@ class ManagedJobCodeGen:
                      if managed_job_dag.execution else DEFAULT_EXECUTION.value)
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            set_job_info_kwargs = {{'workspace': {workspace!r}}}
-            if managed_job_version < 4:
-                set_job_info_kwargs = {{}}
-            if managed_job_version >= 5:
-                set_job_info_kwargs['entrypoint'] = {entrypoint!r}
+            set_job_info_kwargs = {{
+                'workspace': {workspace!r},
+                'entrypoint': {entrypoint!r},
+            }}
             if managed_job_version >= 8:
                 from sky.serve import serve_state
                 pool_hash = None
@@ -3050,10 +3018,7 @@ class ManagedJobCodeGen:
                     managed_job_dag.primary_tasks is None or
                     task.name in managed_job_dag.primary_tasks)
             code += textwrap.dedent(f"""\
-                if managed_job_version < 7:
-                    managed_job_state.set_pending({job_id}, {task_id},
-                                    {task.name!r}, {resources_str!r})
-                elif managed_job_version < 15:
+                if managed_job_version < 15:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
                                     {task.metadata_json!r})

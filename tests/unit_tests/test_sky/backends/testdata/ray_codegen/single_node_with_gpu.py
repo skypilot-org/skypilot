@@ -118,9 +118,9 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 def _get_context():
-    # TODO(aylei): remove this after we drop the backward-compatibility for
-    # 0.9.x in 0.12.0
-    # Keep backward-compatibility for the old version of SkyPilot runtimes.
+    # The globals() guard is needed because this function is inlined into
+    # generated codegen scripts (sky_job_*) deployed to remote nodes, where
+    # 'context' may not be imported/defined.
     if 'context' in globals():
         return context.get()
     else:

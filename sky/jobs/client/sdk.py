@@ -71,12 +71,6 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
-    remote_api_version = versions.get_remote_api_version()
-    if (pool is not None and
-        (remote_api_version is None or remote_api_version < 12)):
-        raise click.UsageError('Pools are not supported in your API server. '
-                               'Please upgrade to a newer API server to use '
-                               'pools.')
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify num_jobs without pool.')
 
@@ -163,7 +157,6 @@ def launch(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(18)
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -284,29 +277,15 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
-          containing the information of a job.
+        If version=1 (deprecated), returns a list of managed job records.
+        If version=2, returns a tuple of
+        ``(job_records, total, status_counts, total_no_filter)`` where:
 
-          .. code-block:: python
-
-            [
-              {
-                'job_id': (int) job id,
-                'job_name': (str) job name,
-                'resources': (str) resources of the job,
-                'submitted_at': (float) timestamp of submission,
-                'end_at': (float) timestamp of end,
-                'job_duration': (float) duration in seconds,
-                'recovery_count': (int) Number of retries,
-                'status': (sky.jobs.ManagedJobStatus) of the job,
-                'cluster_resources': (str) resources of the cluster,
-                'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
-                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
-              }
-            ]
+        - job_records (List[responses.ManagedJobRecord]): A list of dicts,
+          with each dict containing the information of a job.
+        - total (int): Total number of jobs after filter.
+        - status_counts (Dict[str, int]): Status counts after filter.
+        - total_no_filter (int): Total number of jobs before filter.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
@@ -317,10 +296,11 @@ def queue(
         raise ValueError(f'Invalid queue version: {version}. Must be 1 or 2.')
 
     if version == 2:
-        return queue_v2(refresh=refresh,
-                        skip_finished=skip_finished,
-                        all_users=all_users,
-                        job_ids=job_ids)
+        return queue_v2(
+            refresh=refresh,  # type: ignore[return-value]
+            skip_finished=skip_finished,
+            all_users=all_users,
+            job_ids=job_ids)
 
     logger.warning('sky.jobs.queue(version=1) is deprecated and will be '
                    'removed in v0.13. Use sky.jobs.queue(version=2) or '
@@ -374,11 +354,6 @@ def cancel(
         RuntimeError: failed to cancel the job.
     """
     remote_api_version = versions.get_remote_api_version()
-    if (pool is not None and
-        (remote_api_version is None or remote_api_version < 12)):
-        raise click.UsageError('Pools are not supported in your API server. '
-                               'Please upgrade to a newer API server to use '
-                               'pools.')
     if graceful and (remote_api_version is None or remote_api_version < 39):
         logger.warning('`--graceful` is ignored because the server does '
                        'not support it yet.')
@@ -611,7 +586,6 @@ def dashboard() -> None:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_apply(
     task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
@@ -622,13 +596,6 @@ def pool_apply(
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
-    remote_api_version = versions.get_remote_api_version()
-    if (workers is not None and
-        (remote_api_version is None or remote_api_version < 19)):
-        raise click.UsageError('Updating the number of workers in a pool is '
-                               'not supported in your API server. Please '
-                               'upgrade to a newer API server to use this '
-                               'feature.')
     return impl.apply(task,
                       workers,
                       pool_name,
@@ -639,7 +606,6 @@ def pool_apply(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -651,7 +617,6 @@ def pool_down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -662,7 +627,6 @@ def pool_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(16)
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -682,7 +646,6 @@ def pool_tail_logs(pool_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(16)
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,

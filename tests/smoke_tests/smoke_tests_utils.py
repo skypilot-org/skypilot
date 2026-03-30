@@ -1133,10 +1133,10 @@ def get_dashboard_cluster_status_request_id() -> str:
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
+    body = payloads.JobsQueueV2Body(all_users=True,)
     response = server_common.make_authenticated_request(
         'POST',
-        '/internal/dashboard/jobs/queue',
+        '/internal/dashboard/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         server_url=get_api_server_url())
     return server_common.get_request_id(response)
@@ -1323,7 +1323,8 @@ def wait_for_managed_job_status_sdk(job_name: str,
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
-        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        result = sky.get(sky.jobs.queue_v2(refresh=False))
+        jobs_list = result[0] if isinstance(result, tuple) else result
         for job in jobs_list:
             if job['job_name'] == job_name:
                 if job['status'] in target_statuses:

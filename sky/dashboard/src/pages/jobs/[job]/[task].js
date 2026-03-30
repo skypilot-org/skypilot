@@ -392,7 +392,7 @@ function TaskLogsContent({
   setIsLoadingLogs,
   isLoadingLogs,
 }) {
-  const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
+  const PENDING_STATUSES = ['PENDING', 'STARTING'];
   const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(taskData.status);

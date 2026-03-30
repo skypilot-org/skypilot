@@ -1310,14 +1310,6 @@ class JobLibCodeGen:
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
-        # TODO(zhwu): Backward compatibility, remove after 0.12.0.
-        if user_hash is None:
-            code = [
-                (f'cancelled = job_lib.cancel_jobs_encoded_results('
-                 f' {job_ids!r}, {cancel_all})'),
-                # Print cancelled IDs. Caller should parse by decoding.
-                'print(cancelled, flush=True)',
-            ]
         return cls._build(code)
 
     @classmethod
@@ -1391,10 +1383,7 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            # TODO(aylei): backward compatibility, remove after 0.12.0.
-            'log_dirs = job_lib.get_log_dir_for_jobs(job_ids) if '
-            'hasattr(job_lib, "get_log_dir_for_jobs") else '
-            'job_lib.run_timestamp_with_globbing_payload(job_ids)',
+            'log_dirs = job_lib.get_log_dir_for_jobs(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

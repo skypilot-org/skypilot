@@ -184,14 +184,6 @@ spec:
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
           mkdir -p /root/.sky
-          # When the config.yaml is a symlink, it should be from the old API
-          # server code. We remove the symlink and copy the ConfigMap config to
-          # PVC location for backward compatibility.
-          # TODO(zhwu): remove this after 0.12.0.
-          if [ -L /root/.sky/config.yaml ]; then
-            echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
-            rm /root/.sky/config.yaml
-          fi
           # Initialize the SkyPilot config.
           if [ -s /root/.sky/config.yaml ]; then
             # If the config.yaml is not empty, sync the PVC config to ConfigMap

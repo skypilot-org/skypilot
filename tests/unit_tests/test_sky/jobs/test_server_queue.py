@@ -486,7 +486,8 @@ class TestQueue:
             },
         ]
         self._patch_backend_and_utils(monkeypatch, jobs)
-        # Only my hash and None should pass when all_users=False
+        # Only my hash should pass when all_users=False
+        # (jobs with user_hash=None are no longer included)
         monkeypatch.setattr(jobs_core.common_utils, 'get_user_hash',
                             lambda: 'me')
         filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
@@ -500,8 +501,8 @@ class TestQueue:
             pool_match=None,
             page=None,
             limit=None)
-        assert total == 2
-        assert sorted([j['job_id'] for j in filtered]) == [1, 3]
+        assert total == 1
+        assert sorted([j['job_id'] for j in filtered]) == [1]
         assert total_no_filter == 3
 
     def test_queue_workspace_filtering(self, monkeypatch):

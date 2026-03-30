@@ -10,7 +10,6 @@ class ManagedJobStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     MANAGED_JOB_STATUS_UNSPECIFIED: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_PENDING: _ClassVar[ManagedJobStatus]
-    MANAGED_JOB_STATUS_SUBMITTED: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_STARTING: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_RUNNING: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_RECOVERING: _ClassVar[ManagedJobStatus]
@@ -36,7 +35,6 @@ class ManagedJobScheduleState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     MANAGED_JOB_SCHEDULE_STATE_DONE: _ClassVar[ManagedJobScheduleState]
 MANAGED_JOB_STATUS_UNSPECIFIED: ManagedJobStatus
 MANAGED_JOB_STATUS_PENDING: ManagedJobStatus
-MANAGED_JOB_STATUS_SUBMITTED: ManagedJobStatus
 MANAGED_JOB_STATUS_STARTING: ManagedJobStatus
 MANAGED_JOB_STATUS_RUNNING: ManagedJobStatus
 MANAGED_JOB_STATUS_RECOVERING: ManagedJobStatus
@@ -99,7 +97,7 @@ class GetVersionResponse(_message.Message):
     def __init__(self, controller_version: _Optional[str] = ...) -> None: ...
 
 class GetJobTableRequest(_message.Message):
-    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "show_jobs_without_user_hash", "fields", "sort_by", "sort_order")
+    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "fields", "sort_by", "sort_order")
     SKIP_FINISHED_FIELD_NUMBER: _ClassVar[int]
     ACCESSIBLE_WORKSPACES_FIELD_NUMBER: _ClassVar[int]
     JOB_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -110,7 +108,6 @@ class GetJobTableRequest(_message.Message):
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     USER_HASHES_FIELD_NUMBER: _ClassVar[int]
     STATUSES_FIELD_NUMBER: _ClassVar[int]
-    SHOW_JOBS_WITHOUT_USER_HASH_FIELD_NUMBER: _ClassVar[int]
     FIELDS_FIELD_NUMBER: _ClassVar[int]
     SORT_BY_FIELD_NUMBER: _ClassVar[int]
     SORT_ORDER_FIELD_NUMBER: _ClassVar[int]
@@ -124,11 +121,10 @@ class GetJobTableRequest(_message.Message):
     limit: int
     user_hashes: UserHashes
     statuses: Statuses
-    show_jobs_without_user_hash: bool
     fields: Fields
     sort_by: str
     sort_order: str
-    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ...) -> None: ...
+    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
     __slots__ = ("job_id", "task_id", "job_name", "task_name", "job_duration", "workspace", "status", "schedule_state", "resources", "cluster_resources", "cluster_resources_full", "cloud", "region", "infra", "accelerators", "recovery_count", "details", "failure_reason", "user_name", "user_hash", "submitted_at", "start_at", "end_at", "user_yaml", "entrypoint", "metadata", "pool", "pool_hash", "_job_id", "links", "is_primary_in_job_group", "zone", "labels", "cluster_name_on_cloud", "internal_external_ips", "internal_services", "priority_class")

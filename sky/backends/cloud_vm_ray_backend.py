@@ -4432,12 +4432,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_ids = list(job_to_dir.keys())
         dirs = list(job_to_dir.values())
-        remote_log_dirs = [
-            # TODO(aylei): backward compatibility for legacy runtime that
-            # returns run_timestamp only, remove after 0.12.0
-            (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
-                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
-        ]
+        remote_log_dirs = list(dirs)
         # Include cluster name in local log directory path to avoid conflicts
         # when the same job_id exists on different clusters
         cluster_name = handle.cluster_name
@@ -5346,10 +5341,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                     # down = False is the default, but warn the user in case
                     # they have explicitly specified it.
-                    # TODO(cooperc): Fix for new autostop stuff.
                     config_override_down = skypilot_config.get_nested(
                         (controller.value.controller_type, 'controller',
-                         'autostop', 'down'), None)
+                         'resources', 'autostop', 'down'), None)
                     if config_override_down is False:  # will not match None
                         logger.warning(
                             'SkyServe controller autodown is disabled in the '

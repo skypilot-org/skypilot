@@ -15,7 +15,6 @@ import sys
 import time
 from typing import Dict, Optional
 
-import requests
 import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
@@ -224,18 +223,11 @@ async def websocket_to_stdout(websocket: ClientConnection,
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
 
-    disable_latency_measurement = os.environ.get(
+    # Timestamps are always supported by compatible servers (API version >= 24),
+    # but can be disabled via env var for latency measurement purposes.
+    disable_timestamps = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    if disable_latency_measurement:
-        timestamps_are_supported = False
-    else:
-        # TODO(aylei): remove the separate /api/health call and use the header
-        # during websocket handshake to determine the server version.
-        health_url = f'{server_url}/api/health'
-        cookie_hdr = server_common.get_cookie_header_for_url(health_url)
-        health_response = requests.get(health_url, headers=cookie_hdr)
-        health_data = health_response.json()
-        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
+    timestamps_are_supported = not disable_timestamps
 
     # Capture the original API server URL for login hint if authentication
     # is required.
@@ -246,8 +238,15 @@ if __name__ == '__main__':
         websocket_proto = 'wss'
     server_url = f'{websocket_proto}://{server_fqdn}'
 
-    client_version_str = (f'&client_version={constants.API_VERSION}'
-                          if timestamps_are_supported else '')
+    # Pass client_version and disable_timestamps as query params so the
+    # server can determine timestamp behavior.
+    # TODO(dev): In v0.13.0, the server should use disable_timestamps
+    # directly and client_version can be sent unconditionally.
+    query_params = ''
+    if not disable_timestamps:
+        query_params += f'&client_version={constants.API_VERSION}'
+    else:
+        query_params += '&disable_timestamps=true'
 
     # For backwards compatibility, fallback to kubernetes-pod-ssh-proxy if
     # no endpoint is provided.
@@ -257,5 +256,5 @@ if __name__ == '__main__':
     websocket_url = (f'{server_url}/{endpoint}'
                      f'?cluster_name={sys.argv[2]}'
                      f'&worker={worker_idx}'
-                     f'{client_version_str}')
+                     f'{query_params}')
     asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))

@@ -894,8 +894,8 @@ function JobDetailsContent({
     }
   }, []);
 
-  const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
-  const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
+  const PENDING_STATUSES = ['PENDING', 'STARTING'];
+  const PRE_START_STATUSES = ['PENDING'];
   const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);

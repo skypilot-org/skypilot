@@ -239,7 +239,7 @@ class TestSerializeKubernetesNodeInfo:
         }
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
-        # is_ready should be removed
+        # is_ready should be removed for version < 25
         assert 'is_ready' not in parsed['node_info_dict']['node1']
         assert 'is_ready' not in parsed['node_info_dict']['node2']
         # Other fields should remain
@@ -253,7 +253,7 @@ class TestSerializeKubernetesNodeInfo:
     )
     def test_node_without_is_ready_field(self, mock_get_version):
         """Test that nodes without is_ready field are handled gracefully."""
-        mock_get_version.return_value = 20
+        mock_get_version.return_value = 24
         data = {
             'node_info_dict': {
                 'node1': {
@@ -269,6 +269,7 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         assert 'is_ready' not in parsed['node_info_dict']['node1']
+        # is_ready removed for version < 25
         assert 'is_ready' not in parsed['node_info_dict']['node2']
 
     @mock.patch(
@@ -373,10 +374,10 @@ class TestSerializeKubernetesNodeInfo:
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
     def test_combined_version_compatibility_old_client(self, mock_get_version):
-        """Test combined version compatibility for old clients (API version < 25).
+        """Test combined version compatibility for API version 24 clients.
 
-        Old clients should not see any of the newer fields: is_ready,
-        cpu_count, memory_gb, cpu_free, memory_free_gb, is_cordoned, taints.
+        Version 24 clients should not see is_ready (added in 25),
+        resource fields (added in 26), or is_cordoned/taints (added in 28).
         """
         mock_get_version.return_value = 24
         data = {
@@ -397,12 +398,14 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         node = parsed['node_info_dict']['node1']
-        # All newer fields should be removed
+        # is_ready should be removed (added in version 25)
         assert 'is_ready' not in node
+        # Resource fields should be removed (added in version 26)
         assert 'cpu_count' not in node
         assert 'memory_gb' not in node
         assert 'cpu_free' not in node
         assert 'memory_free_gb' not in node
+        # is_cordoned and taints should be removed (added in version 28)
         assert 'is_cordoned' not in node
         assert 'taints' not in node
         # Basic fields should remain
@@ -415,8 +418,8 @@ class TestSerializeKubernetesNodeInfo:
     def test_combined_version_compatibility_version_25(self, mock_get_version):
         """Test combined version compatibility for API version 25 clients.
 
-        Version 25 clients should see is_ready but not cpu_count, memory_gb,
-        cpu_free, memory_free_gb, is_cordoned, taints.
+        Version 25 clients should see is_ready but not resource fields
+        (added in 26) or is_cordoned/taints (added in 28).
         """
         mock_get_version.return_value = 25
         data = {
@@ -436,14 +439,14 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         node = parsed['node_info_dict']['node1']
-        # is_ready should be preserved
+        # is_ready should be preserved (added in version 25)
         assert node['is_ready'] is True
-        # Resource fields should be removed
+        # Resource fields should be removed (added in version 26)
         assert 'cpu_count' not in node
         assert 'memory_gb' not in node
         assert 'cpu_free' not in node
         assert 'memory_free_gb' not in node
-        # Cordon/taint fields should be removed
+        # Cordon/taint fields should be removed (added in version 28)
         assert 'is_cordoned' not in node
         assert 'taints' not in node
 

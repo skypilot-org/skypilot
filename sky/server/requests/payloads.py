@@ -277,11 +277,7 @@ class LaunchBody(RequestBody):
     task: str
     cluster_name: str
     retry_until_up: bool = False
-    # TODO(aylei): remove this field in v0.12.0
-    idle_minutes_to_autostop: Optional[int] = None
     dryrun: bool = False
-    # TODO(aylei): remove this field in v0.12.0
-    down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
     no_setup: bool = False
@@ -352,8 +348,7 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
-    # TODO (kyuds): default to False post 0.12.0
-    include_credentials: bool = True
+    include_credentials: bool = False
     # Only return fields that are needed for the
     # dashboard / CLI summary response
     summary_response: bool = False
@@ -576,8 +571,9 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+# TODO(dev): Remove in v0.13.0 — only JobsQueueV2Body is used now.
 class JobsQueueBody(RequestBody):
-    """The request body for the jobs queue endpoint."""
+    """The request body for the jobs queue endpoint (deprecated)."""
     refresh: bool = False
     skip_finished: bool = False
     all_users: bool = False

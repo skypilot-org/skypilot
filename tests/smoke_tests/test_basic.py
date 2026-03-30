@@ -1192,14 +1192,11 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             assert len(job_ids) == 1
             job_id = job_ids[0]
             assert handle is not None
-            # Check the job status from the dashboard
-            queue_request_id = (
-                smoke_tests_utils.get_dashboard_jobs_queue_request_id())
-            queue_response = (
-                smoke_tests_utils.get_response_from_request_id_dashboard(
-                    queue_request_id))
+            # Check the job status
+            result = sky.get(sky.jobs.queue_v2(refresh=False, all_users=True))
+            jobs_list = result[0] if isinstance(result, tuple) else result
             job_exist = False
-            for job in queue_response:
+            for job in jobs_list:
                 if job['job_id'] == job_id:
                     job_exist = True
                     break

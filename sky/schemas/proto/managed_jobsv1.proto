@@ -16,9 +16,10 @@ service ManagedJobsService {
 }
 
 enum ManagedJobStatus {
+  reserved 2;  // was MANAGED_JOB_STATUS_SUBMITTED
+  reserved "MANAGED_JOB_STATUS_SUBMITTED";
   MANAGED_JOB_STATUS_UNSPECIFIED = 0;
   MANAGED_JOB_STATUS_PENDING = 1;
-  MANAGED_JOB_STATUS_SUBMITTED = 2;
   MANAGED_JOB_STATUS_STARTING = 3;
   MANAGED_JOB_STATUS_RUNNING = 4;
   MANAGED_JOB_STATUS_RECOVERING = 5;
@@ -85,7 +86,7 @@ message GetJobTableRequest {
   optional int32 limit = 8;
   optional UserHashes user_hashes = 9;
   optional Statuses statuses = 10;
-  bool show_jobs_without_user_hash = 11;
+  reserved 11;  // was show_jobs_without_user_hash
   optional Fields fields = 12;
   // Sorting parameters, added in ManagedJobsService v14.
   optional string sort_by = 13;

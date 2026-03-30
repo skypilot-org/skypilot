@@ -24,11 +24,11 @@ header_found && /^[0-9]+/ {
     # This is a job line (starts with a number)
     job_id = $1
     # Find the STATUS field (checking for all statuses in active and finished groups)
-    # active: PENDING, RUNNING, RECOVERING, SUBMITTED, STARTING, CANCELLING
+    # active: PENDING, RUNNING, RECOVERING, STARTING, CANCELLING
     # finished: SUCCEEDED, FAILED, CANCELLED, FAILED_SETUP, FAILED_PRECHECKS, FAILED_NO_RESOURCE, FAILED_CONTROLLER
     status = ""
     for (i = 1; i <= NF; i++) {
-        if ($i ~ /^(PENDING|RUNNING|RECOVERING|SUBMITTED|STARTING|CANCELLING|SUCCEEDED|FAILED|CANCELLED|FAILED_SETUP|FAILED_PRECHECKS|FAILED_NO_RESOURCE|FAILED_CONTROLLER)/) {
+        if ($i ~ /^(PENDING|RUNNING|RECOVERING|STARTING|CANCELLING|SUCCEEDED|FAILED|CANCELLED|FAILED_SETUP|FAILED_PRECHECKS|FAILED_NO_RESOURCE|FAILED_CONTROLLER)/) {
             status = $i
             break
         }
