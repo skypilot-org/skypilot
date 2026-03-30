@@ -3,10 +3,12 @@
 import grpc
 import warnings
 
-import managed_jobsv1_pb2 as managed__jobsv1__pb2
+from sky.schemas.generated import managed_jobsv1_pb2 as sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2
 
-GRPC_GENERATED_VERSION = '1.78.0'
+GRPC_GENERATED_VERSION = '1.63.0'
 GRPC_VERSION = grpc.__version__
+EXPECTED_ERROR_RELEASE = '1.65.0'
+SCHEDULED_RELEASE_DATE = 'June 25, 2024'
 _version_not_supported = False
 
 try:
@@ -16,12 +18,15 @@ except ImportError:
     _version_not_supported = True
 
 if _version_not_supported:
-    raise RuntimeError(
+    warnings.warn(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in managed_jobsv1_pb2_grpc.py depends on'
+        + f' but the generated code in sky/schemas/generated/managed_jobsv1_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
+        + f' This warning will become an error in {EXPECTED_ERROR_RELEASE},'
+        + f' scheduled for release on {SCHEDULED_RELEASE_DATE}.',
+        RuntimeWarning
     )
 
 
@@ -36,28 +41,28 @@ class ManagedJobsServiceStub(object):
         """
         self.GetVersion = channel.unary_unary(
                 '/managed_jobs.v1.ManagedJobsService/GetVersion',
-                request_serializer=managed__jobsv1__pb2.GetVersionRequest.SerializeToString,
-                response_deserializer=managed__jobsv1__pb2.GetVersionResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionResponse.FromString,
                 _registered_method=True)
         self.GetJobTable = channel.unary_unary(
                 '/managed_jobs.v1.ManagedJobsService/GetJobTable',
-                request_serializer=managed__jobsv1__pb2.GetJobTableRequest.SerializeToString,
-                response_deserializer=managed__jobsv1__pb2.GetJobTableResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableResponse.FromString,
                 _registered_method=True)
         self.GetAllJobIdsByName = channel.unary_unary(
                 '/managed_jobs.v1.ManagedJobsService/GetAllJobIdsByName',
-                request_serializer=managed__jobsv1__pb2.GetAllJobIdsByNameRequest.SerializeToString,
-                response_deserializer=managed__jobsv1__pb2.GetAllJobIdsByNameResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameResponse.FromString,
                 _registered_method=True)
         self.CancelJobs = channel.unary_unary(
                 '/managed_jobs.v1.ManagedJobsService/CancelJobs',
-                request_serializer=managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
-                response_deserializer=managed__jobsv1__pb2.CancelJobsResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.FromString,
                 _registered_method=True)
         self.StreamLogs = channel.unary_stream(
                 '/managed_jobs.v1.ManagedJobsService/StreamLogs',
-                request_serializer=managed__jobsv1__pb2.StreamLogsRequest.SerializeToString,
-                response_deserializer=managed__jobsv1__pb2.StreamLogsResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsResponse.FromString,
                 _registered_method=True)
 
 
@@ -104,34 +109,33 @@ def add_ManagedJobsServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetVersion': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVersion,
-                    request_deserializer=managed__jobsv1__pb2.GetVersionRequest.FromString,
-                    response_serializer=managed__jobsv1__pb2.GetVersionResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionResponse.SerializeToString,
             ),
             'GetJobTable': grpc.unary_unary_rpc_method_handler(
                     servicer.GetJobTable,
-                    request_deserializer=managed__jobsv1__pb2.GetJobTableRequest.FromString,
-                    response_serializer=managed__jobsv1__pb2.GetJobTableResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableResponse.SerializeToString,
             ),
             'GetAllJobIdsByName': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAllJobIdsByName,
-                    request_deserializer=managed__jobsv1__pb2.GetAllJobIdsByNameRequest.FromString,
-                    response_serializer=managed__jobsv1__pb2.GetAllJobIdsByNameResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameResponse.SerializeToString,
             ),
             'CancelJobs': grpc.unary_unary_rpc_method_handler(
                     servicer.CancelJobs,
-                    request_deserializer=managed__jobsv1__pb2.CancelJobsRequest.FromString,
-                    response_serializer=managed__jobsv1__pb2.CancelJobsResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.SerializeToString,
             ),
             'StreamLogs': grpc.unary_stream_rpc_method_handler(
                     servicer.StreamLogs,
-                    request_deserializer=managed__jobsv1__pb2.StreamLogsRequest.FromString,
-                    response_serializer=managed__jobsv1__pb2.StreamLogsResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'managed_jobs.v1.ManagedJobsService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('managed_jobs.v1.ManagedJobsService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -153,8 +157,8 @@ class ManagedJobsService(object):
             request,
             target,
             '/managed_jobs.v1.ManagedJobsService/GetVersion',
-            managed__jobsv1__pb2.GetVersionRequest.SerializeToString,
-            managed__jobsv1__pb2.GetVersionResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetVersionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -180,8 +184,8 @@ class ManagedJobsService(object):
             request,
             target,
             '/managed_jobs.v1.ManagedJobsService/GetJobTable',
-            managed__jobsv1__pb2.GetJobTableRequest.SerializeToString,
-            managed__jobsv1__pb2.GetJobTableResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetJobTableResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -207,8 +211,8 @@ class ManagedJobsService(object):
             request,
             target,
             '/managed_jobs.v1.ManagedJobsService/GetAllJobIdsByName',
-            managed__jobsv1__pb2.GetAllJobIdsByNameRequest.SerializeToString,
-            managed__jobsv1__pb2.GetAllJobIdsByNameResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.GetAllJobIdsByNameResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -234,8 +238,8 @@ class ManagedJobsService(object):
             request,
             target,
             '/managed_jobs.v1.ManagedJobsService/CancelJobs',
-            managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
-            managed__jobsv1__pb2.CancelJobsResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.CancelJobsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -261,8 +265,8 @@ class ManagedJobsService(object):
             request,
             target,
             '/managed_jobs.v1.ManagedJobsService/StreamLogs',
-            managed__jobsv1__pb2.StreamLogsRequest.SerializeToString,
-            managed__jobsv1__pb2.StreamLogsResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2.StreamLogsResponse.FromString,
             options,
             channel_credentials,
             insecure,
