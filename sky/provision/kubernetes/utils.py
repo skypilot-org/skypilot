@@ -43,7 +43,6 @@ from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
@@ -3097,126 +3096,6 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
         debug_cmd = 'kubectl describe pod'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
-
-
-def resolve_auto_mounts(
-    context: Optional[str],
-    pod_spec: Dict[str, Any],
-) -> None:
-    """Resolves auto_mounts config and injects volumes/volumeMounts.
-
-    Reads the auto_mounts config from skypilot_config, resolves SkyPilot
-    volume names to PVC claimNames via DB lookup, and injects the corresponding
-    volume and volumeMount entries into the pod spec.
-
-    Args:
-        context: The Kubernetes context name.
-        pod_spec: The pod spec dict to inject volumes into (modified in-place).
-    """
-    auto_mounts = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('auto_mounts',),
-        default_value=None)
-    if not auto_mounts:
-        return
-
-    if 'volumes' not in pod_spec['spec']:
-        pod_spec['spec']['volumes'] = []
-    if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
-        pod_spec['spec']['containers'][0]['volumeMounts'] = []
-
-    # Track k8s volume names already present in the pod spec to avoid
-    # duplicates (e.g. user added the same volume via pod_config, or this
-    # function is called more than once).
-    added_volumes: Set[str] = {
-        vol['name'] for vol in pod_spec['spec'].get('volumes', [])
-    }
-
-    for mount_entry in auto_mounts:
-        volume_name = mount_entry['volume_name']
-        mount_paths = mount_entry['mount_paths']
-
-        # Resolve SkyPilot volume name to volume config
-        record = global_user_state.get_volume_by_name(volume_name)
-        if record is None:
-            logger.warning(
-                f'Auto-mount volume {volume_name!r} not found in SkyPilot '
-                f'volume DB. Skipping. Create it with: sky volumes apply')
-            continue
-        volume_config: models.VolumeConfig = record['handle']
-
-        # Only hostPath and ReadWriteMany PVC volumes support concurrent
-        # multi-pod access required by auto_mounts.
-        if (volume_config.type == volume_lib.VolumeType.PVC.value and
-                volume_config.config.get('access_mode') !=
-                volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
-            logger.warning(
-                f'Auto-mount volume {volume_name!r} has access mode '
-                f'{volume_config.config.get("access_mode")!r}, which does not '
-                f'support concurrent multi-pod access. Only hostPath volumes '
-                f'and ReadWriteMany PVC volumes are supported for auto_mounts. '
-                f'Skipping.')
-            continue
-
-        # Use a prefixed name to avoid conflicts with user volumes
-        k8s_volume_name = f'auto-mount-{volume_name}'
-
-        # Add volume entry (once per unique k8s volume name), also checking
-        # against volumes already present in the pod spec.
-        if k8s_volume_name not in added_volumes:
-            if volume_config.type == volume_lib.VolumeType.HOSTPATH.value:
-                host_path = volume_config.config.get('host_path')
-                pod_spec['spec']['volumes'].append({
-                    'name': k8s_volume_name,
-                    'hostPath': {
-                        'path': host_path,
-                        'type': 'DirectoryOrCreate',
-                    },
-                })
-            else:
-                pvc_claim_name = volume_config.name_on_cloud
-                pod_spec['spec']['volumes'].append({
-                    'name': k8s_volume_name,
-                    'persistentVolumeClaim': {
-                        'claimName': pvc_claim_name,
-                    },
-                })
-            added_volumes.add(k8s_volume_name)
-
-        # Add volumeMount entries for each mount path.
-        # mount_paths are validated by schema to be one of:
-        #   /path        — absolute path in the container
-        #   ~/path or ~  — relative to the SkyPilot container home dir.
-        #                  NOTE: this is a limitation — '~' expansion only
-        #                  works correctly for containers whose home dir is
-        #                  /home/sky (i.e. SkyPilot-based images). For custom
-        #                  images with a different home dir, use an absolute
-        #                  path instead.
-        for path in mount_paths:
-            if path.startswith('/'):
-                # Absolute path: mount directly, subPath is the path without
-                # leading slash so it's relative to the PVC/hostPath root.
-                mount_path = path
-                sub_path = path.lstrip('/')
-            elif path.startswith('~/'):
-                # ~/relative: expand ~ to the SkyPilot container home dir.
-                mount_path = (f'{DEFAULT_HOME_DIRECTORY}'
-                              f'/{path[2:]}')
-                sub_path = path[2:]
-            else:
-                # path == '~': mount the entire volume at home directory.
-                mount_path = DEFAULT_HOME_DIRECTORY
-                sub_path = ''
-
-            volume_mount: Dict[str, Any] = {
-                'name': k8s_volume_name,
-                'mountPath': mount_path,
-            }
-            if sub_path:
-                volume_mount['subPath'] = sub_path
-            pod_spec['spec']['containers'][0]['volumeMounts'].append(
-                volume_mount)
 
 
 # Sidecar container names.

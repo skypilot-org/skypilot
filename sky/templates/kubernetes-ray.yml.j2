@@ -473,7 +473,9 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% set seen_volumes = [] %}
         {% for volume_mount in volume_mounts %}
+        {% if volume_mount.name not in seen_volumes %}
         {% if volume_mount.volume_type == 'k8s-hostpath' %}
         - name: {{volume_mount.name}}
           hostPath:
@@ -483,6 +485,8 @@ available_node_types:
         - name: {{volume_mount.name}}
           persistentVolumeClaim:
             claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endif %}
+        {% if seen_volumes.append(volume_mount.name) %}{% endif %}
         {% endif %}
         {% endfor %}
         {% if k8s_enable_gpudirect_tcpx %}

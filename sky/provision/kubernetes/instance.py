@@ -1135,9 +1135,6 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'mountPath': ephemeral_volume.path,
             })
 
-    # Inject auto_mount volumes from skypilot config
-    kubernetes_utils.resolve_auto_mounts(context, pod_spec)
-
     # Docker sidecar cache volume injection: if a SkyPilot volume was
     # specified for the enable_docker cache, look up the PVC name. The actual
     # volume + volumeMount are added per-pod inside _create_resource_thread (so
