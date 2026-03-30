@@ -3142,6 +3142,19 @@ def resolve_auto_mounts(
             continue
         volume_config: models.VolumeConfig = record['handle']
 
+        # Only hostPath and ReadWriteMany PVC volumes support concurrent
+        # multi-pod access required by auto_mounts.
+        if (volume_config.type == volume_lib.VolumeType.PVC.value and
+                volume_config.config.get('access_mode') !=
+                volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
+            logger.warning(
+                f'Auto-mount volume {volume_name!r} has access mode '
+                f'{volume_config.config.get("access_mode")!r}, which does not '
+                f'support concurrent multi-pod access. Only hostPath volumes '
+                f'and ReadWriteMany PVC volumes are supported for auto_mounts. '
+                f'Skipping.')
+            continue
+
         # Use a prefixed name to avoid conflicts with user volumes
         k8s_volume_name = f'auto-mount-{volume_name}'
 

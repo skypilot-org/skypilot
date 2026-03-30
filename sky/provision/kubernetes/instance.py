@@ -1130,14 +1130,10 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             })
             if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
                 pod_spec['spec']['containers'][0]['volumeMounts'] = []
-            volume_mount_entry = {
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
                 'name': ephemeral_volume.name,
                 'mountPath': ephemeral_volume.path,
-            }
-            if ephemeral_volume.sub_path:
-                volume_mount_entry['subPath'] = ephemeral_volume.sub_path
-            pod_spec['spec']['containers'][0]['volumeMounts'].append(
-                volume_mount_entry)
+            })
 
     # Inject auto_mount volumes from skypilot config
     kubernetes_utils.resolve_auto_mounts(context, pod_spec)
