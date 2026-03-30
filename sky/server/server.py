@@ -37,6 +37,7 @@ from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import filelock
 import jwt as pyjwt
+import starlette.background
 import starlette.middleware.base
 import uvloop
 
@@ -94,6 +95,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
@@ -642,7 +644,7 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
-            request_id='skypilot-server-on-boot-check',
+            request_id=server_constants.ON_BOOT_CHECK_REQUEST_ID,
             request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
@@ -652,7 +654,8 @@ async def schedule_on_boot_check_async():
     except exceptions.RequestAlreadyExistsError:
         # Lifespan will be executed in each uvicorn worker process, we
         # can safely ignore the error if the task is already scheduled.
-        logger.debug('Request skypilot-server-on-boot-check already exists.')
+        logger.debug(f'Request {server_constants.ON_BOOT_CHECK_REQUEST_ID} '
+                     'already exists.')
 
 
 @contextlib.asynccontextmanager
@@ -2965,6 +2968,54 @@ async def all_contexts(request: fastapi.Request) -> None:
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/debug/dump_create')
+async def create_debug_dump(
+        request: fastapi.Request,
+        create_debug_dump_body: payloads.CreateDebugDumpBody) -> None:
+    """Starts a debug dump."""
+
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CREATE_DEBUG_DUMP,
+        request_body=create_debug_dump_body,
+        func=core.create_debug_dump,
+        schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.get('/debug/dump_download/{dump_filename}')
+async def download_debug_dump(
+        dump_filename: str) -> fastapi.responses.FileResponse:
+    """Download a debug dump file.
+
+    The dump file is automatically deleted after the download completes.
+    """
+    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
+    dump_path = dump_dir / dump_filename
+
+    # Security: check path traversal before existence to avoid
+    # leaking whether arbitrary files exist on the filesystem.
+    try:
+        dump_path.resolve().relative_to(dump_dir.resolve())
+    except ValueError as path_err:
+        raise fastapi.HTTPException(status_code=403,
+                                    detail='Invalid path') from path_err
+
+    if not dump_path.exists():
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Debug dump not found')
+
+    # Delete the dump file after download completes
+    return fastapi.responses.FileResponse(
+        path=dump_path,
+        filename=dump_filename,
+        media_type='application/zip',
+        background=starlette.background.BackgroundTask(dump_path.unlink,
+                                                       missing_ok=True),
     )
 
 

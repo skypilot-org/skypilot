@@ -1436,6 +1436,27 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'auto_mounts': {
+        'type': 'array',
+        'items': {
+            'type': 'object',
+            'required': ['volume_name', 'mount_paths'],
+            'additionalProperties': False,
+            'properties': {
+                'volume_name': {
+                    'type': 'string',
+                },
+                'mount_paths': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'pattern': '^(/|~/|~$)',
+                    },
+                    'minItems': 1,
+                },
+            },
+        },
+    },
     'enable_docker': {
         'oneOf': [
             # Simple form: enable_docker: true / false
