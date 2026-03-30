@@ -140,9 +140,6 @@ class TestJobProtoToDict:
         status_mappings = [
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
              managed_job_state.ManagedJobStatus.PENDING),
-            # TODO(dev): Remove in v0.13.0. Value 2 was
-            # MANAGED_JOB_STATUS_SUBMITTED, now reserved.
-            (2, managed_job_state.ManagedJobStatus.STARTING),
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
              managed_job_state.ManagedJobStatus.STARTING),
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING,

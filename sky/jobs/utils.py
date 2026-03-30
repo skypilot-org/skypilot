@@ -2231,10 +2231,7 @@ def load_managed_job_queue(
     all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check in v0.13.0.
-            job['user_name'] = all_users_map.get(job['user_hash'])
+        job['user_name'] = all_users_map.get(job['user_hash'])
     return jobs, total, result_type, total_no_filter, status_counts
 
 
@@ -2668,12 +2665,9 @@ def decode_managed_job_protos(
     jobs = []
     for job_proto in job_protos:
         job_dict = _job_proto_to_dict(job_proto)
-        user_hash = job_dict.get('user_hash', None)
-        if user_hash is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check in v0.13.0.
-            user = user_hash_to_user.get(user_hash, None)
-            job_dict['user_name'] = user.name if user is not None else None
+        user_hash = job_dict.get('user_hash')
+        user = user_hash_to_user.get(user_hash, None)
+        job_dict['user_name'] = user.name if user is not None else None
         jobs.append(job_dict)
     return jobs
 
@@ -2970,16 +2964,13 @@ class ManagedJobCodeGen:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
-            msg, retcode = result
-            print(msg, flush=True)
-            sys.exit(retcode)
         else:
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
-            msg, retcode = result
-            print(msg, flush=True)
-            sys.exit(retcode)
+        msg, retcode = result
+        print(msg, flush=True)
+        sys.exit(retcode)
         """)
         return cls._build(code)
 

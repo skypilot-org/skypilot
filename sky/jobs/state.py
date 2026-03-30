@@ -445,10 +445,6 @@ class ManagedJobStatus(enum.Enum):
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
-            # TODO(dev): Remove in v0.13.0. Value 2 was
-            # MANAGED_JOB_STATUS_SUBMITTED, now reserved. Old v0.11
-            # skylets may still send it; map to STARTING.
-            2: cls.STARTING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,

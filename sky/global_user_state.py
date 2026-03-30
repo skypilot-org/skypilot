@@ -875,11 +875,15 @@ def add_or_update_cluster(cluster_name: str,
 
     # Persist cluster YAML content to the cluster_yaml_table so that
     # get_cluster_yaml_str() can retrieve it without a file-system fallback.
+    # Note: get_cluster_yaml_str() looks up by filename stem, so we must use
+    # the same key here.
     cluster_yaml_path = getattr(cluster_handle, 'cluster_yaml', None)
     if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+        yaml_cluster_name, _ = os.path.splitext(
+            os.path.basename(cluster_yaml_path))
         with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
             yaml_content = f.read()
-        set_cluster_yaml(cluster_name, yaml_content)
+        set_cluster_yaml(yaml_cluster_name, yaml_content)
 
 
 @metrics_lib.time_me
@@ -2713,9 +2717,7 @@ def rotate_service_account_token(token_id: str,
 
 @metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
-    """Get the cluster yaml from the database or the local file system.
-    If the cluster yaml is not in the database, check if it exists on the
-    local file system and migrate it to the database.
+    """Get the cluster yaml from the database.
 
     It is assumed that the cluster yaml file is named as <cluster_name>.yml.
     """
@@ -2728,13 +2730,13 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         row = session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
-        return _set_cluster_yaml_from_file(cluster_yaml_path, cluster_name)
+        return None
     return row.yaml
 
 
-def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
-    """Get the cluster yaml from the database or the local file system.
-    """
+def get_cluster_yaml_str_multiple(
+        cluster_yaml_paths: List[str]) -> List[Optional[str]]:
+    """Get the cluster yaml from the database."""
     engine = _db_manager.get_engine()
     cluster_names_to_yaml_paths = {}
     for cluster_yaml_path in cluster_yaml_paths:
@@ -2749,39 +2751,8 @@ def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
 
     yaml_strs = []
     for cluster_name in cluster_names:
-        if cluster_name in row_cluster_names_to_yaml:
-            yaml_strs.append(row_cluster_names_to_yaml[cluster_name])
-        else:
-            yaml_str = _set_cluster_yaml_from_file(
-                cluster_names_to_yaml_paths[cluster_name], cluster_name)
-            yaml_strs.append(yaml_str)
+        yaml_strs.append(row_cluster_names_to_yaml.get(cluster_name))
     return yaml_strs
-
-
-def _set_cluster_yaml_from_file(cluster_yaml_path: str,
-                                cluster_name: str) -> Optional[str]:
-    """Set the cluster yaml in the database from a file."""
-    # Backward compat: clusters created before add_or_update_cluster()
-    # persisted YAML content to cluster_yaml_table may only have the
-    # YAML on disk. Read it from the file and migrate it to the DB.
-    # TODO(syang): Remove in v0.14.0 once old clusters have aged out.
-    if cluster_yaml_path is not None:
-        # First try the exact path
-        path_to_read = None
-        if os.path.exists(cluster_yaml_path):
-            path_to_read = cluster_yaml_path
-        # Fallback: try with .debug suffix (when debug logging was enabled)
-        # Debug logging causes YAML files to be saved with .debug suffix
-        # but the path stored in the handle doesn't include it
-        debug_path = cluster_yaml_path + '.debug'
-        if os.path.exists(debug_path):
-            path_to_read = debug_path
-        if path_to_read is not None:
-            with open(path_to_read, 'r', encoding='utf-8') as f:
-                yaml_str = f.read()
-            set_cluster_yaml(cluster_name, yaml_str)
-            return yaml_str
-    return None
 
 
 def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:

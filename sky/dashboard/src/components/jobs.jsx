@@ -78,7 +78,6 @@ export const statusGroups = {
     'PENDING',
     'RUNNING',
     'RECOVERING',
-    'SUBMITTED', // TODO(dev): Remove in v0.13.0 — status is deprecated.
     'STARTING',
     'CANCELLING',
   ],
@@ -97,17 +96,16 @@ export const statusGroups = {
 const STATUS_PRIORITY = {
   SUCCEEDED: 0,
   PENDING: 1,
-  SUBMITTED: 2, // TODO(dev): Remove in v0.13.0 — status is deprecated.
-  STARTING: 3,
-  RUNNING: 4,
-  RECOVERING: 5,
-  CANCELLING: 6,
-  CANCELLED: 7,
-  FAILED_SETUP: 8,
-  FAILED_PRECHECKS: 9,
-  FAILED_NO_RESOURCE: 10,
-  FAILED: 11,
-  FAILED_CONTROLLER: 12,
+  STARTING: 2,
+  RUNNING: 3,
+  RECOVERING: 4,
+  CANCELLING: 5,
+  CANCELLED: 6,
+  FAILED_SETUP: 7,
+  FAILED_PRECHECKS: 8,
+  FAILED_NO_RESOURCE: 9,
+  FAILED: 10,
+  FAILED_CONTROLLER: 11,
 };
 
 // Helper function to aggregate status for a job group

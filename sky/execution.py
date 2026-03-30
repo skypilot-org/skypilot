@@ -528,8 +528,10 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
+    # TODO(dev): Remove in v0.13.0. Kept for v0.11 client SDK compat.
     idle_minutes_to_autostop: Optional[int] = None,  # pylint: disable=unused-argument
     dryrun: bool = False,
+    # TODO(dev): Remove in v0.13.0. Kept for v0.11 client SDK compat.
     down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
@@ -745,6 +747,7 @@ def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,
+    # TODO(dev): Remove in v0.13.0. Kept for v0.11 client SDK compat.
     down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
