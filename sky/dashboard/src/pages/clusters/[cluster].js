@@ -752,12 +752,12 @@ function ProvisionLogs({ clusterName, numNodes }) {
     setSelectedWorker(val === 'head' ? null : Number(val));
   };
 
-  // Build worker options: Head, Worker 1 .. Worker N-1
+  // Build worker options: Head, Worker1 .. WorkerN-1
   const workerOptions = useMemo(() => {
     const opts = [{ label: 'Head', value: 'head' }];
     if (numNodes > 1) {
       for (let i = 1; i < numNodes; i++) {
-        opts.push({ label: `Worker ${i}`, value: String(i) });
+        opts.push({ label: `Worker${i}`, value: String(i) });
       }
     }
     return opts;
