@@ -6,9 +6,15 @@ Tests cover:
 - Diffusion batch (image generation): GPU workers, multi-output (images +
   manifest JSONL).
 - Batch cancel: cancel a running batch job mid-flight.
+- Batch HA: kill controller mid-flight, verify resume from DB.
 """
+import tempfile
+
 import pytest
 from smoke_tests import smoke_tests_utils
+
+import sky
+from sky import skypilot_config
 
 
 # ---------- Test simple batch (text doubling) ----------
@@ -226,5 +232,206 @@ def test_batch_cancel():
          f' rm -f /tmp/batch-cancel-input-{name}.jsonl'),
         timeout=30 * 60,
         env={'SKY_BATCH_BUCKET': bucket},
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test batch HA: kill controller, verify resume from DB ----------
+@pytest.mark.kubernetes
+@pytest.mark.batch
+def test_batch_ha_kill_running(generic_cloud: str):
+    """Kill the jobs controller while a batch job is RUNNING.
+
+    After the controller pod restarts, the batch coordinator should
+    resume from DB (``_resume_from_db``) and complete all batches.
+    Uses the simple double-text example (CPU-only) to keep costs low.
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip(
+            'Skipping HA test in non-docker remote api server environment as '
+            'controller might be managed by different user/test agents')
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Skipping HA kill test in consolidation mode: no separate '
+                    'controller pod to kill')
+
+    name = smoke_tests_utils.get_cluster_name()
+    bucket = f'sky-batch-ha-{name}'
+    pool_name = 'test-batch-pool'
+
+    # HA config: run the jobs controller on k8s with high_availability.
+    skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
+    pytest_config_file_override = (
+        smoke_tests_utils.pytest_config_file_override())
+    if pytest_config_file_override is not None:
+        with open(pytest_config_file_override, 'r') as f:
+            base_config = f.read()
+        with open(skypilot_config_path, 'r') as f:
+            ha_config = f.read()
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                         delete=False) as f:
+            f.write(base_config)
+            f.write(ha_config)
+            f.flush()
+            skypilot_config_path = f.name
+
+    test = smoke_tests_utils.Test(
+        'batch_ha_kill_running',
+        [
+            # --- Cloud-cmd cluster for kubectl access ---
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
+            # --- Pre-cleanup ---
+            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
+            f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Data setup: 200 items / batch_size 2 = 100 batches ---
+            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            (f'for i in $(seq 1 200); do '
+             f'echo "{{\\"text\\": \\"word_$i\\"}}"; '
+             f'done > /tmp/batch-ha-input-{name}.jsonl'),
+            (f'aws s3 cp /tmp/batch-ha-input-{name}.jsonl '
+             f's3://{bucket}/test.jsonl'),
+            f'aws s3 rm s3://{bucket}/output.jsonl 2>/dev/null || true',
+            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
+             f'--recursive 2>/dev/null || true'),
+
+            # --- Launch batch job in background, wait for RUNNING ---
+            (f'nohup python examples/batch/simple/double_text.py '
+             f'> /tmp/batch-ha-bg-{name}.log 2>&1 &\n'
+             f'echo "Backgrounded double_text.py (PID=$!)"\n'
+             f'for i in $(seq 1 180); do\n'
+             f'  if sky jobs queue 2>/dev/null '
+             f'| grep "{pool_name}" | grep -q "RUNNING"; then\n'
+             f'    echo "Batch job is RUNNING"\n'
+             f'    exit 0\n'
+             f'  fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             f'echo "Timeout waiting for batch job to reach RUNNING"\n'
+             f'exit 1'),
+
+            # --- Let batches accumulate, then record progress and job ID ---
+            (
+                f'echo "Sleeping 60s to let batches complete..."\n'
+                f'sleep 60\n'
+                f'QUEUE=$(sky jobs queue 2>/dev/null)\n'
+                f'POOL_LINE=$(echo "$QUEUE" | grep "{pool_name}" | head -1)\n'
+                f'PROGRESS=$(echo "$POOL_LINE" '
+                f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
+                f'COMPLETED=${{PROGRESS%%/*}}\n'
+                # Also record the managed job ID for log verification later.
+                f'JOB_ID=$(echo "$POOL_LINE" '
+                f'| awk \'$1 ~ /^[0-9]+$/ {{print $1}}\')\n'
+                f'echo "Progress before kill: $PROGRESS '
+                f'(completed=$COMPLETED, job_id=$JOB_ID)"\n'
+                f'if [ -z "$COMPLETED" ] || [ "$COMPLETED" -eq 0 ]; then\n'
+                f'  echo "ERROR: No batches completed after 60s"\n'
+                f'  exit 1\n'
+                f'fi\n'
+                f'echo "$COMPLETED" '
+                f'> /tmp/batch-ha-progress-{name}.txt\n'
+                f'echo "$JOB_ID" '
+                f'> /tmp/batch-ha-jobid-{name}.txt'),
+
+            # --- Kill controller pod ---
+            smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
+
+            # --- Verify resume preserves progress, then wait for SUCCEED ---
+            (
+                f'COMPLETED_BEFORE=$(cat /tmp/batch-ha-progress-{name}.txt)\n'
+                f'echo "Completed before kill: $COMPLETED_BEFORE"\n'
+                f'VERIFIED=0\n'
+                f'for i in $(seq 1 180); do\n'
+                f'  LINE=$(sky jobs queue 2>/dev/null '
+                f'| grep "{pool_name}" | head -1)\n'
+                # Check progress once the job is back to RUNNING or SUCCEEDED.
+                f'  if echo "$LINE" | grep -qE "RUNNING|SUCCEEDED"; then\n'
+                f'    if [ "$VERIFIED" -eq 0 ]; then\n'
+                f'      PROGRESS_AFTER=$(echo "$LINE" '
+                f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
+                f'      COMPLETED_AFTER=${{PROGRESS_AFTER%%/*}}\n'
+                f'      echo "Progress after recovery: $PROGRESS_AFTER"\n'
+                # After resume the completed count must be >= what we
+                # recorded before the kill.  It can be slightly larger
+                # because batches may have finished between our last
+                # progress read and the actual kill.
+                f'      if [ -n "$COMPLETED_AFTER" ] && '
+                f'[ "$COMPLETED_AFTER" -ge "$COMPLETED_BEFORE" ]; then\n'
+                f'        echo "Resume verified: progress preserved '
+                f'($COMPLETED_BEFORE -> $COMPLETED_AFTER)"\n'
+                f'        VERIFIED=1\n'
+                f'      else\n'
+                f'        echo "ERROR: Progress went backwards after '
+                f'recovery ($COMPLETED_BEFORE -> $COMPLETED_AFTER)"\n'
+                f'        exit 1\n'
+                f'      fi\n'
+                f'    fi\n'
+                # Now check if job reached SUCCEEDED.
+                f'    if echo "$LINE" | grep -q "SUCCEEDED"; then\n'
+                f'      echo "Batch job SUCCEEDED after controller recovery"\n'
+                f'      exit 0\n'
+                f'    fi\n'
+                f'  fi\n'
+                f'  sleep 5\n'
+                f'done\n'
+                f'echo "Timeout waiting for SUCCEEDED after recovery"\n'
+                f'exit 1'),
+
+            # --- Verify controller logs show BATCH_RESUME with correct count ---
+            (
+                f'JOB_ID=$(cat /tmp/batch-ha-jobid-{name}.txt)\n'
+                f'COMPLETED_BEFORE=$(cat /tmp/batch-ha-progress-{name}.txt)\n'
+                f's=$(sky jobs logs --controller $JOB_ID --no-follow)\n'
+                f'echo "$s"\n'
+                # The BATCH_RESUME line is emitted by _resume_from_db:
+                # "BATCH_RESUME total=100 completed=N pending=M"
+                f'echo "$s" | grep "BATCH_RESUME" || '
+                f'{{ echo "ERROR: BATCH_RESUME not found in controller logs"; '
+                f'exit 1; }}\n'
+                f'RESUME_COMPLETED=$(echo "$s" | grep "BATCH_RESUME" '
+                f'| grep -oE "completed=[0-9]+" | cut -d= -f2)\n'
+                f'echo "Controller log: resumed with '
+                f'completed=$RESUME_COMPLETED (expected >= $COMPLETED_BEFORE)"\n'
+                f'if [ -z "$RESUME_COMPLETED" ] || '
+                f'[ "$RESUME_COMPLETED" -lt "$COMPLETED_BEFORE" ]; then\n'
+                f'  echo "ERROR: Resume completed count '
+                f'($RESUME_COMPLETED) < progress before kill '
+                f'($COMPLETED_BEFORE)"\n'
+                f'  exit 1\n'
+                f'fi'),
+
+            # --- Verify all 200 items processed correctly ---
+            (f'aws s3 cp s3://{bucket}/output.jsonl '
+             f'/tmp/batch-ha-output-{name}.jsonl'),
+            f'test $(wc -l < /tmp/batch-ha-output-{name}.jsonl) -eq 200',
+            (f"python3 << 'PYEOF'\n"
+             "import json\n"
+             f"path = '/tmp/batch-ha-output-{name}.jsonl'\n"
+             "results = [json.loads(l) for l in open(path)]\n"
+             "assert len(results) == 200, f'Expected 200, got {len(results)}'\n"
+             "texts = set()\n"
+             "for r in results:\n"
+             "    assert 'text' in r and 'output' in r, f'Bad record: {r}'\n"
+             "    assert r['output'] == r['text'] * 2, f'Wrong output: {r}'\n"
+             "    texts.add(r['text'])\n"
+             "expected = set(f'word_{i}' for i in range(1, 201))\n"
+             "assert texts == expected, (\n"
+             "    f'Missing: {expected - texts}, Extra: {texts - expected}')\n"
+             "print(f'All {len(results)} results valid after HA recovery')\n"
+             "PYEOF"),
+        ],
+        # Teardown: remove pool, bucket, temp files, cloud-cmd cluster.
+        (f'sky jobs pool down {pool_name} -y;'
+         f' sky serve down {pool_name} -y 2>/dev/null || true;'
+         f' aws s3 rb s3://{bucket} --force;'
+         f' rm -f /tmp/batch-ha-input-{name}.jsonl'
+         f' /tmp/batch-ha-output-{name}.jsonl'
+         f' /tmp/batch-ha-bg-{name}.log'
+         f' /tmp/batch-ha-progress-{name}.txt'
+         f' /tmp/batch-ha-jobid-{name}.txt;'
+         f' {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
+        timeout=30 * 60,
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path,
+        },
     )
     smoke_tests_utils.run_one_test(test)

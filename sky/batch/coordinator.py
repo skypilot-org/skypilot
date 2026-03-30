@@ -218,8 +218,11 @@ class BatchCoordinator:
         self.completed_count = 0
         self._retry_counts = {}
 
-        for rec in records:
+        for i, rec in enumerate(records):
             batch_idx = rec['batch_idx']
+            assert batch_idx == i, (
+                f'Batch records not contiguous: expected batch_idx={i}, '
+                f'got {batch_idx}. DB may be corrupted.')
             self.batches.append([rec['start_idx'], rec['end_idx']])
             status = rec['status']
             if status == 'PENDING':
@@ -232,6 +235,9 @@ class BatchCoordinator:
         logger.info(f'Resumed from DB: {len(self.batches)} batches, '
                     f'{self.completed_count} completed, '
                     f'{len(self.pending_batches)} pending')
+        logger.info(f'BATCH_RESUME total={len(self.batches)} '
+                    f'completed={self.completed_count} '
+                    f'pending={len(self.pending_batches)}')
 
     def _shutdown_stale_workers(self) -> None:
         """Shut down any stale worker services on discovered workers.
