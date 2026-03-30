@@ -289,6 +289,7 @@ def mock_job_table_one_job(monkeypatch):
             'current_cluster_name': None,
             'job_id_on_pool_cluster': None,
             'pool_hash': None,
+            'user_hash': 'test1234',
         }
         return 0, message_utils.encode_payload({
             'jobs': [job_data],
