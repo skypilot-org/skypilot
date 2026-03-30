@@ -74,13 +74,7 @@ import {
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
-  active: [
-    'PENDING',
-    'RUNNING',
-    'RECOVERING',
-    'STARTING',
-    'CANCELLING',
-  ],
+  active: ['PENDING', 'RUNNING', 'RECOVERING', 'STARTING', 'CANCELLING'],
   finished: [
     'SUCCEEDED',
     'FAILED',

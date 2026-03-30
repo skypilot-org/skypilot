@@ -297,7 +297,7 @@ def queue(
         raise ValueError(f'Invalid queue version: {version}. Must be 1 or 2.')
 
     if version == 2:
-        return queue_v2(refresh=refresh,
+        return queue_v2(refresh=refresh,  # type: ignore[return-value]
                         skip_finished=skip_finished,
                         all_users=all_users,
                         job_ids=job_ids)
