@@ -195,30 +195,18 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 f'{valid_regex}')
 
 
-def check_cluster_name_not_file_path(cluster_name: Optional[str],
-                                     command_hint: str = 'sky launch') -> None:
-    """Errors out if the cluster name looks like a file path.
+def cluster_name_looks_like_file_path(cluster_name: Optional[str]) -> bool:
+    """Returns True if the cluster name looks like a file path.
 
-    This catches a common user mistake: typing 'sky launch -c job.yaml'
+    This detects a common user mistake: typing 'sky launch -c job.yaml'
     instead of 'sky launch -c mycluster job.yaml'.
-
-    Raises:
-        exceptions.InvalidClusterNameError: If the cluster name looks like
-            a file path.
     """
     if cluster_name is None:
-        return
+        return False
 
     file_extensions = ('.yaml', '.yml', '.json')
-    looks_like_file = (cluster_name.lower().endswith(file_extensions) or
-                       os.path.isfile(os.path.expanduser(cluster_name)))
-
-    if looks_like_file:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.InvalidClusterNameError(
-                f'Cluster name {cluster_name!r} looks like a file path. '
-                f'Did you mean:\n  {command_hint} -c <cluster-name> '
-                f'{cluster_name}')
+    return (cluster_name.lower().endswith(file_extensions) or
+            os.path.isfile(os.path.expanduser(cluster_name)))
 
 
 def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
