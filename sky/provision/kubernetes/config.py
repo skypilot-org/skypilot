@@ -20,6 +20,12 @@ def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     del region, cluster_name  # unused
+
+    # V1 managed jobs create their own headless Service and RBAC in
+    # managed_job.apply_job(), so skip the full bootstrap.
+    if config.provider_config.get('managed_job_config') is not None:
+        return config
+
     namespace = kubernetes_utils.get_namespace_from_config(
         config.provider_config)
     context = kubernetes_utils.get_context_from_config(config.provider_config)
