@@ -3601,6 +3601,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
+        # K8s managed jobs have workdir baked into the pod spec.
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
+                isinstance(handle.launched_resources.cloud,
+                           clouds.Kubernetes) and self._is_managed):
+            logger.info('K8s managed job: skipping workdir sync.')
+            return
+
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -3720,6 +3727,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
+        # K8s managed jobs have file mounts baked into the pod spec.
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
+                isinstance(handle.launched_resources.cloud,
+                           clouds.Kubernetes) and self._is_managed):
+            logger.info('K8s managed job: skipping file mounts sync.')
+            return
+
         launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
