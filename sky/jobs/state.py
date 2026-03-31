@@ -2241,7 +2241,7 @@ async def set_starting_async(job_id: int,
     await add_job_event_async(job_id, task_id, ManagedJobStatus.STARTING,
                               'Job is starting')
     engine = await _db_manager.get_async_engine()
-    logger.info('Launching the spot cluster...')
+    logger.info('Launching cluster...')
     async with sql_async.AsyncSession(engine) as session:
         values = {
             spot_table.c.resources: resources_str,
