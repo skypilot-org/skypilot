@@ -1218,12 +1218,13 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
-    if not yes and common_utils.cluster_name_looks_like_file_path(cluster):
-        click.confirm(
-            f'Cluster name {cluster!r} looks like a file path. '
-            f'Did you mean: sky launch -c <cluster-name> {cluster}\n'
-            'Proceed anyway?',
-            abort=True)
+    if common_utils.cluster_name_looks_like_file_path(cluster):
+        warning = (f'Cluster name {cluster!r} looks like a file path. '
+                   f'Did you mean: sky launch -c <cluster-name> {cluster}')
+        if yes:
+            click.secho(f'WARNING: {warning}', fg='yellow')
+        else:
+            click.confirm(f'{warning}\nProceed anyway?', abort=True)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -5564,12 +5565,13 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
-    if not yes and common_utils.cluster_name_looks_like_file_path(name):
-        click.confirm(
-            f'Job name {name!r} looks like a file path. '
-            f'Did you mean: sky jobs launch -n <job-name> {name}\n'
-            'Proceed anyway?',
-            abort=True)
+    if common_utils.cluster_name_looks_like_file_path(name):
+        warning = (f'Job name {name!r} looks like a file path. '
+                   f'Did you mean: sky jobs launch -n <job-name> {name}')
+        if yes:
+            click.secho(f'WARNING: {warning}', fg='yellow')
+        else:
+            click.confirm(f'{warning}\nProceed anyway?', abort=True)
 
     if pool is not None:
         num_job_int = num_jobs if num_jobs is not None else 1
