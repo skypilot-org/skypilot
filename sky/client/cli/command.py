@@ -1469,12 +1469,6 @@ def exec(
 
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
-    if common_utils.cluster_name_looks_like_file_path(cluster):
-        click.confirm(
-            f'Cluster name {cluster!r} looks like a file path. '
-            f'Did you mean: sky exec -c <cluster-name> {cluster}\n'
-            'Proceed anyway?',
-            abort=True)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
