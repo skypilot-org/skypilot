@@ -435,7 +435,7 @@ def generate_cli_reference():
 
         # Group description
         if group.help:
-            first_para = group.help.strip().split('\n\n')[0].replace('\n', ' ')
+            first_para = ' '.join(group.help.strip().split('\n\n')[0].split())
             lines.append(first_para)
             lines.append('')
 
@@ -446,8 +446,8 @@ def generate_cli_reference():
                 # Nested group (e.g., jobs pool)
                 lines.append(f'### `sky {group_name} {sub_name}` (subgroup)\n')
                 if sub_cmd.help:
-                    lines.append(sub_cmd.help.strip().split('\n\n')[0].replace(
-                        '\n', ' '))
+                    lines.append(' '.join(
+                        sub_cmd.help.strip().split('\n\n')[0].split()))
                     lines.append('')
                 for nested_name, nested_cmd in sorted(sub_cmd.commands.items()):
                     if getattr(nested_cmd, 'hidden', False):
