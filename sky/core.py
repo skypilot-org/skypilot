@@ -1779,5 +1779,5 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         recent_minutes=recent_minutes,
         client_info=client_info)
     logger.info('Debug dump created')
-    logger.debug(f'API server path: {debug_dump_path}')
+    logger.debug(f'Debug dump path on API server: {debug_dump_path}')
     return str(debug_dump_path)
