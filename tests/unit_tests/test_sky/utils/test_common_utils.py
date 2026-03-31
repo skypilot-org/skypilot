@@ -202,8 +202,8 @@ class TestCgroupFunctions:
 
         # Test no limit (-1)
         mock_files = {
-            '/sys/fs/cgroup/cpu/cpu.cfs_quota_us':
-                mock.mock_open(read_data='-1').return_value,
+            '/sys/fs/cgroup/cpu/cpu.cfs_quota_us': mock.mock_open(read_data='-1'
+                                                                 ).return_value,
             '/sys/fs/cgroup/cpu/cpu.cfs_period_us':
                 mock.mock_open(read_data='100000').return_value,
         }
