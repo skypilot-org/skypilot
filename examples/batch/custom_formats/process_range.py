@@ -12,19 +12,19 @@ Usage (from project root):
 """
 import os
 
-import sky
-from sky.serve import serve_utils
-
 # Import custom formats — this registers them with the global registries.
 from custom_formats import JsonFileOutput  # pylint: disable=import-error
 from custom_formats import RangeInput  # pylint: disable=import-error
 from custom_formats import TextOutput  # pylint: disable=import-error
 
+import sky
+from sky.serve import serve_utils
+
 
 @sky.batch.remote_function
 def process_items():
     """Process each item: produce a text snippet and JSON metadata."""
-    import random
+    import random  # pylint: disable=import-outside-toplevel
 
     for batch in sky.batch.load():
         results = []
@@ -67,7 +67,8 @@ def ensure_pool(pool_name: str, pool_yaml: str) -> None:
 
 
 def main():
-    default_bucket = (f'sky-batch-custom-fmt-{os.environ.get("USER", "default")}')
+    default_bucket = (
+        f'sky-batch-custom-fmt-{os.environ.get("USER", "default")}')
     bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
     print(f'Using bucket: s3://{bucket}  '
           f'(override with SKY_BATCH_BUCKET env var)')

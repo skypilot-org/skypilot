@@ -52,7 +52,7 @@ class InputFormat(ABC):
         if type(self).__module__ != __name__:
             try:
                 source_file = inspect.getfile(type(self))
-                with open(source_file) as f:
+                with open(source_file, encoding='utf-8') as f:
                     return f.read()
             except (TypeError, OSError):
                 return None
@@ -72,14 +72,15 @@ class InputFormat(ABC):
         # Load custom format class from embedded source if not registered
         class_source = d.get('_class_source')
         if class_source and fmt not in registry.INPUT_FORMAT_REGISTRY:
-            exec(compile(class_source, '<custom_format>', 'exec'),  # pylint: disable=exec-used
-                 {'__builtins__': __builtins__})
+            exec(  # pylint: disable=exec-used
+                compile(class_source, '<custom_format>', 'exec'),
+                {'__builtins__': __builtins__})
         cls = registry.INPUT_FORMAT_REGISTRY.from_str(fmt)
         assert cls is not None, f'Unknown input format: {fmt}'
         instance = cls.from_dict_args(d)
         # Preserve source for re-serialization (coordinator → worker)
         if class_source:
-            instance._class_source_code = class_source  # type: ignore[attr-defined]
+            setattr(instance, '_class_source_code', class_source)
         return instance
 
     @classmethod
@@ -126,7 +127,7 @@ class OutputFormat(ABC):
         if type(self).__module__ != __name__:
             try:
                 source_file = inspect.getfile(type(self))
-                with open(source_file) as f:
+                with open(source_file, encoding='utf-8') as f:
                     return f.read()
             except (TypeError, OSError):
                 return None
@@ -145,13 +146,14 @@ class OutputFormat(ABC):
         fmt = d.get('format')
         class_source = d.get('_class_source')
         if class_source and fmt not in registry.OUTPUT_FORMAT_REGISTRY:
-            exec(compile(class_source, '<custom_format>', 'exec'),  # pylint: disable=exec-used
-                 {'__builtins__': __builtins__})
+            exec(  # pylint: disable=exec-used
+                compile(class_source, '<custom_format>', 'exec'),
+                {'__builtins__': __builtins__})
         cls = registry.OUTPUT_FORMAT_REGISTRY.from_str(fmt)
         assert cls is not None, f'Unknown output format: {fmt}'
         instance = cls.from_dict_args(d)
         if class_source:
-            instance._class_source_code = class_source  # type: ignore[attr-defined]
+            setattr(instance, '_class_source_code', class_source)
         return instance
 
     @classmethod

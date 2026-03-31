@@ -1316,14 +1316,9 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'cluster',
-                'operator': ':',
-                'value': handle.get_cluster_name(),
-            })
             cluster_dashboard_url = server_common.get_dashboard_url(
                 server_common.get_server_url(),
-                starting_page=f'clusters?{query}')
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -5601,28 +5596,22 @@ def jobs_launch(
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
+        returncode = None
         if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
+        job_dashboard_url = None
+        if not server_common.is_api_server_local():
+            job_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
+        if returncode is not None:
             sys.exit(returncode)
-        else:
-            job_dashboard_url = None
-            if not server_common.is_api_server_local():
-                query = urllib.parse.urlencode({
-                    'property': 'id',
-                    'operator': '=',
-                    'value': job_id,
-                })
-                job_dashboard_url = server_common.get_dashboard_url(
-                    server_common.get_server_url(),
-                    starting_page=f'jobs?{query}')
-            click.secho(
-                ux_utils.command_hint_messages(
-                    ux_utils.CommandHintType.MANAGED_JOB,
-                    job_id=str(job_id),
-                    dashboard_url=job_dashboard_url))
     else:
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
