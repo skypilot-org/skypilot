@@ -759,3 +759,13 @@ Create a debug dump for troubleshooting. Creates a zip file containing logs, sta
 - `--recent-minutes` — Include resources active within the last N minutes.
 - `--output` — Output path for the dump file.
 - `--async` — Run the command asynchronously.
+
+### `sky doctor`
+
+Run accelerator health diagnostics on a cluster.
+
+**Options:**
+
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `CLUSTER` — Name of the cluster to diagnose.
+- `--verbose`, `-v` — Show detailed output for each check, including raw command output.
