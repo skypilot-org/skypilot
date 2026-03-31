@@ -1221,6 +1221,9 @@ class TestBootstrapCustomServiceAccount:
         create_ns_mock = mock.MagicMock()
         monkeypatch.setattr('sky.provision.kubernetes.utils.create_namespace',
                             create_ns_mock)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda cfg: 'test-context')
 
         # Mock _configure_services to do nothing
         monkeypatch.setattr(
@@ -1257,7 +1260,8 @@ class TestBootstrapCustomServiceAccount:
                                        provision_config)
 
         # Verify that create_namespace was called with skypilot-system
-        create_ns_mock.assert_called_once_with('skypilot-system', None)
+        create_ns_mock.assert_called_once_with('skypilot-system',
+                                               'test-context')
 
     def test_default_sa_does_not_double_create_namespace(self, monkeypatch):
         """When the default service account is used, the namespace creation
@@ -1269,6 +1273,9 @@ class TestBootstrapCustomServiceAccount:
         create_ns_mock = mock.MagicMock()
         monkeypatch.setattr('sky.provision.kubernetes.utils.create_namespace',
                             create_ns_mock)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda cfg: 'test-context')
 
         # Mock all the configure functions
         monkeypatch.setattr(

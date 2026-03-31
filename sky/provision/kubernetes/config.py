@@ -95,13 +95,13 @@ def bootstrap_instances(
     # account being used. This is needed because the namespace may not exist on
     # newly added clusters. When a custom service account is used, RBAC for the
     # namespace is assumed to be managed by the cluster admin.
+    # This is a lightweight call: a single GET to check if the namespace exists,
+    # returning immediately if it does (common case).
     if (requested_service_account !=
             kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
         skypilot_system_namespace = config.provider_config.get(
             'skypilot_system_namespace')
         if skypilot_system_namespace is not None:
-            context = kubernetes_utils.get_context_from_config(
-                config.provider_config)
             kubernetes_utils.create_namespace(skypilot_system_namespace,
                                               context)
 
