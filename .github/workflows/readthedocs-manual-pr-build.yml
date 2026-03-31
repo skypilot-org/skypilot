@@ -22,7 +22,7 @@ jobs:
         id: check-auth
         env:
           AUTHORIZED_USERS: ${{ vars.AUTHORIZED_RTD_BUILDERS }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             // Get authorized users from repository variable (comma-separated list)
@@ -57,7 +57,7 @@ jobs:
 
       - name: Get PR branch
         id: get-branch
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const pr = await github.rest.pulls.get({
@@ -185,7 +185,7 @@ jobs:
         if: success()
         env:
           READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const branch = '${{ steps.get-branch.outputs.result }}';
@@ -222,7 +222,7 @@ jobs:
         if: failure()
         env:
           BRANCH_NAME: ${{ steps.get-branch.outputs.result || 'unknown' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const branch = process.env.BRANCH_NAME;

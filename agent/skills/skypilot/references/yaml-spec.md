@@ -37,8 +37,10 @@ resources:
   instance_type: p3.8xlarge
   use_spot: false
   disk_size: 256
+  ephemeral_storage: 50
   disk_tier: medium
   network_tier: best
+  max_hourly_cost: 10.0
 
   # Config.
   image_id: ami-0868a20f5a3bf9702
@@ -75,6 +77,8 @@ envs:
 secrets:
   MY_HF_TOKEN: my-secret-value
   WANDB_API_KEY: my-secret-value-2
+
+api_server_access: true
 
 volumes:
   /mnt/data: volume-name
@@ -541,6 +545,48 @@ resources:
 ```
 
 
+### ``resources.ephemeral_storage``
+
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., `50GB`).
+
+This sets the `resources.requests.ephemeral-storage` field in the Kubernetes pod spec.
+When set_pod_resource_limits is configured in the SkyPilot config, it also sets
+`resources.limits.ephemeral-storage` using the multiplier defined there.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+> **WARNING**:
+>
+> The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50
+```
+
+OR
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50GB
+
+
+```
+
+
 ### ``resources.disk_tier``
 Disk tier to use for OS (optional).
 
@@ -582,11 +628,36 @@ If `'best'` is specified, use the best network tier available on the specified i
 - `infra: nebius`: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
 - `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
+- `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
 - `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
 ```yaml
 resources:
   network_tier: best
+
+```
+
+
+### ``resources.max_hourly_cost``
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When `use_spot` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+```yaml
+resources:
+  accelerators: A100
+  max_hourly_cost: 10.0
+```
+
+```yaml
+# Combined with spot instances: filters by spot price
+resources:
+  use_spot: true
+  max_hourly_cost: 5.0
 
 ```
 
@@ -646,7 +717,7 @@ resources:
 ### ``resources.image_id``
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -769,7 +840,18 @@ resources:
   image_id:
     us-east-1: ami-123
     us-west-2: ami-456
+```
 
+**Nebius**
+
+The `image_id` parameter supports specifying an image by ID, or by image family.
+
+```yaml
+resources:
+  # Specify an image by ID
+  image_id: computeimage-e00d6q343kqz6ayd63
+  # Or use the latest image from a family
+  image_id: ubuntu24.04-cuda13.0
 ```
 
 **RunPod**
@@ -981,6 +1063,20 @@ secrets:
   HF_TOKEN: my-huggingface-token
   WANDB_API_KEY: my-wandb-api-key
 ```
+
+
+### ``api_server_access``
+
+Whether to inject API server credentials into the task's environment so that it can call `sky` CLI/SDK to launch nested SkyPilot operations. Defaults to `true`. Set to `false` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+```yaml
+# Opt out of API server access injection
+api_server_access: false
+```
+
+See Nested SkyPilot from managed jobs for details.
 
 
 ### ``volumes``

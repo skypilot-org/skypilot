@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import click
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
@@ -27,14 +26,10 @@ from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import io
-    import webbrowser
 
     import sky
     from sky import backends
     from sky.serve import serve_utils
-else:
-    # only used in dashboard()
-    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -122,33 +117,31 @@ def launch(
                               show_default=True)
 
         # Inject the client's API server endpoint for tasks with
-        # api_access. Done client-side because get_server_url()
+        # api_server_access. Done client-side because get_server_url()
         # returns the externally reachable endpoint here, whereas
         # the server sees 127.0.0.1.
-        any_api_access = any(t.api_access for t in dag.tasks)
+        any_api_access = any(t.api_server_access for t in dag.tasks)
         if any_api_access:
             remote_api_version = versions.get_remote_api_version()
             if (remote_api_version is not None and remote_api_version <
                     server_constants.MIN_API_ACCESS_API_VERSION):
-                raise click.UsageError(
-                    'api_access: true requires a newer API server. '
-                    'Please upgrade the server to use this '
-                    'feature.')
-            endpoint = server_common.get_server_url()
-            if server_common.is_api_server_local(endpoint):
-                # Warn instead of raising an error to allow local
-                # testing and CI environments where the server may
-                # be accessible via Docker networking or port
-                # forwarding despite appearing local.
-                logger.warning('api_access: true is set but the API server '
-                               f'appears to be local ({endpoint}). The '
-                               'managed job may not be able to reach the '
-                               'API server from remote clusters.')
-            for task_ in dag.tasks:
-                if task_.api_access:
-                    task_.update_envs({
-                        constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
-                    })
+                logger.debug(
+                    'Skipping api_server_access injection: API server '
+                    'version too old (need >= %s, got %s).',
+                    server_constants.MIN_API_ACCESS_API_VERSION,
+                    remote_api_version)
+            else:
+                endpoint = server_common.get_server_url()
+                if server_common.is_api_server_local(endpoint):
+                    logger.debug(
+                        'Skipping api_server_access injection: '
+                        'API server appears to be local (%s).', endpoint)
+                else:
+                    for task_ in dag.tasks:
+                        if task_.api_server_access:
+                            task_.update_envs({
+                                constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
+                            })
 
         dag, file_mounts_blob_id = (
             client_common.upload_mounts_to_api_server(dag))
@@ -466,13 +459,70 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is 0, thus can resume previous
-    # streaming point on retry.
+    # Log request is idempotent when tail is None or 0 (both stream from
+    # the beginning), thus can resume previous streaming point on retry.
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0),
+                               resumable=(tail is None or tail == 0),
                                get_result=follow)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(45)
+def wait(
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    timeout: Optional[int] = None,
+    poll_interval: int = 15,
+    task: Optional[Union[str, int]] = None,
+) -> server_common.RequestId[int]:
+    """Waits for a managed job to reach a terminal state.
+
+    Blocks until the specified managed job finishes (succeeds, fails, or is
+    cancelled), or until the timeout is exceeded.
+
+    You can provide either a job name or a job ID. If a name is provided and
+    multiple jobs share that name, the most recent one is used.
+
+    For JobGroups (jobs with multiple tasks), if ``task`` is specified, waits
+    only for that specific task. Otherwise, waits until all tasks in the job
+    are in a terminal state.
+
+    Args:
+        name: Name of the managed job to wait for.
+        job_id: ID of the managed job to wait for.
+        timeout: Maximum time to wait in seconds. None means wait forever.
+        poll_interval: Time between status polls in seconds. Minimum 5,
+            default 15.
+        task: Task identifier to wait for a specific task in a JobGroup.
+            If an int, it is treated as a task ID. If a str, it is treated
+            as a task name. If None, waits for all tasks.
+
+    Returns:
+        The request ID of the wait request. The result is an exit code (int)
+        based on the terminal job status. 0 if success, 100 if failed.
+        See exceptions.JobExitCode for possible exit codes.
+
+    Request Raises:
+        ValueError: if arguments are invalid or job/task is not found.
+        TimeoutError: if the timeout is exceeded before the job finishes.
+    """
+    body = payloads.JobsWaitBody(
+        name=name,
+        job_id=job_id,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        task=task,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/wait',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
 
 
 @usage_lib.entrypoint
@@ -555,7 +605,7 @@ def dashboard() -> None:
     params = f'user_hash={user_hash}'
     url = f'{api_server_url}/jobs/dashboard?{params}'
     logger.info(f'Opening dashboard in browser: {url}')
-    webbrowser.open(url)
+    common_utils.open_browser(url)
 
 
 @context.contextual

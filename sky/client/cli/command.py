@@ -41,6 +41,7 @@ import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
                     TypeVar, Union)
+import urllib.parse
 
 import click
 import colorama
@@ -102,7 +103,6 @@ from sky.utils.cli_utils import status_utils
 from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
-    import types
 
     import prettytable
 
@@ -821,6 +821,11 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     return None
 
 
+# TODO(zhwu): All CLI command handlers should be wrapped with
+# @annotations.client_api so that is_on_api_server is False during
+# YAML parsing and schema validation. For now, we wrap this common
+# entry point to cover the majority of cases.
+@annotations.client_api
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
@@ -1308,9 +1313,15 @@ def launch(
             returncode = sdk.tail_logs(handle.get_cluster_name(),
                                        job_id,
                                        follow=True)
+        cluster_dashboard_url = None
+        if not server_common.is_api_server_local():
+            cluster_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(),
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
-                                           job_id, handle.get_cluster_name()))
+                                           job_id, handle.get_cluster_name(),
+                                           cluster_dashboard_url))
         sys.exit(returncode)
 
 
@@ -5582,32 +5593,55 @@ def jobs_launch(
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
 
-    if not detach_run:
-        if len(job_ids) == 1:
-            job_id = job_ids[0]
+    if len(job_ids) == 1:
+        job_id = job_ids[0]
+        returncode = None
+        if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
+        job_dashboard_url = None
+        if not server_common.is_api_server_local():
+            job_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
+        if returncode is not None:
             sys.exit(returncode)
-        else:
-            # TODO(tian): This can be very long. Considering have a "group id"
-            # and query all job ids with the same group id.
-            # Sort job ids to ensure consistent ordering.
-            job_ids_str = ','.join(map(str, sorted(job_ids)))
-            click.secho(
-                f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
-                f'{job_ids_str}{colorama.Style.RESET_ALL}.'
-                f'\n📋 Useful Commands'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
-                f'{ux_utils.BOLD}sky jobs logs <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
-                f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+    else:
+        # TODO(tian): This can be very long. Considering have a "group id"
+        # and query all job ids with the same group id.
+        # Sort job ids to ensure consistent ordering.
+        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        dashboard_hint = ''
+        if not server_common.is_api_server_local():
+            query = urllib.parse.urlencode({
+                'property': 'pool',
+                'operator': ':',
+                'value': pool,
+            })
+            dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs?{query}')
+            dashboard_hint = (
+                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
+                f'\t\t{ux_utils.BOLD}{dashboard_url}'
                 f'{ux_utils.RESET_BOLD}')
+        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                    f'{job_ids_str}{colorama.Style.RESET_ALL}.'
+                    f'\n📋 Useful Commands'
+                    f'{dashboard_hint}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                    f'{ux_utils.RESET_BOLD}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -7681,6 +7715,104 @@ def ssh_down(infra, async_call):
         print(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
+
+
+@cli.command('debug-dump', cls=_DocumentedCodeCommand)
+@click.option('--request-ids',
+              '-r',
+              multiple=True,
+              help='Request IDs or prefixes to include in the dump.')
+@click.option('--cluster-names',
+              '-c',
+              multiple=True,
+              help='Cluster names to include in the dump.')
+@click.option('--job-ids',
+              '-j',
+              multiple=True,
+              type=int,
+              help='Managed job IDs to include in the dump.')
+@click.option('--recent-minutes',
+              type=float,
+              default=None,
+              help='Include resources active within the last N minutes.')
+@click.option('--output', default=None, help='Output path for the dump file.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+@usage_lib.entrypoint
+def debug_dump(
+    request_ids: Tuple[str, ...],
+    cluster_names: Tuple[str, ...],
+    job_ids: Tuple[int, ...],
+    recent_minutes: Optional[float],
+    output: Optional[str],
+    async_call: bool,
+):
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+    Example usage:
+
+    \b
+    # Dump info for a specific cluster
+    $ sky debug-dump -c my-cluster
+
+    \b
+    # Dump info for a managed job
+    $ sky debug-dump -j 123
+
+    \b
+    # Dump info for a specific request
+    $ sky debug-dump -r abc123-def456
+
+    \b
+    # Dump resources from the last 60 minutes
+    $ sky debug-dump --recent-minutes 60
+
+    \b
+    # Combine multiple resources
+    $ sky debug-dump -c cluster1 -j 123 -r request-id
+
+    \b
+    # Save to a specific file
+    $ sky debug-dump -c my-cluster --output my-dump.zip
+    """
+    if (not request_ids and not cluster_names and not job_ids and
+            recent_minutes is None):
+        raise click.UsageError(
+            'At least one of --request-ids, --cluster-names, --job-ids, '
+            'or --recent-minutes must be provided.')
+    if recent_minutes is not None and recent_minutes <= 0:
+        raise click.UsageError('--recent-minutes must be a positive number.')
+
+    # Create the dump on the server
+    request_id = sdk.create_debug_dump(
+        request_ids=list(request_ids) if request_ids else None,
+        cluster_names=list(cluster_names) if cluster_names else None,
+        managed_job_ids=list(job_ids) if job_ids else None,
+        recent_minutes=recent_minutes,
+    )
+
+    if async_call:
+        click.echo(f'Request submitted with ID: {request_id}')
+        return
+
+    # Wait for the dump to be created
+    with rich_utils.client_status(
+            ux_utils.spinner_message('Creating debug dump')):
+        result = sdk.stream_and_get(request_id)
+
+    # Download the dump
+    dump_filename = pathlib.Path(result).name
+    local_path = output or dump_filename
+
+    click.echo(f'Downloading debug dump to {local_path}...')
+    sdk.download_debug_dump(dump_filename, local_path)
+    click.echo(f'Debug dump saved to: {local_path}')
 
 
 def main():

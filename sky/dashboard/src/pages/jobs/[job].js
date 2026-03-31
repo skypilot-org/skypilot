@@ -633,7 +633,7 @@ function JobDetails() {
                         <SelectItem value="all">All Nodes</SelectItem>
                         {logNodes.map((node) => (
                           <SelectItem key={node} value={node}>
-                            {node}
+                            {node.charAt(0).toUpperCase() + node.slice(1)}
                           </SelectItem>
                         ))}
                       </SelectContent>

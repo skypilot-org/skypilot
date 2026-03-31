@@ -112,6 +112,21 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
 
+    def set_strategy_config(self, config: dict) -> None:
+        """Handle strategy-specific config from the job_recovery dict.
+
+        Override in subclasses to accept custom parameters registered
+        by plugins. Unknown keys are logged as warnings by default.
+
+        Args:
+            config: Remaining key-value pairs from the job_recovery dict
+                after common keys (strategy, max_restarts_on_errors,
+                recover_on_exit_codes) have been removed.
+        """
+        if config:
+            logger.debug('Unused job_recovery config keys for strategy '
+                         f'{type(self).__name__}: {list(config.keys())}')
+
     @classmethod
     def make(
         cls,
@@ -131,7 +146,12 @@ class StrategyExecutor:
         # single context, since there are not multiple clouds/regions to
         # failover through.
         resource_list = list(task.resources)
+        # Copy to avoid mutating the original resources' job_recovery
+        # dict, which would cause issues if make() is called more than
+        # once on the same task.
         job_recovery = resource_list[0].job_recovery
+        if isinstance(job_recovery, dict):
+            job_recovery = dict(job_recovery)
         for resource in resource_list:
             if resource.job_recovery != job_recovery:
                 raise ValueError(
@@ -164,13 +184,20 @@ class StrategyExecutor:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
             recover_on_exit_codes = None
+        # Remaining keys in the dict are strategy-specific config,
+        # passed to the executor via set_strategy_config().
+        strategy_config = dict(job_recovery) if isinstance(job_recovery,
+                                                           dict) else {}
+
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
-        return job_recovery_strategy(cluster_name, backend, task,
-                                     max_restarts_on_errors, job_id, task_id,
-                                     pool, starting, starting_lock,
-                                     starting_signal, recover_on_exit_codes)
+        executor = job_recovery_strategy(cluster_name, backend, task,
+                                         max_restarts_on_errors, job_id,
+                                         task_id, pool, starting, starting_lock,
+                                         starting_signal, recover_on_exit_codes)
+        executor.set_strategy_config(strategy_config)
+        return executor
 
     async def launch(self) -> float:
         """Launch the cluster for the first time.

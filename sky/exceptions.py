@@ -430,6 +430,11 @@ class InvalidRecipeNameError(Exception):
     pass
 
 
+class InvalidWorkspaceNameError(Exception):
+    """Raised when the workspace name is invalid."""
+    pass
+
+
 class RecipeAlreadyExistsError(Exception):
     """Raised when attempting to create a recipe with an existing name."""
     pass

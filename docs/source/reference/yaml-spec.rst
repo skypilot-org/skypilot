@@ -38,8 +38,10 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
+    :ref:`ephemeral_storage <yaml-spec-resources-ephemeral-storage>`: 50
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
+    :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -76,6 +78,8 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`secrets <yaml-spec-secrets>`:
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
+
+  :ref:`api_server_access <yaml-spec-api-server-access>`: true
 
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
@@ -567,6 +571,50 @@ OR
 
 
 
+.. _yaml-spec-resources-ephemeral-storage:
+
+``resources.ephemeral_storage``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
+
+This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
+When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+``resources.limits.ephemeral-storage`` using the multiplier defined there.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+
+.. code-block:: yaml
+
+  resources:
+    infra: kubernetes
+    ephemeral_storage: 50
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    infra: kubernetes
+    ephemeral_storage: 50GB
+
+
+
 .. _yaml-spec-resources-disk-tier:
 
 ``resources.disk_tier``
@@ -613,12 +661,39 @@ If ``'best'`` is specified, use the best network tier available on the specified
 - ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
 - ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
+- ``infra: k8s/my-together-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
 - ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
 .. code-block:: yaml
 
   resources:
     network_tier: best
+
+
+.. _yaml-spec-resources-max-hourly-cost:
+
+``resources.max_hourly_cost``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When ``use_spot`` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100
+    max_hourly_cost: 10.0
+
+.. code-block:: yaml
+
+  # Combined with spot instances: filters by spot price
+  resources:
+    use_spot: true
+    max_hourly_cost: 5.0
 
 
 .. _yaml-spec-resources-ports:
@@ -681,7 +756,7 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -806,6 +881,17 @@ OR
       us-east-1: ami-123
       us-west-2: ami-456
 
+**Nebius**
+
+The ``image_id`` parameter supports specifying an image by ID, or by image family.
+
+.. code-block:: yaml
+
+  resources:
+    # Specify an image by ID
+    image_id: computeimage-e00d6q343kqz6ayd63
+    # Or use the latest image from a family
+    image_id: ubuntu24.04-cuda13.0
 
 **RunPod**
 
@@ -1030,6 +1116,22 @@ Example:
   secrets:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
+
+.. _yaml-spec-api-server-access:
+
+``api_server_access``
+~~~~~~~~~~~~~~~~~~~~~
+
+Whether to inject API server credentials into the task's environment so that it can call ``sky`` CLI/SDK to launch nested SkyPilot operations. Defaults to ``true``. Set to ``false`` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+.. code-block:: yaml
+
+  # Opt out of API server access injection
+  api_server_access: false
+
+See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for details.
 
 .. _yaml-spec-new-volumes:
 

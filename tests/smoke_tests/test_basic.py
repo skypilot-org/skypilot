@@ -1573,6 +1573,76 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
+@pytest.mark.kubernetes
+@pytest.mark.resource_heavy
+@pytest.mark.no_dependency
+def test_kubernetes_allowed_nodes():
+    """Test that allowed_nodes config filters discovery and scheduling.
+
+    This test requires a multi-node Kubernetes cluster (runs on EKS/GKE
+    resource_heavy queue). It:
+    1. Picks one node from the cluster as the "allowed" node
+    2. Launches with allowed_nodes.names restricting to that node
+    3. Verifies the pod landed on the allowed node
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+
+    # Get node names directly from kubectl (independent of SkyPilot config,
+    # which the test framework may override via SKYPILOT_GLOBAL_CONFIG).
+    result = subprocess.run(
+        ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[*].metadata.name}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    if result.returncode != 0:
+        pytest.skip(f'kubectl failed: {result.stderr}')
+    node_names = result.stdout.strip().split()
+    if len(node_names) < 2:
+        pytest.skip('Need at least 2 nodes for allowed_nodes test')
+
+    allowed_node = node_names[0]
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_allowed_nodes',
+        [
+            # Launch with the allowed_nodes config (config_dict is
+            # automatically overlaid via override_sky_config and sent
+            # to the API server with each request).
+            f'sky launch -y -c {name}'
+            f' --infra kubernetes --cpus 0.5 --memory 1'
+            f' -- echo "hello from allowed node"',
+            f'sky logs {name} 1 --status',
+            # Verify the pod landed on the allowed node. We query by
+            # the annotation (which has the exact cluster name, unlike
+            # the label which includes a hash suffix) across all
+            # namespaces.
+            f'POD_NODE=$(kubectl get pods --all-namespaces -o'
+            f' jsonpath=\'{{range .items[*]}}'
+            f'{{.metadata.annotations.skypilot-cluster-name}}'
+            f' {{.spec.nodeName}}{{\"\\n\"}}{{end}}\''
+            f' | grep "^{name} " | awk \'{{print $2}}\') &&'
+            f' echo "Pod landed on: $POD_NODE" &&'
+            f' [ "$POD_NODE" = "{allowed_node}" ]',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+        # Use config_dict to overlay allowed_nodes into the active
+        # config via the standard override_sky_config mechanism.
+        config_dict={
+            'kubernetes': {
+                'allowed_nodes': {
+                    'names': [allowed_node]
+                }
+            }
+        },
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_aws
 @pytest.mark.no_gcp
 @pytest.mark.no_nebius
