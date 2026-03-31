@@ -10,7 +10,6 @@ eliminating: internal_file_mounts, setup_runtime_on_cluster, Ray cluster setup,
 Skylet startup, SSH-based user setup, and Ray-based job submission.
 """
 import base64
-import enum
 import logging
 import os
 import textwrap
@@ -26,6 +25,7 @@ from sky.data import data_utils
 from sky.provision.kubernetes import discovery_sidecar
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants as skylet_constants
+from sky.skylet import job_lib
 from sky.utils import subprocess_utils
 from sky.utils import yaml_utils
 
@@ -45,7 +45,7 @@ def is_managed_jobs_v1_enabled() -> bool:
 
 
 # Label to identify managed job resources created by this module.
-TAG_MANAGED_JOB = 'skypilot-managed-job'
+TAG_MANAGED_JOB_V1 = 'skypilot-managed-job-v1'
 TAG_MANAGED_JOB_NAME = 'skypilot-managed-job-name'
 # Mount path for the PVC that holds local workdir and file mounts.
 FILEMOUNT_MOUNT_PATH = '/skypilot/mounts'
@@ -56,14 +56,6 @@ _POLL_INTERVAL = 2
 _POD_READY_TIMEOUT = 600  # 10 minutes
 
 
-class ManagedJobStatus(enum.Enum):
-    """Status of a K8s managed job, mapped from pod phases."""
-    PENDING = 'PENDING'
-    SETTING_UP = 'SETTING_UP'
-    RUNNING = 'RUNNING'
-    SUCCEEDED = 'SUCCEEDED'
-    FAILED = 'FAILED'
-    UNKNOWN = 'UNKNOWN'
 
 
 
@@ -250,7 +242,7 @@ def upload_local_files_to_configmap(
             'name': cm_name,
             'namespace': namespace,
             'labels': {
-                TAG_MANAGED_JOB: 'true',
+                TAG_MANAGED_JOB_V1: 'true',
                 TAG_MANAGED_JOB_NAME: job_name,
             },
         },
@@ -317,11 +309,12 @@ def get_job_status(
     job_name: str,
     namespace: str,
     context: Optional[str],
-) -> ManagedJobStatus:
+) -> Optional[job_lib.JobStatus]:
     """Get the status of a K8s managed job by checking pod phases.
 
     Returns:
-        ManagedJobStatus representing the aggregate status.
+        job_lib.JobStatus representing the aggregate status, or None if
+        unknown (pods not found or API error).
     """
     label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
     try:
@@ -329,30 +322,30 @@ def get_job_status(
             namespace, label_selector=label_selector)
     except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to get pods for job {job_name}: {e}')
-        return ManagedJobStatus.UNKNOWN
+        return None
 
     if not pods.items:
-        return ManagedJobStatus.UNKNOWN
+        return None
 
     phases = [pod.status.phase for pod in pods.items]
 
     # If any pod failed, the job failed
     if 'Failed' in phases:
-        return ManagedJobStatus.FAILED
+        return job_lib.JobStatus.FAILED
 
     # If all pods succeeded, the job succeeded
     if all(p == 'Succeeded' for p in phases):
-        return ManagedJobStatus.SUCCEEDED
+        return job_lib.JobStatus.SUCCEEDED
 
     # If all pods are running or succeeded, the job is running
     if all(p in ('Running', 'Succeeded') for p in phases):
-        return ManagedJobStatus.RUNNING
+        return job_lib.JobStatus.RUNNING
 
     # If any pods are pending, still setting up
     if 'Pending' in phases:
-        return ManagedJobStatus.SETTING_UP
+        return job_lib.JobStatus.SETTING_UP
 
-    return ManagedJobStatus.RUNNING
+    return job_lib.JobStatus.RUNNING
 
 
 def get_pod_logs(
@@ -552,7 +545,8 @@ def is_managed_job_cluster(cluster_name_on_cloud: str, namespace: str,
 
     Returns True if there are managed job pods with this name.
     """
-    label_selector = f'{TAG_MANAGED_JOB_NAME}={cluster_name_on_cloud}'
+    label_selector = (f'{TAG_MANAGED_JOB_NAME}={cluster_name_on_cloud}'
+                      f',{TAG_MANAGED_JOB_V1}=true')
     try:
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace, label_selector=label_selector)
@@ -761,7 +755,7 @@ def build_job_manifests(
             'name': cluster_name,
             'namespace': namespace,
             'labels': {
-                TAG_MANAGED_JOB: 'true',
+                TAG_MANAGED_JOB_V1: 'true',
                 TAG_MANAGED_JOB_NAME: cluster_name,
             },
         },
@@ -791,7 +785,7 @@ def _build_rbac_manifests(job_name: str, namespace: str,
             'name': f'{job_name}-discovery',
             'namespace': namespace,
             'labels': {
-                TAG_MANAGED_JOB: 'true',
+                TAG_MANAGED_JOB_V1: 'true',
                 TAG_MANAGED_JOB_NAME: job_name,
             },
         },
@@ -812,7 +806,7 @@ def _build_rbac_manifests(job_name: str, namespace: str,
             'name': f'{job_name}-discovery',
             'namespace': namespace,
             'labels': {
-                TAG_MANAGED_JOB: 'true',
+                TAG_MANAGED_JOB_V1: 'true',
                 TAG_MANAGED_JOB_NAME: job_name,
             },
         },
@@ -1018,7 +1012,7 @@ def get_job_pod_status(
     namespace: str,
     context: Optional[str],
     min_nodes: int,
-) -> Tuple[ManagedJobStatus, int, int, int]:
+) -> Tuple[job_lib.JobStatus, int, int, int]:
     """Get status of an elastic job with per-pod tracking.
 
     Checks the 'main' container state (not pod phase) because the
@@ -1034,7 +1028,7 @@ def get_job_pod_status(
             namespace, label_selector=label_selector)
     except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to list pods for {job_name}: {e}')
-        return ManagedJobStatus.UNKNOWN, 0, 0, 0
+        return job_lib.JobStatus.UNKNOWN, 0, 0, 0
 
     running = 0
     succeeded = 0
@@ -1055,21 +1049,21 @@ def get_job_pod_status(
 
     # All pods' main containers have succeeded (none pending/running/failed)
     if succeeded == total and total > 0:
-        return ManagedJobStatus.SUCCEEDED, running, succeeded, failed
+        return job_lib.JobStatus.SUCCEEDED, running, succeeded, failed
 
     # All non-succeeded pods have failed — terminal failure
     if failed > 0 and running == 0 and pending == 0:
-        return ManagedJobStatus.FAILED, running, succeeded, failed
+        return job_lib.JobStatus.FAILED, running, succeeded, failed
 
     # Below min_nodes with main container still running
     if running < min_nodes:
-        return ManagedJobStatus.SETTING_UP, running, succeeded, failed
+        return job_lib.JobStatus.SETTING_UP, running, succeeded, failed
 
     # Enough pods running
     if running >= min_nodes:
-        return ManagedJobStatus.RUNNING, running, succeeded, failed
+        return job_lib.JobStatus.RUNNING, running, succeeded, failed
 
-    return ManagedJobStatus.PENDING, running, succeeded, failed
+    return job_lib.JobStatus.PENDING, running, succeeded, failed
 
 
 

@@ -35,14 +35,14 @@ metadata:
   name: "{{ job_name }}-{{ index }}"
   namespace: "{{ namespace }}"
   labels:
-    skypilot-managed-job: "true"
+    skypilot-managed-job-v1: "true"
     skypilot-managed-job-name: "{{ job_name }}"
     skypilot-node-index: "{{ index }}"
     skypilot-cluster-name: "{{ job_name }}"
   annotations:
     skypilot-cluster-name: "{{ job_name }}"
 spec:
-  hostname: "{{ job_name }}-{{ index }}"
+  hostname: "node-{{ index }}"
   subdomain: "{{ job_name }}"
   restartPolicy: "{{ restart_policy | default('Never') }}"
 {% if service_account %}
@@ -127,7 +127,7 @@ spec:
           import urllib.request, json, ssl, os
           token = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read().strip()
           ns = os.environ.get('SKYPILOT_NAMESPACE', 'default')
-          pod = os.environ.get('HOSTNAME', '')
+          pod = os.environ.get('POD_NAME', '')
           url = f'https://kubernetes.default.svc/api/v1/namespaces/{ns}/pods/{pod}'
           data = json.dumps({'metadata':{'labels':{'skypilot-node-phase':'$1'}}}).encode()
           req = urllib.request.Request(url, data=data, method='PATCH')
@@ -189,6 +189,10 @@ spec:
           value: "{{ discovery_port }}"
         - name: SKYPILOT_APP_STATUS
           value: "/tmp/skypilot_app_status"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
 {% if jobgroup_tasks %}
         - name: SKYPILOT_JOBGROUP_TASKS
           value: "{{ jobgroup_tasks }}"

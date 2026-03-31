@@ -44,8 +44,11 @@ TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
 IS_HEAD = (SELF_RANK == 0)
-# Head pod DNS for proxying from non-head pods
-HEAD_HOST = f"{SERVICE_NAME}-0.{SERVICE_NAME}.{NAMESPACE}.svc.cluster.local"
+# Head pod DNS for proxying from non-head pods.
+# SERVICE_NAME is the headless Service name (= spec.subdomain in the pod template).
+# Must match spec.hostname of the head pod in kubernetes-managed-job.yaml.j2,
+# which is "node-{{ index }}" (index=0 for head).
+HEAD_HOST = f"node-0.{SERVICE_NAME}.{NAMESPACE}.svc.cluster.local"
 
 
 def _get_k8s_token():
@@ -65,7 +68,7 @@ def _patch_pod_label(label_key, label_value):
     token = _get_k8s_token()
     if not token:
         return
-    hostname = os.environ.get("HOSTNAME", "")
+    hostname = os.environ.get("POD_NAME", "")
     if not hostname:
         return
     url = f"{K8S_API}/api/v1/namespaces/{NAMESPACE}/pods/{hostname}"

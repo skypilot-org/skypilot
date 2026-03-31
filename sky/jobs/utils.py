@@ -408,9 +408,6 @@ async def _get_k8s_managed_job_status(
         use the normal status checking path).
         (job_status, transient_error_reason) if it IS a K8s managed job.
     """
-    if not k8s_managed_job.is_managed_jobs_v1_enabled():
-        return None
-
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     # Try to get namespace/context from the handle's cluster YAML
@@ -456,19 +453,8 @@ async def _get_k8s_managed_job_status(
         logger.warning(f'Error checking K8s job status: {e}')
         return (None, f'K8s API error: {e}')
 
-    from sky.skylet import job_lib
-    status_map = {
-        k8s_managed_job.ManagedJobStatus.RUNNING: job_lib.JobStatus.RUNNING,
-        k8s_managed_job.ManagedJobStatus.SUCCEEDED: job_lib.JobStatus.SUCCEEDED,
-        k8s_managed_job.ManagedJobStatus.FAILED: job_lib.JobStatus.FAILED,
-        k8s_managed_job.ManagedJobStatus.SETTING_UP: job_lib.JobStatus.SETTING_UP,
-        k8s_managed_job.ManagedJobStatus.PENDING: job_lib.JobStatus.PENDING,
-    }
-    status = status_map.get(k8s_status)
-    if (status is None and k8s_status == k8s_managed_job.ManagedJobStatus.UNKNOWN):
-        return (None, None)
-    logger.info(f'K8s managed job status: {k8s_status} -> {status}')
-    return (status, None)
+    logger.info(f'K8s managed job status: {k8s_status}')
+    return (k8s_status, None)
 
 
 async def get_job_status(

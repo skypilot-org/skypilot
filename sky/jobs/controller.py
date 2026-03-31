@@ -1257,7 +1257,7 @@ class JobController:
                 f'running={running} succeeded={succeeded} failed={failed}')
 
             # All pods succeeded
-            if status == k8s_managed_job.ManagedJobStatus.SUCCEEDED:
+            if status == job_lib.JobStatus.SUCCEEDED:
                 # If in RECOVERING state, must transition through RECOVERED
                 # before SUCCEEDED (state machine constraint).
                 if was_recovering:
@@ -1279,7 +1279,7 @@ class JobController:
                 return True
 
             # All pods failed — terminal failure, don't attempt recovery
-            if status == k8s_managed_job.ManagedJobStatus.FAILED:
+            if status == job_lib.JobStatus.FAILED:
                 failure_reason = (
                     f'All pods failed for elastic job {cluster_name}. '
                     f'running={running} succeeded={succeeded} failed={failed}')
