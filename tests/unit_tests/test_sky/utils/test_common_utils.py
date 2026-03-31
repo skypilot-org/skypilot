@@ -94,6 +94,55 @@ class TestCheckClusterNameIsValid:
         common_utils.check_cluster_name_is_valid(None)
 
 
+class TestCheckClusterNameNotFilePath:
+
+    def test_yaml_extension(self):
+        with pytest.raises(exceptions.InvalidClusterNameError):
+            common_utils.check_cluster_name_not_file_path('job.yaml')
+
+    def test_yml_extension(self):
+        with pytest.raises(exceptions.InvalidClusterNameError):
+            common_utils.check_cluster_name_not_file_path('job.yml')
+
+    def test_json_extension(self):
+        with pytest.raises(exceptions.InvalidClusterNameError):
+            common_utils.check_cluster_name_not_file_path('config.json')
+
+    def test_yaml_case_insensitive(self):
+        with pytest.raises(exceptions.InvalidClusterNameError):
+            common_utils.check_cluster_name_not_file_path('job.YAML')
+
+    def test_normal_name_passes(self):
+        common_utils.check_cluster_name_not_file_path('mycluster')
+
+    def test_name_with_dot_passes(self):
+        common_utils.check_cluster_name_not_file_path('my.cluster')
+
+    def test_name_with_hyphen_passes(self):
+        common_utils.check_cluster_name_not_file_path('my-cluster')
+
+    def test_none_passes(self):
+        common_utils.check_cluster_name_not_file_path(None)
+
+    def test_existing_file(self, tmp_path):
+        test_file = tmp_path / 'somefile'
+        test_file.write_text('content')
+        with pytest.raises(exceptions.InvalidClusterNameError):
+            common_utils.check_cluster_name_not_file_path(str(test_file))
+
+    def test_error_message_contains_hint(self):
+        with pytest.raises(exceptions.InvalidClusterNameError,
+                           match=r'sky launch -c <cluster-name> job\.yaml'):
+            common_utils.check_cluster_name_not_file_path(
+                'job.yaml', command_hint='sky launch')
+
+    def test_custom_command_hint(self):
+        with pytest.raises(exceptions.InvalidClusterNameError,
+                           match=r'sky exec -c <cluster-name>'):
+            common_utils.check_cluster_name_not_file_path(
+                'task.yaml', command_hint='sky exec')
+
+
 class TestMakeClusterNameOnCloud:
 
     @mock.patch('sky.utils.common_utils.get_user_hash')
@@ -170,8 +219,8 @@ class TestCgroupFunctions:
 
         # Test no limit (-1)
         mock_files = {
-            '/sys/fs/cgroup/cpu/cpu.cfs_quota_us': mock.mock_open(read_data='-1'
-                                                                 ).return_value,
+            '/sys/fs/cgroup/cpu/cpu.cfs_quota_us':
+                mock.mock_open(read_data='-1').return_value,
             '/sys/fs/cgroup/cpu/cpu.cfs_period_us':
                 mock.mock_open(read_data='100000').return_value,
         }

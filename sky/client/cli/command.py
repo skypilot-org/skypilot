@@ -1218,6 +1218,8 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    common_utils.check_cluster_name_not_file_path(cluster,
+                                                  command_hint='sky launch')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1462,6 +1464,8 @@ def exec(
 
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    common_utils.check_cluster_name_not_file_path(cluster,
+                                                  command_hint='sky exec')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
@@ -5552,6 +5556,8 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
+    common_utils.check_cluster_name_not_file_path(
+        name, command_hint='sky jobs launch')
 
     if pool is not None:
         num_job_int = num_jobs if num_jobs is not None else 1
