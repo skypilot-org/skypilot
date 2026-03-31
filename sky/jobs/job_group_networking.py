@@ -52,6 +52,10 @@ def _is_kubernetes(
     return False
 
 
+# Public alias for use in controller.py
+is_kubernetes_handle = _is_kubernetes
+
+
 def _get_k8s_namespace_from_handle(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> str:
     """Get Kubernetes namespace from a resource handle.
@@ -548,6 +552,121 @@ class NetworkConfigurator:
         logger.info(
             f'Hosts injection: {success_count}/{len(results)} succeeded')
         return success_count == len(results)
+
+
+# ============================================================================
+# Layer 3.5: Codegen - Bake networking setup into task.run for K8s
+# ============================================================================
+
+
+def generate_k8s_dns_mappings_from_tasks(
+    job_group_name: str,
+    all_tasks: List['task_lib.Task'],
+    job_id: int,
+    namespace: str,
+) -> List[Tuple[str, str]]:
+    """Compute K8s DNS mappings from task metadata alone (no handles needed).
+
+    For V1 K8s managed jobs, all DNS names are deterministic before
+    provisioning, so we can compute mappings at prep time.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        all_tasks: All tasks in the job group.
+        job_id: Managed job ID.
+        namespace: K8s namespace.
+
+    Returns:
+        List of (k8s_dns, simple_hostname) tuples.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    mappings = []
+    for task in all_tasks:
+        task_name = task.name
+        if task_name is None:
+            continue
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task_name, job_id)
+
+        # Map the head node (node-0) for every task so all tasks
+        # can resolve each other via job group hostnames.
+        k8s_dns = _construct_k8s_internal_svc(
+            cluster_name, namespace, node_idx=0, managed_job_v1=True)
+        hostname = f'{task_name}-0.{job_group_name}'
+        mappings.append((k8s_dns, hostname))
+
+    return mappings
+
+
+def generate_k8s_networking_setup_script(
+    job_group_name: str,
+    all_tasks: List['task_lib.Task'],
+    job_id: int,
+    namespace: str,
+    other_job_names: List[str],
+) -> str:
+    """Generate a script that starts the DNS updater and waits for networking.
+
+    For K8s job group tasks, this bakes the DNS updater startup directly
+    into task.run so pods self-configure at startup without needing
+    Phase 3 kubectl-exec.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        all_tasks: All tasks in the job group.
+        job_id: Managed job ID.
+        namespace: K8s namespace.
+        other_job_names: Other task names to wait for (for wait script).
+
+    Returns:
+        Bash script as a string.
+    """
+    dns_mappings = generate_k8s_dns_mappings_from_tasks(
+        job_group_name, all_tasks, job_id, namespace)
+
+    if not dns_mappings:
+        return generate_wait_for_networking_script(
+            job_group_name, other_job_names)
+
+    # Generate the DNS updater script content
+    updater_script = generate_k8s_dns_updater_script(
+        dns_mappings, job_group_name)
+
+    # Build the startup snippet that embeds and launches the updater
+    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    script_path = f'/tmp/{process_id}.sh'
+    log_path = f'/tmp/{process_id}.log'
+    marker_file = get_network_ready_marker_path(job_group_name)
+
+    # Heredoc delimiters must start at column 0, so we build the
+    # script via concatenation rather than an indented f-string.
+    startup_lines = [
+        '# Start K8s DNS updater for JobGroup networking',
+        f"cat > {script_path} << 'SKYPILOT_DNS_UPDATER_EOF'",
+        updater_script,
+        'SKYPILOT_DNS_UPDATER_EOF',
+        f'chmod +x {script_path}',
+        f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &)',
+        'sleep 0.5',
+        f'if pgrep -f "{process_id}" > /dev/null 2>&1; then',
+        f'  touch {marker_file}',
+        f'  echo "[SkyPilot] DNS updater started (log: {log_path})"',
+        'else',
+        '  echo "[SkyPilot] Warning: DNS updater failed to start"',
+        'fi',
+    ]
+    startup_script = '\n'.join(startup_lines)
+
+    # Append the wait script (waits for marker + hostname resolution)
+    wait_script = generate_wait_for_networking_script(
+        job_group_name, other_job_names)
+
+    parts = [startup_script.strip()]
+    if wait_script:
+        parts.append(wait_script)
+    return '\n\n'.join(parts)
 
 
 # ============================================================================

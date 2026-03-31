@@ -18,6 +18,7 @@ import dotenv
 import filelock
 
 import sky
+from sky import clouds as sky_clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
@@ -1334,6 +1335,15 @@ class JobController:
                         callback_func=callback_func)
                     was_recovering = False
 
+    @staticmethod
+    def _get_k8s_namespace_for_task(task: 'sky.Task') -> str:
+        """Get K8s namespace from a task's resources."""
+        # pylint: disable=import-outside-toplevel
+        from sky.provision.kubernetes import utils as k8s_utils
+        resource = list(task.resources)[0]
+        context = resource.region
+        return k8s_utils.get_kube_config_context_namespace(context)
+
     async def _prepare_job_group_task_for_launch(
         self,
         task: 'sky.Task',
@@ -1362,22 +1372,30 @@ class JobController:
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
 
-        # Inject wait script to ensure networking is ready before task runs.
-        # Skip for DYNAMIC_NODE_SET tasks — they use /nodes endpoint
-        # for discovery instead of /etc/hosts DNS mappings.
+        # Inject networking setup script before task runs.
+        # For K8s tasks, bake the DNS updater startup + wait script
+        # directly into task.run so pods self-configure at startup.
+        # For non-K8s (SSH) tasks, only inject the wait script;
+        # Phase 3 will handle /etc/hosts injection via SSH.
         task_resources = list(task.resources)
-        task_recovery = (task_resources[0].job_recovery
-                         if task_resources else None)
-        is_dynamic_node_set = (isinstance(task_recovery, dict) and
-                               task_recovery.get('strategy')
-                               == 'DYNAMIC_NODE_SET')
-        if not is_dynamic_node_set:
-            wait_script = (
-                job_group_networking.generate_wait_for_networking_script(
+        is_k8s = (task_resources and task_resources[0].cloud is not None
+                  and task_resources[0].cloud.is_same_cloud(
+                      sky_clouds.Kubernetes()))
+        if is_k8s and all_tasks:
+            namespace = self._get_k8s_namespace_for_task(task)
+            networking_script = (
+                job_group_networking
+                .generate_k8s_networking_setup_script(
+                    job_group_name, all_tasks, self._job_id,
+                    namespace, other_job_names))
+        else:
+            networking_script = (
+                job_group_networking
+                .generate_wait_for_networking_script(
                     job_group_name, other_job_names))
-            if wait_script:
-                current_run = task.run or ''
-                task.run = wait_script + '\n\n' + current_run
+        if networking_script:
+            current_run = task.run or ''
+            task.run = networking_script + '\n\n' + current_run
 
         # For job groups, set SKYPILOT_JOBGROUP_TASKS so the discovery
         # server's /nodes endpoint can aggregate across all tasks.
@@ -1672,35 +1690,22 @@ class JobController:
             task_id = sync_task_ids[i]
             handles[task_id] = handle
 
-        # Phase 3: Set up networking
+        # Phase 3: Set up networking for non-K8s (SSH) tasks only.
+        # K8s tasks self-configure via DNS updater scripts baked into
+        # task.run during _prepare_job_group_task_for_launch.
         logger.info('Phase 3: Setting up JobGroup networking...')
-        # Build list of (task, handle) for non-terminal tasks with valid handles
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
             task_handle = handles[tid]
-            if task_handle is not None:
-                tasks_handles.append((task, task_handle))
-
-        # For DYNAMIC_NODE_SET tasks, inject their headless service
-        # into the networking so other tasks can discover them via
-        # standard job group hostname: {task_name}-0.{job_group_name}
-        for tid, task in enumerate(tasks):
-            if handles[tid] is not None:
-                continue  # Already handled
-            executor = strategy_executors[tid]
-            if (executor is not None and isinstance(
-                    executor, recovery_strategy.DynamicNodeSetExecutor)):
-                # Create DNS mapping: the DYNAMIC_NODE_SET headless
-                # service is queryable at {cluster_name}.{ns}.svc...
-                # Map it to {task_name}-0.{job_group_name}
-                svc_name = executor.cluster_name
-                ns = executor._namespace or 'default'  # pylint: disable=protected-access
-                svc_dns = f'{svc_name}.{ns}.svc.cluster.local'
-                hostname = f'{task.name}-0.{job_group_name}'
-                job_group_networking.add_extra_dns_mapping(
-                    job_group_name, tasks_handles, svc_dns, hostname)
-                logger.info(f'DYNAMIC_NODE_SET DNS: {hostname} -> {svc_dns}')
+            if task_handle is None:
+                continue
+            # Skip K8s tasks — they self-configure networking at startup
+            if job_group_networking.is_kubernetes_handle(task_handle):
+                logger.info(f'Skipping Phase 3 for K8s task {task.name} '
+                            '(self-configuring)')
+                continue
+            tasks_handles.append((task, task_handle))
 
         if tasks_handles:
             networking_success = await (
@@ -1709,6 +1714,9 @@ class JobController:
             if not networking_success:
                 logger.warning(
                     'Some networking setup failed, continuing anyway')
+        else:
+            logger.info('Phase 3: All tasks self-configure networking, '
+                        'skipping')
 
         logger.info('JobGroup setup complete, all jobs are running')
 
