@@ -1053,8 +1053,12 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         # Serialize file_mounts
         file_mounts = dict(task.file_mounts) if task.file_mounts else None
 
-        # Upload local workdir/file_mounts to a ConfigMap if needed
-        cm_name = k8s_managed_job.upload_local_files_to_configmap(
+        # Upload local workdir/file_mounts to a ConfigMap if needed.
+        # All K8s API calls and CPU-heavy manifest building are run in
+        # threads to avoid blocking the asyncio event loop (which would
+        # starve other tasks in a job group).
+        cm_name = await asyncio.to_thread(
+            k8s_managed_job.upload_local_files_to_configmap,
             job_name=job_name,
             namespace=self._namespace,
             context=self._context,
@@ -1073,7 +1077,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
         # Build and apply all manifests
         pod_manifests, service_manifest, rbac_manifests = (
-            k8s_managed_job.build_job_manifests(
+            await asyncio.to_thread(
+                k8s_managed_job.build_job_manifests,
                 cluster_name=job_name,
                 namespace=self._namespace,
                 pod_spec=pod_spec,
@@ -1090,7 +1095,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             ))
 
         try:
-            k8s_managed_job.apply_job(
+            await asyncio.to_thread(
+                k8s_managed_job.apply_job,
                 namespace=self._namespace,
                 context=self._context,
                 pod_manifests=pod_manifests,
@@ -1107,8 +1113,9 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         start = time.time()
         timeout = 300
         while time.time() - start < timeout:
-            status, running, _, _ = (k8s_managed_job.get_job_pod_status(
-                job_name, self._namespace, self._context, self.min_nodes))
+            status, running, _, _ = (await asyncio.to_thread(
+                k8s_managed_job.get_job_pod_status, job_name, self._namespace,
+                self._context, self.min_nodes))
             if running >= self.min_nodes:
                 logger.info(f'Elastic job {job_name}: {running} pods running '
                             f'(min_nodes={self.min_nodes})')
