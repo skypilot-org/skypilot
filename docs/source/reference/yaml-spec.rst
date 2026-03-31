@@ -659,21 +659,21 @@ If ``'best'`` is specified, use the best network tier available on the specified
 
 **VM-based:**
 
-- `infra: aws`: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
-- `infra: gcp`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
-- `infra: nebius`: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+- ``infra: aws``: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
+- ``infra: gcp``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
+- ``infra: nebius``: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
 
 **Kubernetes-based:**
 
-- `infra: k8s/my-eks-or-hyperpod-cluster`: Enable EFA for high-performance inter-node communication across pods on AWS EKS/HyperPod clusters.
-- `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
-- `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
-- `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
-- `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- ``infra: k8s/my-eks-or-hyperpod-cluster``: Enable EFA for high-performance inter-node communication across pods on AWS EKS/HyperPod clusters.
+- ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+- ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
+- ``infra: k8s/my-together-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
 
 **Slurm-based:**
 
-- `infra: slurm`: On AWS HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.), EFA is available by default. No `network_tier` setting is needed.
+- ``infra: slurm``: On AWS HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.), EFA is available by default. No `network_tier` setting is needed.
 
 .. code-block:: yaml
 
