@@ -1222,7 +1222,7 @@ def launch(
         warning = (f'Cluster name {cluster!r} looks like a file path. '
                    f'Did you mean: sky launch -c <cluster-name> {cluster}')
         if yes:
-            click.secho(f'WARNING: {warning}', fg='yellow')
+            logger.warning(warning)
         else:
             click.confirm(f'{warning}\nProceed anyway?', abort=True)
     controller_utils.check_cluster_name_not_controller(
@@ -5569,7 +5569,7 @@ def jobs_launch(
         warning = (f'Job name {name!r} looks like a file path. '
                    f'Did you mean: sky jobs launch -n <job-name> {name}')
         if yes:
-            click.secho(f'WARNING: {warning}', fg='yellow')
+            logger.warning(warning)
         else:
             click.confirm(f'{warning}\nProceed anyway?', abort=True)
 
