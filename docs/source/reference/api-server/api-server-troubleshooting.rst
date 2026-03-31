@@ -4,8 +4,8 @@ Troubleshooting SkyPilot API Server
 ===================================
 
 This guide includes tips for troubleshooting common issues with API server deployment.
-
-If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
+ 
+ If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
 .. _sky-api-server-troubleshooting-helm:
 
