@@ -238,6 +238,20 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
     return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
+def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
+    """Redact secrets and credentials from a parsed task YAML config dict.
+
+    Modifies task_yaml in-place.
+    """
+    if task_yaml.get('secrets') is not None:
+        task_yaml['secrets'] = {k: '<redacted>' for k in task_yaml['secrets']}
+    docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
+                                                       {})
+    if isinstance(docker_config,
+                  dict) and docker_config.get('password') is not None:
+        docker_config['password'] = '<redacted>'
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -1736,12 +1750,7 @@ class Task:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
-            if config.get('secrets') is not None:
-                config['secrets'] = {k: '<redacted>' for k in config['secrets']}
-            docker_config = config.get('resources',
-                                       {}).get('_docker_login_config', {})
-            if docker_config.get('password') is not None:
-                docker_config['password'] = '<redacted>'
+            redact_task_yaml_dict(config)
             return config
         return self._to_yaml_config()
 
