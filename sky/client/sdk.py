@@ -474,7 +474,7 @@ def validate(
     omit_file_mount_type = _omit(40)
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
-    omit_mount_config = _omit(47)
+    omit_mount_config = _omit(48)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
