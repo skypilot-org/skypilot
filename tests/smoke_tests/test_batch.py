@@ -180,6 +180,76 @@ def test_batch_diffusion():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test custom formats (range input, text + JSON file output) --------
+@pytest.mark.batch
+def test_batch_custom_formats():
+    name = smoke_tests_utils.get_cluster_name()
+    bucket = f'sky-batch-cfmt-{name}'
+    pool_name = 'custom-fmt-pool'
+
+    test = smoke_tests_utils.Test(
+        'batch_custom_formats',
+        [
+            # --- Pre-cleanup: remove stale pool from previous runs ---
+            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
+            f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create S3 bucket (output only — no input data needed) ---
+            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            # Clean previous output
+            (f'aws s3 rm "s3://{bucket}/output/" '
+             f'--recursive 2>/dev/null || true'),
+            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
+             f'--recursive 2>/dev/null || true'),
+
+            # --- Run batch job (RangeInput, TextOutput, JsonFileOutput) ---
+            f'PYTHONPATH=examples/batch/custom_formats:$PYTHONPATH '
+            f'python examples/batch/custom_formats/process_range.py',
+
+            # --- Verify final job status ---
+            f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
+
+            # --- Verify text output files ---
+            # 20 items -> 20 .txt files
+            (f'test $(aws s3 ls s3://{bucket}/output/texts/ '
+             f'| grep -c "\\.txt") -eq 20'),
+            # Check zero-padded naming
+            f'aws s3 ls s3://{bucket}/output/texts/ | grep "00000000.txt"',
+            f'aws s3 ls s3://{bucket}/output/texts/ | grep "00000019.txt"',
+            # Spot-check content of first text file
+            (f'aws s3 cp s3://{bucket}/output/texts/00000000.txt - '
+             f'| grep "Item 0"'),
+
+            # --- Verify JSON metadata output files ---
+            # 20 items -> 20 .json files
+            (f'test $(aws s3 ls s3://{bucket}/output/metadata/ '
+             f'| grep -c "\\.json") -eq 20'),
+            f'aws s3 ls s3://{bucket}/output/metadata/ | grep "00000000.json"',
+            f'aws s3 ls s3://{bucket}/output/metadata/ | grep "00000019.json"',
+            # Validate JSON structure: parseable, has expected keys
+            (f"python3 << 'PYEOF'\n"
+             "import json, subprocess\n"
+             f"bucket = '{bucket}'\n"
+             "for idx in [0, 5, 19]:\n"
+             "    path = f's3://{{bucket}}/output/metadata/{{idx:08d}}.json'\n"
+             "    data = subprocess.check_output(['aws', 's3', 'cp', path, '-'])\n"
+             "    meta = json.loads(data)\n"
+             "    assert meta['id'] == idx, f'Wrong id: {{meta}}'\n"
+             "    assert meta['squared'] == idx ** 2, f'Wrong squared: {{meta}}'\n"
+             "    assert meta['tag'] in ('alpha', 'beta', 'gamma'), (\n"
+             "        f'Invalid tag: {{meta}}')\n"
+             "print('All JSON metadata files valid')\n"
+             "PYEOF"),
+        ],
+        # Teardown: remove pool, bucket
+        (f'sky jobs pool down {pool_name} -y;'
+         f' sky serve down {pool_name} -y 2>/dev/null || true;'
+         f' aws s3 rb s3://{bucket} --force'),
+        timeout=30 * 60,
+        env={'SKY_BATCH_BUCKET': bucket},
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test batch cancel ----------
 @pytest.mark.batch
 def test_batch_cancel():
