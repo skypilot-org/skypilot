@@ -1152,20 +1152,20 @@ def write_cluster_config(
             # This is currently only used by AWS and Kubernetes.
             'runcmd': runcmd,
 
-            # Preemption hook for K8s preStop lifecycle hook.
+            # Autostop hook reused as K8s preStop lifecycle hook.
             # hook_timeout sets both the script timeout and
             # terminationGracePeriodSeconds in the pod spec.
             # Base64-encode the hook script so it can be safely embedded
             # in YAML without Jinja2's tojson HTML-escaping (which
             # converts > to \u003e, breaking shell redirects).
             'preemption_hook': (base64.b64encode(
-                to_provision.preemption_config.hook.encode()).decode()
-                                if to_provision.preemption_config and
-                                to_provision.preemption_config.hook else None),
+                to_provision.autostop_config.hook.encode()).decode()
+                                if to_provision.autostop_config and
+                                to_provision.autostop_config.hook else None),
             'preemption_hook_timeout':
-                (to_provision.preemption_config.hook_timeout
-                 if to_provision.preemption_config and
-                 to_provision.preemption_config.hook else None),
+                (to_provision.autostop_config.hook_timeout
+                 if to_provision.autostop_config and
+                 to_provision.autostop_config.hook else None),
 
             # Priority class
             'priority_class': to_provision.priority_class,

@@ -288,30 +288,35 @@ Common use cases for autostop hooks:
 Preemption hooks (Kubernetes)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-On Kubernetes, you can configure a **preemption hook** that runs when a pod is about
-to be terminated due to preemption, node drain, or pod eviction. The hook is implemented
-as a Kubernetes-native ``preStop`` lifecycle hook, embedded in the pod spec at launch time.
+On Kubernetes, the same ``autostop.hook`` is automatically embedded as a
+Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time.
+This means a single hook configuration handles both autostop and preemption
+scenarios.
 
 .. code-block:: yaml
 
    resources:
      cloud: kubernetes
-     preemption:
+     autostop:
+       idle_minutes: 10
        hook: |
-         echo "Saving checkpoint before preemption"
+         echo "Saving checkpoint before shutdown"
          cp checkpoint.pt s3://bucket/checkpoints/
-       hook_timeout: 600  # seconds (default: 300)
+       hook_timeout: 600  # seconds
 
 **How it works:**
 
 - The hook runs on **all nodes** (head + workers) via the Kubernetes ``preStop`` lifecycle hook
+- On Kubernetes, the hook is only executed via the ``preStop`` path (not via the
+  skylet), so it fires exactly once per termination event
 - ``hook_timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
-  (default: 300s when a hook is configured, 30s when no hook is set)
+  (default: uses the autostop hook timeout if set, otherwise 30s)
 - The hook is embedded in the pod spec at launch time; updating the hook requires
   ``sky down`` followed by ``sky launch``
 
 **When the hook fires:**
 
+- Cluster autostop/autodown (idle timeout triggers pod deletion)
 - Kubernetes preemption (higher-priority pod needs resources)
 - Node drain (e.g., during cluster maintenance)
 - Pod eviction (e.g., resource pressure)
