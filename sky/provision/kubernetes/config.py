@@ -24,6 +24,12 @@ def bootstrap_instances(
         config.provider_config)
     context = kubernetes_utils.get_context_from_config(config.provider_config)
 
+    # V1 managed jobs are fully self-contained: they create their own headless
+    # Service, RBAC (Role + RoleBinding), and run as the default SA. Skip all
+    # bootstrap work (services, autoscaler SA/roles, FUSE, ingress).
+    if 'managed_job_config' in config.provider_config:
+        return config
+
     _configure_services(namespace, context, config.provider_config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
