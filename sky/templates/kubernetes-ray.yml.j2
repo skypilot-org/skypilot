@@ -996,7 +996,10 @@ available_node_types:
               (
                 (
                 set -e
-                mkdir -p ~/.sky
+                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # writes python_path there before ray_installation_commands (which
+                # contains SETUP_SKY_DIRS_COMMANDS) creates it.
+                mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
