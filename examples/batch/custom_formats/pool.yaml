@@ -1,0 +1,12 @@
+# Pool configuration for custom format batch processing example.
+# Uses CPU-only workers (no GPU needed for this example).
+
+pool:
+  workers: 2
+
+resources:
+  cpus: 1+
+
+setup: echo "Setup complete!"
+
+run: echo "setup done"

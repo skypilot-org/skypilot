@@ -12,6 +12,7 @@ Each class is both a descriptor (path, to_dict/from_dict) and a handler
 from abc import ABC
 from abc import abstractmethod
 import hashlib
+import inspect
 import io
 import json
 import logging
@@ -25,7 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 class InputFormat(ABC):
-    """Base class for input formats."""
+    """Base class for input formats.
+
+    Subclasses register via ``@registry.INPUT_FORMAT_REGISTRY.type_register``.
+    Custom formats defined outside this module are automatically serialized
+    with their source code so they can be reconstructed on remote workers.
+    """
 
     def __init__(self, path: str):
         self.path = path
@@ -36,16 +42,45 @@ class InputFormat(ABC):
                 return name
         raise ValueError(f'Unregistered input format: {type(self).__name__}')
 
+    def _get_class_source(self) -> Optional[str]:
+        """Return module source for custom (non-builtin) formats."""
+        # Preserved from a prior from_dict() roundtrip
+        stored = getattr(self, '_class_source_code', None)
+        if stored is not None:
+            return stored
+        # Auto-detect: embed source for classes not defined in this module
+        if type(self).__module__ != __name__:
+            try:
+                source_file = inspect.getfile(type(self))
+                with open(source_file) as f:
+                    return f.read()
+            except (TypeError, OSError):
+                return None
+        return None
+
     def to_dict(self) -> Dict[str, Any]:
-        return {'format': self._format_name(), 'path': self.path}
+        d: Dict[str, Any] = {'format': self._format_name(), 'path': self.path}
+        class_source = self._get_class_source()
+        if class_source is not None:
+            d['_class_source'] = class_source
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'InputFormat':
         """Reconstruct an InputFormat from a dict."""
         fmt = d.get('format')
+        # Load custom format class from embedded source if not registered
+        class_source = d.get('_class_source')
+        if class_source and fmt not in registry.INPUT_FORMAT_REGISTRY:
+            exec(compile(class_source, '<custom_format>', 'exec'),  # pylint: disable=exec-used
+                 {'__builtins__': __builtins__})
         cls = registry.INPUT_FORMAT_REGISTRY.from_str(fmt)
-        assert cls is not None, f'Unregistered input format: {fmt}'
-        return cls.from_dict_args(d)
+        assert cls is not None, f'Unknown input format: {fmt}'
+        instance = cls.from_dict_args(d)
+        # Preserve source for re-serialization (coordinator → worker)
+        if class_source:
+            instance._class_source_code = class_source  # type: ignore[attr-defined]
+        return instance
 
     @classmethod
     @abstractmethod
@@ -67,7 +102,12 @@ class InputFormat(ABC):
 
 
 class OutputFormat(ABC):
-    """Base class for output formats."""
+    """Base class for output formats.
+
+    Subclasses register via ``@registry.OUTPUT_FORMAT_REGISTRY.type_register``.
+    Custom formats defined outside this module are automatically serialized
+    with their source code so they can be reconstructed on remote workers.
+    """
 
     def __init__(self, path: str):
         self.path = path
@@ -78,16 +118,41 @@ class OutputFormat(ABC):
                 return name
         raise ValueError(f'Unregistered output format: {type(self).__name__}')
 
+    def _get_class_source(self) -> Optional[str]:
+        """Return module source for custom (non-builtin) formats."""
+        stored = getattr(self, '_class_source_code', None)
+        if stored is not None:
+            return stored
+        if type(self).__module__ != __name__:
+            try:
+                source_file = inspect.getfile(type(self))
+                with open(source_file) as f:
+                    return f.read()
+            except (TypeError, OSError):
+                return None
+        return None
+
     def to_dict(self) -> Dict[str, Any]:
-        return {'format': self._format_name(), 'path': self.path}
+        d: Dict[str, Any] = {'format': self._format_name(), 'path': self.path}
+        class_source = self._get_class_source()
+        if class_source is not None:
+            d['_class_source'] = class_source
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> 'OutputFormat':
         """Reconstruct an OutputFormat from a dict."""
         fmt = d.get('format')
+        class_source = d.get('_class_source')
+        if class_source and fmt not in registry.OUTPUT_FORMAT_REGISTRY:
+            exec(compile(class_source, '<custom_format>', 'exec'),  # pylint: disable=exec-used
+                 {'__builtins__': __builtins__})
         cls = registry.OUTPUT_FORMAT_REGISTRY.from_str(fmt)
-        assert cls is not None, f'Unregistered output format: {fmt}'
-        return cls.from_dict_args(d)
+        assert cls is not None, f'Unknown output format: {fmt}'
+        instance = cls.from_dict_args(d)
+        if class_source:
+            instance._class_source_code = class_source  # type: ignore[attr-defined]
+        return instance
 
     @classmethod
     @abstractmethod
