@@ -1031,8 +1031,9 @@ def _warn_if_name_looks_like_file_path(name: Optional[str], yes: bool,
     """Warns or prompts if a name looks like a file path."""
     if not common_utils.cluster_name_looks_like_file_path(name):
         return
-    warning = (f'{name_label} {name!r} looks like a file path. '
-               f'Did you mean: {command_hint}')
+    warning = (f'{colorama.Fore.YELLOW}{name_label} {name!r} looks like a '
+               f'file path. Did you mean: {command_hint}'
+               f'{colorama.Style.RESET_ALL}')
     if yes:
         logger.warning(warning)
     else:
