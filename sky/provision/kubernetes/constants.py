@@ -24,5 +24,9 @@ TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 # Default name of the primary workload container in SkyPilot Ray pods.
 RAY_NODE_CONTAINER_NAME = 'ray-node'
 
+# Container name used by V1 K8s managed job pods
+# (see sky/templates/kubernetes-managed-job.yaml.j2).
+MANAGED_JOB_CONTAINER_NAME = 'main'
+
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']

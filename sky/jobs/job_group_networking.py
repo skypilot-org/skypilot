@@ -78,20 +78,31 @@ def _get_k8s_namespace_from_handle(
     return 'default'
 
 
-def _construct_k8s_internal_svc(cluster_name_on_cloud: str, namespace: str,
-                                node_idx: int) -> str:
+def _construct_k8s_internal_svc(cluster_name_on_cloud: str,
+                                namespace: str,
+                                node_idx: int,
+                                managed_job_v1: bool = False) -> str:
     """Construct Kubernetes internal service DNS URL.
 
-    The pod creation logic guarantees this format.
+    Two formats depending on the provisioning path:
+    - V1 managed jobs: pods use hostname="node-{idx}", subdomain="{job_name}"
+      -> node-{idx}.{cluster}.{namespace}.svc.cluster.local
+      See sky/templates/kubernetes-managed-job.yaml.j2
+    - Ray-based clusters: head pod uses hostname="{cluster}-head"
+      -> {cluster}-head.{namespace}.svc.cluster.local
 
     Args:
         cluster_name_on_cloud: Cluster name on cloud
         namespace: Kubernetes namespace
         node_idx: Node index (0 for head, 1+ for workers)
+        managed_job_v1: Whether this is a V1 managed job
 
     Returns:
-        DNS URL like '{cluster}-head.{namespace}.svc.cluster.local'
+        Fully qualified K8s DNS name for the pod.
     """
+    if managed_job_v1:
+        return (f'node-{node_idx}.{cluster_name_on_cloud}.'
+                f'{namespace}.svc.cluster.local')
     if node_idx == 0:
         return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
     return (f'{cluster_name_on_cloud}-worker{node_idx}.'
@@ -136,6 +147,9 @@ def _generate_k8s_dns_mappings(
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
     mappings = []
     for task, handle in tasks_handles:
         if handle is None or not _is_kubernetes(handle):
@@ -144,13 +158,16 @@ def _generate_k8s_dns_mappings(
         job_name = task.name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         namespace = _get_k8s_namespace_from_handle(handle)
+        is_v1 = managed_job_utils.is_v1_k8s_managed_job(handle)
         num_nodes = (len(handle.stable_internal_external_ips)
                      if handle.stable_internal_external_ips else 1)
 
         for node_idx in range(num_nodes):
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
             internal_svc = _construct_k8s_internal_svc(cluster_name_on_cloud,
-                                                       namespace, node_idx)
+                                                       namespace,
+                                                       node_idx,
+                                                       managed_job_v1=is_v1)
             mappings.append((internal_svc, hostname))
             node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
             logger.debug(f'K8s DNS mapping ({node_type}): '

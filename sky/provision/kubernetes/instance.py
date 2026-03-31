@@ -1758,7 +1758,7 @@ def terminate_instances(
     # of ray tags. Clean them up via dedicated delete functions which
     # use the correct label selectors.
     if 'managed_job_config' in provider_config:
-        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
         k8s_managed_job.delete_managed_job(cluster_name_on_cloud, namespace,
                                            context)
         return
@@ -2445,6 +2445,12 @@ def get_command_runners(
     context = kubernetes_utils.get_context_from_config(
         cluster_info.provider_config)
 
+    # V1 managed job pods use 'main' as the container name, not 'ray-node'.
+    is_managed_job = (cluster_info.provider_config.get('managed_job_config')
+                      is not None)
+    container_name = (k8s_constants.MANAGED_JOB_CONTAINER_NAME if is_managed_job
+                      else k8s_constants.RAY_NODE_CONTAINER_NAME)
+
     runners: List[command_runner.CommandRunner] = []
     if cluster_info.head_instance_id is not None:
         pod_name = cluster_info.head_instance_id
@@ -2458,7 +2464,7 @@ def get_command_runners(
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0],
             deployment=deployment,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            container=container_name,
             **credentials)
         runners.append(head_runner)
 
@@ -2467,8 +2473,6 @@ def get_command_runners(
                  if pod_name != cluster_info.head_instance_id]
     runners.extend(
         command_runner.KubernetesCommandRunner.make_runner_list(
-            node_list,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
-            **credentials))
+            node_list, container=container_name, **credentials))
 
     return runners

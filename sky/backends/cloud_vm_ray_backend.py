@@ -812,7 +812,8 @@ class RetryingVmProvisioner(object):
             'run': self._task.run,
             'envs': envs,
             'num_nodes': self._task.num_nodes,
-            'num_gpus_per_node': backend_utils.get_num_gpus_per_node(self._task),
+            'num_gpus_per_node': backend_utils.get_num_gpus_per_node(self._task
+                                                                    ),
             'workdir': workdir_config,
             'file_mounts': file_mounts,
         }
@@ -1254,8 +1255,8 @@ class RetryingVmProvisioner(object):
                         # into the cluster YAML so the K8s provisioner
                         # can create a Job manifest with user commands
                         # baked into the pod spec.
-                        if (k8s_managed_job.is_managed_jobs_v1_enabled()
-                                and self._is_managed and isinstance(
+                        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
+                                self._is_managed and isinstance(
                                     to_provision.cloud, clouds.Kubernetes)):
                             self._inject_managed_job_config_to_yaml(
                                 handle.cluster_yaml, cluster_name)
@@ -3483,10 +3484,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             status_lib.ClusterStatus.UP)
 
         # K8s managed jobs don't have skylet - skip job queue updates.
-        is_k8s_managed = (
-            k8s_managed_job.is_managed_jobs_v1_enabled() and
-            isinstance(handle.launched_resources.cloud, clouds.Kubernetes) and
-            self._is_managed)
+        is_k8s_managed = (k8s_managed_job.is_managed_jobs_v1_enabled() and
+                          isinstance(handle.launched_resources.cloud,
+                                     clouds.Kubernetes) and self._is_managed)
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
@@ -3602,9 +3602,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
         # K8s managed jobs have workdir baked into the pod spec.
-        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
-                isinstance(handle.launched_resources.cloud,
-                           clouds.Kubernetes) and self._is_managed):
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and isinstance(
+                handle.launched_resources.cloud, clouds.Kubernetes) and
+                self._is_managed):
             logger.info('K8s managed job: skipping workdir sync.')
             return
 
@@ -3728,9 +3728,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert here that all storage_mounts are MOUNT mode.
         """
         # K8s managed jobs have file mounts baked into the pod spec.
-        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
-                isinstance(handle.launched_resources.cloud,
-                           clouds.Kubernetes) and self._is_managed):
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and isinstance(
+                handle.launched_resources.cloud, clouds.Kubernetes) and
+                self._is_managed):
             logger.info('K8s managed job: skipping file mounts sync.')
             return
 
@@ -3759,9 +3759,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         start = time.time()
 
         # K8s managed jobs have setup baked into the pod spec.
-        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
-                isinstance(handle.launched_resources.cloud,
-                           clouds.Kubernetes) and self._is_managed):
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and isinstance(
+                handle.launched_resources.cloud, clouds.Kubernetes) and
+                self._is_managed):
             logger.info('K8s managed job: skipping SSH-based setup.')
             return
 
@@ -4271,9 +4271,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # K8s managed jobs run commands directly in pods - no Ray submission.
         # We still need to return a job_id so the managed jobs controller
         # can track the job. We use job_id=1 as a convention.
-        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
-                isinstance(handle.launched_resources.cloud,
-                           clouds.Kubernetes) and self._is_managed):
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and isinstance(
+                handle.launched_resources.cloud, clouds.Kubernetes) and
+                self._is_managed):
             logger.info('K8s managed job: pods already running user commands. '
                         'Waiting for completion via K8s API.')
             return 1  # Dummy job_id; monitoring uses K8s API directly
