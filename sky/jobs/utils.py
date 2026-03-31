@@ -39,7 +39,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.provision.kubernetes import managed_job as k8s_mj
+from sky.provision.kubernetes import managed_job as k8s_managed_job
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -408,10 +408,9 @@ async def _get_k8s_managed_job_status(
         use the normal status checking path).
         (job_status, transient_error_reason) if it IS a K8s managed job.
     """
-    if not k8s_mj.is_managed_jobs_v1_enabled():
+    if not k8s_managed_job.is_managed_jobs_v1_enabled():
         return None
 
-    from sky.provision.kubernetes import managed_job as k8s_managed_job
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     # Try to get namespace/context from the handle's cluster YAML
@@ -462,13 +461,11 @@ async def _get_k8s_managed_job_status(
         k8s_managed_job.ManagedJobStatus.RUNNING: job_lib.JobStatus.RUNNING,
         k8s_managed_job.ManagedJobStatus.SUCCEEDED: job_lib.JobStatus.SUCCEEDED,
         k8s_managed_job.ManagedJobStatus.FAILED: job_lib.JobStatus.FAILED,
-        k8s_managed_job.ManagedJobStatus.SETTING_UP:
-            job_lib.JobStatus.SETTING_UP,
+        k8s_managed_job.ManagedJobStatus.SETTING_UP: job_lib.JobStatus.SETTING_UP,
         k8s_managed_job.ManagedJobStatus.PENDING: job_lib.JobStatus.PENDING,
     }
     status = status_map.get(k8s_status)
-    if (status is None and
-            k8s_status == k8s_managed_job.ManagedJobStatus.UNKNOWN):
+    if (status is None and k8s_status == k8s_managed_job.ManagedJobStatus.UNKNOWN):
         return (None, None)
     logger.info(f'K8s managed job status: {k8s_status} -> {status}')
     return (status, None)
@@ -1122,7 +1119,7 @@ def _stream_k8s_managed_job_logs(
     import threading
 
     from sky.adaptors import kubernetes as k8s_adaptor
-    from sky.provision.kubernetes import managed_job as k8s_managed_job
+
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     # Get context from handle's launched resources (region = K8s context)
@@ -1160,10 +1157,7 @@ def _stream_k8s_managed_job_logs(
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = pod.metadata.labels.get(
-            k8s_managed_job.TAG_NODE_INDEX,
-            pod.metadata.labels.get('batch.kubernetes.io/job-completion-index',
-                                    '?'))
+        idx = k8s_managed_job._get_node_index(pod)
         try:
             resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=True, _preload_content=False)
@@ -1182,6 +1176,76 @@ def _stream_k8s_managed_job_logs(
         threads.append(t)
 
     # Wait for all threads (pods to complete)
+    for t in threads:
+        t.join()
+
+    return 0
+
+
+def _stream_k8s_managed_job_logs_direct(
+    cluster_name: str,
+    context: Optional[str],
+    follow: bool = True,
+    tail: Optional[int] = None,
+) -> int:
+    """Stream V1 K8s managed job logs without a cluster handle.
+
+    Used for elastic jobs (DYNAMIC_NODE_SET) that create pods directly
+    without registering in global_user_state.
+    """
+    import threading
+
+    from sky.adaptors import kubernetes as k8s_adaptor
+
+    from sky.provision.kubernetes import utils as kubernetes_utils
+
+    namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+    # Elastic jobs use cluster_name (no user hash) as the job name
+    label_selector = f'{k8s_managed_job.TAG_MANAGED_JOB_NAME}={cluster_name}'
+
+    try:
+        pods = k8s_adaptor.core_api(context).list_namespaced_pod(
+            namespace, label_selector=label_selector)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to list pods for log streaming: {e}')
+        return 1
+
+    if not pods.items:
+        logger.info(f'No pods found for {cluster_name}')
+        return 0
+
+    if not follow:
+        logs = k8s_managed_job.get_pod_logs(cluster_name,
+                                            namespace,
+                                            context,
+                                            tail_lines=tail)
+        if logs:
+            print(logs, flush=True)
+        return 0
+
+    # Follow mode: stream from all pods concurrently
+    print_lock = threading.Lock()
+
+    def _stream_pod(pod):
+        pod_name = pod.metadata.name
+        idx = k8s_managed_job._get_node_index(pod)
+        try:
+            resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
+                pod_name, namespace, follow=True, _preload_content=False)
+            for line in resp:
+                decoded = line.decode('utf-8', errors='replace')
+                with print_lock:
+                    print(f'(node {idx}) {decoded}', end='', flush=True)
+        except Exception as e:  # pylint: disable=broad-except
+            with print_lock:
+                logger.debug(f'Log stream ended for {pod_name}: {e}')
+
+    threads = []
+    for pod in pods.items:
+        t = threading.Thread(target=_stream_pod, args=(pod,), daemon=True)
+        t.start()
+        threads.append(t)
+
     for t in threads:
         t.join()
 
@@ -1381,8 +1445,7 @@ def stream_logs_by_id(
                         # Stream the logs to the console without reading the
                         # whole file into memory.
                         # V1 K8s logs don't have the streaming marker
-                        start_streaming = (
-                            k8s_mj.is_managed_jobs_v1_enabled())
+                        start_streaming = (k8s_managed_job.is_managed_jobs_v1_enabled())
                         read_from: Union[TextIO, Deque[str]] = f
                         if tail is not None:
                             assert tail > 0
@@ -1456,6 +1519,29 @@ def stream_logs_by_id(
                 if cluster_name is not None:
                     handle = global_user_state.get_handle_from_cluster_name(
                         cluster_name)
+
+            # V1 elastic jobs bypass sdk.launch() and don't register a
+            # cluster handle. Stream logs directly from K8s API using
+            # infra info stored by the controller via set_job_infra().
+            if (handle is None and cluster_name is not None and
+                    managed_job_status
+                    == managed_job_state.ManagedJobStatus.RUNNING):
+                if k8s_managed_job.is_managed_jobs_v1_enabled():
+                    job_infra = managed_job_state.get_job_infra(job_id)
+                    if (job_infra is not None and
+                            job_infra['cloud'] == 'Kubernetes'):
+                        from sky.adaptors import kubernetes as k8s_adaptor
+                        ctx = job_infra['region']
+                        if (ctx is not None and
+                                ctx == k8s_adaptor.in_cluster_context_name()):
+                            ctx = None
+                        status_display.stop()
+                        returncode = _stream_k8s_managed_job_logs_direct(
+                            cluster_name=cluster_name,
+                            context=ctx,
+                            follow=follow,
+                            tail=tail)
+                        break
 
             # Check the handle: The cluster can be preempted and removed from
             # the table before the managed job state is updated by the

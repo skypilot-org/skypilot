@@ -34,6 +34,7 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
 from sky.provision import common as provision_common
+from sky.provision.kubernetes import managed_job as k8s_managed_job
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -1495,22 +1496,34 @@ def _tail_logs_k8s_v1(
     if handle is None and status is not None and status.is_terminal():
         return _read_saved_v1_logs(job_id, task_id, status)
 
+    # V1 elastic jobs don't register a cluster handle — they create
+    # K8s pods directly. Use infra from the managed job state DB.
     if handle is None:
-        return None
+        job_infra = managed_job_state.get_job_infra(job_id)
+        if (job_infra is not None and job_infra['cloud'] == 'Kubernetes'):
+            from sky.adaptors import kubernetes as k8s_adaptor
 
-    if not managed_job_utils._is_v1_k8s_managed_job(handle):
+            from sky.provision.kubernetes import utils as kubernetes_utils
+
+            context = job_infra['region']
+            if (context is not None and
+                    context == k8s_adaptor.in_cluster_context_name()):
+                context = None
+        else:
+            return None
+    elif not managed_job_utils._is_v1_k8s_managed_job(handle):
         return None  # Not V1, fall back
+    else:
+        # Standard V1 path with handle
+        from sky.adaptors import kubernetes as k8s_adaptor
+        from sky.provision.kubernetes import utils as kubernetes_utils
 
-    # Stream directly from K8s API
-    from sky.adaptors import kubernetes as k8s_adaptor
-    from sky.provision.kubernetes import managed_job as k8s_managed_job
-    from sky.provision.kubernetes import utils as kubernetes_utils
+        context = handle.launched_resources.region
+        if context == k8s_adaptor.in_cluster_context_name():
+            context = None
 
-    context = handle.launched_resources.region
-    if context == k8s_adaptor.in_cluster_context_name():
-        context = None
     namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-    cloud_name = handle.cluster_name_on_cloud
+    cloud_name = handle.cluster_name_on_cloud if handle is not None else cluster_name
 
     # Get the output stream (context's log file for API server streaming)
     from sky.utils import context as context_lib
@@ -1581,10 +1594,7 @@ def _tail_logs_k8s_v1(
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = pod.metadata.labels.get(
-            k8s_managed_job.TAG_NODE_INDEX,
-            pod.metadata.labels.get('batch.kubernetes.io/job-completion-index',
-                                    '?'))
+        idx = k8s_managed_job._get_node_index(pod)
         ip = (pod.status.pod_ip if pod.status and pod.status.pod_ip else '')
         # Match original format: (name, rank=N, ip=IP)
         if num_pods == 1:
@@ -1672,9 +1682,7 @@ def tail_logs(name: Optional[str],
 
     # V1 K8s managed jobs: stream logs directly from K8s API
     # instead of going through run_on_head → generated Python code.
-    from sky.provision.kubernetes import managed_job as _k8s_mj
-    if (_k8s_mj.is_managed_jobs_v1_enabled() and
-            not controller):
+    if (k8s_managed_job.is_managed_jobs_v1_enabled() and not controller):
         returncode = _tail_logs_k8s_v1(job_id=job_id,
                                        job_name=name,
                                        follow=follow,

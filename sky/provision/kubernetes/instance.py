@@ -1547,12 +1547,13 @@ def _create_managed_job(region: str, cluster_name: str,
             'mountPath': k8s_managed_job.FILEMOUNT_MOUNT_PATH,
         })
 
-    job_manifest, service_manifest, rbac_manifests = (
-        k8s_managed_job.build_job_manifest(
-            cluster_name_on_cloud=cluster_name_on_cloud,
+    pod_manifests, service_manifest, rbac_manifests = (
+        k8s_managed_job.build_job_manifests(
+            cluster_name=cluster_name_on_cloud,
             namespace=namespace,
             pod_spec=pod_spec,
             num_nodes=num_nodes,
+            min_nodes=num_nodes,
             setup_commands=setup_commands,
             run_commands=run_commands,
             envs=envs,
@@ -1561,10 +1562,10 @@ def _create_managed_job(region: str, cluster_name: str,
             file_mounts=file_mounts,
         ))
 
-    k8s_managed_job.apply_managed_job(
+    k8s_managed_job.apply_job(
         namespace=namespace,
         context=context,
-        job_manifest=job_manifest,
+        pod_manifests=pod_manifests,
         service_manifest=service_manifest,
         rbac_manifests=rbac_manifests,
     )
@@ -1603,9 +1604,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                        managed_job_config)
         except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
             e_msg = common_utils.format_exception(e)
-            logger.warning(
-                'run_instances: Error creating K8s managed job:\n'
-                f'{e_msg}')
+            logger.warning('run_instances: Error creating K8s managed job:\n'
+                           f'{e_msg}')
             raise
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
@@ -1811,6 +1811,7 @@ def _get_managed_job_cluster_info(
     Returns None if no managed job pods found (falls back to standard path).
     """
     from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
 
@@ -1834,10 +1835,7 @@ def _get_managed_job_cluster_info(
             continue
         internal_ip = pod.status.pod_ip or ''
         k8s_node_name = getattr(pod.spec, 'node_name', None)
-        idx = int(pod.metadata.labels.get(
-            'skypilot-node-index',
-            pod.metadata.labels.get(
-                'batch.kubernetes.io/job-completion-index', '0')))
+        idx = int(pod.metadata.labels.get('skypilot-node-index', '0'))
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,

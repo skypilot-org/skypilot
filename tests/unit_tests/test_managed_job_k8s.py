@@ -1,231 +1,118 @@
 """Unit tests for K8s managed job provisioning.
 
-Tests the manifest builder, status tracking, entrypoint generation,
-and template rendering without requiring a real K8s cluster.
+Tests the manifest builder, status tracking, and template rendering
+without requiring a real K8s cluster.
 """
-import os
-import textwrap
 from unittest import mock
-
-import pytest
 
 # Enable V1 managed jobs via config mock
-from unittest import mock
 mock.patch('sky.skypilot_config.get_nested',
            side_effect=lambda key, default=None: True
            if key == ('jobs', 'use_v1') else default).start()
 
 
-class TestBuildJobManifest:
-    """Tests for the IndexedJob manifest builder."""
-
-    def test_single_node_no_service(self):
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, service, rbac = build_job_manifest(
-            cluster_name_on_cloud='test-job',
-            namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'ray-node',
-                        'image': 'ubuntu:22.04',
-                        'resources': {
-                            'requests': {
-                                'cpu': '1'
-                            }
-                        },
-                    }],
-                },
+_POD_SPEC = lambda image='ubuntu:22.04', extra_containers=None, resources=None: {
+    'metadata': {
+        'labels': {},
+        'annotations': {}
+    },
+    'spec': {
+        'containers': [{
+            'name': 'ray-node',
+            'image': image,
+            'resources': resources or {
+                'requests': {
+                    'cpu': '1'
+                }
             },
+        }] + (extra_containers or []),
+    },
+}
+
+
+class TestBuildElasticJobManifests:
+    """Tests for build_job_manifests."""
+
+    def test_single_node_produces_one_pod(self):
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, service, rbac = build_job_manifests(
+            cluster_name='test-job',
+            namespace='default',
+            pod_spec=_POD_SPEC(),
             num_nodes=1,
+            min_nodes=1,
             setup_commands=None,
             run_commands='echo hello',
             envs={},
         )
-        assert manifest['kind'] == 'Job'
-        assert manifest['spec']['completions'] == 1
-        assert manifest['spec']['parallelism'] == 1
-        assert service is None  # No service for single node
+        assert len(manifests) == 1
+        assert manifests[0]['kind'] == 'Pod'
+        assert manifests[0]['metadata']['name'] == 'test-job-0'
+        assert service is not None
         assert len(rbac) == 2  # Role + RoleBinding
 
-    def test_multi_node_creates_service(self):
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, service, rbac = build_job_manifest(
-            cluster_name_on_cloud='test-job',
+    def test_multi_node_creates_multiple_pods(self):
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, service, rbac = build_job_manifests(
+            cluster_name='test-job',
             namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'ray-node',
-                        'image': 'ubuntu:22.04',
-                        'resources': {
-                            'requests': {
-                                'cpu': '1'
-                            }
-                        },
-                    }],
-                },
-            },
+            pod_spec=_POD_SPEC(),
             num_nodes=4,
+            min_nodes=4,
             setup_commands=None,
             run_commands='echo hello',
             envs={'MY_VAR': 'val'},
         )
-        assert manifest['spec']['completions'] == 4
-        assert manifest['spec']['parallelism'] == 4
-        assert manifest['spec']['completionMode'] == 'Indexed'
+        assert len(manifests) == 4
+        for i, pod in enumerate(manifests):
+            assert pod['kind'] == 'Pod'
+            assert pod['metadata']['name'] == f'test-job-{i}'
         assert service is not None
         assert service['spec']['clusterIP'] == 'None'  # Headless
 
-    def test_strips_init_containers(self):
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, _, _ = build_job_manifest(
-            cluster_name_on_cloud='test',
+    def test_pod_has_single_container(self):
+        """Pod manifests should have only one main container."""
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, _, _ = build_job_manifests(
+            cluster_name='test',
             namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'ray-node',
-                        'image': 'ubuntu:22.04',
-                    }],
-                    'initContainers': [{
-                        'name': 'setup',
-                        'image': 'busybox',
-                    }],
-                },
-            },
+            pod_spec=_POD_SPEC(extra_containers=[{
+                'name': 'sidecar',
+                'image': 'busybox'
+            }]),
             num_nodes=1,
+            min_nodes=1,
             setup_commands=None,
             run_commands='echo hi',
             envs={},
         )
-        pod_spec = manifest['spec']['template']['spec']
-        assert 'initContainers' not in pod_spec
-
-    def test_strips_lifecycle_probes(self):
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, _, _ = build_job_manifest(
-            cluster_name_on_cloud='test',
-            namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'ray-node',
-                        'image': 'ubuntu:22.04',
-                        'lifecycle': {
-                            'postStart': {}
-                        },
-                        'readinessProbe': {
-                            'exec': {}
-                        },
-                        'livenessProbe': {
-                            'exec': {}
-                        },
-                    }],
-                },
-            },
-            num_nodes=1,
-            setup_commands=None,
-            run_commands='echo hi',
-            envs={},
-        )
-        container = manifest['spec']['template']['spec']['containers'][0]
-        assert 'lifecycle' not in container
-        assert 'readinessProbe' not in container
-        assert 'livenessProbe' not in container
-
-    def test_only_one_container_kept(self):
-        """Extra sidecar containers from Ray spec should be stripped."""
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, _, _ = build_job_manifest(
-            cluster_name_on_cloud='test',
-            namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [
-                        {
-                            'name': 'ray-node',
-                            'image': 'ubuntu:22.04'
-                        },
-                        {
-                            'name': 'sidecar',
-                            'image': 'busybox'
-                        },
-                    ],
-                },
-            },
-            num_nodes=1,
-            setup_commands=None,
-            run_commands='echo hi',
-            envs={},
-        )
-        containers = manifest['spec']['template']['spec']['containers']
+        containers = manifests[0]['spec']['containers']
         assert len(containers) == 1
-        assert containers[0]['command'] == ['/bin/bash', '-c']
+        assert containers[0]['name'] == 'main'
 
     def test_restart_policy_never(self):
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        manifest, _, _ = build_job_manifest(
-            cluster_name_on_cloud='test',
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, _, _ = build_job_manifests(
+            cluster_name='test',
             namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'main',
-                        'image': 'ubuntu:22.04'
-                    },],
-                },
-            },
+            pod_spec=_POD_SPEC(),
             num_nodes=1,
+            min_nodes=1,
             setup_commands=None,
             run_commands='echo hi',
             envs={},
         )
-        assert manifest['spec']['template']['spec']['restartPolicy'] == 'Never'
+        assert manifests[0]['spec']['restartPolicy'] == 'Never'
 
     def test_rbac_has_pods_patch(self):
         """RBAC should include pods patch for phase/app_status labels."""
-        from sky.provision.kubernetes.managed_job import build_job_manifest
-        _, _, rbac = build_job_manifest(
-            cluster_name_on_cloud='test',
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        _, _, rbac = build_job_manifests(
+            cluster_name='test',
             namespace='default',
-            pod_spec={
-                'metadata': {
-                    'labels': {},
-                    'annotations': {}
-                },
-                'spec': {
-                    'containers': [{
-                        'name': 'main',
-                        'image': 'ubuntu:22.04'
-                    },],
-                },
-            },
+            pod_spec=_POD_SPEC(),
             num_nodes=1,
+            min_nodes=1,
             setup_commands=None,
             run_commands='echo hi',
             envs={},
@@ -237,71 +124,52 @@ class TestBuildJobManifest:
         assert 'get' in pod_rule['verbs']
         assert 'list' in pod_rule['verbs']
 
+    def test_entrypoint_has_discovery_and_phases(self):
+        """Pod entrypoint should have discovery server and phase labels."""
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, _, _ = build_job_manifests(
+            cluster_name='test',
+            namespace='default',
+            pod_spec=_POD_SPEC(),
+            num_nodes=1,
+            min_nodes=1,
+            setup_commands='echo setup',
+            run_commands='echo run',
+            envs={},
+        )
+        main = manifests[0]['spec']['containers'][0]
+        entrypoint = main['args'][0]
+        assert '_skypilot_set_phase' in entrypoint
+        assert 'SETTING_UP' in entrypoint
+        assert 'RUNNING' in entrypoint
+        assert 'skypilot_nodes' in entrypoint
+        assert 'SKYPILOT_APP_STATUS' in entrypoint
 
-class TestEntrypointScript:
-    """Tests for the entrypoint script generation."""
-
-    def test_single_node_no_peer_discovery(self):
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1, None,
-                                          'echo hello', 0)
-        assert 'SKYPILOT_NODE_RANK' in script
-        assert 'echo hello' in script
-        # Single node should NOT have node count waiting
-        assert 'Waiting for' not in script
-
-    def test_multi_node_has_node_discovery(self):
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 4, None,
-                                          'echo hello', 0)
-        assert 'Waiting for 4 initialized nodes' in script
-        assert 'skypilot_nodes' in script
-
-    def test_setup_commands_included(self):
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1,
-                                          'pip install torch',
-                                          'python train.py', 2)
-        assert 'pip install torch' in script
-        assert 'python train.py' in script
-
-    def test_has_phase_labels(self):
-        """Entrypoint should patch pod labels at phase transitions."""
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1, 'echo setup',
-                                          'echo run', 0)
-        assert '_skypilot_set_phase PENDING' in script
-        assert '_skypilot_set_phase SETTING_UP' in script
-        assert '_skypilot_set_phase RUNNING' in script
-
-    def test_has_discovery_server(self):
-        """Entrypoint should start background discovery server."""
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1, None, 'echo hi',
-                                          0)
-        assert 'discovery server' in script.lower()
-        assert 'DISCOVERY_PID' in script
-
-    def test_has_app_status_env(self):
-        """Entrypoint should export SKYPILOT_APP_STATUS."""
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1, None, 'echo hi',
-                                          0)
-        assert 'SKYPILOT_APP_STATUS' in script
-
-    def test_skypilot_nodes_helper(self):
-        """Entrypoint should define skypilot_nodes() helper."""
-        from sky.provision.kubernetes.managed_job import (
-            _build_entrypoint_script)
-        script = _build_entrypoint_script('test', 'default', 1, None, 'echo hi',
-                                          0)
-        assert 'skypilot_nodes()' in script
+    def test_gpu_creates_dshm_volume(self):
+        """GPU pods should get a /dev/shm volume."""
+        from sky.provision.kubernetes.managed_job import build_job_manifests
+        manifests, _, _ = build_job_manifests(
+            cluster_name='test',
+            namespace='default',
+            pod_spec=_POD_SPEC(resources={
+                'requests': {
+                    'cpu': '4',
+                    'nvidia.com/gpu': '1',
+                },
+                'limits': {
+                    'nvidia.com/gpu': '1',
+                },
+            }),
+            num_nodes=1,
+            min_nodes=1,
+            setup_commands=None,
+            run_commands='echo hi',
+            envs={},
+            num_gpus_per_node=1,
+        )
+        volumes = manifests[0]['spec'].get('volumes', [])
+        vol_names = [v['name'] for v in volumes]
+        assert 'dshm' in vol_names
 
 
 class TestMainContainerState:
@@ -352,7 +220,7 @@ class TestMainContainerState:
 
 
 class TestElasticJobStatus:
-    """Tests for get_elastic_job_status."""
+    """Tests for get_job_pod_status."""
 
     def _make_pod(self, main_state='running', name='pod-0', index='0'):
         pod = mock.MagicMock()
@@ -382,7 +250,7 @@ class TestElasticJobStatus:
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     def test_all_running(self, mock_core_api):
-        from sky.provision.kubernetes.managed_job import get_elastic_job_status
+        from sky.provision.kubernetes.managed_job import get_job_pod_status
         from sky.provision.kubernetes.managed_job import ManagedJobStatus
         pods_response = mock.MagicMock()
         pods_response.items = [
@@ -390,7 +258,7 @@ class TestElasticJobStatus:
         ]
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
-        status, running, succeeded, failed = get_elastic_job_status('test',
+        status, running, succeeded, failed = get_job_pod_status('test',
                                                                     'default',
                                                                     None,
                                                                     min_nodes=2)
@@ -401,7 +269,7 @@ class TestElasticJobStatus:
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     def test_all_succeeded(self, mock_core_api):
-        from sky.provision.kubernetes.managed_job import get_elastic_job_status
+        from sky.provision.kubernetes.managed_job import get_job_pod_status
         from sky.provision.kubernetes.managed_job import ManagedJobStatus
         pods_response = mock.MagicMock()
         pods_response.items = [
@@ -409,7 +277,7 @@ class TestElasticJobStatus:
         ]
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
-        status, running, succeeded, failed = get_elastic_job_status('test',
+        status, running, succeeded, failed = get_job_pod_status('test',
                                                                     'default',
                                                                     None,
                                                                     min_nodes=2)
@@ -418,7 +286,7 @@ class TestElasticJobStatus:
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     def test_below_min_nodes(self, mock_core_api):
-        from sky.provision.kubernetes.managed_job import get_elastic_job_status
+        from sky.provision.kubernetes.managed_job import get_job_pod_status
         from sky.provision.kubernetes.managed_job import ManagedJobStatus
         pods_response = mock.MagicMock()
         pods_response.items = [
@@ -426,7 +294,7 @@ class TestElasticJobStatus:
         ]
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
-        status, running, succeeded, failed = get_elastic_job_status('test',
+        status, running, succeeded, failed = get_job_pod_status('test',
                                                                     'default',
                                                                     None,
                                                                     min_nodes=2)
@@ -436,7 +304,7 @@ class TestElasticJobStatus:
     @mock.patch('sky.adaptors.kubernetes.core_api')
     def test_pending_not_counted_as_succeeded(self, mock_core_api):
         """Pending pods should prevent false SUCCEEDED (issue I6)."""
-        from sky.provision.kubernetes.managed_job import get_elastic_job_status
+        from sky.provision.kubernetes.managed_job import get_job_pod_status
         from sky.provision.kubernetes.managed_job import ManagedJobStatus
         pods_response = mock.MagicMock()
         pods_response.items = [
@@ -446,7 +314,7 @@ class TestElasticJobStatus:
         ]
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
-        status, running, succeeded, failed = get_elastic_job_status('test',
+        status, running, succeeded, failed = get_job_pod_status('test',
                                                                     'default',
                                                                     None,
                                                                     min_nodes=1)
@@ -478,8 +346,6 @@ class TestPodsToReplace:
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     def test_succeeded_pod_not_replaced(self, mock_core_api):
-        from sky.provision.kubernetes.managed_job import (
-            _get_main_container_state)
         from sky.provision.kubernetes.managed_job import get_pods_to_replace
         pod0 = mock.MagicMock()
         pod0.metadata.labels = {'skypilot-node-index': '0'}
@@ -501,8 +367,8 @@ class TestElasticPodTemplate:
     """Tests for the Jinja2 elastic pod template."""
 
     def test_template_renders(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -520,8 +386,8 @@ class TestElasticPodTemplate:
 
     def test_template_has_single_container(self):
         """Template should have only main container (no sidecar)."""
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -537,8 +403,8 @@ class TestElasticPodTemplate:
         assert containers[0]['name'] == 'main'
 
     def test_collocate_adds_affinity(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -554,8 +420,8 @@ class TestElasticPodTemplate:
         assert 'podAffinity' in affinity
 
     def test_skypilot_nodes_function_in_entrypoint(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -571,8 +437,8 @@ class TestElasticPodTemplate:
         assert 'skypilot_nodes' in entrypoint
 
     def test_phase_labels_in_entrypoint(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -590,8 +456,8 @@ class TestElasticPodTemplate:
         assert 'RUNNING' in entrypoint
 
     def test_app_status_env_var(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -607,8 +473,8 @@ class TestElasticPodTemplate:
         assert 'SKYPILOT_APP_STATUS' in env_names
 
     def test_jobgroup_tasks_env_var(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,
@@ -626,8 +492,8 @@ class TestElasticPodTemplate:
             'SKYPILOT_JOBGROUP_TASKS') == 'ctrl:svc1,workers:svc2'
 
     def test_gang_barrier_uses_nodes_endpoint(self):
-        from sky.provision.kubernetes.managed_job import render_elastic_pod
-        pod = render_elastic_pod(
+        from sky.provision.kubernetes.managed_job import render_pod
+        pod = render_pod(
             job_name='test',
             namespace='default',
             index=0,

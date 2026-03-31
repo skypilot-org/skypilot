@@ -304,8 +304,8 @@ class JobController:
                         f'kubeconfig defaults for log download.')
             context_name = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            context = (None if context_name ==
-                       k8s_adaptor.in_cluster_context_name()
+            context = (None
+                       if context_name == k8s_adaptor.in_cluster_context_name()
                        else context_name)
             cloud_name = cluster_name
         else:
@@ -322,12 +322,10 @@ class JobController:
                         f'{len(logs) if logs else 0} chars')
             if logs:
                 local_dir = os.path.expanduser(
-                    os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                 'managed_jobs',
+                    os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
                                  f'job-id-{self._job_id}'))
                 os.makedirs(local_dir, exist_ok=True)
-                log_file = os.path.join(local_dir,
-                                        f'task-{task_id}.log')
+                log_file = os.path.join(local_dir, f'task-{task_id}.log')
                 with open(log_file, 'w', encoding='utf-8') as f:
                     f.write(logs)
                 managed_job_state.set_local_log_file(self._job_id, task_id,
@@ -354,7 +352,7 @@ class JobController:
         if not managed_job_utils._is_v1_k8s_managed_job(handle):
             return None
 
-        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         # Get namespace/context with fallback to kubeconfig defaults
@@ -404,7 +402,7 @@ class JobController:
     async def _cleanup_k8s_managed_job(self, cluster_name: str) -> None:
         """Directly clean up K8s managed job resources."""
         from sky.adaptors import kubernetes as k8s_adaptor
-        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         handle = await asyncio.to_thread(
@@ -428,7 +426,7 @@ class JobController:
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'K8s Job cleanup: {e}')
         try:
-            await asyncio.to_thread(k8s_managed_job.delete_elastic_job,
+            await asyncio.to_thread(k8s_managed_job.delete_job,
                                     cloud_name, namespace, context)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Elastic job cleanup: {e}')
@@ -449,7 +447,7 @@ class JobController:
         if 'managed_job_config' not in provider_config:
             return None
 
-        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import utils as kubernetes_utils
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
         context = kubernetes_utils.get_context_from_config(provider_config)
@@ -1245,14 +1243,13 @@ class JobController:
             try:
                 await backend_utils.async_check_network_connection()
             except exceptions.NetworkError:
-                logger.info(
-                    'Network is not available. Retrying again in '
-                    f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
-                    'seconds.')
+                logger.info('Network is not available. Retrying again in '
+                            f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
+                            'seconds.')
                 continue
 
             status, running, succeeded, failed = (await asyncio.to_thread(
-                k8s_managed_job.get_elastic_job_status, cluster_name, namespace,
+                k8s_managed_job.get_job_pod_status, cluster_name, namespace,
                 context, min_nodes))
 
             logger.info(
@@ -2237,31 +2234,27 @@ class ControllerManager:
         since the pods may not have a standard cluster handle.
         For standard jobs, looks up the cluster and downloads via SSH.
         """
-        from sky.provision.kubernetes import managed_job as k8s_mj
-        if k8s_mj.is_managed_jobs_v1_enabled():
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        if k8s_managed_job.is_managed_jobs_v1_enabled():
             # V1: download directly from K8s API
-            log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                   'managed_jobs',
+            log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
                                    f'job-id-{job_id}')
             try:
-                from sky.provision.kubernetes import utils as k8s_utils  # pylint: disable=import-outside-toplevel
+                from sky.provision.kubernetes import utils as k8s_utils
                 ns = k8s_utils.get_kube_config_context_namespace()
                 ctx = k8s_utils.get_current_kube_config_context_name()
-                logs = await asyncio.to_thread(
-                    k8s_mj.get_pod_logs, cluster_name, ns, ctx)
+                logs = await asyncio.to_thread(k8s_managed_job.get_pod_logs,
+                                               cluster_name, ns, ctx)
                 os.makedirs(os.path.expanduser(log_dir), exist_ok=True)
-                log_file = os.path.join(
-                    os.path.expanduser(log_dir),
-                    f'task-{task_id}.log')
+                log_file = os.path.join(os.path.expanduser(log_dir),
+                                        f'task-{task_id}.log')
                 with open(log_file, 'w') as f:
                     f.write(logs)
                 logger.info(f'Downloaded K8s managed job logs to '
                             f'{log_file}')
-                managed_job_state.set_local_log_file(
-                    job_id, task_id, log_file)
+                managed_job_state.set_local_log_file(job_id, task_id, log_file)
             except Exception as e:  # pylint: disable=broad-except
-                logger.info(
-                    f'No pods found for job {cluster_name}')
+                logger.info(f'No pods found for job {cluster_name}')
             return
 
         clusters = await asyncio.to_thread(

@@ -53,7 +53,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
-from sky.provision.kubernetes import managed_job as k8s_mj
+from sky.provision.kubernetes import managed_job as k8s_managed_job
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
@@ -1254,7 +1254,7 @@ class RetryingVmProvisioner(object):
                         # into the cluster YAML so the K8s provisioner
                         # can create a Job manifest with user commands
                         # baked into the pod spec.
-                        if (k8s_mj.is_managed_jobs_v1_enabled()
+                        if (k8s_managed_job.is_managed_jobs_v1_enabled()
                                 and self._is_managed and isinstance(
                                     to_provision.cloud, clouds.Kubernetes)):
                             self._inject_managed_job_config_to_yaml(
@@ -3315,7 +3315,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_k8s = isinstance(handle.launched_resources.cloud,
                                     clouds.Kubernetes)
                 is_k8s_managed_job = (
-                    k8s_mj.is_managed_jobs_v1_enabled() and is_k8s and
+                    k8s_managed_job.is_managed_jobs_v1_enabled() and is_k8s and
                     self._is_managed)
 
                 if is_k8s_managed_job:
@@ -3484,7 +3484,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # K8s managed jobs don't have skylet - skip job queue updates.
         is_k8s_managed = (
-            k8s_mj.is_managed_jobs_v1_enabled() and
+            k8s_managed_job.is_managed_jobs_v1_enabled() and
             isinstance(handle.launched_resources.cloud, clouds.Kubernetes) and
             self._is_managed)
 
@@ -3745,7 +3745,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         start = time.time()
 
         # K8s managed jobs have setup baked into the pod spec.
-        if (k8s_mj.is_managed_jobs_v1_enabled() and
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
                 isinstance(handle.launched_resources.cloud,
                            clouds.Kubernetes) and self._is_managed):
             logger.info('K8s managed job: skipping SSH-based setup.')
@@ -4257,7 +4257,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # K8s managed jobs run commands directly in pods - no Ray submission.
         # We still need to return a job_id so the managed jobs controller
         # can track the job. We use job_id=1 as a convention.
-        if (k8s_mj.is_managed_jobs_v1_enabled() and
+        if (k8s_managed_job.is_managed_jobs_v1_enabled() and
                 isinstance(handle.launched_resources.cloud,
                            clouds.Kubernetes) and self._is_managed):
             logger.info('K8s managed job: pods already running user commands. '

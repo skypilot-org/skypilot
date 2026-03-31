@@ -243,6 +243,10 @@ spec:
 {% if vol.emptyDir is defined %}
       emptyDir: {}
 {% endif %}
+{% if vol.configMap is defined %}
+      configMap:
+        name: "{{ vol.configMap.name }}"
+{% endif %}
 {% endfor %}
 {% endif %}
 {% endif %}

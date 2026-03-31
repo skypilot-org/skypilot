@@ -304,8 +304,8 @@ class StrategyExecutor:
             # For K8s managed jobs, skip cluster status refresh (no
             # SSH/skylet to query) and go straight to K8s API status.
             # Check config first (fast), then YAML (reliable).
-            from sky.provision.kubernetes import managed_job as k8s_mj  # pylint: disable=import-outside-toplevel
-            is_k8s_v1 = k8s_mj.is_managed_jobs_v1_enabled()
+            from sky.provision.kubernetes import managed_job as k8s_managed_job
+            is_k8s_v1 = k8s_managed_job.is_managed_jobs_v1_enabled()
             if not is_k8s_v1 and self.cluster_name is not None:
                 _handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name,
@@ -1075,7 +1075,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
         # Build and apply all manifests
         pod_manifests, service_manifest, rbac_manifests = (
-            k8s_managed_job.build_elastic_job_manifests(
+            k8s_managed_job.build_job_manifests(
                 cluster_name=job_name,
                 namespace=self._namespace,
                 pod_spec=pod_spec,
@@ -1092,7 +1092,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             ))
 
         try:
-            k8s_managed_job.apply_elastic_job(
+            k8s_managed_job.apply_job(
                 namespace=self._namespace,
                 context=self._context,
                 pod_manifests=pod_manifests,
@@ -1109,7 +1109,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         start = time.time()
         timeout = 300
         while time.time() - start < timeout:
-            status, running, _, _ = (k8s_managed_job.get_elastic_job_status(
+            status, running, _, _ = (k8s_managed_job.get_job_pod_status(
                 job_name, self._namespace, self._context, self.min_nodes))
             if running >= self.min_nodes:
                 logger.info(f'Elastic job {job_name}: {running} pods running '
@@ -1180,7 +1180,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         if self.cluster_name is None:
             return
-        k8s_managed_job.delete_elastic_job(self.cluster_name, self._namespace or
+        k8s_managed_job.delete_job(self.cluster_name, self._namespace or
                                            'default', self._context)
 
     def _build_pod_spec_from_task(self,

@@ -2,14 +2,14 @@
 
 This module provides a fast path for managed jobs on Kubernetes that bypasses
 the full SkyPilot backend pipeline (Ray, Skylet, SSH, rsync). Instead, it
-creates K8s Job resources directly with user commands baked into the pod spec.
+creates K8s Pod resources directly with user commands baked in via a Jinja2
+template (kubernetes-managed-job.yaml.j2).
 
 For a 1004-node cluster, this reduces launch time from ~28 min to ~30s by
 eliminating: internal_file_mounts, setup_runtime_on_cluster, Ray cluster setup,
 Skylet startup, SSH-based user setup, and Ray-based job submission.
 """
 import base64
-import copy
 import enum
 import logging
 import os
@@ -23,8 +23,6 @@ from sky import cloud_stores
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.data import data_utils
-from sky.provision import constants as provision_constants
-from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import discovery_sidecar
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants as skylet_constants
@@ -44,6 +42,7 @@ def is_managed_jobs_v1_enabled() -> bool:
     """Check if the K8s-native managed job fast path is enabled."""
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
     return bool(skypilot_config.get_nested(_CONFIG_KEY, False))
+
 
 # Label to identify managed job resources created by this module.
 TAG_MANAGED_JOB = 'skypilot-managed-job'
@@ -66,162 +65,6 @@ class ManagedJobStatus(enum.Enum):
     FAILED = 'FAILED'
     UNKNOWN = 'UNKNOWN'
 
-
-def build_job_manifest(
-    cluster_name_on_cloud: str,
-    namespace: str,
-    pod_spec: Dict[str, Any],
-    num_nodes: int,
-    setup_commands: Optional[str],
-    run_commands: Optional[str],
-    envs: Dict[str, str],
-    num_gpus_per_node: int = 0,
-    workdir: Optional[Dict[str, Any]] = None,
-    file_mounts: Optional[Dict[str, str]] = None,
-) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Build K8s Job manifest and headless Service for a managed job.
-
-    Args:
-        cluster_name_on_cloud: Unique name for the cluster/job.
-        namespace: K8s namespace to create resources in.
-        pod_spec: Base pod spec from the cluster config (contains resource
-            requests, image, volumes, etc.).
-        num_nodes: Number of pods to create.
-        setup_commands: User's setup commands (run before the main task).
-        run_commands: User's run commands (the main task).
-        envs: User environment variables to set in each pod.
-        num_gpus_per_node: Number of GPUs per node.
-        workdir: Workdir config dict. {'git': {...}} for git repos,
-            {'path': '/local/path'} for local dirs. None if no workdir.
-        file_mounts: Dict of remote_path -> local_path_or_cloud_uri.
-
-    Returns:
-        Tuple of (job_manifest, service_manifest, rbac_manifests).
-        service_manifest is None for single-node jobs.
-    """
-    job_name = cluster_name_on_cloud
-
-    # Build the entrypoint script that runs setup + run commands
-    entrypoint = _build_entrypoint_script(
-        job_name=job_name,
-        namespace=namespace,
-        num_nodes=num_nodes,
-        setup_commands=setup_commands,
-        run_commands=run_commands,
-        num_gpus_per_node=num_gpus_per_node,
-        workdir=workdir,
-        file_mounts=file_mounts,
-    )
-
-    # Deep copy pod spec and modify for managed job
-    job_pod_spec = copy.deepcopy(pod_spec)
-
-    # Strip Ray-specific metadata and labels that don't apply
-    metadata = job_pod_spec.get('metadata', {})
-    labels = metadata.get('labels', {})
-    # Keep skypilot labels, remove ray labels
-    labels.pop(k8s_constants.TAG_RAY_CLUSTER_NAME, None)
-    labels[TAG_MANAGED_JOB] = 'true'
-    labels[TAG_MANAGED_JOB_NAME] = job_name
-    labels[provision_constants.TAG_SKYPILOT_CLUSTER_NAME] = (
-        cluster_name_on_cloud)
-
-    # Override the container command to run our entrypoint
-    containers = job_pod_spec['spec']['containers']
-    # Keep only one container (strip any extra sidecars from Ray spec)
-    main_container = containers[0]
-    job_pod_spec['spec']['containers'] = [main_container]
-    main_container['command'] = ['/bin/bash', '-c']
-    main_container['args'] = [entrypoint]
-
-    # Strip Ray-specific container config that conflicts
-    main_container.pop('lifecycle', None)
-    main_container.pop('readinessProbe', None)
-    main_container.pop('livenessProbe', None)
-    main_container.pop('startupProbe', None)
-
-    # Add environment variables
-    env_list = main_container.get('env', [])
-    env_list.append({
-        'name': 'SKYPILOT_NUM_NODES',
-        'value': str(num_nodes),
-    })
-    env_list.append({
-        'name': 'SKYPILOT_NUM_GPUS_PER_NODE',
-        'value': str(num_gpus_per_node),
-    })
-    for key, value in envs.items():
-        env_list.append({'name': key, 'value': str(value)})
-    main_container['env'] = env_list
-
-    # Remove init containers and restart policy (SkyPilot setup not needed)
-    job_pod_spec['spec'].pop('initContainers', None)
-    # Ensure pods don't restart on failure (controller handles recovery)
-    job_pod_spec['spec']['restartPolicy'] = 'Never'
-
-    # For indexed jobs, set subdomain for DNS-based peer discovery
-    if num_nodes > 1:
-        job_pod_spec['spec']['subdomain'] = job_name
-
-    # Build the Job manifest
-    job_manifest: Dict[str, Any] = {
-        'apiVersion': 'batch/v1',
-        'kind': 'Job',
-        'metadata': {
-            'name': job_name,
-            'namespace': namespace,
-            'labels': {
-                TAG_MANAGED_JOB: 'true',
-                TAG_MANAGED_JOB_NAME: job_name,
-                provision_constants.TAG_SKYPILOT_CLUSTER_NAME:
-                    (cluster_name_on_cloud),
-            },
-        },
-        'spec': {
-            'completions': num_nodes,
-            'parallelism': num_nodes,
-            'completionMode': 'Indexed',
-            'backoffLimit': 0,  # No retries - managed job controller handles
-            'template': {
-                'metadata': {
-                    'labels': labels,
-                    'annotations': metadata.get('annotations', {}),
-                },
-                'spec': job_pod_spec['spec'],
-            },
-        },
-    }
-
-    # Build headless service for multi-node peer discovery
-    service_manifest = None
-    if num_nodes > 1:
-        service_manifest = {
-            'apiVersion': 'v1',
-            'kind': 'Service',
-            'metadata': {
-                'name': job_name,
-                'namespace': namespace,
-                'labels': {
-                    TAG_MANAGED_JOB: 'true',
-                    TAG_MANAGED_JOB_NAME: job_name,
-                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME:
-                        (cluster_name_on_cloud),
-                },
-            },
-            'spec': {
-                'clusterIP': 'None',  # Headless service
-                'selector': {
-                    TAG_MANAGED_JOB_NAME: job_name,
-                },
-                'publishNotReadyAddresses': True,
-            },
-        }
-
-    # RBAC for discovery server (phase/app_status label patching, pod listing)
-    sa = job_pod_spec['spec'].get('serviceAccountName', 'default')
-    rbac_manifests = _build_rbac_manifests(job_name, namespace, sa)
-
-    return job_manifest, service_manifest, rbac_manifests
 
 
 def _build_workdir_block(workdir: Optional[Dict[str, Any]]) -> str:
@@ -319,214 +162,6 @@ def _build_file_mounts_block(file_mounts: Optional[Dict[str, str]]) -> str:
     if not commands:
         return ''
     return '# === File Mounts ===\n' + '\n'.join(commands) + '\n'
-
-
-def _build_entrypoint_script(
-    job_name: str,
-    namespace: str,
-    num_nodes: int,
-    setup_commands: Optional[str],
-    run_commands: Optional[str],
-    num_gpus_per_node: int = 0,
-    workdir: Optional[Dict[str, Any]] = None,
-    file_mounts: Optional[Dict[str, str]] = None,
-) -> str:
-    """Build the shell script that runs as the pod's entrypoint.
-
-    This script:
-    1. Sets SKYPILOT_NODE_RANK from JOB_COMPLETION_INDEX
-    2. Starts background discovery server on localhost:9876
-    3. Patches pod labels at phase transitions (PENDING → SETTING_UP → RUNNING)
-    4. For multi-node: waits for peers via /nodes endpoint
-    5. Sets up workdir (git clone) and file mounts
-    6. Runs user setup commands
-    7. Runs user run commands
-    """
-    # Build workdir setup block
-    workdir_block = _build_workdir_block(workdir)
-
-    # Build file mounts download block
-    file_mounts_block = _build_file_mounts_block(file_mounts)
-
-    setup_block = ''
-    if setup_commands:
-        setup_block = textwrap.dedent(f"""\
-            # === User Setup ===
-            _skypilot_set_phase SETTING_UP
-            {setup_commands}
-            """)
-
-    run_block = ''
-    if run_commands:
-        run_block = textwrap.dedent(f"""\
-            # === User Run ===
-            _skypilot_set_phase RUNNING
-            {run_commands}
-            """)
-
-    if num_nodes > 1:
-        peer_discovery = textwrap.dedent(f"""\
-            # === Wait for all nodes via /nodes endpoint ===
-            # Count nodes whose entrypoint started (status in PENDING/SETTING_UP/RUNNING)
-            _skylog "Waiting for {num_nodes} initialized nodes..."
-            RETRIES=0
-            MAX_RETRIES=120
-            while true; do
-                NODE_COUNT=$(skypilot_nodes 2>/dev/null | python3 -c "
-import sys,json; d=json.load(sys.stdin)
-# Handle both single-task ('nodes' key) and job-group (task-name keys) formats
-nodes = d.get('nodes', [])
-if not nodes:
-    for v in d.values():
-        if isinstance(v, list): nodes.extend(v)
-ok = ('PENDING','SETTING_UP','RUNNING')
-print(len([n for n in nodes if n.get('status') in ok]))
-" 2>/dev/null || echo 0)
-                if [ "$NODE_COUNT" -ge {num_nodes} ] 2>/dev/null; then
-                    break
-                fi
-                RETRIES=$((RETRIES + 1))
-                if [ $RETRIES -ge $MAX_RETRIES ]; then
-                    _skylog "WARNING: Only found $NODE_COUNT/{num_nodes} nodes after $MAX_RETRIES retries"
-                    break
-                fi
-                sleep 1
-            done
-            # Export IPs for compatibility
-            PEER_IPS=$(skypilot_nodes 2>/dev/null | python3 -c "
-            import sys,json
-            nodes=json.load(sys.stdin).get('nodes',[])
-            print('\\n'.join(n['ip'] for n in nodes if n.get('ip')))" 2>/dev/null || true)
-            export SKYPILOT_NODE_IPS="$PEER_IPS"
-            _skylog "Discovered $(echo "$SKYPILOT_NODE_IPS" | wc -l) nodes"
-            """)
-    else:
-        peer_discovery = textwrap.dedent("""\
-            # Single node - no peer discovery needed
-            export SKYPILOT_NODE_IPS="$(hostname -i)"
-            """)
-
-    # The discovery server script is embedded in the entrypoint as a
-    # background process. We base64-encode it to avoid shell quoting issues.
-    discovery_script_b64 = discovery_sidecar.DISCOVERY_SERVER_SCRIPT_B64
-    discovery_port = discovery_sidecar.DISCOVERY_SERVER_PORT
-
-    script = textwrap.dedent(f"""\
-        #!/bin/bash
-        set -eo pipefail
-
-        # === SkyPilot Managed Job Entrypoint ===
-        export SKYPILOT_NODE_RANK=${{JOB_COMPLETION_INDEX:-0}}
-        export SKYPILOT_NUM_NODES={num_nodes}
-        export SKYPILOT_NUM_GPUS_PER_NODE={num_gpus_per_node}
-        export SKYPILOT_SERVICE_NAME={job_name}
-        export SKYPILOT_NAMESPACE={namespace}
-        export SKYPILOT_DISCOVERY_PORT={discovery_port}
-        export SKYPILOT_APP_STATUS=/tmp/skypilot_app_status
-
-        # SkyPilot internal messages go to a separate file (hidden from log streaming)
-        _skylog() {{ echo "$@" >> /tmp/skypilot_internal.log; }}
-
-        # Phase label: patch pod label to track entrypoint progress
-        _skypilot_set_phase() {{
-          python3 -c "
-        import urllib.request, json, ssl, os
-        token = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read().strip()
-        ns = os.environ.get('SKYPILOT_NAMESPACE', 'default')
-        pod = os.environ.get('HOSTNAME', '')
-        url = f'https://kubernetes.default.svc/api/v1/namespaces/{{ns}}/pods/{{pod}}'
-        data = json.dumps({{'metadata':{{'labels':{{'skypilot-node-phase':'$1'}}}}}}).encode()
-        req = urllib.request.Request(url, data=data, method='PATCH')
-        req.add_header('Authorization', f'Bearer {{token}}')
-        req.add_header('Content-Type', 'application/strategic-merge-patch+json')
-        ctx = ssl.create_default_context(cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
-        urllib.request.urlopen(req, context=ctx)
-        " 2>/dev/null || true
-        }}
-
-        # Helper: query discovery server for node list
-        skypilot_nodes() {{
-          python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:{discovery_port}/nodes').read().decode())" 2>/dev/null \\
-            || curl -s "http://localhost:{discovery_port}/nodes" 2>/dev/null \\
-            || echo '{{"error":"discovery server not ready"}}'
-        }}
-        export -f skypilot_nodes
-
-        # Start background discovery server
-        _skylog "Starting discovery server on port {discovery_port}..."
-        echo '{discovery_script_b64}' | base64 -d > /tmp/skypilot_discovery.py
-        python3 /tmp/skypilot_discovery.py &
-        DISCOVERY_PID=$!
-        sleep 1
-
-        _skypilot_set_phase PENDING
-        _skylog "SkyPilot managed job starting on node rank $SKYPILOT_NODE_RANK / $SKYPILOT_NUM_NODES"
-
-        {peer_discovery}
-        {workdir_block}
-        {file_mounts_block}
-        {setup_block}
-        {run_block}
-        """)
-    return script
-
-
-def apply_managed_job(
-    namespace: str,
-    context: Optional[str],
-    job_manifest: Dict[str, Any],
-    service_manifest: Optional[Dict[str, Any]],
-    rbac_manifests: Optional[List[Dict[str, Any]]] = None,
-) -> str:
-    """Apply K8s Job and Service manifests.
-
-    Returns:
-        The name of the created Job.
-    """
-    # Create RBAC first (needed for discovery server label patching)
-    for manifest in (rbac_manifests or []):
-        kind = manifest['kind']
-        name = manifest['metadata']['name']
-        try:
-            if kind == 'Role':
-                kubernetes.auth_api(context).create_namespaced_role(
-                    namespace, manifest)
-            elif kind == 'RoleBinding':
-                kubernetes.auth_api(context).create_namespaced_role_binding(
-                    namespace, manifest)
-            logger.debug(f'Created {kind} {name}')
-        except kubernetes.api_exception() as e:
-            if e.status == 409:
-                logger.debug(f'{kind} {name} already exists.')
-            else:
-                raise
-
-    # Create headless service first (needed for DNS before pods start)
-    if service_manifest is not None:
-        try:
-            kubernetes.core_api(context).create_namespaced_service(
-                namespace, service_manifest)
-            svc_name = service_manifest['metadata']['name']
-            logger.debug(f'Created headless service {svc_name}')
-        except kubernetes.api_exception() as e:
-            if e.status == 409:  # Already exists
-                logger.debug('Headless service already exists, continuing.')
-            else:
-                raise
-
-    # Create the Job
-    job_name = job_manifest['metadata']['name']
-    try:
-        kubernetes.batch_api(context).create_namespaced_job(
-            namespace, job_manifest)
-        logger.info(f'Created K8s Job {job_name}')
-    except kubernetes.api_exception() as e:
-        if e.status == 409:  # Already exists
-            logger.debug(f'Job {job_name} already exists, continuing.')
-        else:
-            raise
-
-    return job_name
 
 
 def upload_local_files_to_configmap(
@@ -730,6 +365,9 @@ def get_pod_logs(
 ) -> str:
     """Get logs from pods in a managed job.
 
+    For multiple pods, fetches timestamped logs and interleaves them
+    chronologically so multi-node output is readable.
+
     Args:
         job_name: Name of the K8s Job.
         namespace: K8s namespace.
@@ -740,7 +378,7 @@ def get_pod_logs(
         tail_lines: Number of tail lines to return.
 
     Returns:
-        Log content as a string.
+        Log content as a string with ``(node N)`` prefixes.
     """
     label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
     pods = kubernetes.core_api(context).list_namespaced_pod(
@@ -749,12 +387,10 @@ def get_pod_logs(
     if not pods.items:
         return f'No pods found for job {job_name}'
 
-    # Sort pods by their index (from job-completion-index annotation)
+    # Sort pods by their node index label
     sorted_pods = sorted(
         pods.items,
-        key=lambda p: int(
-            p.metadata.labels.get('batch.kubernetes.io/job-completion-index',
-                                  '0')))
+        key=lambda p: int(p.metadata.labels.get(TAG_NODE_INDEX, '0')))
 
     if pod_index is not None:
         if pod_index >= len(sorted_pods):
@@ -762,23 +398,51 @@ def get_pod_logs(
                     f'(total: {len(sorted_pods)})')
         sorted_pods = [sorted_pods[pod_index]]
 
-    all_logs = []
-    for pod in sorted_pods:
+    # Single pod: no interleaving needed
+    if len(sorted_pods) == 1:
+        pod = sorted_pods[0]
         pod_name = pod.metadata.name
-        idx = pod.metadata.labels.get(
-            'batch.kubernetes.io/job-completion-index', '?')
+        idx = _get_node_index(pod)
         try:
-            kwargs = {}
+            kwargs: dict = {}
             if tail_lines is not None:
                 kwargs['tail_lines'] = tail_lines
             log = kubernetes.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=follow, **kwargs)
-            all_logs.append(f'--- Node {idx} ({pod_name}) ---\n{log}')
+            lines = [f'(node {idx}) {line}' for line in log.splitlines()]
+            return '\n'.join(lines)
         except kubernetes.api_exception() as e:
-            all_logs.append(f'--- Node {idx} ({pod_name}) ---\n'
-                            f'[Error getting logs: {e.reason}]')
+            return f'(node {idx}) [Error getting logs: {e.reason}]'
 
-    return '\n'.join(all_logs)
+    # Multiple pods: fetch with timestamps and interleave chronologically
+    all_entries: list = []  # (timestamp_str, node_idx, line_content)
+    for pod in sorted_pods:
+        pod_name = pod.metadata.name
+        idx = _get_node_index(pod)
+        try:
+            kwargs = {'timestamps': True}
+            if tail_lines is not None:
+                kwargs['tail_lines'] = tail_lines
+            log = kubernetes.core_api(context).read_namespaced_pod_log(
+                pod_name, namespace, follow=follow, **kwargs)
+            for raw_line in log.splitlines():
+                # K8s format: "2024-01-01T00:00:00.000000000Z <content>"
+                space_idx = raw_line.find(' ')
+                if space_idx > 0:
+                    ts = raw_line[:space_idx]
+                    content = raw_line[space_idx + 1:]
+                else:
+                    ts = ''
+                    content = raw_line
+                all_entries.append((ts, idx, content))
+        except kubernetes.api_exception() as e:
+            all_entries.append(('', idx, f'[Error getting logs: {e.reason}]'))
+
+    # ISO 8601 timestamps sort lexicographically
+    all_entries.sort(key=lambda x: x[0])
+
+    return '\n'.join(
+        f'(node {idx}) {content}' for _, idx, content in all_entries)
 
 
 def delete_managed_job(
@@ -788,23 +452,18 @@ def delete_managed_job(
 ) -> None:
     """Delete a K8s managed job and its associated resources.
 
-    This deletes the Job (with cascading pod deletion) and the headless
-    Service used for peer discovery.
+    Deletes all pods by label selector, the headless Service, RBAC
+    resources, and the file-mount ConfigMap.
     """
-    # Delete the Job with cascading deletion (kills all pods)
+    # Delete all pods by label selector
+    label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
     try:
-        kubernetes.batch_api(context).delete_namespaced_job(
-            job_name,
-            namespace,
-            body=kubernetes.kubernetes.client.V1DeleteOptions(
-                propagation_policy='Foreground'),
-        )
-        logger.info(f'Deleted K8s Job {job_name}')
+        kubernetes.core_api(context).delete_collection_namespaced_pod(
+            namespace, label_selector=label_selector)
+        logger.info(f'Deleted pods for managed job {job_name}')
     except kubernetes.api_exception() as e:
-        if e.status == 404:
-            logger.debug(f'Job {job_name} already deleted.')
-        else:
-            logger.warning(f'Failed to delete job {job_name}: {e}')
+        if e.status != 404:
+            logger.warning(f'Failed to delete pods for {job_name}: {e}')
 
     # Delete the headless service
     try:
@@ -812,9 +471,7 @@ def delete_managed_job(
             job_name, namespace)
         logger.debug(f'Deleted headless service {job_name}')
     except kubernetes.api_exception() as e:
-        if e.status == 404:
-            logger.debug(f'Service {job_name} already deleted.')
-        else:
+        if e.status != 404:
             logger.warning(f'Failed to delete service {job_name}: {e}')
 
     # Delete RBAC resources
@@ -861,9 +518,7 @@ def get_pod_exit_codes(
 
     exit_codes = {}
     for pod in pods.items:
-        idx = int(
-            pod.metadata.labels.get('batch.kubernetes.io/job-completion-index',
-                                    '0'))
+        idx = int(pod.metadata.labels.get(TAG_NODE_INDEX, '0'))
         if (pod.status.container_statuses and
                 pod.status.container_statuses[0].state.terminated):
             exit_codes[idx] = (
@@ -895,17 +550,8 @@ def is_managed_job_cluster(cluster_name_on_cloud: str, namespace: str,
                            context: Optional[str]) -> bool:
     """Check if a cluster is a K8s-native managed job.
 
-    Returns True if there is a K8s Job or managed job pods with this name.
+    Returns True if there are managed job pods with this name.
     """
-    # Check for K8s Job resource
-    try:
-        kubernetes.batch_api(context).read_namespaced_job(
-            cluster_name_on_cloud, namespace)
-        return True
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            raise
-    # Check for elastic job pods (individual pods, not a Job)
     label_selector = f'{TAG_MANAGED_JOB_NAME}={cluster_name_on_cloud}'
     try:
         pods = kubernetes.core_api(context).list_namespaced_pod(
@@ -921,6 +567,17 @@ def is_managed_job_cluster(cluster_name_on_cloud: str, namespace: str,
 
 TAG_NODE_INDEX = 'skypilot-node-index'
 
+
+def _get_node_index(pod) -> str:
+    """Get the node index label from a pod, raising if missing."""
+    idx = pod.metadata.labels.get(TAG_NODE_INDEX)
+    if idx is None:
+        raise ValueError(
+            f'Pod {pod.metadata.name} is missing required label '
+            f'{TAG_NODE_INDEX!r}')
+    return idx
+
+
 # Template file for elastic pod manifests
 _ELASTIC_POD_TEMPLATE = 'kubernetes-managed-job.yaml.j2'
 
@@ -935,7 +592,7 @@ def _get_num_threads() -> int:
     return _NUM_THREADS
 
 
-def render_elastic_pod(
+def render_pod(
     job_name: str,
     namespace: str,
     index: int,
@@ -1004,7 +661,7 @@ def render_elastic_pod(
     return yaml_utils.safe_load(rendered)
 
 
-def build_elastic_job_manifests(
+def build_job_manifests(
     cluster_name: str,
     namespace: str,
     pod_spec: Dict[str, Any],
@@ -1070,7 +727,7 @@ def build_elastic_job_manifests(
     # Build pod manifests
     pod_manifests = []
     for i in range(num_nodes):
-        pod = render_elastic_pod(
+        pod = render_pod(
             job_name=cluster_name,
             namespace=namespace,
             index=i,
@@ -1173,7 +830,7 @@ def _build_rbac_manifests(job_name: str, namespace: str,
     return [role, role_binding]
 
 
-def apply_elastic_job(
+def apply_job(
     namespace: str,
     context: Optional[str],
     pod_manifests: List[Dict[str, Any]],
@@ -1303,7 +960,7 @@ def create_replacement_pod(
 
     # Create new pod from template
     gpu_request = str(num_gpus_per_node) if num_gpus_per_node > 0 else None
-    pod_manifest = render_elastic_pod(
+    pod_manifest = render_pod(
         job_name=job_name,
         namespace=namespace,
         index=index,
@@ -1356,7 +1013,7 @@ def _get_main_container_state(pod) -> str:
     return 'pending'
 
 
-def get_elastic_job_status(
+def get_job_pod_status(
     job_name: str,
     namespace: str,
     context: Optional[str],
@@ -1415,29 +1072,6 @@ def get_elastic_job_status(
     return ManagedJobStatus.PENDING, running, succeeded, failed
 
 
-def get_failed_pod_indices(
-    job_name: str,
-    namespace: str,
-    context: Optional[str],
-) -> List[int]:
-    """Get indices of failed pods that need replacement."""
-    label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
-    try:
-        pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace, label_selector=label_selector)
-    except Exception as e:
-        logger.warning(f'Failed to list pods for {job_name}: {e}')
-        return []
-
-    failed_indices = []
-    for pod in pods.items:
-        state = _get_main_container_state(pod)
-        if state == 'failed':
-            idx = int(pod.metadata.labels.get(TAG_NODE_INDEX, '-1'))
-            if idx >= 0:
-                failed_indices.append(idx)
-    return failed_indices
-
 
 def get_pods_to_replace(
     job_name: str,
@@ -1481,7 +1115,7 @@ def get_pods_to_replace(
     return to_replace
 
 
-def delete_elastic_job(
+def delete_job(
     job_name: str,
     namespace: str,
     context: Optional[str],

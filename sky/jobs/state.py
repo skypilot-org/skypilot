@@ -1798,6 +1798,23 @@ def set_job_infra(job_id: int,
             session.commit()
 
 
+def get_job_infra(job_id: int) -> Optional[Dict[str, Optional[str]]]:
+    """Get cloud/region/zone infrastructure info for a job.
+
+    Returns None if the job is not found or infra has not been set yet.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(
+            job_info_table.c.cloud,
+            job_info_table.c.region,
+            job_info_table.c.zone,
+        ).filter(job_info_table.c.spot_job_id == job_id).first()
+        if row is None or row.cloud is None:
+            return None
+        return {'cloud': row.cloud, 'region': row.region, 'zone': row.zone}
+
+
 def update_job_full_resources(job_id: int,
                               full_resources_json: Dict[str, Any]) -> None:
     """Update the full_resources column for a job.
