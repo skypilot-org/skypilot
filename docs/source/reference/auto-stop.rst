@@ -285,13 +285,13 @@ Common use cases for autostop hooks:
 
 .. _preemption-hooks:
 
-Preemption hooks (Kubernetes)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Autostop hooks on Kubernetes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-On Kubernetes, the same ``autostop.hook`` is automatically embedded as a
+On Kubernetes, ``autostop.hook`` is automatically embedded as a
 Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time.
-This means a single hook configuration handles both autostop and preemption
-scenarios.
+This means the same hook fires on both idle autostop and involuntary
+termination (preemption, node drain, eviction).
 
 .. code-block:: yaml
 
