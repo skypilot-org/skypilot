@@ -308,28 +308,43 @@ def test_batch_ha_kill_running(generic_cloud: str):
              f'echo "Timeout waiting for batch job to reach RUNNING"\n'
              f'exit 1'),
 
-            # --- Let batches accumulate, then record progress and job ID ---
-            (
-                f'echo "Sleeping 60s to let batches complete..."\n'
-                f'sleep 60\n'
-                f'QUEUE=$(sky jobs queue 2>/dev/null)\n'
-                f'POOL_LINE=$(echo "$QUEUE" | grep "{pool_name}" | head -1)\n'
-                f'PROGRESS=$(echo "$POOL_LINE" '
-                f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
-                f'COMPLETED=${{PROGRESS%%/*}}\n'
-                # Also record the managed job ID for log verification later.
-                f'JOB_ID=$(echo "$POOL_LINE" '
-                f'| awk \'$1 ~ /^[0-9]+$/ {{print $1}}\')\n'
-                f'echo "Progress before kill: $PROGRESS '
-                f'(completed=$COMPLETED, job_id=$JOB_ID)"\n'
-                f'if [ -z "$COMPLETED" ] || [ "$COMPLETED" -eq 0 ]; then\n'
-                f'  echo "ERROR: No batches completed after 60s"\n'
-                f'  exit 1\n'
-                f'fi\n'
-                f'echo "$COMPLETED" '
-                f'> /tmp/batch-ha-progress-{name}.txt\n'
-                f'echo "$JOB_ID" '
-                f'> /tmp/batch-ha-jobid-{name}.txt'),
+            # --- Poll until some batches complete, then record progress ---
+            # Workers need time to start; poll instead of a fixed sleep.
+            (f'echo "Waiting for batches to start completing..."\n'
+             f'for i in $(seq 1 120); do\n'
+             f'  QUEUE=$(sky jobs queue 2>/dev/null)\n'
+             f'  POOL_LINE=$(echo "$QUEUE" '
+             f'| grep "{pool_name}" | head -1)\n'
+             f'  PROGRESS=$(echo "$POOL_LINE" '
+             f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
+             f'  COMPLETED=${{PROGRESS%%/*}}\n'
+             f'  if [ -n "$COMPLETED" ] && [ "$COMPLETED" -gt 0 ]; then\n'
+             f'    break\n'
+             f'  fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             # Once progress is non-zero, let a few more batches complete
+             # so we have a meaningful checkpoint to verify after resume.
+             f'echo "First batch completed, sleeping 300s for more progress"\n'
+             f'sleep 300\n'
+             f'QUEUE=$(sky jobs queue 2>/dev/null)\n'
+             f'POOL_LINE=$(echo "$QUEUE" | grep "{pool_name}" | head -1)\n'
+             f'PROGRESS=$(echo "$POOL_LINE" '
+             f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
+             f'COMPLETED=${{PROGRESS%%/*}}\n'
+             # Record the managed job ID for log verification later.
+             f'JOB_ID=$(echo "$POOL_LINE" '
+             f'| awk \'$1 ~ /^[0-9]+$/ {{print $1}}\')\n'
+             f'echo "Progress before kill: $PROGRESS '
+             f'(completed=$COMPLETED, job_id=$JOB_ID)"\n'
+             f'if [ -z "$COMPLETED" ] || [ "$COMPLETED" -eq 0 ]; then\n'
+             f'  echo "ERROR: No batches completed"\n'
+             f'  exit 1\n'
+             f'fi\n'
+             f'echo "$COMPLETED" '
+             f'> /tmp/batch-ha-progress-{name}.txt\n'
+             f'echo "$JOB_ID" '
+             f'> /tmp/batch-ha-jobid-{name}.txt'),
 
             # --- Kill controller pod ---
             smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
@@ -428,7 +443,7 @@ def test_batch_ha_kill_running(generic_cloud: str):
          f' /tmp/batch-ha-progress-{name}.txt'
          f' /tmp/batch-ha-jobid-{name}.txt;'
          f' {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
-        timeout=30 * 60,
+        timeout=45 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path,
