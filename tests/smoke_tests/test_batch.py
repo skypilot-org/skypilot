@@ -230,13 +230,13 @@ def test_batch_custom_formats():
              "import json, subprocess\n"
              f"bucket = '{bucket}'\n"
              "for idx in [0, 5, 19]:\n"
-             "    path = f's3://{{bucket}}/output/metadata/{{idx:08d}}.json'\n"
+             "    path = f's3://{bucket}/output/metadata/{idx:08d}.json'\n"
              "    data = subprocess.check_output(['aws', 's3', 'cp', path, '-'])\n"
              "    meta = json.loads(data)\n"
-             "    assert meta['id'] == idx, f'Wrong id: {{meta}}'\n"
-             "    assert meta['squared'] == idx ** 2, f'Wrong squared: {{meta}}'\n"
+             "    assert meta['id'] == idx, f'Wrong id: {meta}'\n"
+             "    assert meta['squared'] == idx ** 2, f'Wrong squared: {meta}'\n"
              "    assert meta['tag'] in ('alpha', 'beta', 'gamma'), (\n"
-             "        f'Invalid tag: {{meta}}')\n"
+             "        f'Invalid tag: {meta}')\n"
              "print('All JSON metadata files valid')\n"
              "PYEOF"),
         ],
