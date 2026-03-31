@@ -726,7 +726,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
+                f'{colorama.Fore.YELLOW}{entrypoint!r} looks like a yaml '
+                f'path but {invalid_reason}'
+                f'{colorama.Style.RESET_ALL}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml, result
