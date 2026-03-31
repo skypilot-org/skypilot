@@ -1489,7 +1489,7 @@ def _create_managed_job(region: str, cluster_name: str,
                         config: common.ProvisionConfig,
                         managed_job_config: dict) -> common.ProvisionRecord:
     """Create a K8s Job for a managed job, bypassing the full pod setup."""
-    from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import managed_job as k8s_managed_job
 
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
@@ -1753,6 +1753,16 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
+
+    # V1 K8s managed jobs use skypilot-managed-job-name labels instead
+    # of ray tags. Clean them up via dedicated delete functions which
+    # use the correct label selectors.
+    if 'managed_job_config' in provider_config:
+        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+        k8s_managed_job.delete_managed_job(cluster_name_on_cloud, namespace,
+                                           context)
+        return
+
     pods = kubernetes_utils.filter_pods(namespace, context,
                                         ray_tag_filter(cluster_name_on_cloud),
                                         None)
@@ -1810,7 +1820,7 @@ def _get_managed_job_cluster_info(
 
     Returns None if no managed job pods found (falls back to standard path).
     """
-    from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+    from sky.provision.kubernetes import managed_job as k8s_managed_job
 
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)

@@ -17,6 +17,7 @@ from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
@@ -34,6 +35,7 @@ from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -303,16 +305,13 @@ class StrategyExecutor:
 
             # For K8s managed jobs, skip cluster status refresh (no
             # SSH/skylet to query) and go straight to K8s API status.
-            # Check config first (fast), then YAML (reliable).
-            from sky.provision.kubernetes import managed_job as k8s_managed_job
-            is_k8s_v1 = k8s_managed_job.is_managed_jobs_v1_enabled()
-            if not is_k8s_v1 and self.cluster_name is not None:
+            is_k8s_v1 = False
+            if self.cluster_name is not None:
                 _handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name,
                     self.cluster_name)
                 if _handle is not None:
-                    is_k8s_v1 = managed_job_utils._is_v1_k8s_managed_job(
-                        _handle)
+                    is_k8s_v1 = managed_job_utils.is_v1_k8s_managed_job(_handle)
             if not is_k8s_v1:
                 try:
                     cluster_status, _ = (await asyncio.to_thread(
@@ -980,9 +979,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         self.min_nodes = int(config.get('min_nodes', 1))
         task = self.dag.tasks[0]
         if task.num_nodes is not None and self.min_nodes > task.num_nodes:
-            raise ValueError(
-                f'min_nodes ({self.min_nodes}) cannot exceed '
-                f'num_nodes ({task.num_nodes})')
+            raise ValueError(f'min_nodes ({self.min_nodes}) cannot exceed '
+                             f'num_nodes ({task.num_nodes})')
         self._namespace: Optional[str] = None
         self._context: Optional[str] = None
         self._image: str = 'python:3.11-slim'
@@ -1121,6 +1119,17 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                     cloud='Kubernetes',
                     region=context_name,
                 )
+                # Register a cluster handle so that the standard
+                # cleanup path (core.down -> terminate_instances) can
+                # find and delete these pods.
+                await asyncio.to_thread(
+                    self._register_handle,
+                    job_name,
+                    num_nodes,
+                    resource,
+                    context_name,
+                    self._namespace,
+                )
                 return time.time()
             logger.debug(f'Waiting for min_nodes={self.min_nodes} pods: '
                          f'{running} running')
@@ -1131,6 +1140,57 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             raise TimeoutError(f'Elastic job {job_name}: timed out waiting for '
                                f'{self.min_nodes} pods')
         return None
+
+    def _register_handle(self, job_name: str, num_nodes: int,
+                         resource: resources_lib.Resources, context_name: str,
+                         namespace: str) -> None:
+        """Register a cluster handle for DynamicNodeSetExecutor pods.
+
+        This ensures that the standard cleanup path (core.down ->
+        terminate_instances) can find and clean up these pods, and that
+        the handle is only removed after pods are actually deleted.
+        """
+        from sky.backends import cloud_vm_ray_backend
+
+        launched = resource.copy(region=context_name,
+                                 instance_type=resource.instance_type or '-')
+        # Build a minimal cluster YAML with managed_job_config so
+        # is_v1_k8s_managed_job() recognises this handle and
+        # terminate_instances uses the V1 delete path.
+        provider_config: dict = {
+            'type': 'kubernetes',
+            'module': 'sky.provision.kubernetes',
+            'region': context_name,
+            'namespace': namespace,
+            'managed_job_config': {},
+        }
+        cluster_yaml_dict = {
+            'provider': provider_config,
+            'auth': {
+                'ssh_user': 'sky',
+            },
+        }
+        yaml_str = yaml_utils.dump_yaml_str(cluster_yaml_dict)
+        global_user_state.set_cluster_yaml(job_name, yaml_str)
+        # cluster_yaml must be a path whose basename (sans extension)
+        # equals the cluster_name key used in set_cluster_yaml above.
+        cluster_yaml_path = f'{job_name}.yml'
+
+        handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
+            cluster_name=job_name,
+            cluster_name_on_cloud=job_name,
+            cluster_yaml=cluster_yaml_path,
+            launched_nodes=num_nodes,
+            launched_resources=launched,
+        )
+        global_user_state.add_or_update_cluster(
+            job_name,
+            handle,
+            {launched},
+            ready=True,
+            is_managed=True,
+        )
+        logger.info(f'Registered cluster handle for elastic job {job_name}')
 
     async def recover(self) -> float:
         """Replace failed or missing pods individually.
@@ -1180,7 +1240,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         if self.cluster_name is None:
             return
-        k8s_managed_job.delete_job(self.cluster_name, self._namespace or
+        k8s_managed_job.delete_managed_job(self.cluster_name, self._namespace or
                                            'default', self._context)
 
     def _build_pod_spec_from_task(self,
@@ -1193,8 +1253,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         resource = list(task.resources)[0]
-        spec = kubernetes_utils.build_pod_resource_spec(
-            self._context, resource)
+        spec = kubernetes_utils.build_pod_resource_spec(self._context, resource)
 
         # Store on self for use by recover() and _launch()
         self._num_gpus = spec.acc_count

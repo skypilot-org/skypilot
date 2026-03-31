@@ -56,9 +56,6 @@ _POLL_INTERVAL = 2
 _POD_READY_TIMEOUT = 600  # 10 minutes
 
 
-
-
-
 def _build_workdir_block(workdir: Optional[Dict[str, Any]]) -> str:
     """Build entrypoint commands for workdir setup.
 
@@ -448,11 +445,15 @@ def delete_managed_job(
     Deletes all pods by label selector, the headless Service, RBAC
     resources, and the file-mount ConfigMap.
     """
-    # Delete all pods by label selector
+    # Delete all pods by label selector. grace_period_seconds=0 ensures
+    # immediate deletion; propagation_policy='Background' ensures the
+    # API returns quickly while deletion proceeds asynchronously.
     label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
     try:
+        body = kubernetes.kubernetes.client.V1DeleteOptions(
+            grace_period_seconds=0, propagation_policy='Background')
         kubernetes.core_api(context).delete_collection_namespaced_pod(
-            namespace, label_selector=label_selector)
+            namespace, label_selector=label_selector, body=body)
         logger.info(f'Deleted pods for managed job {job_name}')
     except kubernetes.api_exception() as e:
         if e.status != 404:
@@ -566,9 +567,8 @@ def _get_node_index(pod) -> str:
     """Get the node index label from a pod, raising if missing."""
     idx = pod.metadata.labels.get(TAG_NODE_INDEX)
     if idx is None:
-        raise ValueError(
-            f'Pod {pod.metadata.name} is missing required label '
-            f'{TAG_NODE_INDEX!r}')
+        raise ValueError(f'Pod {pod.metadata.name} is missing required label '
+                         f'{TAG_NODE_INDEX!r}')
     return idx
 
 
@@ -779,8 +779,10 @@ def _build_rbac_manifests(job_name: str, namespace: str,
                           service_account: str) -> List[Dict[str, Any]]:
     """Build Role + RoleBinding for Endpoints read and Pods read/patch access."""
     role = {
-        'apiVersion': 'rbac.authorization.k8s.io/v1',
-        'kind': 'Role',
+        'apiVersion':
+            'rbac.authorization.k8s.io/v1',
+        'kind':
+            'Role',
         'metadata': {
             'name': f'{job_name}-discovery',
             'namespace': namespace,
@@ -1066,7 +1068,6 @@ def get_job_pod_status(
     return job_lib.JobStatus.PENDING, running, succeeded, failed
 
 
-
 def get_pods_to_replace(
     job_name: str,
     namespace: str,
@@ -1085,7 +1086,7 @@ def get_pods_to_replace(
     try:
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace, label_selector=label_selector)
-    except Exception as e:
+    except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to list pods for {job_name}: {e}')
         return []
 
@@ -1107,46 +1108,3 @@ def get_pods_to_replace(
             to_replace.append(i)
         # 'running' and 'succeeded' pods are fine, don't replace
     return to_replace
-
-
-def delete_job(
-    job_name: str,
-    namespace: str,
-    context: Optional[str],
-) -> None:
-    """Delete all resources for an elastic job."""
-    # Delete all pods
-    label_selector = f'{TAG_MANAGED_JOB_NAME}={job_name}'
-    try:
-        kubernetes.core_api(context).delete_collection_namespaced_pod(
-            namespace, label_selector=label_selector)
-        logger.info(f'Deleted pods for elastic job {job_name}')
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            logger.warning(f'Failed to delete pods: {e}')
-
-    # Delete headless service
-    try:
-        kubernetes.core_api(context).delete_namespaced_service(
-            job_name, namespace)
-        logger.debug(f'Deleted service {job_name}')
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            logger.warning(f'Failed to delete service: {e}')
-
-    # Delete RBAC
-    rbac_name = f'{job_name}-discovery'
-    try:
-        kubernetes.auth_api(context).delete_namespaced_role(
-            rbac_name, namespace)
-        logger.debug(f'Deleted role {rbac_name}')
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            logger.warning(f'Failed to delete role {rbac_name}: {e}')
-    try:
-        kubernetes.auth_api(context).delete_namespaced_role_binding(
-            rbac_name, namespace)
-        logger.debug(f'Deleted role binding {rbac_name}')
-    except kubernetes.api_exception() as e:
-        if e.status != 404:
-            logger.warning(f'Failed to delete role binding {rbac_name}: {e}')

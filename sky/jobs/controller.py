@@ -349,10 +349,10 @@ class JobController:
         task_id: Optional[int],
     ) -> Optional[str]:
         """Download logs from K8s managed job pods if applicable."""
-        if not managed_job_utils._is_v1_k8s_managed_job(handle):
+        if not managed_job_utils.is_v1_k8s_managed_job(handle):
             return None
 
-        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         # Get namespace/context with fallback to kubeconfig defaults
@@ -393,8 +393,7 @@ class JobController:
             # since core.down() may not find the cluster handle.
             _h = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
-            if (_h is not None and
-                    managed_job_utils._is_v1_k8s_managed_job(_h)):
+            if (_h is not None and managed_job_utils.is_v1_k8s_managed_job(_h)):
                 await self._cleanup_k8s_managed_job(cluster_name)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
@@ -402,7 +401,7 @@ class JobController:
     async def _cleanup_k8s_managed_job(self, cluster_name: str) -> None:
         """Directly clean up K8s managed job resources."""
         from sky.adaptors import kubernetes as k8s_adaptor
-        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         handle = await asyncio.to_thread(
@@ -425,18 +424,13 @@ class JobController:
                                     cloud_name, namespace, context)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'K8s Job cleanup: {e}')
-        try:
-            await asyncio.to_thread(k8s_managed_job.delete_job,
-                                    cloud_name, namespace, context)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Elastic job cleanup: {e}')
 
     def _maybe_get_k8s_exit_codes(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[list]:
         """Get exit codes from K8s managed job pods if applicable."""
-        if not managed_job_utils._is_v1_k8s_managed_job(handle):
+        if not managed_job_utils.is_v1_k8s_managed_job(handle):
             return None
         try:
             config = global_user_state.get_cluster_yaml_dict(
@@ -447,7 +441,7 @@ class JobController:
         if 'managed_job_config' not in provider_config:
             return None
 
-        from sky.provision.kubernetes import managed_job as k8s_managed_job  # pylint: disable=import-outside-toplevel
+        from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
         context = kubernetes_utils.get_context_from_config(provider_config)
@@ -799,14 +793,9 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
-        # Detect V1: check config first (fast), then YAML (reliable)
-        from sky.provision.kubernetes.managed_job import is_managed_jobs_v1_enabled
-        is_k8s_v1 = is_managed_jobs_v1_enabled()
-        if not is_k8s_v1:
-            _handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if _handle is not None:
-                is_k8s_v1 = managed_job_utils._is_v1_k8s_managed_job(_handle)
+        _handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        is_k8s_v1 = (_handle is not None and
+                     managed_job_utils.is_v1_k8s_managed_job(_handle))
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -1847,11 +1836,25 @@ class JobController:
 
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
-            # Cancel all remaining tasks
-            for task_id, async_task in monitor_async_tasks.items():
+            # Cancel monitoring tasks before cleanup to prevent
+            # recovery from recreating pods during cleanup.
+            for async_task in list(monitor_async_tasks.values()):
                 async_task.cancel()
             await self._cleanup_job_group_clusters(cluster_names)
             raise
+        finally:
+            # Cancel all remaining monitoring tasks. This handles the
+            # CancelledError path (bypasses except Exception above)
+            # and is idempotent for the Exception path.
+            for async_task in list(monitor_async_tasks.values()):
+                async_task.cancel()
+            # Wait for in-flight recover() calls to finish before
+            # returning, so cleanup doesn't race with pod creation.
+            for async_task in list(monitor_async_tasks.values()):
+                try:
+                    await async_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
         # Check results (include terminal tasks)
         all_succeeded = True
@@ -2235,7 +2238,10 @@ class ControllerManager:
         For standard jobs, looks up the cluster and downloads via SSH.
         """
         from sky.provision.kubernetes import managed_job as k8s_managed_job
-        if k8s_managed_job.is_managed_jobs_v1_enabled():
+        _log_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
+        if (_log_handle is not None and
+                managed_job_utils.is_v1_k8s_managed_job(_log_handle)):
             # V1: download directly from K8s API
             log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
                                    f'job-id-{job_id}')

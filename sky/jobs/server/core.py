@@ -1502,7 +1502,6 @@ def _tail_logs_k8s_v1(
         job_infra = managed_job_state.get_job_infra(job_id)
         if (job_infra is not None and job_infra['cloud'] == 'Kubernetes'):
             from sky.adaptors import kubernetes as k8s_adaptor
-
             from sky.provision.kubernetes import utils as kubernetes_utils
 
             context = job_infra['region']
@@ -1511,7 +1510,7 @@ def _tail_logs_k8s_v1(
                 context = None
         else:
             return None
-    elif not managed_job_utils._is_v1_k8s_managed_job(handle):
+    elif not managed_job_utils.is_v1_k8s_managed_job(handle):
         return None  # Not V1, fall back
     else:
         # Standard V1 path with handle

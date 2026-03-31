@@ -1078,8 +1078,7 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
-def _is_v1_k8s_managed_job(
-    handle: 'backends.CloudVmRayResourceHandle',) -> bool:
+def is_v1_k8s_managed_job(handle: 'backends.CloudVmRayResourceHandle',) -> bool:
     """Check if a cluster is a V1 K8s managed job via its YAML config."""
     from sky import clouds
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
@@ -1105,7 +1104,6 @@ def _stream_k8s_managed_job_logs(
     import threading
 
     from sky.adaptors import kubernetes as k8s_adaptor
-
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     # Get context from handle's launched resources (region = K8s context)
@@ -1182,7 +1180,6 @@ def _stream_k8s_managed_job_logs_direct(
     import threading
 
     from sky.adaptors import kubernetes as k8s_adaptor
-
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     namespace = kubernetes_utils.get_kube_config_context_namespace(context)
@@ -1397,6 +1394,12 @@ def stream_logs_by_id(
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
+            _pool_cluster_name, _ = managed_job_state.get_pool_submit_info(
+                job_id)
+            _pool_handle = (global_user_state.get_handle_from_cluster_name(
+                _pool_cluster_name) if _pool_cluster_name is not None else None)
+            _is_k8s_v1_job = (_pool_handle is not None and
+                              is_v1_k8s_managed_job(_pool_handle))
             # Filter tasks if task filter is specified
             if task is not None:
                 task_info = [
@@ -1431,7 +1434,7 @@ def stream_logs_by_id(
                         # Stream the logs to the console without reading the
                         # whole file into memory.
                         # V1 K8s logs don't have the streaming marker
-                        start_streaming = (k8s_managed_job.is_managed_jobs_v1_enabled())
+                        start_streaming = _is_k8s_v1_job
                         read_from: Union[TextIO, Deque[str]] = f
                         if tail is not None:
                             assert tail > 0
@@ -1566,7 +1569,7 @@ def stream_logs_by_id(
             # V1 K8s managed jobs: stream logs directly from K8s API.
             # Check via cluster YAML (not env var, which may not be set
             # in the log streaming subprocess).
-            is_v1 = _is_v1_k8s_managed_job(handle)
+            is_v1 = is_v1_k8s_managed_job(handle)
             if is_v1:
                 assert cluster_name is not None
                 returncode = _stream_k8s_managed_job_logs(handle,
