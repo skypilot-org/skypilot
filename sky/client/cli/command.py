@@ -1218,7 +1218,7 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
-    if common_utils.cluster_name_looks_like_file_path(cluster):
+    if not yes and common_utils.cluster_name_looks_like_file_path(cluster):
         click.confirm(
             f'Cluster name {cluster!r} looks like a file path. '
             f'Did you mean: sky launch -c <cluster-name> {cluster}\n'
@@ -5564,7 +5564,7 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
-    if common_utils.cluster_name_looks_like_file_path(name):
+    if not yes and common_utils.cluster_name_looks_like_file_path(name):
         click.confirm(
             f'Job name {name!r} looks like a file path. '
             f'Did you mean: sky jobs launch -n <job-name> {name}\n'
