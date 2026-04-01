@@ -822,6 +822,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
         }
 
+        # Add ephemeral storage to deploy vars if specified.
+        ephemeral_storage = resources.ephemeral_storage
+        if ephemeral_storage is not None:
+            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
         # number -> that multiplier
@@ -832,6 +837,9 @@ class Kubernetes(clouds.Cloud):
                 multiplier = float(set_pod_resource_limits_config)
             deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
             deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
+            if ephemeral_storage is not None:
+                deploy_vars['k8s_ephemeral_storage_limit'] = round(
+                    ephemeral_storage * multiplier, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
@@ -857,6 +865,33 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
+
+        # Docker sidecar (DinD / BuildKit) support.
+        raw_docker_cfg = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('enable_docker',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides)
+        docker_cfg = kubernetes_utils.normalize_enable_docker_config(
+            raw_docker_cfg)
+        if docker_cfg is not None:
+            docker_mode = docker_cfg.mode
+            dind_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.ALL]
+            build_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.BUILD]
+            deploy_vars['k8s_enable_docker_all'] = (
+                docker_mode == kubernetes_utils.DockerMode.ALL)
+            deploy_vars['k8s_enable_docker_build'] = (
+                docker_mode == kubernetes_utils.DockerMode.BUILD)
+            deploy_vars['k8s_docker_dind_image'] = dind_defaults.image
+            deploy_vars['k8s_docker_buildkit_image'] = build_defaults.image
+            deploy_vars['k8s_docker_config_dict'] = docker_cfg.to_dict()
+        else:
+            deploy_vars['k8s_enable_docker_all'] = False
+            deploy_vars['k8s_enable_docker_build'] = False
+            deploy_vars['k8s_docker_config_dict'] = None
 
         return deploy_vars
 

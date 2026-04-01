@@ -143,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 31  # add max hourly cost.
+    _VERSION = 32  # add ephemeral_storage.
 
     def __init__(
         self,
@@ -161,6 +161,7 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[Union[str, int]] = None,
+        ephemeral_storage: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         local_disk: Optional[str] = None,
@@ -346,6 +347,13 @@ class Resources:
         else:
             self._disk_size = DEFAULT_DISK_SIZE_GB
 
+        if ephemeral_storage is not None:
+            self._ephemeral_storage: Optional[int] = int(
+                resources_utils.parse_memory_resource(ephemeral_storage,
+                                                      'ephemeral_storage'))
+        else:
+            self._ephemeral_storage = None
+
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
@@ -445,6 +453,7 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
+        self._try_validate_ephemeral_storage()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -524,6 +533,11 @@ class Resources:
         if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
+        ephemeral_storage = ''
+        if self._ephemeral_storage is not None:
+            ephemeral_storage = (
+                f', ephemeral_storage={self._ephemeral_storage}')
+
         ports = ''
         if self.ports is not None:
             ports = f', ports={self.ports}'
@@ -539,8 +553,8 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{network_tier}{disk_size}{local_disk}'
-            f'{max_hourly_cost}{ports}')
+            f'{disk_tier}{network_tier}{disk_size}{ephemeral_storage}'
+            f'{local_disk}{max_hourly_cost}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -665,6 +679,10 @@ class Resources:
     @property
     def disk_size(self) -> int:
         return self._disk_size
+
+    @property
+    def ephemeral_storage(self) -> Optional[int]:
+        return self._ephemeral_storage
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -827,7 +845,15 @@ class Resources:
                     f'The "memory" field should be either a number or '
                     f'a string "<number>+". Found: {memory!r}') from None
 
-        if memory_gb <= 0:
+        # For Slurm, memory=0 is allowed. This happens when:
+        # (a) the user explicitly requested --memory 0, or
+        # (b) the user did not specify memory and the cluster does not track
+        #     memory as a consumable resource (CR_CPU, CR_Core, CR_Socket),
+        #     so the default was set to 0.
+        # In both cases, --mem will be omitted from the sbatch script.
+        # Negative memory is never valid for any cloud.
+        is_slurm = isinstance(self._cloud, clouds.Slurm)
+        if memory_gb < 0 or (memory_gb == 0 and not is_slurm):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'The "memory" field should be positive. Found: {memory!r}')
@@ -1330,8 +1356,17 @@ class Resources:
         # Validate the job recovery strategy
         assert isinstance(self._job_recovery['strategy'],
                           str), 'Job recovery strategy must be a string'
-        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
-            self._job_recovery['strategy'])
+        try:
+            registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
+                self._job_recovery['strategy'])
+        except ValueError:
+            # On the server side, plugins are loaded before validation,
+            # so all valid strategies are in the registry. Re-raise to
+            # surface the error in the jobs/launch endpoint.
+            # On the client side, plugin-provided strategies may not be
+            # registered, so we pass to let the server validate.
+            if annotations.is_on_api_server:
+                raise
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -1352,7 +1387,6 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
-
         if self._network_tier == resources_utils.NetworkTier.BEST:
             if isinstance(self._cloud, clouds.GCP):
                 # Handle GPU Direct TCPX requirement for docker images
@@ -1417,8 +1451,8 @@ class Resources:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/Azure/IBM/OCI/'
-                    'Kubernetes. For Lambda cloud, use "docker:" prefix for '
-                    'Docker images.') from e
+                    'Kubernetes/Nebius. For Lambda cloud, use "docker:" '
+                    'prefix for Docker images.') from e
 
         if self._region is not None:
             # If the image_id has None as key (region-agnostic),
@@ -1637,6 +1671,16 @@ class Resources:
                     raise ValueError(
                         'max_hourly_cost must be a positive number, '
                         f'got {self._max_hourly_cost}')
+
+    def _try_validate_ephemeral_storage(self) -> None:
+        if self._ephemeral_storage is None:
+            return
+        if self.cloud is not None and not isinstance(self.cloud,
+                                                     clouds.Kubernetes):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'ephemeral_storage is only supported on Kubernetes, '
+                    f'not on {self.cloud}.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -2066,6 +2110,8 @@ class Resources:
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
+            ephemeral_storage=override.pop('ephemeral_storage',
+                                           self._ephemeral_storage),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
@@ -2397,6 +2443,8 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
+        resources_fields['ephemeral_storage'] = config.pop(
+            'ephemeral_storage', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
@@ -2430,6 +2478,9 @@ class Resources:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
+        if resources_fields['ephemeral_storage'] is not None:
+            resources_fields['ephemeral_storage'] = str(
+                resources_fields['ephemeral_storage'])
         if resources_fields['local_disk'] is not None:
             # may be integer by only specifying exact size.
             resources_fields['local_disk'] = str(resources_fields['local_disk'])
@@ -2463,6 +2514,7 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
+        add_if_not_none('ephemeral_storage', self._ephemeral_storage)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
@@ -2679,6 +2731,9 @@ class Resources:
 
         if version < 31:
             self._max_hourly_cost = None
+
+        if version < 32:
+            self._ephemeral_storage = None
 
         self.__dict__.update(state)
 

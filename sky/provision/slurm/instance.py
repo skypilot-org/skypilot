@@ -542,6 +542,14 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
+    mem_directive = ''
+    if float(resources['memory']) > 0:
+        # Memory is in MB to support fractional GB values (e.g. 0.5GB ->
+        # 512M), since Slurm's --mem requires integer values per unit.
+        # Slurm's M suffix means MiB (1G = 1024M), matching SkyPilot's
+        # GB convention.
+        mem_in_mb = int(float(resources['memory']) * 1024)
+        mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
     # pylint: disable=line-too-long
     # fmt: off
     provision_script = f"""\
@@ -555,8 +563,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={int(resources["cpus"])}
-#SBATCH --mem={int(resources["memory"])}G
-{gpu_directive}{custom_sbatch_directives}
+{mem_directive}{gpu_directive}{custom_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{

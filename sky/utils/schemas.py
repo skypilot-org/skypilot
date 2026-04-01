@@ -8,7 +8,32 @@ from typing import Any, Dict, List, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import kubernetes_enums
+
+# Registry for plugin-provided job_recovery schema properties.
+# Plugins call register_job_recovery_property() to add strategy-specific
+# config fields. On the server (is_on_api_server=True), plugins have
+# registered their properties so additionalProperties is False. On
+# the client (is_on_api_server=False), additionalProperties is True
+# to let plugin config pass through for server-side validation.
+_extra_job_recovery_properties: Dict[str, Any] = {}
+
+
+def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the job_recovery schema.
+
+    This allows plugins to extend the job_recovery dict schema with
+    strategy-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'integer'}).
+    """
+    _extra_job_recovery_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -222,7 +247,15 @@ def _get_single_resources_schema():
                     {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_job_recovery_property(), so we
+                        # can be strict. On the client (where
+                        # is_on_api_server is False), we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties':
+                            not annotations.is_on_api_server,
                         'properties': {
                             'strategy': {
                                 'anyOf': [{
@@ -255,6 +288,10 @@ def _get_single_resources_schema():
                                     },
                                 ],
                             },
+                            # Plugin-registered strategy-specific
+                            # properties (validated on server side
+                            # where plugins are loaded).
+                            **_extra_job_recovery_properties,
                         }
                     }
                 ],
@@ -294,6 +331,14 @@ def _get_single_resources_schema():
                 },
             },
             'disk_size': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
+            },
+            'ephemeral_storage': {
                 'anyOf': [{
                     'type': 'string',
                     'pattern': constants.MEMORY_SIZE_PATTERN,
@@ -522,6 +567,12 @@ def get_volume_schema():
                     'namespace': {
                         'type': 'string',
                     },
+                    'host_path': {
+                        'type': 'string',
+                    },
+                    'cleanup_on_deletion': {
+                        'type': 'boolean',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
@@ -641,6 +692,15 @@ def get_storage_schema():
                                 'type': 'string',
                                 'pattern': rclone_duration_pattern,
                             },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'mount': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
                             'read_only': {
                                 'type': 'boolean',
                             },
@@ -1064,7 +1124,7 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
-            'api_access': {
+            'api_server_access': {
                 'type': 'boolean',
             },
             '_metadata': {
@@ -1306,6 +1366,34 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'allowed_nodes': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'label_selector': {
+                # Each key-value pair is OR'd: a node matches if ANY
+                # label matches. This differs from K8s label selectors
+                # which are AND'd.
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+            },
+            'names': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+            'ips': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
@@ -1387,6 +1475,57 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'auto_mounts': {
+        'type': 'array',
+        'items': {
+            'type': 'object',
+            'required': ['volume_name', 'mount_paths'],
+            'additionalProperties': False,
+            'properties': {
+                'volume_name': {
+                    'type': 'string',
+                },
+                'mount_paths': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'pattern': '^(/|~/|~$)',
+                    },
+                    'minItems': 1,
+                },
+            },
+        },
+    },
+    'enable_docker': {
+        'oneOf': [
+            # Simple form: enable_docker: true / false
+            {
+                'type': 'boolean'
+            },
+            # Simple form: enable_docker: "ALL" / "BUILD"
+            {
+                'type': 'string',
+                'enum': ['ALL', 'BUILD'],
+            },
+            # Detailed form with optional cache volume.
+            {
+                'type': 'object',
+                'required': ['mode'],
+                'additionalProperties': False,
+                'properties': {
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['ALL', 'BUILD'],
+                    },
+                    # SkyPilot volume name for the Docker/BuildKit cache.
+                    # Omit to use an ephemeral emptyDir volume instead.
+                    'cache_volume': {
+                        'type': 'string',
+                    },
+                },
+            },
+        ],
+    },
 }
 
 

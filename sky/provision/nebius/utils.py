@@ -209,7 +209,7 @@ def launch(cluster_name_on_cloud: str,
            platform: str,
            preset: str,
            region: str,
-           image_family: str,
+           image_id_or_family: str,
            disk_size: int,
            user_data: str,
            associate_public_ip_address: bool,
@@ -284,18 +284,24 @@ def launch(cluster_name_on_cloud: str,
                 f'{actual_disk_size} GiB.')
 
     service = nebius.compute().DiskServiceClient(nebius.sdk())
+
+    spec = nebius.compute().DiskSpec(
+        size_gibibytes=actual_disk_size,
+        type=_disk_tier_to_disk_type(disk_tier),
+    )
+    if image_id_or_family.startswith('computeimage-'):
+        spec.source_image_id = image_id_or_family
+    else:
+        spec.source_image_family = nebius.compute().SourceImageFamily(
+            image_family=image_id_or_family)
+
     disk = nebius.sync_call(
         service.create(nebius.compute().CreateDiskRequest(
             metadata=nebius.nebius_common().ResourceMetadata(
                 parent_id=project_id,
                 name=disk_name,
             ),
-            spec=nebius.compute().DiskSpec(
-                source_image_family=nebius.compute().SourceImageFamily(
-                    image_family=image_family),
-                size_gibibytes=actual_disk_size,
-                type=_disk_tier_to_disk_type(disk_tier),
-            ))))
+            spec=spec)))
     disk_id = disk.resource_id
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_DISK_CREATE:

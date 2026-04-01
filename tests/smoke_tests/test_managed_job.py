@@ -2156,6 +2156,82 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+@pytest.mark.managed_jobs
+def test_managed_job_git_commit_in_queue(generic_cloud: str):
+    """Test that git commit metadata is captured and returned in job queue."""
+    from sky.client import sdk
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Get the current git commit of this repo (the test YAML will be
+    # written inside this repo's working tree).
+    repo_commit = common_utils.get_git_commit()
+    assert repo_commit is not None, (
+        'Test must be run from within a git repository')
+
+    def check_git_commit_in_queue():
+        """Check that git_commit is present in the job queue metadata."""
+        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_records = sdk.stream_and_get(queue_request_id)
+
+        if isinstance(queue_records, tuple):
+            jobs_list, _, _, _ = queue_records
+        else:
+            jobs_list = queue_records
+
+        job_record = None
+        for job in jobs_list:
+            if job.get('job_name') == name:
+                job_record = job
+                break
+
+        assert job_record is not None, f'Job {name} not found in queue'
+        metadata = job_record.get('metadata')
+        assert metadata is not None, 'metadata field is None'
+        git_commit = metadata.get('git_commit')
+        assert git_commit is not None, 'git_commit missing from metadata'
+        assert git_commit == repo_commit, (
+            f'Expected git_commit {repo_commit}, got {git_commit}')
+
+    # Write the test YAML inside the current repo so that
+    # load_chain_dag_from_yaml captures the repo's git commit.
+    yaml_content = textwrap.dedent("""\
+        run: |
+          echo "Testing git commit metadata"
+          sleep 10000
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml',
+                                     mode='w',
+                                     dir=os.getcwd(),
+                                     delete=True) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'managed_job_git_commit_in_queue',
+            [
+                f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[
+                        sky.ManagedJobStatus.STARTING,
+                        sky.ManagedJobStatus.RUNNING,
+                        sky.ManagedJobStatus.SUCCEEDED,
+                    ],
+                    timeout=120),
+                lambda: check_git_commit_in_queue(),
+            ],
+            teardown=f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
 @pytest.mark.no_dependency
 @pytest.mark.kubernetes
 def test_large_production_performance(request):
@@ -2905,11 +2981,82 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_wait_timeout(generic_cloud: str):
+    """Test that jobs.wait raises TimeoutError when timeout is exceeded."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    def sdk_wait_timeout():
+        # Wait with a short timeout; the job should still be running.
+        request_id = jobs_sdk.wait(name=name, timeout=5, poll_interval=5)
+        try:
+            sky.stream_and_get(request_id)
+        except Exception as e:  # pylint: disable=broad-except
+            assert 'TimeoutError' in type(e).__name__ or 'Timed out' in str(
+                e), f'Expected TimeoutError, got {type(e).__name__}: {e}'
+            print('Got Timeout Error (Expected)')
+        else:
+            raise AssertionError('Expected TimeoutError but wait succeeded')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_wait_timeout',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 300" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=360),
+            sdk_wait_timeout,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_wait_success(generic_cloud: str):
+    """Test that jobs.wait returns successfully for a completed job."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    def sdk_wait_success():
+        request_id = jobs_sdk.wait(name=name, poll_interval=5)
+        exit_code = sky.stream_and_get(request_id)
+        assert exit_code == sky.exceptions.JobExitCode.SUCCEEDED, (
+            f'Expected SUCCEEDED (0), got {exit_code}')
+        print('Successfully waited for job to succeed.')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_wait_success',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 300" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=360),
+            sdk_wait_success,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_api_access(generic_cloud: str):
-    """Test managed jobs with api_access: nested job launch from a job.
+    """Test managed jobs with api_server_access: nested job launch from a job.
 
     This test only works with kubernetes and remote server enabled. It is the
     only test configuration that gives us an API server that is accessible from

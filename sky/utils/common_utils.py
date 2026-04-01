@@ -37,11 +37,14 @@ from sky.utils import ux_utils
 from sky.utils import validator
 
 if typing.TYPE_CHECKING:
+    import webbrowser
+
     import jinja2
     import psutil
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
+    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -786,6 +789,43 @@ def remove_file_if_exists(path: Optional[str]):
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
     return 'microsoft' in platform.uname().release.lower()
+
+
+def open_browser(url: str) -> bool:
+    """Open a URL in the default browser, with WSL support.
+
+    On WSL, Python's webbrowser module tries xdg-open which fails because
+    there are no GUI browsers in the Linux environment. This function detects
+    WSL and uses Windows-side browser opening instead.
+
+    Returns:
+        True if the browser was likely opened successfully, False otherwise.
+    """
+    if is_wsl():
+        # On WSL, use Windows-side browser opening.
+        # Try wslview (from wslu package) first, then powershell.exe.
+        for cmd in [
+            ['wslview', url],
+            ['powershell.exe', '/c', 'start', url],
+            ['cmd.exe', '/c', 'start', url],
+        ]:
+            try:
+                logger.debug(f'trying to open browser via {cmd}')
+                result = subprocess.run(cmd,
+                                        capture_output=True,
+                                        timeout=10,
+                                        check=False)
+                if result.returncode == 0:
+                    return True
+            except FileNotFoundError:
+                logger.debug(f'{cmd[0]} failed', exc_info=True)
+                continue
+            except Exception:  # pylint: disable=broad-except
+                logger.debug('failed', exc_info=True)
+                continue
+        return False
+
+    return webbrowser.open(url)
 
 
 def find_free_port(start_port: int) -> int:

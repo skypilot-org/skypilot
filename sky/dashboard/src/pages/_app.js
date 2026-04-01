@@ -3,6 +3,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import * as ReactDOMAll from 'react-dom';
+import createCache from '@emotion/cache';
+import { CacheProvider } from '@emotion/react';
 import dynamic from 'next/dynamic';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
@@ -11,6 +13,7 @@ import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
 import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
+import { getNonce } from '@/utils/csp';
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
@@ -25,6 +28,11 @@ if (typeof window !== 'undefined') {
   window.ReactDOM = { ...ReactDOMAll, ...ReactDOM };
 }
 
+// Create an Emotion cache with the CSP nonce so that dynamically injected
+// <style> tags carry the nonce attribute and satisfy the CSP policy.
+const nonce = getNonce();
+const emotionCache = createCache({ key: 'css', nonce: nonce || undefined });
+
 function App({ Component, pageProps }) {
   useEffect(() => {
     const link = document.createElement('link');
@@ -34,15 +42,17 @@ function App({ Component, pageProps }) {
   }, []);
 
   return (
-    <PluginProvider>
-      <VersionProvider>
-        <TourProvider>
-          <Layout highlighted={pageProps.highlighted}>
-            <Component {...pageProps} />
-          </Layout>
-        </TourProvider>
-      </VersionProvider>
-    </PluginProvider>
+    <CacheProvider value={emotionCache}>
+      <PluginProvider>
+        <VersionProvider>
+          <TourProvider>
+            <Layout highlighted={pageProps.highlighted}>
+              <Component {...pageProps} />
+            </Layout>
+          </TourProvider>
+        </VersionProvider>
+      </PluginProvider>
+    </CacheProvider>
   );
 }
 

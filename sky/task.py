@@ -253,10 +253,34 @@ def _parse_secret_name(raw_name: str):
 
 @dataclasses.dataclass
 class ManagedSecretRef:
-    """A reference to a managed secret in task YAML."""
+    """A reference to a secret in task YAML."""
     name: str
     mount_path: Optional[str] = None
     scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
+
+
+def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
+    """Redact secrets and credentials from a parsed task YAML config dict.
+
+    Modifies task_yaml in-place. Secret refs (secrets: prefix) in array
+    form are kept as-is; in dict form they are set to null so the YAML
+    remains launchable.
+    """
+    raw_secrets = task_yaml.get('secrets')
+    if raw_secrets is not None:
+        if isinstance(raw_secrets, list):
+            # Array form: all items are secret refs, keep as-is
+            pass
+        else:
+            task_yaml['secrets'] = {
+                k: (None if k.startswith('secrets:') else '<redacted>')
+                for k in raw_secrets
+            }
+    docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
+                                                       {})
+    if isinstance(docker_config,
+                  dict) and docker_config.get('password') is not None:
+        docker_config['password'] = '<redacted>'
 
 
 class Task:
@@ -283,7 +307,7 @@ class Task:
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
-        api_access: bool = False,
+        api_server_access: bool = True,
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
@@ -367,9 +391,10 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          api_access: If True, auto-inject API server credentials (endpoint
-            and service account token) into the job's environment so that the
-            job can call ``sky`` SDK / CLI to launch nested jobs.
+          api_server_access: If True, auto-inject API server credentials
+            (endpoint and service account token) into the job's environment
+            so that the job can call ``sky`` SDK / CLI to launch nested jobs.
+            Defaults to True.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -388,7 +413,7 @@ class Task:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
         self._managed_secret_refs: List[ManagedSecretRef] = []
-        self._api_access = api_access
+        self._api_server_access = api_server_access
 
         # concatenate commands if given as list
         def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
@@ -565,7 +590,13 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
-        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+        git_commit = common_utils.get_git_commit(self.workdir)
+        # Always prefer the workdir's commit over any previously set value
+        # (e.g. from the YAML file's repo). But don't overwrite a valid
+        # value with None, which happens on the server where the uploaded
+        # blob directory is not a git repo.
+        if git_commit is not None:
+            self._metadata['git_commit'] = git_commit
 
     @staticmethod
     def from_yaml_config(
@@ -726,7 +757,7 @@ class Task:
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
-            api_access=config.pop('api_access', False),
+            api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
@@ -1077,8 +1108,8 @@ class Task:
         return self._managed_secret_refs
 
     @property
-    def api_access(self) -> bool:
-        return self._api_access
+    def api_server_access(self) -> bool:
+        return self._api_server_access
 
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
@@ -1834,21 +1865,7 @@ class Task:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
-            raw_secrets = config.get('secrets')
-            if raw_secrets is not None:
-                if isinstance(raw_secrets, list):
-                    # Array form: all items are secret refs, keep as-is
-                    pass
-                else:
-                    # Dict form: redact inline values, keep refs as null
-                    config['secrets'] = {
-                        k: (None if k.startswith('secrets:') else '<redacted>')
-                        for k in raw_secrets
-                    }
-            docker_config = config.get('resources',
-                                       {}).get('_docker_login_config', {})
-            if docker_config.get('password') is not None:
-                docker_config['password'] = '<redacted>'
+            redact_task_yaml_dict(config)
             return config
         return self._to_yaml_config()
 
@@ -1965,7 +1982,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
-        add_if_not_none('api_access', self._api_access or None)
+        if not self._api_server_access:
+            config['api_server_access'] = False
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
         add_if_not_none('_user_specified_yaml', self._user_specified_yaml)

@@ -494,7 +494,8 @@ if script or True:
         env_vars = shlex.quote(env_vars_json)
         cluster_ips = shlex.quote(",".join(['10.0.0.1']))
 
-        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips}'
+        cluster_home = shlex.quote(os.path.expanduser('~'))
+        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips} --cluster-home-dir={cluster_home}'
 
         if task_name is not None:
             runner_args += f' --task-name={shlex.quote(task_name)}'

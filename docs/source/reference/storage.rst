@@ -487,6 +487,11 @@ Storage YAML reference
 
         config: dict
           Optional advanced configuration. Currently supports:
+          - mount: dict of parameters for MOUNT mode.
+            Available parameters:
+            - read_only: bool; default: false
+                Whether the mount is read-only. When enabled, writes to the
+                mount path will be rejected by the filesystem.
           - mount_cached: dict of rclone parameters for MOUNT_CACHED mode.
             Any parameters set here override the defaults from the workload type.
             Available parameters:
