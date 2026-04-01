@@ -1826,8 +1826,17 @@ class Task:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
-            if config.get('secrets') is not None:
-                config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+            raw_secrets = config.get('secrets')
+            if raw_secrets is not None:
+                if isinstance(raw_secrets, list):
+                    # Array form: all items are secret refs, keep as-is
+                    pass
+                else:
+                    # Dict form: redact inline values, keep refs as null
+                    config['secrets'] = {
+                        k: (None if k.startswith('secrets:') else '<redacted>')
+                        for k in raw_secrets
+                    }
             docker_config = config.get('resources',
                                        {}).get('_docker_login_config', {})
             if docker_config.get('password') is not None:
@@ -1873,31 +1882,62 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if secrets and not redact_secrets:
-            secrets = {k: v.get_secret_value() for k, v in secrets.items()}
-        elif secrets and redact_secrets:
-            secrets = {k: '<redacted>' for k, v in secrets.items()}
-        add_if_not_none('secrets', secrets, no_empty=True)
+        # Separate inline secrets from resolved secret refs
+        has_refs = any(k.startswith('secrets:') for k in (secrets or {}))
+        has_refs = has_refs or bool(self._managed_secret_refs)
 
-        # Add managed secrets references
-        if self._managed_secret_refs:
-            managed_secrets = []
-            for ref in self._managed_secret_refs:
-                prefix = (f'{ref.scope_override}.'
-                          if ref.scope_override else '')
-                if ref.mount_path is not None:
-                    # Advanced: keep in managed_secrets field
-                    managed_secrets.append(
-                        {f'{prefix}{ref.name}': {
-                            'mount_path': ref.mount_path
-                        }})
+        if secrets and not has_refs:
+            # Pure inline secrets — use dict form
+            if not redact_secrets:
+                secrets = {k: v.get_secret_value()
+                           for k, v in secrets.items()}
+            else:
+                secrets = {k: '<redacted>' for k in secrets}
+            add_if_not_none('secrets', secrets, no_empty=True)
+        elif secrets or has_refs:
+            # Has secret refs — use array form for refs, dict for inline.
+            # Inline secrets go in dict form.
+            inline = {k: v for k, v in (secrets or {}).items()
+                      if not k.startswith('secrets:')}
+            if inline:
+                if not redact_secrets:
+                    inline = {k: v.get_secret_value()
+                              for k, v in inline.items()}
                 else:
-                    # Simple: serialize as secrets:NAME: null
-                    config.setdefault(
-                        'secrets', {}
-                    )[f'secrets:{prefix}{ref.name}'] = None
-            if managed_secrets:
-                config['managed_secrets'] = managed_secrets
+                    inline = {k: '<redacted>' for k in inline}
+                config['secrets'] = inline
+
+            # Secret refs go in array form (valid YAML, re-launchable)
+            ref_list = sorted(k for k in (secrets or {})
+                              if k.startswith('secrets:'))
+
+            # Add unresolved refs from _secret_refs
+            managed_secrets_field = []
+            if self._managed_secret_refs:
+                for ref in self._managed_secret_refs:
+                    prefix = (f'{ref.scope_override}.'
+                              if ref.scope_override else '')
+                    if ref.mount_path is not None:
+                        managed_secrets_field.append(
+                            {f'{prefix}{ref.name}': {
+                                'mount_path': ref.mount_path
+                            }})
+                    else:
+                        ref_list.append(
+                            f'secrets:{prefix}{ref.name}')
+
+            if ref_list:
+                # Append refs to secrets array or set it
+                existing = config.get('secrets')
+                if isinstance(existing, dict):
+                    # Mixed: inline dict already set. Put refs in
+                    # managed_secrets field to keep YAML valid.
+                    managed_secrets_field.extend(ref_list)
+                else:
+                    config['secrets'] = ref_list
+
+            if managed_secrets_field:
+                config['managed_secrets'] = managed_secrets_field
 
         add_if_not_none('file_mounts', {})
 
