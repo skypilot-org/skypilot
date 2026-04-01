@@ -20,10 +20,15 @@ MIN_WORKERS = int(os.environ.get('MIN_WORKERS', 4))
 
 def get_all_workers():
     """Query /nodes and return all worker nodes."""
-    try:
-        data = json.loads(urllib.request.urlopen(NODES_URL, timeout=5).read())
-    except Exception:
-        return []
+    for i in range(5):
+        try:
+            data = json.loads(
+                urllib.request.urlopen(NODES_URL, timeout=30).read())
+            break
+        except Exception as e:
+            print(e)
+            if i == 4:
+                return []
     nodes = data.get('workers', data.get('nodes', []))
     return sorted(nodes, key=lambda n: n['rank'])
 
