@@ -12,6 +12,7 @@ from paramiko.config import SSHConfig
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.skylet import constants
 from sky.utils import annotations
@@ -618,27 +619,49 @@ def check_instance_fits(
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
-        # Resolve to the exact raw GRES type that will be used at deploy
-        # time, so the CPU/memory fitness check below runs against the
-        # same nodes that Slurm will actually schedule on.
-        try:
-            resolved_type = resolve_gres_gpu_type(cluster, acc_type, acc_count,
-                                                  partition)
-        except exceptions.ResourcesUnavailableError as e:
-            return (False, str(e))
+        # Check if gpu_partition_map redirects this GPU type to use
+        # GRES without GPU type (count-only check).
+        gpu_partition_map = get_gpu_partition_map(cluster)
+        mapped_partitions = lookup_gpu_partition_map(gpu_partition_map,
+                                                     acc_type)
 
-        # Filter to nodes carrying the resolved raw type with enough GPUs.
-        gpu_nodes = []
-        for node_info in nodes:
-            node_acc_type, node_acc_count = get_gpu_type_and_count(
-                node_info.gres)
-            if (node_acc_type == resolved_type and node_acc_count >= acc_count):
-                gpu_nodes.append(node_info)
+        if mapped_partitions is not None:
+            # Count-only check: accept any node with enough GPUs,
+            # regardless of GRES type name.
+            gpu_nodes = []
+            for node_info in nodes:
+                _, node_acc_count = get_gpu_type_and_count(node_info.gres)
+                if node_acc_count >= acc_count:
+                    gpu_nodes.append(node_info)
+            candidate_nodes = gpu_nodes
+            not_fit_reason_prefix = (
+                f'GPU nodes (mapped via gpu_partition_map for '
+                f'{acc_type!r}){partition_suffix} do not have '
+                f'enough {req_str}. ')
+        else:
+            # Resolve to the exact raw GRES type that will be used at
+            # deploy time, so the CPU/memory fitness check below runs
+            # against the same nodes that Slurm will actually schedule on.
+            try:
+                resolved_type = resolve_gres_gpu_type(cluster, acc_type,
+                                                      acc_count, partition)
+            except exceptions.ResourcesUnavailableError as e:
+                return (False, str(e))
 
-        candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (
-            f'GPU nodes with {acc_type}{partition_suffix} do not have '
-            f'enough {req_str}. ')
+            # Filter to nodes carrying the resolved raw type with enough
+            # GPUs.
+            gpu_nodes = []
+            for node_info in nodes:
+                node_acc_type, node_acc_count = get_gpu_type_and_count(
+                    node_info.gres)
+                if (node_acc_type == resolved_type and
+                        node_acc_count >= acc_count):
+                    gpu_nodes.append(node_info)
+
+            candidate_nodes = gpu_nodes
+            not_fit_reason_prefix = (
+                f'GPU nodes with {acc_type}{partition_suffix} do not '
+                f'have enough {req_str}. ')
 
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
@@ -784,6 +807,45 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
                 return canonical
 
     return raw_name.upper()
+
+
+def get_gpu_partition_map(
+        cluster: str) -> Optional[Dict[str, Union[str, List[str]]]]:
+    """Get the gpu_partition_map for a cluster with two-level merge.
+
+    Reads from global (slurm.gpu_partition_map) and per-cluster
+    (slurm.cluster_configs.<cluster>.gpu_partition_map), with per-cluster
+    values overriding global ones.
+    """
+    gpu_partition_map: Dict[str, Union[str, List[str]]] = {}
+    for config_keys in [
+        ('slurm', 'gpu_partition_map'),
+        ('slurm', 'cluster_configs', cluster, 'gpu_partition_map'),
+    ]:
+        level_config = skypilot_config.get_nested(config_keys,
+                                                  default_value=None)
+        if level_config is not None:
+            gpu_partition_map.update(level_config)
+    return gpu_partition_map if gpu_partition_map else None
+
+
+def lookup_gpu_partition_map(
+    gpu_partition_map: Optional[Dict[str, Union[str, List[str]]]],
+    acc_type: str,
+) -> Optional[List[str]]:
+    """Look up a GPU type in gpu_partition_map (case-insensitive).
+
+    Returns a list of partition names, or None if not found in the map.
+    String values are normalized to single-element lists.
+    """
+    if gpu_partition_map is None:
+        return None
+    for map_gpu, map_partitions in gpu_partition_map.items():
+        if map_gpu.lower() == acc_type.lower():
+            if isinstance(map_partitions, str):
+                return [map_partitions]
+            return list(map_partitions)
+    return None
 
 
 def resolve_gres_gpu_type(
