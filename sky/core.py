@@ -709,6 +709,199 @@ def start(
                   force=force)
 
 
+@usage_lib.entrypoint
+def resize(
+    cluster_name: str,
+    num_nodes: int,
+) -> backends.CloudVmRayResourceHandle:
+    """Resize a running cluster to a different number of nodes.
+
+    Supports scaling up (adding worker nodes) to an existing cluster.
+    The head node and existing workers are preserved; only new workers
+    are added and joined to the Ray cluster.
+
+    Args:
+        cluster_name: name of the cluster to resize.
+        num_nodes: the desired total number of nodes (including head).
+
+    Raises:
+        sky.exceptions.ClusterDoesNotExist: the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: the cluster is not in UP status.
+        sky.exceptions.NotSupportedError: if the cluster does not support
+            resize (e.g., non-CloudVmRay backend, or scale-down requested).
+        ValueError: if num_nodes is invalid.
+    """
+    if num_nodes < 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('num_nodes must be >= 1.')
+
+    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
+    if handle is None:
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
+    if cluster_status != status_lib.ClusterStatus.UP:
+        raise exceptions.ClusterNotUpError(
+            f'Cluster {cluster_name!r} must be UP to resize '
+            f'(current status: {cluster_status}).',
+            cluster_status=cluster_status,
+            handle=handle)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise exceptions.NotSupportedError(
+            f'Resizing cluster {cluster_name!r} with backend '
+            f'{backend.NAME} is not supported.')
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        raise exceptions.NotSupportedError(
+            f'Resizing cluster {cluster_name!r} is not supported '
+            'for this handle type.')
+
+    current_nodes = handle.launched_nodes
+    if num_nodes == current_nodes:
+        sky_logging.print(
+            f'Cluster {cluster_name!r} already has {num_nodes} node(s). '
+            'Nothing to do.')
+        return handle
+    if num_nodes < current_nodes:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Scale-down (reducing the number of nodes) is not yet '
+                f'supported. Current nodes: {current_nodes}, '
+                f'requested: {num_nodes}. To reduce nodes, '
+                f'tear down and re-launch: sky down {cluster_name}')
+
+    assert num_nodes > current_nodes
+    delta = num_nodes - current_nodes
+    sky_logging.print(
+        f'Resizing cluster {cluster_name!r} from {current_nodes} to '
+        f'{num_nodes} node(s) (+{delta} worker(s)).')
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+
+    # Import here to avoid circular imports at module level.
+    from sky.backends import cloud_vm_ray_backend as vm_backend
+    from sky.backends import wheel_utils
+    from sky.provision import provisioner
+
+    to_provision = handle.launched_resources
+    assert to_provision is not None
+    assert to_provision.cloud is not None, handle
+    assert to_provision.region is not None, handle
+
+    # Build the SkyPilot wheel for provisioning.
+    local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
+
+    region = clouds.Region(to_provision.region)
+    zones = ([clouds.Zone(to_provision.zone)]
+             if to_provision.zone is not None else None)
+
+    # Re-generate cluster config with the new num_nodes.
+    config_dict = backend_utils.write_cluster_config(
+        to_provision=to_provision,
+        num_nodes=num_nodes,
+        cluster_config_template=vm_backend._get_cluster_config_template(
+            to_provision.cloud),
+        cluster_name=cluster_name,
+        local_wheel_path=local_wheel_path,
+        wheel_hash=wheel_hash,
+        region=region,
+        zones=zones,
+        dryrun=False,
+        keep_launch_fields_in_existing_config=True,
+    )
+    cluster_config_file = config_dict['ray']
+
+    # Create updated handle with new num_nodes and cluster yaml.
+    new_handle = backends.CloudVmRayResourceHandle(
+        cluster_name=cluster_name,
+        cluster_name_on_cloud=handle.cluster_name_on_cloud,
+        cluster_yaml=cluster_config_file,
+        launched_nodes=num_nodes,
+        launched_resources=to_provision,
+        stable_internal_external_ips=handle.stable_internal_external_ips,
+        stable_ssh_ports=handle.stable_ssh_ports,
+        cluster_info=handle.cached_cluster_info,
+    )
+    new_handle.docker_user = handle.docker_user
+
+    # Mark cluster as INIT during resize.
+    global_user_state.add_or_update_cluster(
+        cluster_name,
+        new_handle,
+        {to_provision},
+        ready=False,
+    )
+
+    try:
+        cluster_name_on_cloud = resources_utils.ClusterName(
+            cluster_name, handle.cluster_name_on_cloud)
+
+        # Provision the additional nodes. bulk_provision will see existing
+        # instances and only create the delta.
+        assert to_provision.cloud is not None
+        assert new_handle.cluster_yaml is not None
+        provision_record = provisioner.bulk_provision(
+            to_provision.cloud,
+            region,
+            zones,
+            cluster_name_on_cloud,
+            num_nodes=num_nodes,
+            cluster_yaml=new_handle.cluster_yaml,
+            prev_cluster_ever_up=True,
+            log_dir=backend.log_dir,
+        )
+
+        # Run post-provision setup: SSH, file mounts, Ray on all nodes.
+        resources_vars = to_provision.cloud.make_deploy_resources_variables(
+            to_provision, cluster_name_on_cloud, region, zones, num_nodes)
+
+        cluster_info = provisioner.post_provision_runtime_setup(
+            to_provision,
+            cluster_name_on_cloud,
+            new_handle.cluster_yaml,
+            provision_record=provision_record,
+            custom_resource=resources_vars.get('custom_resources'),
+            log_dir=backend.log_dir,
+        )
+
+        # Update handle with fresh IPs and cluster info.
+        new_handle.cached_cluster_info = cluster_info
+        new_handle.docker_user = cluster_info.docker_user
+        new_handle.update_cluster_ips(
+            max_attempts=vm_backend._FETCH_IP_MAX_ATTEMPTS,
+            cluster_info=cluster_info)
+        new_handle.update_ssh_ports(
+            max_attempts=vm_backend._FETCH_IP_MAX_ATTEMPTS)
+
+        new_handle.launched_resources = new_handle.launched_resources.copy(
+            region=provision_record.region, zone=provision_record.zone)
+
+    except Exception:
+        # If resize failed, try to restore the cluster state. The original
+        # nodes should still be running.
+        logger.warning('Resize failed. Attempting to restore cluster state.')
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle, {to_provision},
+                                                ready=True)
+        raise
+
+    # Mark cluster as UP with the updated handle.
+    global_user_state.add_or_update_cluster(cluster_name,
+                                            new_handle, {to_provision},
+                                            ready=True)
+
+    global_user_state.add_cluster_event(
+        cluster_name, status_lib.ClusterStatus.UP,
+        f'Cluster resized from {current_nodes} to {num_nodes} node(s)',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
+    sky_logging.print(
+        f'{colorama.Fore.GREEN}Cluster {cluster_name!r} resized to '
+        f'{num_nodes} node(s).{colorama.Style.RESET_ALL}')
+    return new_handle
+
+
 def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
     if resources.use_spot:
         message = ('Stopping spot instances is currently not supported on '
@@ -1098,18 +1291,28 @@ def queue(cluster_name: str,
             jobs = []
             for job_info in response.jobs:
                 job_dict = {
-                    'job_id': job_info.job_id,
-                    'job_name': job_info.job_name,
-                    'submitted_at': job_info.submitted_at,
-                    'status': job_lib.JobStatus.from_protobuf(job_info.status),
-                    'run_timestamp': job_info.run_timestamp,
-                    'start_at': job_info.start_at
-                                if job_info.HasField('start_at') else None,
-                    'end_at': job_info.end_at
-                              if job_info.HasField('end_at') else None,
-                    'resources': job_info.resources,
-                    'log_path': job_info.log_path,
-                    'user_hash': job_info.username,
+                    'job_id':
+                        job_info.job_id,
+                    'job_name':
+                        job_info.job_name,
+                    'submitted_at':
+                        job_info.submitted_at,
+                    'status':
+                        job_lib.JobStatus.from_protobuf(job_info.status),
+                    'run_timestamp':
+                        job_info.run_timestamp,
+                    'start_at':
+                        job_info.start_at
+                        if job_info.HasField('start_at') else None,
+                    'end_at':
+                        job_info.end_at
+                        if job_info.HasField('end_at') else None,
+                    'resources':
+                        job_info.resources,
+                    'log_path':
+                        job_info.log_path,
+                    'user_hash':
+                        job_info.username,
                 }
                 # Copied from job_lib.load_job_queue.
                 user = global_user_state.get_user(job_dict['user_hash'])

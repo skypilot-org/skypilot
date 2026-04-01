@@ -1755,6 +1755,21 @@ async def start(request: fastapi.Request,
     )
 
 
+@app.post('/resize')
+async def resize(request: fastapi.Request,
+                 resize_body: payloads.ResizeBody) -> None:
+    """Resizes a cluster to a different number of nodes."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_RESIZE,
+        request_body=resize_body,
+        func=core.resize,
+        schedule_type=requests_lib.ScheduleType.LONG,
+        request_cluster_name=resize_body.cluster_name,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/autostop')
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody) -> None:

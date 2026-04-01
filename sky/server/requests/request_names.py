@@ -26,6 +26,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_ENDPOINTS = 'endpoints'
     CLUSTER_DOWN = 'down'
     CLUSTER_START = 'start'
+    CLUSTER_RESIZE = 'resize'
     CLUSTER_AUTOSTOP = 'autostop'
     CLUSTER_QUEUE = 'queue'
     CLUSTER_JOB_STATUS = 'job_status'

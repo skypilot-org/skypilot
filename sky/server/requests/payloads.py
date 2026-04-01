@@ -371,6 +371,12 @@ class StartBody(RequestBody):
     force: bool = False
 
 
+class ResizeBody(RequestBody):
+    """The request body for the resize endpoint."""
+    cluster_name: str
+    num_nodes: int
+
+
 class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str

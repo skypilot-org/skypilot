@@ -80,3 +80,95 @@ def test_status_best_effort(mock_get_clusters) -> None:
     log_message = mock_logger.warning.call_args[0][0]
     assert ('Failed to validate status responses for cluster malformed-cluster'
             in log_message)
+
+
+# --- Resize tests ---
+
+
+def _make_mock_handle(cluster_name='test-cluster',
+                      launched_nodes=2,
+                      region='us-central1',
+                      zone='us-central1-a'):
+    """Helper to create a mock CloudVmRayResourceHandle."""
+    handle = mock.create_autospec(CloudVmRayResourceHandle, instance=True)
+    handle.cluster_name = cluster_name
+    handle.cluster_name_on_cloud = f'{cluster_name}-abcd1234'
+    handle.launched_nodes = launched_nodes
+    handle.docker_user = None
+    handle.cluster_yaml = '/tmp/fake-cluster.yaml'
+
+    mock_resources = mock.MagicMock()
+    mock_resources.cloud = mock.MagicMock()
+    mock_resources.region = region
+    mock_resources.zone = zone
+    handle.launched_resources = mock_resources
+    handle.stable_internal_external_ips = [('10.0.0.1', '1.2.3.4'),
+                                           ('10.0.0.2', '1.2.3.5')]
+    handle.stable_ssh_ports = [22, 22]
+    handle.cached_cluster_info = None
+    return handle
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_resize_cluster_does_not_exist(mock_refresh):
+    """Resize should raise ClusterDoesNotExist if cluster not found."""
+    from sky import exceptions
+    mock_refresh.return_value = (None, None)
+    try:
+        core.resize('no-such-cluster', num_nodes=4)
+        assert False, 'Expected ClusterDoesNotExist'
+    except exceptions.ClusterDoesNotExist:
+        pass
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_resize_cluster_not_up(mock_refresh):
+    """Resize should raise ClusterNotUpError if not UP."""
+    from sky import exceptions
+    handle = _make_mock_handle()
+    mock_refresh.return_value = (status_lib.ClusterStatus.STOPPED, handle)
+    try:
+        core.resize('test-cluster', num_nodes=4)
+        assert False, 'Expected ClusterNotUpError'
+    except exceptions.ClusterNotUpError:
+        pass
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_resize_invalid_num_nodes(mock_refresh):
+    """Resize should raise ValueError for num_nodes < 1."""
+    handle = _make_mock_handle()
+    mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
+    try:
+        core.resize('test-cluster', num_nodes=0)
+        assert False, 'Expected ValueError'
+    except ValueError:
+        pass
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_resize_scale_down_not_supported(mock_refresh):
+    """Resize should raise NotSupportedError for scale-down."""
+    from sky import exceptions
+    handle = _make_mock_handle(launched_nodes=4)
+    mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
+    mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
+    try:
+        core.resize('test-cluster', num_nodes=2)
+        assert False, 'Expected NotSupportedError'
+    except exceptions.NotSupportedError as e:
+        assert 'Scale-down' in str(e)
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+@mock.patch('sky.backends.backend_utils.get_backend_from_handle')
+def test_resize_same_num_nodes_is_noop(mock_get_backend, mock_refresh):
+    """Resize to same num_nodes should be a no-op and return handle."""
+    from sky.backends import cloud_vm_ray_backend
+    handle = _make_mock_handle(launched_nodes=3)
+    mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
+    mock_backend = mock.create_autospec(cloud_vm_ray_backend.CloudVmRayBackend,
+                                        instance=True)
+    mock_get_backend.return_value = mock_backend
+    result = core.resize('test-cluster', num_nodes=3)
+    assert result is handle

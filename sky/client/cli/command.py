@@ -1159,6 +1159,14 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option(
+    '--resize',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Resize an existing cluster to --num-nodes without disrupting '
+          'existing nodes. Only scaling up (adding workers) is supported. '
+          'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -1200,6 +1208,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
     fast: bool,
+    resize: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1212,8 +1221,69 @@ def launch(
 
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
+
+    With ``--resize``, scale an existing cluster to ``--num-nodes`` without
+    disrupting existing nodes.  Only scaling up (adding workers) is currently
+    supported.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Resize an existing cluster to 4 nodes.
+      sky launch -c my-cluster --resize --num-nodes 4
+      \b
+      # Resize using a YAML that specifies num_nodes.
+      sky launch -c my-cluster --resize cluster.yaml
+
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+
+    # --- Handle --resize early ---
+    if resize:
+        if cluster is None:
+            raise click.UsageError(
+                '--resize requires -c/--cluster to specify an existing '
+                'cluster.')
+        # Determine num_nodes: from --num-nodes flag, or from YAML entrypoint.
+        resize_num_nodes = num_nodes
+        if resize_num_nodes is None and entrypoint:
+            # Try to parse a YAML to get num_nodes.
+            task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
+                entrypoint=entrypoint,
+                name=name,
+                workdir=None,
+                cloud=None,
+                region=None,
+                zone=None,
+                gpus=None,
+                cpus=None,
+                memory=None,
+                instance_type=None,
+                num_nodes=None,
+                use_spot=None,
+                image_id=None,
+                env=[],
+                secret=[],
+                disk_size=None,
+                disk_tier=None,
+                network_tier=None,
+                local_disk=None,
+                ports=(),
+            )
+            if (not isinstance(task_or_dag, dag_lib.Dag) and
+                    task_or_dag.num_nodes > 1):
+                resize_num_nodes = task_or_dag.num_nodes
+        if resize_num_nodes is None:
+            raise click.UsageError(
+                '--resize requires --num-nodes or a YAML with num_nodes set.')
+
+        request_id = sdk.resize(cluster, resize_num_nodes)
+        _async_call_or_wait(request_id, async_call, 'sky.resize')
+        if not async_call:
+            _get_cluster_records_and_set_ssh_config(clusters=[cluster])
+        return
+
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
     # submitted, while the synchronous way of `sky launch` does. We should

@@ -107,6 +107,14 @@ def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
     return pickle_and_encode(resource_handle)
 
 
+@register_encoder('resize')
+def encode_resize(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
+    resource_handle = (
+        serialize_utils.prepare_handle_for_backwards_compatibility(
+            resource_handle))
+    return pickle_and_encode(resource_handle)
+
+
 @register_encoder('queue')
 def encode_queue(
     jobs: List[responses.ClusterJobRecord],) -> List[Dict[str, Any]]:

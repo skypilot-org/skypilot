@@ -1278,6 +1278,45 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def resize(
+    cluster_name: str,
+    num_nodes: int,
+) -> server_common.RequestId['backends.CloudVmRayResourceHandle']:
+    """Resize a running cluster to a different number of nodes.
+
+    Supports scaling up (adding worker nodes) to an existing cluster.
+    The head node and existing workers are preserved; only new workers
+    are added and joined to the Ray cluster.
+
+    Args:
+        cluster_name: name of the cluster to resize.
+        num_nodes: the desired total number of nodes (including head).
+
+    Returns:
+        The request ID of the resize request.
+
+    Request Returns:
+        cloud_vm_ray_backend.CloudVmRayResourceHandle: the updated handle.
+
+    Request Raises:
+        sky.exceptions.ClusterDoesNotExist: the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: the cluster is not UP.
+        sky.exceptions.NotSupportedError: resize not supported for this
+            cluster (e.g., scale-down requested).
+        ValueError: if num_nodes is invalid.
+    """
+    body = payloads.ResizeBody(
+        cluster_name=cluster_name,
+        num_nodes=num_nodes,
+    )
+    response = server_common.make_authenticated_request(
+        'POST', '/resize', json=json.loads(body.model_dump_json()), timeout=5)
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def down(
     cluster_name: str,
     purge: bool = False,
