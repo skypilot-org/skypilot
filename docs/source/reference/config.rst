@@ -140,12 +140,18 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         V100: 2.50     # $/accelerator/hr
+    :ref:`sbatch_options <config-yaml-slurm-sbatch-options>`:
+      account: myproject
+      qos: high
+      exclusive: true
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
+        sbatch_options:
+          account: cluster1-project
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -2089,6 +2095,49 @@ Example:
 Pricing can also be set per-cluster and per-partition using
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
 
+.. _config-yaml-slurm-sbatch-options:
+
+``slurm.sbatch_options``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Custom ``#SBATCH`` directives to inject into every submitted sbatch script
+(optional).
+
+Each key-value pair becomes an ``#SBATCH --<key>=<value>`` directive. Keys may
+use underscores or hyphens interchangeably (e.g., ``mail_user`` and
+``mail-user`` are equivalent). Values can be strings, numbers, booleans, or
+null.
+
+- ``true`` produces a bare flag: ``#SBATCH --<key>``
+- ``false`` or ``null`` suppresses the option entirely.
+
+The following options are **protected** by SkyPilot and will be silently ignored
+if specified:
+
+``job-name``, ``output``, ``error``, ``nodes``, ``time``,
+``wait-all-nodes``, ``no-requeue``, ``cpus-per-task``, ``mem``, ``gres``,
+``partition``.
+
+Options are merged across three levels (later levels win):
+
+.. code-block:: text
+
+    cloud-level  <  cluster-level  <  partition-level
+
+Task-level overrides from ``config:`` in a task YAML are applied last.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    sbatch_options:
+      account: myproject
+      qos: high
+      exclusive: true         # bare flag: #SBATCH --exclusive
+      mail_type: END
+      mail_user: me@example.com
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2105,6 +2154,12 @@ Supported fields:
 
 - ``tmpdir``: Per-node temporary storage for the SkyPilot runtime.
   Defaults to ``/tmp``.
+
+- ``sbatch_options``: :ref:`Custom sbatch directives <config-yaml-slurm-sbatch-options>`
+  at both the cluster and partition level. Options at each level are merged with
+  the parent level (later levels override earlier ones). The merge order is::
+
+      cloud-level  <  cluster-level  <  partition-level
 
 - ``pricing``: :ref:`Pricing <config-yaml-slurm-pricing>` overrides at both
   the cluster and partition level. Pricing at each level is deep-merged with the
@@ -2138,6 +2193,9 @@ Example:
           cpu: 0.06
           accelerators:
             A100: 4.00   # Override A100; V100 inherited
+        # Override sbatch account for this cluster.
+        sbatch_options:
+          account: cluster1-project
 
       mycluster2:
         workdir: /home/$USER
@@ -2150,6 +2208,9 @@ Example:
             pricing:
               accelerators:
                 H100: 5.00
+            # Partition-level sbatch options.
+            sbatch_options:
+              qos: gpu-priority
 
 .. _config-yaml-oci:
 
