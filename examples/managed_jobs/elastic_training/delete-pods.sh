@@ -12,4 +12,4 @@ NAMESPACE="default"
 kubectl --context="$CONTEXT" -n "$NAMESPACE" get pods -o name \
   | grep '^pod/workers-' \
   | shuf -n "$NUM_PODS" \
-  | xargs -n "$CHUNK_SIZE" -P "$PARALLELISM" kubectl --context="$CONTEXT" -n "$NAMESPACE" delete --force --grace-period=0
+  | xargs -n "$CHUNK_SIZE" -P "$PARALLELISM" kubectl --context="$CONTEXT" -n "$NAMESPACE" delete --force --grace-period=0 --wait=false
