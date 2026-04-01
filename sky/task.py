@@ -652,11 +652,11 @@ class Task:
             existing = config.get('secrets')
             if isinstance(existing, list):
                 # Convert list form to dict to merge CLI overrides
-                new_secrets: Dict[str, Optional[str]] = {}
+                merged: Dict[str, Optional[str]] = {}
                 for item in existing:
-                    new_secrets[str(item)] = None
-                new_secrets.update(secrets_overrides)
-                config['secrets'] = new_secrets
+                    merged[str(item)] = None
+                merged.update(secrets_overrides)
+                config['secrets'] = merged
             else:
                 new_secrets = existing or {}
                 new_secrets.update(secrets_overrides)
@@ -739,7 +739,7 @@ class Task:
                                 'references (secrets: prefix) must have '
                                 'a null value in dict form. To provide '
                                 'an inline secret value, remove the '
-                                "'secrets:' prefix.")
+                                '\'secrets:\' prefix.')
                     ref_name = key[len('secrets:'):]
                     name, scope = _parse_secret_name(ref_name)
                     managed_from_secrets.append(
@@ -776,8 +776,7 @@ class Task:
                 if isinstance(entry, str):
                     name, scope = _parse_secret_name(entry)
                     task._managed_secret_refs.append(
-                        ManagedSecretRef(name=name,
-                                        scope_override=scope))
+                        ManagedSecretRef(name=name, scope_override=scope))
                 elif isinstance(entry, dict):
                     for raw_name, opts in entry.items():
                         name, scope = _parse_secret_name(raw_name)
@@ -1914,42 +1913,45 @@ class Task:
         if secrets and not has_refs:
             # Pure inline secrets — use dict form
             if not redact_secrets:
-                secrets = {k: v.get_secret_value()
-                           for k, v in secrets.items()}
+                secrets = {k: v.get_secret_value() for k, v in secrets.items()}
             else:
                 secrets = {k: '<redacted>' for k in secrets}
             add_if_not_none('secrets', secrets, no_empty=True)
         elif secrets or has_refs:
             # Has secret refs — use array form for refs, dict for inline.
             # Inline secrets go in dict form.
-            inline = {k: v for k, v in (secrets or {}).items()
-                      if not k.startswith('secrets:')}
+            inline = {
+                k: v
+                for k, v in (secrets or {}).items()
+                if not k.startswith('secrets:')
+            }
             if inline:
                 if not redact_secrets:
-                    inline = {k: v.get_secret_value()
-                              for k, v in inline.items()}
+                    inline = {
+                        k: v.get_secret_value() for k, v in inline.items()
+                    }
                 else:
                     inline = {k: '<redacted>' for k in inline}
                 config['secrets'] = inline
 
             # Secret refs go in array form (valid YAML, re-launchable)
-            ref_list = sorted(k for k in (secrets or {})
-                              if k.startswith('secrets:'))
+            ref_list = sorted(
+                k for k in (secrets or {}) if k.startswith('secrets:'))
 
             # Add unresolved refs from _secret_refs
-            managed_secrets_field = []
+            managed_secrets_field: list = []
             if self._managed_secret_refs:
                 for ref in self._managed_secret_refs:
                     prefix = (f'{ref.scope_override}.'
                               if ref.scope_override else '')
                     if ref.mount_path is not None:
-                        managed_secrets_field.append(
-                            {f'{prefix}{ref.name}': {
+                        managed_secrets_field.append({
+                            f'{prefix}{ref.name}': {
                                 'mount_path': ref.mount_path
-                            }})
+                            }
+                        })
                     else:
-                        ref_list.append(
-                            f'secrets:{prefix}{ref.name}')
+                        ref_list.append(f'secrets:{prefix}{ref.name}')
 
             if ref_list:
                 # Append refs to secrets array or set it

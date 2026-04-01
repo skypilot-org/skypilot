@@ -147,8 +147,8 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
         if resolved.file_mounts:
             secret_dir = tempstore.mkdtemp(prefix='skypilot-secrets-')
             for fm in resolved.file_mounts:
-                tmp_fd, tmp_path = tempfile.mkstemp(
-                    prefix='secret-', dir=secret_dir)
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix='secret-',
+                                                    dir=secret_dir)
                 with os.fdopen(tmp_fd, 'wb') as f:
                     f.write(fm.content)
                 os.chmod(tmp_path, 0o600)
@@ -888,7 +888,8 @@ def exec(  # pylint: disable=redefined-builtin
                                                        operation_str='sky.exec')
     # File-mount secret refs are not supported with exec because exec skips
     # the SYNC_FILE_MOUNTS stage.
-    tasks = [entrypoint] if isinstance(entrypoint, sky.Task) else entrypoint.tasks
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
     for t in tasks:
         for ref in t.managed_secret_refs:
             if ref.mount_path is not None:
