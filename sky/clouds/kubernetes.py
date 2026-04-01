@@ -1146,6 +1146,14 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def get_identity_from_context(context):
+        # TODO (kyuds): remove `namespace` from the identity formation. The
+        # issue with namespace is that it represents the default namespace of
+        # the cluster, not necessarily the actual namespace the cluster was
+        # launched on. We store the namespace in the provider config too
+        # anyways. Therefore, if users launch a SkyPilot cluster on one
+        # namespace and switches, then the a CloudUserIdentityError will
+        # be raised. Currently, this is difficult as there is no good
+        # forward compatibility mechanism (upgrade -> downgrade).
         if 'namespace' in context['context']:
             namespace = context['context']['namespace']
         else:

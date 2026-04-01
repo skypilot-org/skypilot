@@ -2069,6 +2069,8 @@ def _check_owner_identity_with_record(cluster_name: str,
             identity = clouds.Kubernetes.get_identity_from_context_name(context)
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, identity)
+            logger.debug(f'Successfully patched {cluster_name} owner identity '
+                         f'to {identity} (launched on {context}).')
             return True
         except exceptions.CloudUserIdentityError:
             return False
