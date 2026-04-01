@@ -600,7 +600,7 @@ def render_pod(
     cpu_request: Optional[str] = None,
     memory_request: Optional[str] = None,
     gpu_request: Optional[str] = None,
-    gpu_resource_key: str = 'nvidia.com/gpu',
+    gpu_resource_key: Optional[str] = None,
     service_account: Optional[str] = None,
     collocate: bool = False,
     node_selector: Optional[Dict[str, str]] = None,
@@ -779,10 +779,8 @@ def _build_rbac_manifests(job_name: str, namespace: str,
                           service_account: str) -> List[Dict[str, Any]]:
     """Build Role + RoleBinding for Endpoints read and Pods read/patch access."""
     role = {
-        'apiVersion':
-            'rbac.authorization.k8s.io/v1',
-        'kind':
-            'Role',
+        'apiVersion': 'rbac.authorization.k8s.io/v1',
+        'kind': 'Role',
         'metadata': {
             'name': f'{job_name}-discovery',
             'namespace': namespace,
@@ -923,9 +921,11 @@ def create_replacement_pod(
     num_gpus_per_node: int = 0,
     collocate: bool = False,
     service_account: Optional[str] = None,
-    gpu_resource_key: str = 'nvidia.com/gpu',
+    gpu_resource_key: Optional[str] = None,
     tolerations: Optional[List[Dict[str, str]]] = None,
     node_selector: Optional[Dict[str, str]] = None,
+    workdir: Optional[Dict[str, Any]] = None,
+    file_mounts: Optional[Dict[str, str]] = None,
 ) -> str:
     """Create a single replacement pod for a failed index.
 
@@ -954,6 +954,24 @@ def create_replacement_pod(
         if e.status != 404:
             logger.warning(f'Failed to delete pod {pod_name}: {e}')
 
+    # Check if a ConfigMap was created for local files — if so, add volume mount
+    volumes_extra = None
+    volume_mounts_extra = None
+    has_local_files = ((workdir and 'path' in workdir) or (file_mounts and any(
+        not data_utils.is_cloud_store_url(s) for s in file_mounts.values())))
+    if has_local_files:
+        cm_name = f'{job_name}-files'
+        volumes_extra = [{
+            'name': 'skypilot-files',
+            'configMap': {
+                'name': cm_name
+            },
+        }]
+        volume_mounts_extra = [{
+            'name': 'skypilot-files',
+            'mountPath': FILEMOUNT_MOUNT_PATH,
+        }]
+
     # Create new pod from template
     gpu_request = str(num_gpus_per_node) if num_gpus_per_node > 0 else None
     pod_manifest = render_pod(
@@ -973,6 +991,10 @@ def create_replacement_pod(
         service_account=service_account,
         tolerations=tolerations,
         node_selector=node_selector,
+        volumes=volumes_extra,
+        volume_mounts=volume_mounts_extra,
+        workdir=workdir,
+        file_mounts=file_mounts,
     )
     kubernetes.core_api(context).create_namespaced_pod(namespace, pod_manifest)
     logger.info(f'Created replacement pod {pod_name}')
