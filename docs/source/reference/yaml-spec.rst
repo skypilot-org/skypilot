@@ -1204,6 +1204,14 @@ Example:
       mode: MOUNT_CACHED
       type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
 
+    # Mount a bucket as read-only to prevent accidental writes.
+    /readonly-data:
+      source: s3://my-dataset-bucket
+      mode: MOUNT
+      config:
+        mount:
+          read_only: true
+
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
 
@@ -1233,6 +1241,10 @@ OR
 The ``type`` field specifies a pre-tuned workload type for ``MOUNT_CACHED`` mode.
 Available types: ``MODEL_CHECKPOINT_RO``, ``MODEL_CHECKPOINT_RW``, ``DATASET_RO``, ``DATASET_RW``.
 See :ref:`mount_cached_workload_types` for details on workload types and ``config.mount_cached`` parameters.
+
+The ``config.mount`` section supports parameters for ``MOUNT`` mode.
+Setting ``read_only: true`` mounts the bucket as read-only, preventing accidental writes.
+See :ref:`storage-yaml-reference` for all available parameters.
 
 .. _yaml-spec-setup:
 
