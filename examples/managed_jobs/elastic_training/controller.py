@@ -41,7 +41,7 @@ def get_alive_workers():
     """
     return [
         n for n in get_all_workers()
-        if n.get('status') in ('PENDING', 'SETTING_UP', 'RUNNING')
+        if n.get('status') == 'RUNNING'
     ]
 
 
