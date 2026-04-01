@@ -478,10 +478,9 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
                 )
             elif self == self.ENDPOINT_CONNECTION_ERROR:
-                return (
-                    'Failed to connect to the AWS EC2 endpoint. '
-                    'This may be due to network issues or the region being '
-                    'unreachable from the current network environment.')
+                return ('Failed to connect to the AWS EC2 endpoint. '
+                        'This may be due to network issues or the region being '
+                        'unreachable from the current network environment.')
             else:
                 raise ValueError(f'Unknown reason {self}')
 

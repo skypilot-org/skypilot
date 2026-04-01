@@ -169,7 +169,7 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
                     AZ_PERMISSION_DENIED) from None
         else:
             raise
-    except aws.botocore_exceptions().EndpointConnectionError:
+    except aws.botocore_exceptions().ConnectionError:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.AWSAzFetchingError(
                 region,
