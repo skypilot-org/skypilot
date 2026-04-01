@@ -1206,3 +1206,131 @@ class TestRbac409ConflictHandling:
         config_lib._configure_autoscaler_cluster_role_binding(
             'default', None, provider_config)
         auth_api_mock.patch_cluster_role_binding.assert_called_once()
+
+
+class TestBootstrapCustomServiceAccount:
+    """Tests that bootstrap_instances creates skypilot-system namespace
+    even when a custom (non-default) service account is used."""
+
+    def test_custom_sa_creates_system_namespace(self, monkeypatch):
+        """When a custom service account is used, the skypilot-system
+        namespace should still be created."""
+        from sky.provision import common
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        create_ns_mock = mock.MagicMock()
+        monkeypatch.setattr('sky.provision.kubernetes.utils.create_namespace',
+                            create_ns_mock)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda cfg: 'test-context')
+
+        # Mock _configure_services to do nothing
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config._configure_services',
+            lambda *args, **kwargs: None)
+        # Mock _configure_fuse_mounting to do nothing
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config._configure_fuse_mounting',
+            lambda *args, **kwargs: None)
+
+        provider_config = {
+            'namespace': 'my-namespace',
+            'skypilot_system_namespace': 'skypilot-system',
+            'fuse_device_required': False,
+        }
+        node_config = {
+            'spec': {
+                'serviceAccountName': 'sky-api-sa',
+            },
+        }
+
+        provision_config = common.ProvisionConfig(
+            provider_config=provider_config,
+            authentication_config={},
+            docker_config={},
+            node_config=node_config,
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        config_lib.bootstrap_instances('kubernetes', 'test-cluster',
+                                       provision_config)
+
+        # Verify that create_namespace was called with skypilot-system
+        create_ns_mock.assert_called_once_with('skypilot-system',
+                                               'test-context')
+
+    def test_default_sa_does_not_double_create_namespace(self, monkeypatch):
+        """When the default service account is used, the namespace creation
+        should only happen via _configure_skypilot_system_namespace (not the
+        new fallback path)."""
+        from sky.provision import common
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        create_ns_mock = mock.MagicMock()
+        monkeypatch.setattr('sky.provision.kubernetes.utils.create_namespace',
+                            create_ns_mock)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda cfg: 'test-context')
+
+        # Mock all the configure functions
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config._configure_services',
+            lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config.'
+            '_configure_autoscaler_service_account',
+            lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config._configure_autoscaler_role',
+            lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config.'
+            '_configure_autoscaler_role_binding', lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config.'
+            '_configure_autoscaler_cluster_role', lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config.'
+            '_configure_autoscaler_cluster_role_binding',
+            lambda *args, **kwargs: None)
+        configure_system_ns_mock = mock.MagicMock()
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.config.'
+            '_configure_skypilot_system_namespace', configure_system_ns_mock)
+
+        provider_config = {
+            'namespace': 'my-namespace',
+            'skypilot_system_namespace': 'skypilot-system',
+            'fuse_device_required': False,
+            'port_mode': 'loadbalancer',
+        }
+        node_config = {
+            'spec': {
+                'serviceAccountName':
+                    kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME,
+            },
+        }
+
+        provision_config = common.ProvisionConfig(
+            provider_config=provider_config,
+            authentication_config={},
+            docker_config={},
+            node_config=node_config,
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        config_lib.bootstrap_instances('kubernetes', 'test-cluster',
+                                       provision_config)
+
+        # _configure_skypilot_system_namespace should be called (existing path)
+        configure_system_ns_mock.assert_called_once()
+        # create_namespace should NOT be called directly (no double creation)
+        create_ns_mock.assert_not_called()

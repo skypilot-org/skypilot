@@ -90,6 +90,21 @@ def bootstrap_instances(
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
+
+    # Always create the skypilot-system namespace regardless of the service
+    # account being used. This is needed because the namespace may not exist on
+    # newly added clusters. When a custom service account is used, RBAC for the
+    # namespace is assumed to be managed by the cluster admin.
+    # This is a lightweight call: a single GET to check if the namespace exists,
+    # returning immediately if it does (common case).
+    if (requested_service_account !=
+            kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
+        skypilot_system_namespace = config.provider_config.get(
+            'skypilot_system_namespace')
+        if skypilot_system_namespace is not None:
+            kubernetes_utils.create_namespace(skypilot_system_namespace,
+                                              context)
+
     if config.provider_config.get('fuse_device_required', False):
         _configure_fuse_mounting(config.provider_config)
     return config
