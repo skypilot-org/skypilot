@@ -764,6 +764,8 @@ class Kubernetes(clouds.Cloud):
             default_value=timeout,
             override_configs=resources.cluster_config_overrides)
 
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -820,6 +822,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
+            'k8s_context': context,
+            'k8s_namespace': namespace,
         }
 
         # Add ephemeral storage to deploy vars if specified.
@@ -840,14 +844,6 @@ class Kubernetes(clouds.Cloud):
             if ephemeral_storage is not None:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
                     ephemeral_storage * multiplier, 3)
-
-        # Add kubecontext if it is set. It may be None if SkyPilot is running
-        # inside a pod with in-cluster auth.
-        if context is not None:
-            deploy_vars['k8s_context'] = context
-
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        deploy_vars['k8s_namespace'] = namespace
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -1160,7 +1156,7 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
-    def get_user_identity_from_context(cls,
+    def get_identity_from_context_name(cls,
                                        context: str) -> Optional[List[str]]:
         """Returns the user identity for a specific Kubernetes context.
 
@@ -1173,21 +1169,21 @@ class Kubernetes(clouds.Cloud):
             the identity for the given context.
 
         Raises:
-            ValueError: If the context is not found in kubeconfig.
+            CloudUserIdentityError: If the context is not found in kubeconfig.
         """
         k8s = kubernetes.kubernetes
+        err = f'Kubernetes context {context!r} not found in kubeconfig.'
+        if context == kubernetes.in_cluster_context_name():
+            if kubernetes_utils.is_incluster_config_available():
+                return kubernetes.in_cluster_identity()
+            raise exceptions.CloudUserIdentityError(err)
         try:
             all_contexts, _ = kubernetes.list_kube_config_contexts()
         except k8s.config.config_exception.ConfigException:
-            return None
-        if context == kubernetes.in_cluster_context_name():
-            # Need to return None here as in-cluster doesn't support
-            # owner identity.
-            return None
+            raise exceptions.CloudUserIdentityError(err) from None
         context_map = {ctx['name']: ctx for ctx in all_contexts}
         if context not in context_map:
-            raise ValueError(f'Kubernetes context {context!r} not '
-                             'found in kubeconfig.')
+            raise exceptions.CloudUserIdentityError(err)
         return [cls.get_identity_from_context(context_map[context])]
 
     @classmethod
@@ -1198,14 +1194,18 @@ class Kubernetes(clouds.Cloud):
             all_contexts, current_context = (
                 kubernetes.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
-            return None
-        # Add current context at the head of the list
-        current_identity = [cls.get_identity_from_context(current_context)]
-        identities.append(current_identity)
+            all_contexts = []
+            current_context = None
+        if current_context:
+            # Add current context at the head of the list
+            current_identity = [cls.get_identity_from_context(current_context)]
+            identities.append(current_identity)
         for context in all_contexts:
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
-        return identities
+        if kubernetes_utils.is_incluster_config_available():
+            identities.append(kubernetes.in_cluster_identity())
+        return identities if identities else None
 
     @classmethod
     def is_volume_name_valid(cls,
