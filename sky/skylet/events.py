@@ -355,16 +355,6 @@ class AutostopEvent(SkyletEvent):
         os.environ['AWS_SHARED_CREDENTIALS_FILE'] = '/dev/null'
         os.environ['AWS_CONFIG_FILE'] = '/dev/null'
 
-        # Stop the ray autoscaler to avoid scaling up, during
-        # stopping/terminating of the cluster.
-        if not cloud.uses_ray():
-            logger.info('Skipping ray stop as cloud does not use Ray.')
-        else:
-            logger.info('Stopping the ray cluster.')
-            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
-                           shell=True,
-                           check=True)
-
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:
             operation_fn = provision_lib.terminate_instances

@@ -4967,25 +4967,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):
             logger.debug(f'Provisioner version: {cloud.PROVISIONER_VERSION} '
                          'using new provisioner for teardown.')
-            # Stop the ray autoscaler first to avoid the head node trying to
-            # re-launch the worker nodes, during the termination of the
-            # cluster.
-            try:
-                # We do not check the return code, since Ray returns
-                # non-zero return code when calling Ray stop,
-                # even when the command was executed successfully.
-                self.run_on_head(handle,
-                                 f'{constants.SKY_RAY_CMD} stop --force')
-            except exceptions.FetchClusterInfoError:
-                # This error is expected if the previous cluster IP is
-                # failed to be found,
-                # i.e., the cluster is already stopped/terminated.
-                if prev_cluster_status == status_lib.ClusterStatus.UP:
-                    logger.warning(
-                        'Failed to take down Ray autoscaler on the head node. '
-                        'It might be because the cluster\'s head node has '
-                        'already been terminated. It is fine to skip this.')
-
             try:
                 provisioner.teardown_cluster(repr(cloud),
                                              resources_utils.ClusterName(
