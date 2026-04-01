@@ -143,10 +143,12 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
             task.update_envs(resolved.env_vars)
 
         # Write resolved file mounts to temp files and add to task.
+        # Uses tempstore so files are cleaned up when the request ends.
         if resolved.file_mounts:
+            secret_dir = tempstore.mkdtemp(prefix='skypilot-secrets-')
             for fm in resolved.file_mounts:
                 tmp_fd, tmp_path = tempfile.mkstemp(
-                    prefix='skypilot-secret-')
+                    prefix='secret-', dir=secret_dir)
                 with os.fdopen(tmp_fd, 'wb') as f:
                     f.write(fm.content)
                 os.chmod(tmp_path, 0o600)
