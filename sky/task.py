@@ -701,6 +701,14 @@ class Task:
             # Dict form: split inline values vs secrets: prefix refs
             for key, value in raw_secrets.items():
                 if key.startswith('secrets:'):
+                    if value is not None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid secret {key!r}: secret '
+                                'references (secrets: prefix) must have '
+                                'a null value in dict form. To provide '
+                                'an inline secret value, remove the '
+                                "'secrets:' prefix.")
                     ref_name = key[len('secrets:'):]
                     name, scope = _parse_secret_name(ref_name)
                     managed_from_secrets.append(
