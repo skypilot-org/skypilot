@@ -1053,6 +1053,31 @@ def _get_all_task_ids_statuses(
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
+def _get_primary_task_ids_statuses(
+        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+    """Returns (task_id, status) pairs for primary tasks only.
+
+    For job groups, only tasks with is_primary_in_job_group=True are returned.
+    For non-job-group jobs (where is_primary_in_job_group is NULL), all tasks
+    are returned, so behavior is unchanged for regular jobs/pipelines.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        id_statuses = session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.status,
+            ).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    sqlalchemy.or_(
+                        spot_table.c.is_primary_in_job_group.is_(None),
+                        spot_table.c.is_primary_in_job_group.is_(True),
+                    ),
+                )).order_by(spot_table.c.task_id.asc())).fetchall()
+        return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
+
+
 def get_all_task_ids_names_statuses_logs(
     job_id: int
 ) -> List[Tuple[int, str, ManagedJobStatus, str, Optional[float]]]:
@@ -1101,9 +1126,13 @@ def get_latest_task_id_status(
     first task is succeeded, and the second task is being executed. This will
     return (1, ManagedJobStatus.RUNNING).
 
+    For job groups with primary/auxiliary tasks, only primary tasks are
+    considered so the overall status reflects primary task outcomes
+    (e.g. SUCCEEDED rather than CANCELLED from auto-terminated auxiliaries).
+
     If the job_id does not exist, (None, None) will be returned.
     """
-    id_statuses = _get_all_task_ids_statuses(job_id)
+    id_statuses = _get_primary_task_ids_statuses(job_id)
     return get_latest_task_id_from_statuses(id_statuses)
 
 
@@ -2192,8 +2221,12 @@ def get_workspace(job_id: int) -> str:
 
 async def get_latest_task_id_status_async(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
-    """Returns the (task id, status) of the latest task of a job."""
-    id_statuses = await get_all_task_ids_statuses_async(job_id)
+    """Returns the (task id, status) of the latest task of a job.
+
+    For job groups with primary/auxiliary tasks, only primary tasks are
+    considered so the overall status reflects primary task outcomes.
+    """
+    id_statuses = await _get_primary_task_ids_statuses_async(job_id)
     return get_latest_task_id_from_statuses(id_statuses)
 
 
@@ -2208,6 +2241,30 @@ async def get_all_task_ids_statuses_async(
                 spot_table.c.status,
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc()))
+        return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
+
+
+async def _get_primary_task_ids_statuses_async(
+        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+    """Async version of _get_primary_task_ids_statuses().
+
+    Returns (task_id, status) pairs for primary tasks only. For non-job-group
+    jobs (where is_primary_in_job_group is NULL), all tasks are returned.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.status,
+            ).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    sqlalchemy.or_(
+                        spot_table.c.is_primary_in_job_group.is_(None),
+                        spot_table.c.is_primary_in_job_group.is_(True),
+                    ),
+                )).order_by(spot_table.c.task_id.asc()))
         return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
