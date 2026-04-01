@@ -24,10 +24,13 @@ name: controller
 resources:
   infra: kubernetes
   cpus: 1
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    min_nodes: 1
 
 envs:
-  TOTAL_EPOCHS: 20
-  MIN_WORKERS: 4
+  TOTAL_EPOCHS: 200
+  MIN_WORKERS: 1000
 
 workdir:
   url: https://github.com/skypilot-org/skypilot.git
@@ -45,13 +48,13 @@ resources:
   memory: 0.1
   job_recovery:
     strategy: DYNAMIC_NODE_SET
-    min_nodes: 4
+    min_nodes: 1000
 
 workdir:
   url: https://github.com/skypilot-org/skypilot.git
   ref: speedup-job
 
-num_nodes: 8
+num_nodes: 1500
 
 run: |
   cd examples/managed_jobs/elastic_training && python worker.py

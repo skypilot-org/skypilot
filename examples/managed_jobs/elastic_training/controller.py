@@ -21,8 +21,7 @@ MIN_WORKERS = int(os.environ.get('MIN_WORKERS', 4))
 def get_all_workers():
     """Query /nodes and return all worker nodes."""
     try:
-        data = json.loads(
-            urllib.request.urlopen(NODES_URL, timeout=5).read())
+        data = json.loads(urllib.request.urlopen(NODES_URL, timeout=5).read())
     except Exception:
         return []
     nodes = data.get('workers', data.get('nodes', []))
@@ -31,8 +30,7 @@ def get_all_workers():
 
 def get_ready_workers():
     """Return workers with app_status == 'ready' (for initial setup)."""
-    return [n for n in get_all_workers()
-            if n.get('app_status') == 'ready']
+    return [n for n in get_all_workers() if n.get('app_status') == 'ready']
 
 
 def get_alive_workers():
@@ -41,8 +39,10 @@ def get_alive_workers():
     Used for liveness checks — a worker in 'training' status is still
     alive, just busy with the previous epoch.
     """
-    return [n for n in get_all_workers()
-            if n.get('status') in ('PENDING', 'SETTING_UP', 'RUNNING')]
+    return [
+        n for n in get_all_workers()
+        if n.get('status') in ('PENDING', 'SETTING_UP', 'RUNNING')
+    ]
 
 
 def send_state(worker, state):
@@ -74,8 +74,10 @@ def main():
 
     # Select initial active set
     active_ranks = {w['rank'] for w in ready[:MIN_WORKERS]}
-    print(f'Active: ranks {sorted(active_ranks)}, '
-          f'Standby: {len(ready) - MIN_WORKERS}', flush=True)
+    print(
+        f'Active: ranks {sorted(active_ranks)}, '
+        f'Standby: {len(ready) - MIN_WORKERS}',
+        flush=True)
 
     # Training loop
     for epoch in range(1, EPOCHS + 1):
@@ -94,21 +96,18 @@ def main():
                 if (w['rank'] not in active_ranks and
                         len(active_ranks) < MIN_WORKERS):
                     active_ranks.add(w['rank'])
-                    print(f'  Promoted rank {w["rank"]} to active',
-                          flush=True)
+                    print(f'  Promoted rank {w["rank"]} to active', flush=True)
 
         # Wait if we still don't have enough active workers
         while len(active_ranks) < MIN_WORKERS:
-            print(f'  Only {len(active_ranks)} active, waiting...',
-                  flush=True)
+            print(f'  Only {len(active_ranks)} active, waiting...', flush=True)
             time.sleep(2)
             alive = get_alive_workers()
             for w in alive:
                 if (w['rank'] not in active_ranks and
                         len(active_ranks) < MIN_WORKERS):
                     active_ranks.add(w['rank'])
-                    print(f'  Promoted rank {w["rank"]} to active',
-                          flush=True)
+                    print(f'  Promoted rank {w["rank"]} to active', flush=True)
 
         # Build active worker list — use alive workers in active set
         # Re-check: some active-ranked pods may have died between
@@ -116,8 +115,7 @@ def main():
         alive = get_alive_workers()
         active = [w for w in alive if w['rank'] in active_ranks]
         if not active:
-            print(f'  No active workers alive, retrying...',
-                  flush=True)
+            print(f'  No active workers alive, retrying...', flush=True)
             continue
         standby_count = len(alive) - len(active)
 
@@ -131,17 +129,13 @@ def main():
             'peers': peer_ips,
         }) for i, w in enumerate(active)]
 
-        print(f'  Active: {n} '
-              f'(ranks {sorted(w["rank"] for w in active)}), '
-              f'Standby: {standby_count}', flush=True)
+        print(f'  Active: {n}, Standby: {standby_count}', flush=True)
 
         # Push state to active workers concurrently
         results = []
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=n) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as pool:
             futures = {
-                pool.submit(send_state, w, s): w
-                for w, s in worker_states
+                pool.submit(send_state, w, s): w for w, s in worker_states
             }
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -154,18 +148,17 @@ def main():
                         active_ranks.discard(rank)
                 else:
                     results.append(result)
-                    print(f'  rank {result["rank"]}: '
-                          f'loss={result["loss"]:.4f} '
-                          f'({result["samples"]} samples)',
-                          flush=True)
 
         if results:
-            avg_loss = (sum(r['loss'] for r in results) /
-                        len(results))
+            losses = [r['loss'] for r in results]
+            avg_loss = sum(losses) / len(losses)
             total_samples = sum(r['samples'] for r in results)
-            print(f'  Epoch {epoch}: {len(results)}/{n} '
-                  f'workers, {total_samples} samples, '
-                  f'avg_loss={avg_loss:.4f}', flush=True)
+            print(
+                f'  Epoch {epoch}: {len(results)}/{n} '
+                f'workers, {total_samples} samples, '
+                f'avg_loss={avg_loss:.4f} '
+                f'(min={min(losses):.4f}, max={max(losses):.4f})',
+                flush=True)
 
     print('\n===== TRAINING COMPLETE =====', flush=True)
 
