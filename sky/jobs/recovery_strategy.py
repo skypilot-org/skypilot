@@ -991,6 +991,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         self._gpu_resource_key: Optional[str] = None
         self._tolerations: List[Dict[str, str]] = []
         self._node_selector: Dict[str, str] = {}
+        self._workdir_config: Optional[Dict[str, Any]] = None
+        self._file_mounts: Optional[Dict[str, str]] = None
 
     async def _launch(self,
                       max_retry: Optional[int] = 3,
@@ -1052,6 +1054,10 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
         # Serialize file_mounts
         file_mounts = dict(task.file_mounts) if task.file_mounts else None
+
+        # Save workdir and file_mounts for pod replacement during recovery
+        self._workdir_config = workdir_config
+        self._file_mounts = file_mounts
 
         # Upload local workdir/file_mounts to a ConfigMap if needed.
         # All K8s API calls and CPU-heavy manifest building are run in
@@ -1231,6 +1237,8 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                     gpu_resource_key=self._gpu_resource_key,
                     tolerations=self._tolerations,
                     node_selector=self._node_selector,
+                    workdir=self._workdir_config,
+                    file_mounts=self._file_mounts,
                 )
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Failed to replace pod index {idx}: {e}')
