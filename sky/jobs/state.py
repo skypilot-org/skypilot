@@ -2221,12 +2221,11 @@ async def get_latest_task_id_status_async(
     For job groups with primary/auxiliary tasks, only primary tasks are
     considered so the overall status reflects primary task outcomes.
     """
-    id_statuses = await _get_task_ids_statuses_async(job_id,
-                                                      primary_only=True)
+    id_statuses = await get_task_ids_statuses_async(job_id, primary_only=True)
     return get_latest_task_id_from_statuses(id_statuses)
 
 
-async def _get_task_ids_statuses_async(
+async def get_task_ids_statuses_async(
         job_id: int,
         primary_only: bool = False) -> List[Tuple[int, ManagedJobStatus]]:
     """Async version of _get_task_ids_statuses().
