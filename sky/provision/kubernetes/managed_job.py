@@ -10,10 +10,9 @@ eliminating: internal_file_mounts, setup_runtime_on_cluster, Ray cluster setup,
 Skylet startup, SSH-based user setup, and Ray-based job submission.
 """
 import base64
-import logging
 import os
-import threading
 import textwrap
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,7 +23,6 @@ from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.data import data_utils
 from sky.provision.kubernetes import discovery_sidecar
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import subprocess_utils
@@ -789,7 +787,7 @@ def build_job_manifests(
 
 def _build_rbac_manifests(job_name: str, namespace: str,
                           service_account: str) -> List[Dict[str, Any]]:
-    """Build Role + RoleBinding for Endpoints read and Pods read/patch access."""
+    """Build Role + RoleBinding for Endpoints/Pods access."""
     role = {
         'apiVersion': 'rbac.authorization.k8s.io/v1',
         'kind': 'Role',
@@ -1064,7 +1062,7 @@ def get_job_pod_status(
             namespace, label_selector=label_selector)
     except (kubernetes.api_exception(), kubernetes.max_retry_error()) as e:
         logger.warning(f'Failed to list pods for {job_name}: {e}')
-        return job_lib.JobStatus.UNKNOWN, 0, 0, 0
+        return job_lib.JobStatus.INIT, 0, 0, 0
 
     running = 0
     succeeded = 0

@@ -785,9 +785,38 @@ class RetryingVmProvisioner(object):
 
     def _inject_managed_job_config_to_yaml(self, cluster_yaml: str,
                                            cluster_name: str) -> None:
-        """Inject managed job task info into the cluster YAML provider config."""
+        """Inject managed job task info into the cluster YAML."""
         if self._task is None:
             return
+
+        # TODO(kevinw): Block local file mounts and local workdir in the
+        # v1 code path. Remove once file mounts support is implemented
+        # (SKY-5040).
+        local_file_mounts = (self._task.get_local_to_remote_file_mounts() or {})
+        # Git workdirs are dicts (e.g. {'url': ..., 'ref': ...}), so
+        # isinstance(..., str) correctly identifies only local path workdirs.
+        has_local_workdir = (self._task.workdir is not None and
+                             isinstance(self._task.workdir, str))
+        storage_mounts = self._task.storage_mounts
+        if local_file_mounts or has_local_workdir or storage_mounts:
+            unsupported = []
+            if has_local_workdir:
+                unsupported.append(f'workdir: {self._task.workdir!r}')
+            if local_file_mounts:
+                for dst, src in local_file_mounts.items():
+                    unsupported.append(f'file_mounts: {src!r} -> {dst!r}')
+            if storage_mounts:
+                for mnt_path, storage in storage_mounts.items():
+                    unsupported.append(f'storage_mounts: {storage.name!r} -> '
+                                       f'{mnt_path!r}')
+            raise exceptions.NotSupportedError(
+                'Jobs with local file mounts, workdir, or storage '
+                'mounts are not supported with the managed jobs v1 '
+                'code path (jobs.use_v1: true). '
+                'Unsupported mounts:\n  ' + '\n  '.join(unsupported) +
+                '\nPlease use a git workdir or cloud storage '
+                '(s3://, gs://, etc.) instead.')
+
         config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
         provider = config.get('provider', {})
         envs = task_lib.get_plaintext_envs_and_secrets(
@@ -1289,6 +1318,9 @@ class RetryingVmProvisioner(object):
                             raise
                     except exceptions.InconsistentHighAvailabilityError:
                         # No teardown happens for this error.
+                        with ux_utils.print_exception_no_traceback():
+                            raise
+                    except exceptions.NotSupportedError:
                         with ux_utils.print_exception_no_traceback():
                             raise
                     except config_lib.KubernetesError as e:

@@ -1722,9 +1722,15 @@ def stream_logs_by_id(
         # The job is not in terminal state and we are not following,
         # just return.
         return '', exceptions.JobExitCode.SUCCEEDED
+    failure_reason = ''
+    if managed_job_status.is_failed():
+        reason = managed_job_state.get_failure_reason(job_id)
+        if reason:
+            failure_reason = f'\nReason: {reason}'
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
-                                   f'(status: {managed_job_status.value}).'))
+                                   f'(status: {managed_job_status.value}).'
+                                   f'{failure_reason}'))
     return '', exceptions.JobExitCode.from_managed_job_status(
         managed_job_status)
 
