@@ -88,6 +88,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
       low-latency networking
     - COREWEAVE: CoreWeave clusters with InfiniBand support.
+    - TOGETHER: Together AI clusters with InfiniBand support for
+      high-throughput, low-latency networking
+    - AWS_EFA: AWS EKS/HyperPod clusters with Elastic Fabric Adapter (EFA)
+      support for high-performance inter-node communication
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -95,6 +99,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - GCP settings match
       sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
     - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    - AWS EFA settings match the EFA configuration used in AWS VMs
     """
 
     GCP_TCPX = 'gcp_tcpx'
