@@ -399,13 +399,13 @@ When using SkyPilot programmatically, follow this loop:
 1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
 2. **Launch**: `sky launch -c mycluster task.yaml`
 3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
-4. **Wait for completion**: `sky logs mycluster <JOB_ID> --status` (blocks until job finishes; exits 0 on success; get JOB_ID from `sky queue mycluster -o json`)
+4. **Wait for completion**: `sky logs mycluster <JOB_ID>` (streams logs so you can observe progress and react to stalls; blocks until job finishes; get JOB_ID from `sky queue mycluster -o json`). For long-running jobs where you don't need intermediate output, use `sky logs mycluster <JOB_ID> --status` instead (blocks silently, exits 0 on success).
 5. **Inspect output**: `sky logs mycluster <JOB_ID> --no-follow` or `sky logs mycluster <JOB_ID> --tail 100`
-6. **Debug**: `sky logs mycluster <JOB_ID>` (stream from start) or `ssh mycluster` (interactive)
+6. **Debug**: `ssh mycluster` (interactive)
 7. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
 8. **Cleanup**: `sky down mycluster`
 
-> **Never poll with `sleep` + `sky queue`** — use `sky logs CLUSTER JOB_ID --status` to block until done, then `--tail N` to fetch output.
+> **Never poll with `sleep` + `sky queue`** — use `sky logs CLUSTER JOB_ID` to stream logs and block until done. Use `--status` if you only need the exit code, or `--tail N` to fetch recent output after completion.
 
 ## Common Agent Mistakes
 
