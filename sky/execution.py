@@ -884,6 +884,15 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
+    # File-mount secret refs are not supported with exec because exec skips
+    # the SYNC_FILE_MOUNTS stage.
+    tasks = [entrypoint] if isinstance(entrypoint, sky.Task) else entrypoint.tasks
+    for t in tasks:
+        for ref in t.managed_secret_refs:
+            if ref.mount_path is not None:
+                raise ValueError(
+                    f'File-mount secret {ref.name!r} is not supported '
+                    'with `sky exec`. Use `sky launch` instead.')
 
     # Check if cluster is autostopping - reject exec on autostopping clusters
     if not dryrun:
