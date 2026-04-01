@@ -1378,20 +1378,18 @@ class JobController:
         # For non-K8s (SSH) tasks, only inject the wait script;
         # Phase 3 will handle /etc/hosts injection via SSH.
         task_resources = list(task.resources)
-        is_k8s = (task_resources and task_resources[0].cloud is not None
-                  and task_resources[0].cloud.is_same_cloud(
+        is_k8s = (task_resources and task_resources[0].cloud is not None and
+                  task_resources[0].cloud.is_same_cloud(
                       sky_clouds.Kubernetes()))
         if is_k8s and all_tasks:
             namespace = self._get_k8s_namespace_for_task(task)
             networking_script = (
-                job_group_networking
-                .generate_k8s_networking_setup_script(
-                    job_group_name, all_tasks, self._job_id,
-                    namespace, other_job_names))
+                job_group_networking.generate_k8s_networking_setup_script(
+                    job_group_name, all_tasks, self._job_id, namespace,
+                    other_job_names))
         else:
             networking_script = (
-                job_group_networking
-                .generate_wait_for_networking_script(
+                job_group_networking.generate_wait_for_networking_script(
                     job_group_name, other_job_names))
         if networking_script:
             current_run = task.run or ''

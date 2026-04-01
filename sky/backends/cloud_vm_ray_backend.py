@@ -5100,21 +5100,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
-            try:
-                # We do not check the return code, since Ray returns
-                # non-zero return code when calling Ray stop,
-                # even when the command was executed successfully.
-                self.run_on_head(handle,
-                                 f'{constants.SKY_RAY_CMD} stop --force')
-            except exceptions.FetchClusterInfoError:
-                # This error is expected if the previous cluster IP is
-                # failed to be found,
-                # i.e., the cluster is already stopped/terminated.
-                if prev_cluster_status == status_lib.ClusterStatus.UP:
-                    logger.warning(
-                        'Failed to take down Ray autoscaler on the head node. '
-                        'It might be because the cluster\'s head node has '
-                        'already been terminated. It is fine to skip this.')
+            # V1 K8s managed jobs don't run Ray, so skip the SSH call
+            # which would fail on completed pods anyway.
+            is_v1_managed_job = 'managed_job_config' in config.get(
+                'provider', {})
+            if not is_v1_managed_job:
+                try:
+                    # We do not check the return code, since Ray returns
+                    # non-zero return code when calling Ray stop,
+                    # even when the command was executed successfully.
+                    self.run_on_head(handle,
+                                     f'{constants.SKY_RAY_CMD} stop --force')
+                except exceptions.FetchClusterInfoError:
+                    # This error is expected if the previous cluster IP is
+                    # failed to be found,
+                    # i.e., the cluster is already stopped/terminated.
+                    if prev_cluster_status == status_lib.ClusterStatus.UP:
+                        logger.warning(
+                            'Failed to take down Ray autoscaler on the head '
+                            'node. It might be because the cluster\'s head '
+                            'node has already been terminated. It is fine to '
+                            'skip this.')
 
             try:
                 provisioner.teardown_cluster(repr(cloud),
