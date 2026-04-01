@@ -12,6 +12,7 @@ Skylet startup, SSH-based user setup, and Ray-based job submission.
 import base64
 import logging
 import os
+import threading
 import textwrap
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -575,6 +576,10 @@ def _get_node_index(pod) -> str:
 # Template file for elastic pod manifests
 _ELASTIC_POD_TEMPLATE = 'kubernetes-managed-job.yaml.j2'
 
+# Cached compiled Jinja2 template — compiled once, reused for all pods
+_POD_TEMPLATE: Optional[jinja2.Template] = None
+_POD_TEMPLATE_LOCK = threading.Lock()
+
 # Thread count for parallel pod creation (matches K8s provisioner)
 _NUM_THREADS = None  # Lazily initialized
 
@@ -584,6 +589,20 @@ def _get_num_threads() -> int:
     if _NUM_THREADS is None:
         _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
     return _NUM_THREADS
+
+
+def _get_pod_template() -> jinja2.Template:
+    global _POD_TEMPLATE
+    if _POD_TEMPLATE is None:
+        with _POD_TEMPLATE_LOCK:
+            if _POD_TEMPLATE is None:
+                sky_root = os.path.dirname(
+                    os.path.dirname(os.path.dirname(__file__)))
+                template_path = os.path.join(sky_root, 'templates',
+                                             _ELASTIC_POD_TEMPLATE)
+                with open(template_path, 'r', encoding='utf-8') as f:
+                    _POD_TEMPLATE = jinja2.Template(f.read())
+    return _POD_TEMPLATE
 
 
 def render_pod(
@@ -615,14 +634,7 @@ def render_pod(
 
     Uses sky/templates/kubernetes-managed-job.yaml.j2 for readability.
     """
-    # __file__ is sky/provision/kubernetes/managed_job.py
-    # sky root is 3 levels up: sky/provision/kubernetes -> sky/provision -> sky
-    sky_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    template_path = os.path.join(sky_root, 'templates', _ELASTIC_POD_TEMPLATE)
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template_str = f.read()
-
-    j2_template = jinja2.Template(template_str)
+    j2_template = _get_pod_template()
     rendered = j2_template.render(
         job_name=job_name,
         namespace=namespace,
