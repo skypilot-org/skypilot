@@ -6,7 +6,6 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
-from enum import IntEnum
 import hashlib
 import html
 import json
@@ -25,8 +24,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type)
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
 
@@ -37,6 +35,7 @@ from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import filelock
 import jwt as pyjwt
+import starlette.background
 import starlette.middleware.base
 import uvloop
 
@@ -73,6 +72,7 @@ from sky.server import state
 from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
+from sky.server import websocket_utils
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
@@ -94,6 +94,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
@@ -642,7 +643,7 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
-            request_id='skypilot-server-on-boot-check',
+            request_id=server_constants.ON_BOOT_CHECK_REQUEST_ID,
             request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
@@ -652,7 +653,8 @@ async def schedule_on_boot_check_async():
     except exceptions.RequestAlreadyExistsError:
         # Lifespan will be executed in each uvicorn worker process, we
         # can safely ignore the error if the task is already scheduled.
-        logger.debug('Request skypilot-server-on-boot-check already exists.')
+        logger.debug(f'Request {server_constants.ON_BOOT_CHECK_REQUEST_ID} '
+                     'already exists.')
 
 
 @contextlib.asynccontextmanager
@@ -2474,10 +2476,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     )
 
 
-class SSHMessageType(IntEnum):
-    REGULAR_DATA = 0
-    PINGPONG = 1
-    LATENCY_MEASUREMENT = 2
+SSHMessageType = websocket_utils.SSHMessageType
 
 
 async def _get_cluster_and_validate(
@@ -2525,118 +2524,11 @@ async def _get_cluster_and_validate(
     return handle
 
 
-async def _run_websocket_proxy(
-    websocket: fastapi.WebSocket,
-    read_from_backend: Callable[[], Awaitable[bytes]],
-    write_to_backend: Callable[[bytes], Awaitable[None]],
-    close_backend: Callable[[], Awaitable[None]],
-    timestamps_supported: bool,
-) -> bool:
-    """Run bidirectional WebSocket-to-backend proxy.
-
-    Args:
-        websocket: FastAPI WebSocket connection
-        read_from_backend: Async callable to read bytes from backend
-        write_to_backend: Async callable to write bytes to backend
-        close_backend: Async callable to close backend connection
-        timestamps_supported: Whether to use message type framing
-
-    Returns:
-        True if SSH failed, False otherwise
-    """
-    ssh_failed = False
-    websocket_closed = False
-
-    async def websocket_to_backend():
-        try:
-            async for message in websocket.iter_bytes():
-                if timestamps_supported:
-                    type_size = struct.calcsize('!B')
-                    message_type = struct.unpack('!B', message[:type_size])[0]
-                    if message_type == SSHMessageType.REGULAR_DATA:
-                        # Regular data - strip type byte and forward to backend
-                        message = message[type_size:]
-                    elif message_type == SSHMessageType.PINGPONG:
-                        # PING message - respond with PONG
-                        ping_id_size = struct.calcsize('!I')
-                        if len(message) != type_size + ping_id_size:
-                            raise ValueError(
-                                f'Invalid PING message length: {len(message)}')
-                        # Return the same PING message for latency measurement
-                        await websocket.send_bytes(message)
-                        continue
-                    elif message_type == SSHMessageType.LATENCY_MEASUREMENT:
-                        # Latency measurement from client
-                        latency_size = struct.calcsize('!Q')
-                        if len(message) != type_size + latency_size:
-                            raise ValueError('Invalid latency measurement '
-                                             f'message length: {len(message)}')
-                        avg_latency_ms = struct.unpack(
-                            '!Q',
-                            message[type_size:type_size + latency_size])[0]
-                        latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # pylint: disable=line-too-long
-                            pid=os.getpid()).observe(latency_seconds)
-                        continue
-                    else:
-                        raise ValueError(
-                            f'Unknown message type: {message_type}')
-
-                try:
-                    await write_to_backend(message)
-                except Exception as e:  # pylint: disable=broad-except
-                    # Typically we will not reach here, if the conn to backend
-                    # is disconnected, backend_to_websocket will exit first.
-                    # But just in case.
-                    logger.error(f'Failed to write to backend through '
-                                 f'connection: {e}')
-                    nonlocal ssh_failed
-                    ssh_failed = True
-                    break
-        except fastapi.WebSocketDisconnect:
-            pass
-        nonlocal websocket_closed
-        websocket_closed = True
-        await close_backend()
-
-    async def backend_to_websocket():
-        try:
-            while True:
-                data = await read_from_backend()
-                if not data:
-                    if not websocket_closed:
-                        logger.warning(
-                            'SSH connection to backend is disconnected '
-                            'before websocket connection is closed')
-                        nonlocal ssh_failed
-                        ssh_failed = True
-                    break
-                if timestamps_supported:
-                    # Prepend message type byte (0 = regular data)
-                    message_type_bytes = struct.pack(
-                        '!B', SSHMessageType.REGULAR_DATA.value)
-                    data = message_type_bytes + data
-                await websocket.send_bytes(data)
-        except Exception:  # pylint: disable=broad-except
-            pass
-        try:
-            await websocket.close()
-        except Exception:  # pylint: disable=broad-except
-            # The websocket might have been closed by the client
-            pass
-
-    await asyncio.gather(websocket_to_backend(),
-                         backend_to_websocket(),
-                         return_exceptions=True)
-
-    return ssh_failed
-
-
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-        websocket: fastapi.WebSocket,
-        cluster_name: str,
-        client_version: Optional[int] = None) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str,
+                                   client_version: Optional[int] = None,
+                                   no_redirect: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
@@ -2644,6 +2536,23 @@ async def kubernetes_pod_ssh_proxy(
     timestamps_supported = client_version is not None and client_version > 21
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
+
+    # Check if there is a hook wants to redirect this connection.
+    if (no_redirect != 1 and websocket_utils.ssh_redirect_hook is not None and
+            client_version is not None and client_version >=
+            server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION):
+        try:
+            redirect_info = await websocket_utils.ssh_redirect_hook(
+                websocket, cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'SSH redirect hook failed for {cluster_name}: {e}')
+            redirect_info = None
+        if redirect_info is not None:
+            frame = (struct.pack('!B', SSHMessageType.REDIRECT) +
+                     json.dumps(redirect_info).encode())
+            await websocket.send_bytes(frame)
+            await websocket.close()
+            return
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
@@ -2687,7 +2596,7 @@ async def kubernetes_pod_ssh_proxy(
         async def close_writer() -> None:
             writer.close()
 
-        ssh_failed = await _run_websocket_proxy(
+        ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
             read_from_backend=lambda: reader.read(1024),
             write_to_backend=write_and_drain,
@@ -2824,7 +2733,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         async def close_stdin() -> None:
             stdin.close()
 
-        ssh_failed = await _run_websocket_proxy(
+        ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
             read_from_backend=lambda: stdout.read(4096),
             write_to_backend=write_and_drain,
@@ -2965,6 +2874,54 @@ async def all_contexts(request: fastapi.Request) -> None:
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/debug/dump_create')
+async def create_debug_dump(
+        request: fastapi.Request,
+        create_debug_dump_body: payloads.CreateDebugDumpBody) -> None:
+    """Starts a debug dump."""
+
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CREATE_DEBUG_DUMP,
+        request_body=create_debug_dump_body,
+        func=core.create_debug_dump,
+        schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.get('/debug/dump_download/{dump_filename}')
+async def download_debug_dump(
+        dump_filename: str) -> fastapi.responses.FileResponse:
+    """Download a debug dump file.
+
+    The dump file is automatically deleted after the download completes.
+    """
+    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
+    dump_path = dump_dir / dump_filename
+
+    # Security: check path traversal before existence to avoid
+    # leaking whether arbitrary files exist on the filesystem.
+    try:
+        dump_path.resolve().relative_to(dump_dir.resolve())
+    except ValueError as path_err:
+        raise fastapi.HTTPException(status_code=403,
+                                    detail='Invalid path') from path_err
+
+    if not dump_path.exists():
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Debug dump not found')
+
+    # Delete the dump file after download completes
+    return fastapi.responses.FileResponse(
+        path=dump_path,
+        filename=dump_filename,
+        media_type='application/zip',
+        background=starlette.background.BackgroundTask(dump_path.unlink,
+                                                       missing_ok=True),
     )
 
 

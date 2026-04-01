@@ -652,6 +652,173 @@ class TestVolumeConfigModel:
         assert unpickled_config._version == models.VolumeConfig._VERSION
 
 
+class TestSubPath:
+    """Tests for sub_path support."""
+
+    def test_sub_path_pattern_rejects_invalid(self):
+        """Test that SUB_PATH_PATTERN rejects invalid paths."""
+        import re
+
+        from sky.skylet import constants
+        assert not re.match(constants.SUB_PATH_PATTERN, '/absolute/path')
+        assert not re.match(constants.SUB_PATH_PATTERN, '')
+
+    def test_volume_mount_resolve_rejects_traversal(self):
+        """Test VolumeMount.resolve rejects directory traversal."""
+        from sky.utils import volume as volume_utils
+        with pytest.raises(ValueError, match='directory traversal'):
+            volume_utils.VolumeMount.resolve('/mnt/data',
+                                             'test',
+                                             sub_path='../etc/passwd')
+
+    def test_volume_mount_to_yaml_config_with_sub_path(self):
+        """Test VolumeMount serialization includes sub_path."""
+        from sky.utils import volume as volume_utils
+        mock_config = models.VolumeConfig(
+            name='test',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+        )
+        mount = volume_utils.VolumeMount('/mnt/data',
+                                         'test',
+                                         mock_config,
+                                         sub_path='~/.cache/uv')
+        yaml_config = mount.to_yaml_config()
+        assert yaml_config['sub_path'] == '~/.cache/uv'
+
+
+class TestAutoMountsSchema:
+    """Tests for auto_mounts config schema validation."""
+
+    def test_valid_auto_mounts_config(self):
+        """Test valid auto_mounts config passes schema validation."""
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': [
+                        '~/.cache/huggingface/hub',
+                        '~/.cache/huggingface/datasets',
+                    ],
+                }],
+            },
+        }
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid config: ')
+
+    def test_auto_mounts_missing_volume_name(self):
+        """Test auto_mounts without volume_name fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'mount_paths': ['~/.cache/uv'],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_missing_mount_paths(self):
+        """Test auto_mounts without mount_paths fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_empty_mount_paths(self):
+        """Test auto_mounts with empty mount_paths fails validation."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': [],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_relative_path_rejected(self):
+        """Test auto_mounts rejects relative paths (must start with / or ~)."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': ['relative/path'],
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_tilde_username_path_rejected(self):
+        """Test auto_mounts rejects ~user style paths."""
+        from sky import exceptions as sky_exceptions
+        for bad_path in ['~foo', '~username/.cache']:
+            config = {
+                'kubernetes': {
+                    'auto_mounts': [{
+                        'volume_name': 'my-volume',
+                        'mount_paths': [bad_path],
+                    }],
+                },
+            }
+            with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+                common_utils.validate_schema(config,
+                                             schemas.get_config_schema(),
+                                             'Invalid config: ')
+
+    def test_auto_mounts_in_context_config(self):
+        """Test auto_mounts works in context_configs."""
+        config = {
+            'kubernetes': {
+                'context_configs': {
+                    'my-context': {
+                        'auto_mounts': [{
+                            'volume_name': 'ctx-volume',
+                            'mount_paths': ['~/.cache/uv'],
+                        }],
+                    },
+                },
+            },
+        }
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid config: ')
+
+    def test_auto_mounts_additional_properties_rejected(self):
+        """Test auto_mounts rejects unknown properties."""
+        from sky import exceptions as sky_exceptions
+        config = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': 'my-volume',
+                    'mount_paths': ['~/.cache/uv'],
+                    'unknown_field': True,
+                }],
+            },
+        }
+        with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+
 class TestHostPathVolume:
     """Tests for HostPathVolume."""
 
