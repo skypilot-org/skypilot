@@ -102,6 +102,7 @@ def test_batch_simple():
 
 
 # ---------- Test diffusion batch (image generation) ----------
+@pytest.mark.aws
 @pytest.mark.batch
 @pytest.mark.resource_heavy
 def test_batch_diffusion():
