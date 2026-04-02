@@ -140,12 +140,16 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         V100: 2.50     # $/accelerator/hr
+    :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
+      H100: h100-partition
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
+        gpu_partition_map:
+          H100: h100-custom
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
