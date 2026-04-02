@@ -1880,7 +1880,7 @@ def adjust_resources_to_allocatable(
         if cpu_matches:
             alloc_cpu = parse_cpu_or_gpu_resource_to_float(
                 node.status.allocatable.get('cpu', '0'))
-            clamp_cpu = alloc_cpu - node_cap_cpu * 0.01
+            clamp_cpu = alloc_cpu - node_cap_cpu * 0.1
             if min_clamp_cpu is None or clamp_cpu < min_clamp_cpu:
                 min_clamp_cpu = clamp_cpu
         if mem_matches:
