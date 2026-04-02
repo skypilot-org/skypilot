@@ -5,16 +5,16 @@ Managed Jobs
 
 .. tip::
 
-  This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
+  Use managed jobs for auto-recovery and scaling out --- running a single job for long durations, or running many jobs in parallel.
 
 .. seealso::
 
-   :doc:`pools` for running batch inference workloads across multiple infrastructure.
+   :doc:`pools` for running batch inference workloads or workloads with expensive worker setup.
 
    :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
-   can communicate with each other.
+   can communicate with each other (e.g., RL workloads).
 
-SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from hardware failures (GPU errors, node crashes), retry application errors, and clean up resources when done. Managed jobs also support cost-saving spot instances with automatic preemption recovery.
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from failures (job preemptions, GPU errors, node crashes, etc.), retry application errors, and clean up resources when done. Managed jobs also support cost-saving spot instances with automatic preemption recovery.
 
 To start a managed job, use :code:`sky jobs launch`:
 
@@ -47,12 +47,12 @@ The job is launched on a temporary SkyPilot cluster, managed end-to-end, and aut
 
 Managed jobs have several benefits:
 
-#. :ref:`Recover from failure <failure-recovery>`: Automatically recover from GPU failures, NCCL timeouts, node crashes, and other hardware issues. Retry application errors on a fresh cluster.
-#. :ref:`Scale across regions and clouds <scaling-to-many-jobs>`: Easily run and manage **thousands of jobs at once**, using instances and GPUs across multiple regions/clouds.
-#. :ref:`Use spot instances <spot-jobs>`: Optionally run on auto-recovering spot instances to **save ~70\% on GPU costs** while maintaining reliability through automatic preemption recovery.
+#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from job preemptions, GPU failures, NCCL timeouts, node crashes, and or hardware issues. Application errors are also automatically retried for a configurable number of times.
+#. :ref:`Scale across infra (clusters, regions, clouds) <scaling-to-many-jobs>`: Easily run and manage many jobs across your infrastructure choices.
 #. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks.
    Useful for running a sequence of tasks that depend on each other, e.g., data
    processing, training a model, and then running inference on it.
+#. :ref:`Use spot instances <spot-jobs>`: Optionally run on auto-recovering spot instances to save ~70\% on GPU costs while maintaining reliability through automatic preemption recovery.
 
 
 .. contents:: Contents
@@ -123,7 +123,7 @@ To see all flags, you can run :code:`sky jobs launch --help` or see the :ref:`CL
 SkyPilot will launch and start monitoring the job.
 
 - Under the hood, SkyPilot spins up a temporary cluster for the job.
-- If any machine failure happens (GPU errors, node crashes, or spot preemptions), SkyPilot will automatically search for resources across regions and clouds to re-launch the job.
+- If any failure happens (GPU errors, node crashes, or job preemptions), SkyPilot will automatically search for resources to re-launch the job.
 - Resources are cleaned up as soon as the job is finished.
 
 .. tip::
@@ -142,8 +142,8 @@ SkyPilot will launch and start monitoring the job.
      - :code:`sky jobs launch` (managed jobs)
    * - Long-lived, manually managed cluster
      - Dedicated auto-managed cluster for each job
-   * - Hardware failures must be manually recovered
-     - Hardware failures and spot preemptions are auto-recovered
+   * - Failures must be manually recovered
+     - Failures are auto-recovered
    * - Number of parallel jobs limited by cluster resources
      - Easily manage hundreds or thousands of jobs at once
    * - Good for interactive dev
@@ -166,7 +166,7 @@ See a list of managed jobs:
   Fetching managed jobs...
   Managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  2  roberta  1x [A100:8]         2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
 This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
@@ -201,6 +201,127 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
   :alt: Managed jobs dashboard
 
 The UI shows the same information as the CLI ``sky jobs queue -au``.
+
+
+.. _checkpointing:
+
+Checkpointing and recovery
+--------------------------
+
+To recover quickly from failures (hardware issues, preemptions, etc.), your job should checkpoint its state periodically. Any data on local disk that is not stored in persistent storage will be lost during the recovery process.
+
+SkyPilot supports several storage options for checkpointing:
+
+Using Kubernetes volumes
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Kubernetes, :ref:`persistent volumes <volumes-on-kubernetes>` provide high-performance storage for checkpoints. Volumes are ideal when your jobs run on Kubernetes clusters with shared filesystems (NFS, JuiceFS, Nebius shared filesystem, etc.).
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s
+
+  volumes:
+    /checkpoint: my-volume  # Mount a persistent volume
+
+  run: |
+    # Your training script saves checkpoints to /checkpoint
+    python train.py --checkpoint-dir /checkpoint
+
+Volumes offer better performance than cloud buckets and work well for Kubernetes and Slurm-based deployments. See :ref:`Volumes <volumes-all>` for setup instructions.
+
+Using cloud buckets
+~~~~~~~~~~~~~~~~~~~
+
+In cases where a volume is not available, use :ref:`cloud bucket mounts <sky-storage>`:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /checkpoint:
+      name: # NOTE: Fill in your bucket name
+      mode: MOUNT_CACHED # or MOUNT
+
+To learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <training-guide>`.
+
+Real-world examples
+~~~~~~~~~~~~~~~~~~~
+
+See the :ref:`Model training guide <training-guide>` for more training examples and best practices.
+
+
+
+.. _failure-recovery:
+
+Recovering from application failures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Hardware failures (GPU errors, node crashes) and preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
+
+In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue, NCCL timeout, or GPU memory error, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      # Restart the job up to 3 times on user code errors.
+      max_restarts_on_errors: 3
+
+This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
+
+Recovering on specific exit codes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_restarts_on_errors: 3
+      # Always recover if the job exits with code 33 or 34.
+      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      # Can also use a single integer: recover_on_exit_codes: 33
+      recover_on_exit_codes: [33, 34]
+
+In this configuration:
+
+- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
+- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
+
+.. note::
+  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
+.. warning::
+
+  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
+
+
+When will my job be recovered?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Here's how various kinds of failures will be handled by SkyPilot:
+
+.. list-table::
+   :widths: 1 2
+   :header-rows: 0
+
+   * - Hardware fails (GPU errors, node crashes, preemptions):
+     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
+   * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
+     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+   * - Can't find available resources due to cloud quota or capacity restrictions:
+     - Try other regions and other clouds indefinitely until resources are found.
+   * - Cloud config/auth issue or invalid job configuration:
+     - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
+
+To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:`sky jobs logs <job_id>`. If there is a provisioning or recovery issue, you can see the provisioning logs by running :code:`sky jobs logs --controller <job_id>`.
+
+.. tip::
+  Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. See :ref:`jobs-controller`.
 
 
 .. _spot-jobs:
@@ -283,127 +404,6 @@ candidate resources for a job. See documentation :ref:`here
 
 In this example, SkyPilot will choose the cheapest resource to use, which almost certainly
 will be spot instances. If spot instances are not available, SkyPilot will fall back to launching on-demand/reserved instances.
-
-
-.. _checkpointing:
-
-Checkpointing and recovery
---------------------------
-
-To recover quickly from failures (hardware issues, spot preemptions, etc.), your job should checkpoint its state periodically. Any data on local disk that is not stored in persistent storage will be lost during the recovery process.
-
-SkyPilot supports several storage options for checkpointing:
-
-Using Kubernetes volumes
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-On Kubernetes, :ref:`persistent volumes <volumes-on-kubernetes>` provide high-performance storage for checkpoints. Volumes are ideal when your jobs run on Kubernetes clusters with shared filesystems (NFS, JuiceFS, Nebius shared filesystem, etc.).
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-
-  volumes:
-    /checkpoint: my-volume  # Mount a persistent volume
-
-  run: |
-    # Your training script saves checkpoints to /checkpoint
-    python train.py --checkpoint-dir /checkpoint
-
-Volumes offer better performance than cloud buckets and work well for Kubernetes and Slurm-based deployments. See :ref:`Volumes <volumes-all>` for setup instructions.
-
-Using cloud buckets
-~~~~~~~~~~~~~~~~~~~
-
-For cloud VMs or when you need cross-region/cross-cloud checkpoint access, use :ref:`cloud bucket mounts <sky-storage>`:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /checkpoint:
-      name: # NOTE: Fill in your bucket name
-      mode: MOUNT_CACHED # or MOUNT
-
-To learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <training-guide>`.
-
-Real-world examples
-~~~~~~~~~~~~~~~~~~~
-
-See the :ref:`Model training guide <training-guide>` for more training examples and best practices.
-
-
-
-.. _failure-recovery:
-
-Recovering from application failures
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Hardware failures (GPU errors, node crashes) and spot preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
-
-In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue, NCCL timeout, or GPU memory error, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
-
-.. code-block:: yaml
-
-  resources:
-    accelerators: A100:8
-    job_recovery:
-      # Restart the job up to 3 times on user code errors.
-      max_restarts_on_errors: 3
-
-This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
-
-Recovering on specific exit codes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
-
-.. code-block:: yaml
-
-  resources:
-    accelerators: A100:8
-    job_recovery:
-      max_restarts_on_errors: 3
-      # Always recover if the job exits with code 33 or 34.
-      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
-      # Can also use a single integer: recover_on_exit_codes: 33
-      recover_on_exit_codes: [33, 34]
-
-In this configuration:
-
-- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
-- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
-
-.. note::
-  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
-
-.. warning::
-
-  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
-
-
-When will my job be recovered?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Here's how various kinds of failures will be handled by SkyPilot:
-
-.. list-table::
-   :widths: 1 2
-   :header-rows: 0
-
-   * - Hardware fails (GPU errors, node crashes, spot preemptions):
-     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
-   * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
-     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
-   * - Can't find available resources due to cloud quota or capacity restrictions:
-     - Try other regions and other clouds indefinitely until resources are found.
-   * - Cloud config/auth issue or invalid job configuration:
-     - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
-
-To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:`sky jobs logs <job_id>`. If there is a provisioning or recovery issue, you can see the provisioning logs by running :code:`sky jobs logs --controller <job_id>`.
-
-.. tip::
-  Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. See :ref:`jobs-controller`.
 
 
 .. _scaling-to-many-jobs:
@@ -859,7 +859,7 @@ To explicitly control this behavior, set :ref:`consolidation_mode <config-yaml-j
   When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
 
   .. code-block::
-    
+
     jobs:
       bucket: s3://xxx
 
