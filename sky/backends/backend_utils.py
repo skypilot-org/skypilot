@@ -2063,6 +2063,17 @@ def _check_owner_identity_with_record(cluster_name: str,
         # Skip the check if the cloud does not support user identity.
         return
 
+    if owner_identity is None and is_k8s_cloud:
+        # pylint: disable=import-outside-toplevel
+        from sky.adaptors import kubernetes
+
+        global_user_state.set_owner_identity_for_cluster(
+            cluster_name, kubernetes.in_cluster_identity())
+        # Previously, owner identity for in-cluster auth-only api servers
+        # was None. Need to patch this special case.
+        logger.debug(f'Successfully patched {cluster_name} owner identity '
+                     'for in-cluster.')
+
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when
     # the cluster is launched before #1808. In that case, we only check
