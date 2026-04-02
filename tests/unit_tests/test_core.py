@@ -147,17 +147,44 @@ def test_resize_invalid_num_nodes(mock_refresh):
 
 
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
-def test_resize_scale_down_not_supported(mock_refresh):
-    """Resize should raise NotSupportedError for scale-down."""
-    from sky import exceptions
-    handle = _make_mock_handle(launched_nodes=4)
+@mock.patch('sky.backends.backend_utils.get_backend_from_handle')
+@mock.patch('sky.core._check_no_running_jobs')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.provision.get_cluster_info')
+def test_resize_scale_down_running_jobs_rejected(mock_get_info, mock_get_yaml,
+                                                 mock_check_jobs,
+                                                 mock_get_backend,
+                                                 mock_refresh):
+    """Scale-down should fail if jobs are running on the cluster."""
+    from sky.backends import cloud_vm_ray_backend
+    from sky.provision import common as provision_common
+    handle = _make_mock_handle(launched_nodes=3)
     mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
-    mock_refresh.return_value = (status_lib.ClusterStatus.UP, handle)
+    mock_backend = mock.create_autospec(cloud_vm_ray_backend.CloudVmRayBackend,
+                                        instance=True)
+    mock_get_backend.return_value = mock_backend
+    mock_get_yaml.return_value = {'provider': {}}
+    worker1 = provision_common.InstanceInfo(instance_id='w1',
+                                            internal_ip='10.0.0.2',
+                                            external_ip=None,
+                                            tags={})
+    worker2 = provision_common.InstanceInfo(instance_id='w2',
+                                            internal_ip='10.0.0.3',
+                                            external_ip=None,
+                                            tags={})
+    mock_cluster_info = mock.MagicMock()
+    mock_cluster_info.get_worker_instances.return_value = [worker1, worker2]
+    mock_get_info.return_value = mock_cluster_info
+    # Simulate running jobs blocking scale-down.
+    mock_check_jobs.side_effect = ValueError(
+        'Cannot scale down: 1 job(s) still running (IDs: 1). '
+        'Cancel them first with: sky cancel test-cluster -a')
     try:
-        core.resize('test-cluster', num_nodes=2)
-        assert False, 'Expected NotSupportedError'
-    except exceptions.NotSupportedError as e:
-        assert 'Scale-down' in str(e)
+        core.resize('test-cluster', num_nodes=1)
+        assert False, 'Expected ValueError about running jobs'
+    except ValueError as e:
+        assert 'running' in str(e)
+        assert 'sky cancel' in str(e)
 
 
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
