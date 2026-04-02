@@ -102,7 +102,8 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
                                  endpoint_url: Optional[str] = None,
                                  cred_env: str = '',
                                  rclone_extra_flags: str = '',
-                                 goofys_extra_flags: str = '') -> str:
+                                 goofys_extra_flags: str = '',
+                                 read_only: bool = False) -> str:
     """Returns a command to mount an S3-compatible bucket.
 
     Uses goofys by default (x86_64) and rclone for ARM64. Handles both
@@ -121,6 +122,7 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
             (e.g., '--s3-force-path-style=false').
         goofys_extra_flags: Extra flags for goofys mount command
             (e.g., '--subdomain').
+        read_only: Whether to mount as read-only.
     """
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
@@ -139,6 +141,10 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
     if endpoint_url:
         rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
         goofys_extra_flags += f'--endpoint {endpoint_url} '
+
+    if read_only:
+        rclone_extra_flags += '--read-only '
+        goofys_extra_flags += '-o ro '
 
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
@@ -167,12 +173,14 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
 # pylint: disable=invalid-name
 def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
-                     _bucket_sub_path: Optional[str] = None) -> str:
+                     _bucket_sub_path: Optional[str] = None,
+                     read_only: bool = False) -> str:
     """Returns a command to mount an S3 bucket."""
     return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
                                         mount_path=mount_path,
                                         _bucket_sub_path=_bucket_sub_path,
-                                        rclone_extra_flags='--s3-env-auth=true')
+                                        rclone_extra_flags='--s3-env-auth=true',
+                                        read_only=read_only)
 
 
 # Backward-compatible wrappers for existing callers.
@@ -180,14 +188,16 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
                          bucket_name: str,
                          endpoint_url: str,
                          mount_path: str,
-                         _bucket_sub_path: Optional[str] = None) -> str:
+                         _bucket_sub_path: Optional[str] = None,
+                         read_only: bool = False) -> str:
     """Returns a command to mount Nebius bucket."""
     return _get_s3_compatible_mount_cmd(
         bucket_name=bucket_name,
         mount_path=mount_path,
         _bucket_sub_path=_bucket_sub_path,
         endpoint_url=endpoint_url,
-        cred_env=f'AWS_PROFILE={nebius_profile_name}')
+        cred_env=f'AWS_PROFILE={nebius_profile_name}',
+        read_only=read_only)
 
 
 def get_coreweave_mount_cmd(cw_credentials_path: str,
@@ -195,7 +205,8 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
                             bucket_name: str,
                             endpoint_url: str,
                             mount_path: str,
-                            _bucket_sub_path: Optional[str] = None) -> str:
+                            _bucket_sub_path: Optional[str] = None,
+                            read_only: bool = False) -> str:
     """Returns a command to mount CoreWeave bucket."""
     cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
                 f'AWS_PROFILE={coreweave_profile_name}')
@@ -206,7 +217,8 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
         endpoint_url=endpoint_url,
         cred_env=cred_env,
         rclone_extra_flags='--s3-force-path-style=false',
-        goofys_extra_flags='--subdomain')
+        goofys_extra_flags='--subdomain',
+        read_only=read_only)
 
 
 def get_vastdata_mount_cmd(vastdata_credentials_path: str,
@@ -214,7 +226,8 @@ def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                            bucket_name: str,
                            endpoint_url: str,
                            mount_path: str,
-                           _bucket_sub_path: Optional[str] = None) -> str:
+                           _bucket_sub_path: Optional[str] = None,
+                           read_only: bool = False) -> str:
     """Returns a command to mount VastData bucket."""
     cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={vastdata_credentials_path} '
                 f'AWS_PROFILE={vastdata_profile_name}')
@@ -222,7 +235,8 @@ def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                                         mount_path=mount_path,
                                         _bucket_sub_path=_bucket_sub_path,
                                         endpoint_url=endpoint_url,
-                                        cred_env=cred_env)
+                                        cred_env=cred_env,
+                                        read_only=read_only)
 
 
 def get_gcs_mount_install_cmd() -> str:
@@ -244,14 +258,17 @@ def get_gcs_mount_install_cmd() -> str:
 # pylint: disable=invalid-name
 def get_gcs_mount_cmd(bucket_name: str,
                       mount_path: str,
-                      _bucket_sub_path: Optional[str] = None) -> str:
+                      _bucket_sub_path: Optional[str] = None,
+                      read_only: bool = False) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
+    read_only_arg = '-o ro ' if read_only else ''
     log_file = '$(mktemp -t gcsfuse.XXXX.log)'
     mount_cmd = (f'gcsfuse --log-file {log_file} '
                  '--debug_fuse_errors '
                  '-o allow_other '
+                 f'{read_only_arg}'
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -359,7 +376,8 @@ def get_az_mount_cmd(container_name: str,
                      storage_account_name: str,
                      mount_path: str,
                      storage_account_key: Optional[str] = None,
-                     _bucket_sub_path: Optional[str] = None) -> str:
+                     _bucket_sub_path: Optional[str] = None,
+                     read_only: bool = False) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
@@ -369,6 +387,7 @@ def get_az_mount_cmd(container_name: str,
         mount_path: Path where the container will be mounting.
         storage_account_key: Access key for the given storage account.
         _bucket_sub_path: Sub path of the mounting container.
+        read_only: Whether to mount as read-only.
 
     Returns:
         str: Command used to mount AZ container with blobfuse2.
@@ -396,6 +415,8 @@ def get_az_mount_cmd(container_name: str,
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
     mount_options = ['allow_other', 'default_permissions']
+    if read_only:
+        mount_options.append('ro')
     # Format: -o flag1,flag2
     fusermount_options = '-o ' + ','.join(
         mount_options) if mount_options else ''
@@ -439,7 +460,8 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      endpoint_url: str,
                      bucket_name: str,
                      mount_path: str,
-                     _bucket_sub_path: Optional[str] = None) -> str:
+                     _bucket_sub_path: Optional[str] = None,
+                     read_only: bool = False) -> str:
     """Returns a command to mount R2 bucket."""
     cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                 f'AWS_PROFILE={r2_profile_name}')
@@ -447,14 +469,16 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                                         mount_path=mount_path,
                                         _bucket_sub_path=_bucket_sub_path,
                                         endpoint_url=endpoint_url,
-                                        cred_env=cred_env)
+                                        cred_env=cred_env,
+                                        read_only=read_only)
 
 
 def get_cos_mount_cmd(rclone_config: str,
                       rclone_profile_name: str,
                       bucket_name: str,
                       mount_path: str,
-                      _bucket_sub_path: Optional[str] = None) -> str:
+                      _bucket_sub_path: Optional[str] = None,
+                      read_only: bool = False) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
     configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
@@ -466,10 +490,12 @@ def get_cos_mount_cmd(rclone_config: str,
         sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
     else:
         sub_path_arg = f'/{bucket_name}'
+    read_only_flag = '--read-only ' if read_only else ''
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
                  f'{rclone_profile_name}:{sub_path_arg} {mount_path} '
+                 f'{read_only_flag}'
                  '--daemon')
     return mount_cmd
 
@@ -549,10 +575,16 @@ def get_mount_cached_cmd(
     return mount_cmd
 
 
-def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
-                      namespace: str, compartment: str, config_file: str,
-                      config_profile: str) -> str:
+def get_oci_mount_cmd(mount_path: str,
+                      store_name: str,
+                      region: str,
+                      namespace: str,
+                      compartment: str,
+                      config_file: str,
+                      config_profile: str,
+                      read_only: bool = False) -> str:
     """ OCI specific RClone mount command for oci object storage. """
+    read_only_flag = ' --read-only' if read_only else ''
     # pylint: disable=line-too-long
     mount_cmd = (
         f'sudo chown -R `whoami` {mount_path}'
@@ -564,7 +596,7 @@ def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
         f' && sed -i "s/oci-config-file/config_file/g;'
         f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
         f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
-        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty)'
+        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty{read_only_flag})'
     )
     return mount_cmd
 

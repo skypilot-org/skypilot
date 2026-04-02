@@ -28,6 +28,44 @@ _REMOTE_PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
 
 
+class ManagedSecretsProvider(abc.ABC):
+    """Abstract provider for resolving managed secret references."""
+
+    @abc.abstractmethod
+    async def resolve(
+        self,
+        secret_refs: list,
+        user_hash: str,
+        workspace: str,
+    ) -> 'ResolvedSecrets':
+        """Resolve secret references to env vars and file mounts.
+
+        Args:
+            secret_refs: List of ManagedSecretRef from the task YAML.
+            user_hash: The user hash for scoping.
+            workspace: The workspace name for scoping.
+
+        Returns:
+            ResolvedSecrets with env_vars and file_mounts populated.
+        """
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class ResolvedFileMount:
+    """A file mount resolved from a managed secret."""
+    mount_path: str
+    content: bytes
+
+
+@dataclasses.dataclass
+class ResolvedSecrets:
+    """Result of resolving managed secret references."""
+    env_vars: Dict[str, str] = dataclasses.field(default_factory=dict)
+    file_mounts: List[ResolvedFileMount] = dataclasses.field(
+        default_factory=list)
+
+
 class ExtensionContext:
     """Context provided to plugins during installation.
 
@@ -44,6 +82,18 @@ class ExtensionContext:
     def __init__(self, app: Optional[FastAPI] = None):
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
+        self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
+
+    def register_managed_secrets_provider(
+        self,
+        provider: ManagedSecretsProvider,
+    ) -> None:
+        """Register a provider for resolving managed secrets."""
+        self._managed_secrets_provider = provider
+
+    @property
+    def managed_secrets_provider(self,) -> Optional[ManagedSecretsProvider]:
+        return self._managed_secrets_provider
 
     def register_rbac_rule(self,
                            path: str,
@@ -424,3 +474,8 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
         }
     """
     return _PLUGIN_RBAC_RULES
+
+
+def get_extension_context() -> Optional[ExtensionContext]:
+    """Return the extension context created during plugin loading."""
+    return _EXTENSION_CONTEXT

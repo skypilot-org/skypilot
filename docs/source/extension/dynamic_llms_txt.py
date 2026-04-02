@@ -14,6 +14,12 @@ def get_base_url():
     if os.getenv('SPHINX_BUILD_PRODUCTION') == 'true':
         return "https://docs.skypilot.co/en/latest"
 
+    # ReadTheDocs sets READTHEDOCS and READTHEDOCS_CANONICAL_URL.
+    # See: https://docs.readthedocs.io/en/stable/reference/environment-variables.html
+    canonical_url = os.getenv('READTHEDOCS_CANONICAL_URL')
+    if canonical_url:
+        return canonical_url.rstrip('/')
+
     port = os.getenv('SPHINX_PORT', os.getenv('PORT', '8000'))
     return f"http://127.0.0.1:{port}"
 

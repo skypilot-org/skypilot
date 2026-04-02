@@ -169,6 +169,12 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
                     AZ_PERMISSION_DENIED) from None
         else:
             raise
+    except aws.botocore_exceptions().ConnectionError:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.AWSAzFetchingError(
+                region,
+                reason=exceptions.AWSAzFetchingError.Reason.
+                ENDPOINT_CONNECTION_ERROR) from None
     for resp in response['AvailabilityZones']:
         zones.append({
             'AvailabilityZoneName': resp['ZoneName'],

@@ -999,7 +999,10 @@ available_node_types:
               (
                 (
                 set -e
-                mkdir -p ~/.sky
+                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # writes python_path there before ray_installation_commands (which
+                # contains SETUP_SKY_DIRS_COMMANDS) creates it.
+                mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
@@ -1012,16 +1015,16 @@ available_node_types:
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # ~/.sky/python_path is seeded by conda_installation_commands
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="

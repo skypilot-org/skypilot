@@ -140,12 +140,16 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         V100: 2.50     # $/accelerator/hr
+    :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
+      H100: h100-partition
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
+        gpu_partition_map:
+          H100: h100-custom
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -2089,6 +2093,46 @@ Example:
 Pricing can also be set per-cluster and per-partition using
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
 
+.. _config-yaml-slurm-gpu-partition-map:
+
+``slurm.gpu_partition_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Mapping of GPU types to Slurm partition names (optional).
+
+Some Slurm clusters configure
+`GRES <https://slurm.schedmd.com/gres.html>`_ without a GPU type
+(e.g., ``--gres=gpu:8`` instead of ``--gres=gpu:h100:8``), and rely on
+partitions to select the correct node type. By default, SkyPilot generates
+typed GRES directives (``--gres=gpu:<type>:<count>``), which will fail on
+these clusters.
+
+``gpu_partition_map`` tells SkyPilot which partitions correspond to which GPU
+types. When a GPU type is found in the map, SkyPilot will:
+
+1. Narrow the list of candidate partitions to those in the map.
+2. Generate GRES **without** a GPU type (``--gres=gpu:<count>``).
+
+Each key is a GPU type (case-insensitive) and each value is either a single
+partition name or a list of partition names.
+
+Default: not set.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    gpu_partition_map:
+      H100: h100-partition
+      A100:
+        - a100-train
+        - a100-dev
+
+``gpu_partition_map`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Per-cluster
+values override global values for the same GPU type.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2112,6 +2156,11 @@ Supported fields:
   accelerators are inherited. The merge order is::
 
       cloud-level  <  cluster-level  <  partition-level
+
+- ``gpu_partition_map``:
+  :ref:`GPU partition map <config-yaml-slurm-gpu-partition-map>` overrides at
+  the cluster level. Per-cluster values override global values for the same
+  GPU type.
 
 Example:
 
@@ -2143,6 +2192,13 @@ Example:
         workdir: /home/$USER
         pricing:
           cpu: 0.03
+        # Map GPU types to partitions for clusters with GRES
+        # without a GPU type.
+        gpu_partition_map:
+          H100: h100-partition
+          A100:
+            - a100-train
+            - a100-dev
         partition_configs:
           gpu-partition:
             # Override accelerator rate for this partition; other values
