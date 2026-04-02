@@ -4152,8 +4152,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
-    context = provider_config.get('context',
-                                  get_current_kube_config_context_name())
+    context = provider_config.get('context')
+    assert isinstance(context, str)
     if context == kubernetes.in_cluster_context_name():
         # If the context (also used as the region) is in-cluster, we need
         # to use in-cluster auth by setting the context to None.
