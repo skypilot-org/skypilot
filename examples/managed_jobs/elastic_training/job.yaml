@@ -34,7 +34,7 @@ envs:
 
 workdir:
   url: https://github.com/skypilot-org/skypilot.git
-  ref: speedup-job
+  ref: elastic-training-example
 
 run: |
   cd examples/managed_jobs/elastic_training && python controller.py
@@ -52,7 +52,7 @@ resources:
 
 workdir:
   url: https://github.com/skypilot-org/skypilot.git
-  ref: speedup-job
+  ref: elastic-training-example
 
 num_nodes: 1500
 
