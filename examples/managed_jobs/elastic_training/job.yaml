@@ -37,7 +37,7 @@ workdir:
   ref: elastic-training-example
 
 run: |
-  cd examples/managed_jobs/elastic_training && python controller.py
+  cd examples/elastic_training && python controller.py
 
 ---
 name: workers
@@ -57,4 +57,4 @@ workdir:
 num_nodes: 1500
 
 run: |
-  cd examples/managed_jobs/elastic_training && python worker.py
+  cd examples/elastic_training && python worker.py
