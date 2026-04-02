@@ -557,6 +557,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -723,6 +724,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -743,6 +745,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -835,6 +838,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1275,54 +1279,30 @@ def start(
     return server_common.get_request_id(response)
 
 
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
 def resize(
     cluster_name: str,
     num_nodes: int,
-) -> server_common.RequestId['backends.CloudVmRayResourceHandle']:
+) -> server_common.RequestId[Tuple[Optional[int],
+                                   Optional['backends.ResourceHandle']]]:
     """Resize a running cluster to a different number of nodes.
 
-    Supports scaling up (adding worker nodes) to an existing cluster.
-    The head node and existing workers are preserved; only new workers
-    are added and joined to the Ray cluster.
+    Convenience wrapper around :func:`launch` with ``resize=True``.
 
     Args:
         cluster_name: name of the cluster to resize.
         num_nodes: the desired total number of nodes (including head).
 
     Returns:
-        The request ID of the resize request.
-
-    Request Returns:
-        cloud_vm_ray_backend.CloudVmRayResourceHandle: the updated handle.
-
-    Request Raises:
-        sky.exceptions.ClusterDoesNotExist: the cluster does not exist.
-        sky.exceptions.ClusterNotUpError: the cluster is not UP.
-        sky.exceptions.NotSupportedError: resize not supported for this
-            cluster (e.g., scale-down requested).
-        ValueError: if num_nodes is invalid.
+        The request ID of the resize request (same format as launch).
     """
-    # Build a minimal task with the desired num_nodes and post to /launch
-    # with resize=True.
     if typing.TYPE_CHECKING:
         import sky as sky_mod
     else:
         sky_mod = adaptors_common.LazyImport('sky')
-    with sky_mod.Dag() as dag:
+    with sky_mod.Dag():
         dummy_task = sky_mod.Task()
         dummy_task.num_nodes = num_nodes
-    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
-    body = payloads.LaunchBody(
-        task=dag_str,
-        cluster_name=cluster_name,
-        resize=True,
-    )
-    response = server_common.make_authenticated_request(
-        'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
-    return server_common.get_request_id(response)
+    return launch(dummy_task, cluster_name=cluster_name, resize=True)
 
 
 @usage_lib.entrypoint

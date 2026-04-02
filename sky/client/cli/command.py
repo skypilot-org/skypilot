@@ -1278,7 +1278,11 @@ def launch(
             raise click.UsageError(
                 '--resize requires --num-nodes or a YAML with num_nodes set.')
 
-        request_id = sdk.resize(cluster, resize_num_nodes)
+        request_id = sdk.launch(
+            task_lib.Task(num_nodes=resize_num_nodes),
+            cluster_name=cluster,
+            resize=True,
+        )
         _async_call_or_wait(request_id, async_call, 'sky.launch')
         if not async_call:
             _get_cluster_records_and_set_ssh_config(clusters=[cluster])
