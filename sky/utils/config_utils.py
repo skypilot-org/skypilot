@@ -278,13 +278,14 @@ def merge_k8s_configs(
             base_config[key] = value
 
 
-def get_cloud_config_value_from_dict(
-        dict_config: Dict[str, Any],
-        cloud: str,
-        keys: Tuple[str, ...],
-        region: Optional[str] = None,
-        default_value: Optional[Any] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+def get_cloud_config_value_from_dict(dict_config: Dict[str, Any],
+                                     cloud: str,
+                                     keys: Tuple[str, ...],
+                                     region: Optional[str] = None,
+                                     default_value: Optional[Any] = None,
+                                     override_configs: Optional[Dict[
+                                         str, Any]] = None,
+                                     merge_dicts: bool = False) -> Any:
     """Returns the nested key value by reading from config
     Order to get the property_name value:
     1. if region is specified,
@@ -293,6 +294,9 @@ def get_cloud_config_value_from_dict(
        try to get it at the cloud level <cloud>/keys
     3. if not found at cloud level,
        return either default_value if specified or None
+
+    If merge_dicts is True and both levels return dicts, the region-level
+    dict is shallow-merged into the cloud-level dict (region keys override).
     """
     input_config = Config(dict_config)
     region_key = None
@@ -318,6 +322,9 @@ def get_cloud_config_value_from_dict(
             isinstance(per_context_config, dict)):
         merge_k8s_configs(general_config, per_context_config)
         return general_config
+    elif (merge_dicts and isinstance(general_config, dict) and
+          isinstance(per_context_config, dict)):
+        return {**general_config, **per_context_config}
     else:
         return (general_config
                 if per_context_config is None else per_context_config)
