@@ -2007,7 +2007,7 @@ class ControllerManager:
             # them. At this point, statuses accurately reflect which tasks
             # were actually started vs still pending.
             id_statuses = await (
-                managed_job_state.get_all_task_ids_statuses_async(job_id))
+                managed_job_state.get_task_ids_statuses_async(job_id))
 
             # The "latest" non-terminal task - needed for
             # set_cancelling_async callback and set_cancelled_async later.

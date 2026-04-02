@@ -1,0 +1,21 @@
+# Pipeline Status Smoke Test
+# Tests that pipeline (non-job-group) jobs still report correct overall
+# status after the primary-task filtering changes. Both sequential tasks
+# should SUCCEED and the overall job status should be SUCCEEDED.
+---
+name: {{name}}
+---
+name: step-a
+resources:
+  cpus: 2+
+  infra: {{cloud}}
+run: |
+  echo "Step A: generating data"
+  seq 1 10
+---
+name: step-b
+resources:
+  cpus: 2+
+  infra: {{cloud}}
+run: |
+  echo "Step B: done"
