@@ -2062,17 +2062,35 @@ def _check_owner_identity_with_record(cluster_name: str,
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
+    
+    def _raise_identity_error():
+        # Generate error message if no match found
+        if len(user_identities) == 1:
+            err_msg = f'the activated identity is {user_identities[0]!r}.'
+        else:
+            err_msg = (f'available identities are {user_identities!r}.')
+        if is_k8s_cloud:
+            err_msg += (' Check your kubeconfig file and make sure the '
+                        'correct context is available.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) is owned by account '
+                f'{owner_identity!r}, but ' + err_msg)
 
     if owner_identity is None and is_k8s_cloud:
-        # pylint: disable=import-outside-toplevel
-        from sky.adaptors import kubernetes
-
-        global_user_state.set_owner_identity_for_cluster(
-            cluster_name, kubernetes.in_cluster_identity())
-        # Previously, owner identity for in-cluster auth-only api servers
-        # was None. Need to patch this special case.
-        logger.debug(f'Successfully patched {cluster_name} owner identity '
-                     'for in-cluster.')
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        provider_config = config['provider']
+        context = provider_config.get('context')
+        assert isinstance(context, str)
+        try:
+            identity = clouds.Kubernetes.get_identity_from_context_name(context)
+            global_user_state.set_owner_identity_for_cluster(
+                cluster_name, identity)
+            logger.debug(f'Successfully patched {cluster_name} owner identity '
+                         f'to {identity} (launched on {context}).')
+            return
+        except exceptions.CloudUserIdentityError:
+            _raise_identity_error()
 
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when
@@ -2112,19 +2130,7 @@ def _check_owner_identity_with_record(cluster_name: str,
                         global_user_state.set_owner_identity_for_cluster(
                             cluster_name, identity)
                 return  # The user identity matches.
-
-    # Generate error message if no match found
-    if len(user_identities) == 1:
-        err_msg = f'the activated identity is {user_identities[0]!r}.'
-    else:
-        err_msg = (f'available identities are {user_identities!r}.')
-    if is_k8s_cloud:
-        err_msg += (' Check your kubeconfig file and make sure the '
-                    'correct context is available.')
-    with ux_utils.print_exception_no_traceback():
-        raise exceptions.ClusterOwnerIdentityMismatchError(
-            f'{cluster_name!r} ({cloud}) is owned by account '
-            f'{owner_identity!r}, but ' + err_msg)
+    _raise_identity_error()
 
 
 def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
