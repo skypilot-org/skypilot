@@ -146,14 +146,12 @@ def _get_instance_type_offerings(region: str) -> 'pd.DataFrame':
 def _get_availability_zones(region: str) -> 'pd.DataFrame':
     # Use a shorter timeout than the default 60s connect / 60s read to avoid
     # blocking sky check when a region endpoint is unreachable or unresponsive.
-    # With max_attempts=3, worst case is ~45s per region, but since regions are
-    # checked in parallel this only affects total wall time by ~45s.
+    # total_max_attempts=3 means 3 total attempts. Worst case ~30s per region.
     client = aws.client('ec2',
                         region_name=region,
-                        config=aws.botocore_config().Config(
-                            connect_timeout=10,
-                            read_timeout=15,
-                            retries={'max_attempts': 3}))
+                        connect_timeout=10,
+                        read_timeout=10,
+                        total_max_attempts=3)
     zones = []
     try:
         response = client.describe_availability_zones()
