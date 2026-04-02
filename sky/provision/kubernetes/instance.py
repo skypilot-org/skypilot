@@ -1576,7 +1576,6 @@ def _create_managed_job(region: str, cluster_name_on_cloud: str,
         namespace=namespace,
         context=context,
         num_nodes=min_nodes,
-        timeout=provider_config.get('timeout', 600),
     )
 
     logger.info(f'K8s managed job {cluster_name_on_cloud} launched '

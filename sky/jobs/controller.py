@@ -693,6 +693,13 @@ class JobController:
                 task_id=task_id,
                 start_time=remote_job_submitted_at,
                 callback_func=callback_func)
+        elif isinstance(self._strategy_executor,
+                        recovery_strategy.DynamicNodeSetExecutor):
+            # On resume, _launch() is skipped so _populate_recover_state()
+            # was never called. The elastic monitor needs namespace/context/
+            # cluster_name_on_cloud from the cluster handle.
+            self._strategy_executor.cluster_name = cluster_name
+            self._strategy_executor._populate_recover_state()  # pylint: disable=protected-access
 
         async with self.starting_lock:
             try:
@@ -1233,6 +1240,12 @@ class JobController:
         namespace = executor._namespace  # pylint: disable=protected-access
         assert namespace is not None
         context = executor._context  # pylint: disable=protected-access,redefined-outer-name
+        # Use cluster_name_on_cloud for K8s API queries — pods are labeled
+        # with this value (which includes the user hash suffix), not the
+        # SkyPilot display cluster_name.
+        cloud_cluster_name = executor._cluster_name_on_cloud  # pylint: disable=protected-access
+        assert cloud_cluster_name is not None, (
+            f'cluster_name_on_cloud not populated for {cluster_name}')
 
         while True:
             await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -1248,8 +1261,8 @@ class JobController:
                 continue
 
             status, running, succeeded, failed = (await asyncio.to_thread(
-                k8s_managed_job.get_job_pod_status, cluster_name, namespace,
-                context, min_nodes))
+                k8s_managed_job.get_job_pod_status, cloud_cluster_name,
+                namespace, context, min_nodes))
 
             logger.info(
                 f'Elastic job {cluster_name}: status={status.value} '
@@ -1296,8 +1309,8 @@ class JobController:
             # Replace failed or missing pods
             num_nodes = task.num_nodes
             to_replace = await asyncio.to_thread(
-                k8s_managed_job.get_pods_to_replace, cluster_name, namespace,
-                context, num_nodes)
+                k8s_managed_job.get_pods_to_replace, cloud_cluster_name,
+                namespace, context, num_nodes)
             if to_replace:
                 logger.info(f'Replacing pods at indices: {to_replace}')
                 try:
