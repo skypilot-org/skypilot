@@ -412,7 +412,8 @@ def tail_logs(name: Optional[str] = None,
               refresh: bool = False,
               tail: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None,
-              task: Optional[Union[str, int]] = None) -> Optional[int]:
+              task: Optional[Union[str, int]] = None,
+              worker: Optional[int] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -450,6 +451,7 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
         task=task,
+        worker=worker,
     )
     response = server_common.make_authenticated_request(
         'POST',

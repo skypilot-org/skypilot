@@ -349,6 +349,7 @@ def get_pod_logs(
     namespace: str,
     context: Optional[str],
     pod_index: Optional[int] = None,
+    node_index: Optional[int] = None,
     follow: bool = False,
     tail_lines: Optional[int] = None,
 ) -> str:
@@ -361,8 +362,10 @@ def get_pod_logs(
         job_name: Name of the K8s Job.
         namespace: K8s namespace.
         context: K8s context.
-        pod_index: If set, get logs from a specific pod index.
+        pod_index: If set, get logs from a specific pod by list index.
             If None, get logs from all pods.
+        node_index: If set, filter to the pod with this node index label.
+            Takes precedence over pod_index.
         follow: Whether to follow (stream) logs.
         tail_lines: Number of tail lines to return.
 
@@ -381,7 +384,16 @@ def get_pod_logs(
         pods.items,
         key=lambda p: int(p.metadata.labels.get(TAG_NODE_INDEX, '0')))
 
-    if pod_index is not None:
+    if node_index is not None:
+        filtered = [
+            p for p in sorted_pods
+            if p.metadata.labels.get(TAG_NODE_INDEX) == str(node_index)
+        ]
+        if not filtered:
+            return (f'Worker {node_index} not found '
+                    f'(total: {len(sorted_pods)})')
+        sorted_pods = filtered
+    elif pod_index is not None:
         if pod_index >= len(sorted_pods):
             return (f'Pod index {pod_index} not found '
                     f'(total: {len(sorted_pods)})')

@@ -626,6 +626,8 @@ class JobsLogsBody(RequestBody):
     tail: Optional[int] = None
     # Task identifier: int for task_id, str for task_name
     task: Optional[Union[str, int]] = None
+    # Worker index to stream logs from a specific node
+    worker: Optional[int] = None
 
 
 class JobsWaitBody(RequestBody):

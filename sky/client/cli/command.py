@@ -5938,12 +5938,18 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
+@click.option('--worker',
+              '-w',
+              default=None,
+              type=click.IntRange(min=0),
+              help='The worker index to stream logs from. '
+              'If not set, stream logs from all nodes.')
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool,
-              task: Optional[str]):
+              worker: Optional[int], task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
@@ -5990,7 +5996,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh,
-                                                task=parsed_task)
+                                                task=parsed_task,
+                                                worker=worker)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

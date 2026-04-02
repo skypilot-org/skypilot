@@ -1449,6 +1449,8 @@ def _tail_logs_k8s_v1(
     job_name: Optional[str],
     follow: bool,
     tail: Optional[int],
+    task: Optional[Union[str, int]] = None,
+    worker: Optional[int] = None,
 ) -> Optional[int]:
     """Stream logs for a V1 K8s managed job directly via K8s API.
 
@@ -1475,8 +1477,22 @@ def _tail_logs_k8s_v1(
     if job_id is None:
         return None
 
-    # Get the cluster handle to check if this is V1
-    task_id, status = managed_job_state.get_latest_task_id_status(job_id)
+    # Resolve task filter to specific task_id, or fall back to latest
+    task_id = None
+    status = None
+    if task is not None:
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for t_id, t_name, t_status, _, _ in task_info:
+            if ((isinstance(task, int) and t_id == task) or
+                    (isinstance(task, str) and t_name == task)):
+                task_id = t_id
+                status = t_status
+                break
+        if task_id is None:
+            return None
+    else:
+        task_id, status = managed_job_state.get_latest_task_id_status(job_id)
     if task_id is None:
         return None
 
@@ -1535,6 +1551,7 @@ def _tail_logs_k8s_v1(
         logs = k8s_managed_job.get_pod_logs(cloud_name,
                                             namespace,
                                             context,
+                                            node_index=worker,
                                             tail_lines=tail)
         if logs:
             _write(logs + '\n')
@@ -1559,6 +1576,18 @@ def _tail_logs_k8s_v1(
     if not pods.items:
         return None
 
+    # Filter to a specific worker if requested
+    if worker is not None:
+        filtered = [
+            p for p in pods.items
+            if p.metadata.labels.get(
+                k8s_managed_job.TAG_NODE_INDEX) == str(worker)
+        ]
+        if not filtered:
+            _write(f'Worker {worker} not found '
+                   f'(total nodes: {len(pods.items)})\n')
+            return 1
+        pods.items = filtered
     num_pods = len(pods.items)
     # Match original format: header lines then per-line streaming
     # Check for DYNAMIC_NODE_SET with min_nodes for gang scheduling info
@@ -1659,7 +1688,8 @@ def tail_logs(name: Optional[str],
               controller: bool,
               refresh: bool,
               tail: Optional[int] = None,
-              task: Optional[Union[str, int]] = None) -> int:
+              task: Optional[Union[str, int]] = None,
+              worker: Optional[int] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -1704,9 +1734,15 @@ def tail_logs(name: Optional[str],
         returncode = _tail_logs_k8s_v1(job_id=job_id,
                                        job_name=name,
                                        follow=follow,
-                                       tail=tail)
+                                       tail=tail,
+                                       task=task,
+                                       worker=worker)
         if returncode is not None:
             return returncode
+
+    if worker is not None:
+        logger.warning('--worker is only supported for v1 Kubernetes '
+                       'managed jobs. Ignoring --worker flag.')
 
     return backend.tail_managed_job_logs(handle,
                                          job_id=job_id,
