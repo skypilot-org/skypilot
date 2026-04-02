@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import collections
+import dataclasses
 import json
 import os
 import re
@@ -238,13 +239,43 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
     return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
+def _parse_secret_name(raw_name: str):
+    """Parse 'scope.NAME' into (name, scope_override).
+
+    Supports prefixes: personal., workspace., global.
+    Returns (name, None) if no prefix found.
+    """
+    for prefix in ('personal.', 'workspace.', 'global.'):
+        if raw_name.startswith(prefix):
+            return raw_name[len(prefix):], prefix[:-1]
+    return raw_name, None
+
+
+@dataclasses.dataclass
+class ManagedSecretRef:
+    """A reference to a secret in task YAML."""
+    name: str
+    mount_path: Optional[str] = None
+    scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
+
+
 def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
     """Redact secrets and credentials from a parsed task YAML config dict.
 
-    Modifies task_yaml in-place.
+    Modifies task_yaml in-place. Secret refs (secrets: prefix) in array
+    form are kept as-is; in dict form they are set to null so the YAML
+    remains launchable.
     """
-    if task_yaml.get('secrets') is not None:
-        task_yaml['secrets'] = {k: '<redacted>' for k in task_yaml['secrets']}
+    raw_secrets = task_yaml.get('secrets')
+    if raw_secrets is not None:
+        if isinstance(raw_secrets, list):
+            # Array form: all items are secret refs, keep as-is
+            pass
+        else:
+            task_yaml['secrets'] = {
+                k: (None if k.startswith('secrets:') else '<redacted>')
+                for k in raw_secrets
+            }
     docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
                                                        {})
     if isinstance(docker_config,
@@ -381,6 +412,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._managed_secret_refs: List[ManagedSecretRef] = []
         self._api_server_access = api_server_access
 
         # concatenate commands if given as list
@@ -599,6 +631,8 @@ class Task:
                 else:
                     new_secrets[str(k)] = None
             config['secrets'] = new_secrets
+        elif secrets is not None and isinstance(secrets, list):
+            config['secrets'] = [str(item) for item in secrets]
 
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
@@ -615,9 +649,18 @@ class Task:
 
         if secrets_overrides is not None:
             # Override secrets vars from CLI.
-            new_secrets = config.get('secrets', {})
-            new_secrets.update(secrets_overrides)
-            config['secrets'] = new_secrets
+            existing = config.get('secrets')
+            if isinstance(existing, list):
+                # Convert list form to dict to merge CLI overrides
+                merged: Dict[str, Optional[str]] = {}
+                for item in existing:
+                    merged[str(item)] = None
+                merged.update(secrets_overrides)
+                config['secrets'] = merged
+            else:
+                new_secrets = existing or {}
+                new_secrets.update(secrets_overrides)
+                config['secrets'] = new_secrets
 
         for k, v in config.get('envs', {}).items():
             if v is None:
@@ -628,21 +671,26 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
 
-        for k, v in config.get('secrets', {}).items():
-            if v is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Secret variable {k!r} is None. Please set a '
-                        'value for it in task YAML or with --secret flag. '
-                        f'To set it to be empty, use an empty string ({k}: "" '
-                        f'in task YAML or --secret {k}="" in CLI).')
+        raw_secrets_check = config.get('secrets')
+        if isinstance(raw_secrets_check, dict):
+            for k, v in raw_secrets_check.items():
+                if v is None and not k.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Secret variable {k!r} is None. Please set a '
+                            'value for it in task YAML or with --secret flag.'
+                            f' To set it to be empty, use an empty string '
+                            f'({k}: "" in task YAML or '
+                            f'--secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets = config.get('secrets', {})
+        secrets_for_subst = config.get('secrets', {})
+        if isinstance(secrets_for_subst, list):
+            secrets_for_subst = {}  # Array form has no inline values
         env_and_secrets = env_vars.copy()
-        env_and_secrets.update(secrets)
+        env_and_secrets.update(secrets_for_subst)
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       env_and_secrets)
@@ -661,6 +709,44 @@ class Task:
             config['volumes'] = _fill_in_env_vars(config['volumes'],
                                                   env_and_secrets)
 
+        # Split secrets: inline values vs managed references
+        raw_secrets = config.pop('secrets', None)
+        inline_secrets = {}
+        managed_from_secrets = []
+        if isinstance(raw_secrets, list):
+            # Array form: all items are managed secret references
+            for item in raw_secrets:
+                if not isinstance(item, str) or not item.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid secret in array form: {item!r}. '
+                            'Array items must use the secrets: prefix '
+                            '(e.g., secrets:HF_TOKEN). For inline secrets '
+                            'with values, use dict form: '
+                            'secrets: {MY_SECRET: "value"}')
+                ref_name = item[len('secrets:'):]
+                name, scope = _parse_secret_name(ref_name)
+                managed_from_secrets.append(
+                    ManagedSecretRef(name=name, scope_override=scope))
+        elif isinstance(raw_secrets, dict):
+            # Dict form: split inline values vs secrets: prefix refs
+            for key, value in raw_secrets.items():
+                if key.startswith('secrets:'):
+                    if value is not None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid secret {key!r}: secret '
+                                'references (secrets: prefix) must have '
+                                'a null value in dict form. To provide '
+                                'an inline secret value, remove the '
+                                '\'secrets:\' prefix.')
+                    ref_name = key[len('secrets:'):]
+                    name, scope = _parse_secret_name(ref_name)
+                    managed_from_secrets.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                else:
+                    inline_secrets[key] = value
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -668,7 +754,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
-            secrets=config.pop('secrets', None),
+            secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
@@ -676,6 +762,30 @@ class Task:
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
+
+        # Append managed refs from secrets: field (secrets:NAME entries)
+        # pylint: disable=protected-access
+        for ref in managed_from_secrets:
+            task._managed_secret_refs.append(ref)
+
+        # Parse managed_secrets references
+        managed_secrets_raw = config.pop('managed_secrets', None)
+        if managed_secrets_raw:
+            # pylint: disable=protected-access
+            for entry in managed_secrets_raw:
+                if isinstance(entry, str):
+                    name, scope = _parse_secret_name(entry)
+                    task._managed_secret_refs.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                elif isinstance(entry, dict):
+                    for raw_name, opts in entry.items():
+                        name, scope = _parse_secret_name(raw_name)
+                        task._managed_secret_refs.append(
+                            ManagedSecretRef(
+                                name=name,
+                                mount_path=opts.get('mount_path'),
+                                scope_override=scope,
+                            ))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -991,6 +1101,10 @@ class Task:
     @property
     def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
+
+    @property
+    def managed_secret_refs(self) -> List['ManagedSecretRef']:
+        return self._managed_secret_refs
 
     @property
     def api_server_access(self) -> bool:
@@ -1792,11 +1906,65 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if secrets and not redact_secrets:
-            secrets = {k: v.get_secret_value() for k, v in secrets.items()}
-        elif secrets and redact_secrets:
-            secrets = {k: '<redacted>' for k, v in secrets.items()}
-        add_if_not_none('secrets', secrets, no_empty=True)
+        # Separate inline secrets from resolved secret refs
+        has_refs = any(k.startswith('secrets:') for k in (secrets or {}))
+        has_refs = has_refs or bool(self._managed_secret_refs)
+
+        if secrets and not has_refs:
+            # Pure inline secrets — use dict form
+            if not redact_secrets:
+                secrets = {k: v.get_secret_value() for k, v in secrets.items()}
+            else:
+                secrets = {k: '<redacted>' for k in secrets}
+            add_if_not_none('secrets', secrets, no_empty=True)
+        elif secrets or has_refs:
+            # Has secret refs — use array form for refs, dict for inline.
+            # Inline secrets go in dict form.
+            inline = {
+                k: v
+                for k, v in (secrets or {}).items()
+                if not k.startswith('secrets:')
+            }
+            if inline:
+                if not redact_secrets:
+                    inline = {
+                        k: v.get_secret_value() for k, v in inline.items()
+                    }
+                else:
+                    inline = {k: '<redacted>' for k in inline}
+                config['secrets'] = inline
+
+            # Secret refs go in array form (valid YAML, re-launchable)
+            ref_list = sorted(
+                k for k in (secrets or {}) if k.startswith('secrets:'))
+
+            # Add unresolved refs from _secret_refs
+            managed_secrets_field: list = []
+            if self._managed_secret_refs:
+                for ref in self._managed_secret_refs:
+                    prefix = (f'{ref.scope_override}.'
+                              if ref.scope_override else '')
+                    if ref.mount_path is not None:
+                        managed_secrets_field.append({
+                            f'{prefix}{ref.name}': {
+                                'mount_path': ref.mount_path
+                            }
+                        })
+                    else:
+                        ref_list.append(f'secrets:{prefix}{ref.name}')
+
+            if ref_list:
+                # Append refs to secrets array or set it
+                existing = config.get('secrets')
+                if isinstance(existing, dict):
+                    # Mixed: inline dict already set. Put refs in
+                    # managed_secrets field to keep YAML valid.
+                    managed_secrets_field.extend(ref_list)
+                else:
+                    config['secrets'] = ref_list
+
+            if managed_secrets_field:
+                config['managed_secrets'] = managed_secrets_field
 
         add_if_not_none('file_mounts', {})
 
