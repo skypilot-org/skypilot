@@ -171,6 +171,7 @@ def _execute(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
@@ -283,6 +284,7 @@ def _execute(
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            resize=resize,
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
@@ -304,10 +306,11 @@ def _execute_dag(
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
+    resize: bool = False,
     # pylint: disable=invalid-name
-    _quiet_optimizer: bool,
-    _is_launched_by_jobs_controller: bool,
-    _is_launched_by_sky_serve_controller: bool,
+    _quiet_optimizer: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
@@ -515,7 +518,8 @@ def _execute_dag(
                 stream_logs=stream_logs,
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
-                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+                skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+                resize=resize)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -810,6 +814,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        resize=resize,
         _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=

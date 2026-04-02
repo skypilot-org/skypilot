@@ -3031,6 +3031,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
@@ -3071,7 +3072,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return self._locked_provision(lock_id, task, to_provision,
                                               dryrun, stream_logs, cluster_name,
                                               retry_until_up,
-                                              skip_unnecessary_provisioning)
+                                              skip_unnecessary_provisioning,
+                                              resize)
             except locks.LockTimeout:
                 if not communicated_with_user:
                     rich_utils.force_update_status(
@@ -3125,6 +3127,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
             # Reset spinner message to remove any mention of being blocked
@@ -3136,7 +3139,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # cluster, this function will create a to_provision_config
             # with required resources.
             to_provision_config = self._check_existing_cluster(
-                task, to_provision, cluster_name, dryrun)
+                task, to_provision, cluster_name, dryrun, resize)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -5529,13 +5532,132 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     # --- Utilities ---
 
+    def _handle_resize_pre_provision(self, handle: CloudVmRayResourceHandle,
+                                     task: task_lib.Task,
+                                     cluster_name: str) -> None:
+        """Pre-provision steps for cluster resize.
+
+        For scale-down: checks that no jobs are running, then terminates
+        excess worker nodes so that the subsequent bulk_provision sees the
+        correct (reduced) instance count.
+
+        For scale-up or same-size: no-op (bulk_provision handles it).
+        """
+        current_nodes = handle.launched_nodes
+        requested_nodes = task.num_nodes
+
+        if requested_nodes >= current_nodes:
+            # Scale-up or no-op: nothing to do pre-provision.
+            if requested_nodes > current_nodes:
+                delta = requested_nodes - current_nodes
+                sky_logging.print(
+                    f'Resizing cluster {cluster_name!r} from '
+                    f'{current_nodes} to {requested_nodes} node(s) '
+                    f'(+{delta} worker(s)).')
+            else:
+                sky_logging.print(f'Cluster {cluster_name!r} already has '
+                                  f'{current_nodes} node(s). Nothing to do.')
+            return
+
+        to_remove = current_nodes - requested_nodes
+        sky_logging.print(
+            f'Resizing cluster {cluster_name!r} from {current_nodes} to '
+            f'{requested_nodes} node(s) (-{to_remove} worker(s)).')
+
+        # Check for running jobs.
+        returncode, stdout, _ = self.run_on_head(
+            handle,
+            job_lib.JobLibCodeGen.get_job_queue(user_hash=None, all_jobs=False),
+            require_outputs=True,
+            stream_logs=False)
+        if returncode == 0:
+            jobs = job_lib.load_job_queue(stdout)
+            in_progress = [
+                j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
+                                                   job_lib.JobStatus.SETTING_UP,
+                                                   job_lib.JobStatus.PENDING)
+            ]
+            if in_progress:
+                job_ids = ', '.join(str(j['job_id']) for j in in_progress)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot scale down: {len(in_progress)} job(s) still '
+                        f'running (IDs: {job_ids}). Cancel them first with: '
+                        f'sky cancel {cluster_name} -a')
+
+        # Get cluster info and terminate excess workers.
+        launched = handle.launched_resources
+        assert launched is not None and launched.cloud is not None
+        cloud_name = repr(launched.cloud)
+        config_from_yaml = global_user_state.get_cluster_yaml_dict(
+            handle.cluster_yaml)
+        provider_config = config_from_yaml.get('provider')
+        cluster_info = provision_lib.get_cluster_info(
+            cloud_name,
+            launched.region,
+            handle.cluster_name_on_cloud,
+            provider_config=provider_config)
+        worker_instances = cluster_info.get_worker_instances()
+        if len(worker_instances) < to_remove:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot remove {to_remove} worker(s): cluster only has '
+                    f'{len(worker_instances)} worker(s).')
+
+        workers_to_remove = worker_instances[-to_remove:]
+        remove_ids = {inst.instance_id for inst in workers_to_remove}
+        logger.info(f'Removing {to_remove} worker(s): '
+                    f'{[w.instance_id for w in workers_to_remove]}')
+
+        # Stop Ray on workers being removed.
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml, ssh_user=cluster_info.ssh_user)
+        runners = provision_lib.get_command_runners(cloud_name, cluster_info,
+                                                    **ssh_credentials)
+        all_workers = cluster_info.get_worker_instances()
+        worker_runner_pairs = list(zip(all_workers, runners[1:]))
+        runners_to_stop = [(runner, inst)
+                           for inst, runner in worker_runner_pairs
+                           if inst.instance_id in remove_ids]
+
+        def _stop_ray(args):
+            runner, inst = args
+            logger.debug(f'Stopping Ray on worker {inst.instance_id}')
+            runner.run(
+                'ray stop -f 2>/dev/null || '
+                '$(command -v ray || '
+                'echo /home/sky/skypilot-runtime/bin/ray) stop -f',
+                stream_logs=False,
+                source_bashrc=True)
+
+        if runners_to_stop:
+            subprocess_utils.run_in_parallel(_stop_ray, runners_to_stop)
+
+        # Terminate the specific worker instances (K8s only for now).
+        if cloud_name.lower() in ('kubernetes', 'ssh'):
+            from sky.provision.kubernetes import instance as k8s_instance
+            from sky.provision.kubernetes import utils as k8s_utils
+            namespace = k8s_utils.get_namespace_from_config(provider_config)
+            context = k8s_utils.get_context_from_config(provider_config)
+            for inst in workers_to_remove:
+                logger.info(f'Terminating worker pod {inst.instance_id}')
+                k8s_instance._terminate_node(namespace,
+                                             context,
+                                             inst.instance_id,
+                                             is_head=False)
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Scale-down is currently only supported on Kubernetes.')
+
     @timeline.event
     def _check_existing_cluster(
             self,
             task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
             cluster_name: str,
-            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
+            dryrun: bool = False,
+            resize: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -5586,7 +5708,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
-            self.check_resources_fit_cluster(handle, task)
+            if resize:
+                # Resize mode: allow num_nodes to change. Handle
+                # scale-down by checking for running jobs and removing
+                # excess workers before provisioning.
+                self._handle_resize_pre_provision(handle, task, cluster_name)
+            else:
+                self.check_resources_fit_cluster(handle, task)
 
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
@@ -5769,10 +5897,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
+            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
-                handle.launched_nodes,
+                num_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
@@ -6158,13 +6287,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         as a sink for all the cluster info.
         """
         return {
-            'SKYPILOT_CLUSTER_INFO': json.dumps({
-                'cluster_name': handle.cluster_name,
-                'cloud': str(handle.launched_resources.cloud),
-                'region': handle.launched_resources.region,
-                'zone': handle.launched_resources.zone,
-            }),
-            constants.USER_ENV_VAR: common_utils.get_current_user_name(),
+            'SKYPILOT_CLUSTER_INFO':
+                json.dumps({
+                    'cluster_name': handle.cluster_name,
+                    'cloud': str(handle.launched_resources.cloud),
+                    'region': handle.launched_resources.region,
+                    'zone': handle.launched_resources.zone,
+                }),
+            constants.USER_ENV_VAR:
+                common_utils.get_current_user_name(),
         }
 
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,

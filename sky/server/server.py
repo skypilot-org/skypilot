@@ -1635,46 +1635,11 @@ async def unzip_file(zip_file_path: pathlib.Path,
     await asyncio.to_thread(_do_unzip)
 
 
-def _resize_via_launch(**kwargs):
-    """Wrapper to call core.resize from the /launch endpoint.
-
-    Extracts num_nodes from the DAG task and returns the result in the
-    same (job_id, handle) format as a normal launch.  If the cluster
-    does not exist yet, falls through to a normal launch.
-    """
-    from sky import exceptions
-    from sky.execution import launch as execution_launch
-    dag = kwargs.get('task')
-    cluster_name = kwargs.get('cluster_name')
-    num_nodes = 1
-    if dag is not None and dag.tasks:
-        num_nodes = dag.tasks[0].num_nodes
-    try:
-        handle = core.resize(cluster_name=cluster_name, num_nodes=num_nodes)
-        return (None, handle)
-    except exceptions.ClusterDoesNotExist:
-        logger.info(f'Cluster {cluster_name!r} does not exist; '
-                    'falling through to normal launch.')
-        return execution_launch(**kwargs)
-
-
 @app.post('/launch')
 async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
-    """Launches a cluster or task, or resizes an existing cluster."""
+    """Launches a cluster or task."""
     request_id = request.state.request_id
-    if launch_body.resize:
-        logger.info(f'Resize request via /launch: {request_id}')
-        await executor.schedule_request_async(
-            request_id,
-            request_name=request_names.RequestName.CLUSTER_LAUNCH,
-            request_body=launch_body,
-            func=_resize_via_launch,
-            schedule_type=requests_lib.ScheduleType.LONG,
-            request_cluster_name=launch_body.cluster_name,
-            auth_user=request.state.auth_user,
-        )
-        return
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
