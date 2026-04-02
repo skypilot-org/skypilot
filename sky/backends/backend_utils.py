@@ -2062,7 +2062,7 @@ def _check_owner_identity_with_record(cluster_name: str,
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
-    
+
     def _raise_identity_error():
         # Generate error message if no match found
         if len(user_identities) == 1:
