@@ -612,6 +612,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name

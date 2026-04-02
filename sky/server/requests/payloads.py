@@ -317,7 +317,6 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
-        kwargs.pop('resize', None)
         return kwargs
 
 
