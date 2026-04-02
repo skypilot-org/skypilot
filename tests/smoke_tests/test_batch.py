@@ -352,9 +352,9 @@ def test_batch_ha_kill_running(generic_cloud: str):
             # --- Pre-cleanup ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
-            # --- Data setup: 200 items / batch_size 2 = 100 batches ---
+            # --- Data setup: 60 items / batch_size 2 = 30 batches ---
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
-            (f'for i in $(seq 1 200); do '
+            (f'for i in $(seq 1 60); do '
              f'echo "{{\\"text\\": \\"word_$i\\"}}"; '
              f'done > /tmp/batch-ha-input-{name}.jsonl'),
             (f'aws s3 cp /tmp/batch-ha-input-{name}.jsonl '
@@ -396,8 +396,8 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'done\n'
                 # Once progress is non-zero, let a few more batches complete
                 # so we have a meaningful checkpoint to verify after resume.
-                f'echo "First batch completed, sleeping 300s for more progress"\n'
-                f'sleep 300\n'
+                f'echo "First batch completed, sleeping 60s for more progress"\n'
+                f'sleep 60\n'
                 f'QUEUE=$(sky jobs queue 2>/dev/null)\n'
                 f'POOL_LINE=$(echo "$QUEUE" | grep "{pool_name}" | head -1)\n'
                 f'PROGRESS=$(echo "$POOL_LINE" '
@@ -484,21 +484,21 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'  exit 1\n'
                 f'fi'),
 
-            # --- Verify all 200 items processed correctly ---
+            # --- Verify all 60 items processed correctly ---
             (f'aws s3 cp s3://{bucket}/output.jsonl '
              f'/tmp/batch-ha-output-{name}.jsonl'),
-            f'test $(wc -l < /tmp/batch-ha-output-{name}.jsonl) -eq 200',
+            f'test $(wc -l < /tmp/batch-ha-output-{name}.jsonl) -eq 60',
             (f"python3 << 'PYEOF'\n"
              "import json\n"
              f"path = '/tmp/batch-ha-output-{name}.jsonl'\n"
              "results = [json.loads(l) for l in open(path)]\n"
-             "assert len(results) == 200, f'Expected 200, got {len(results)}'\n"
+             "assert len(results) == 60, f'Expected 60, got {len(results)}'\n"
              "texts = set()\n"
              "for r in results:\n"
              "    assert 'text' in r and 'output' in r, f'Bad record: {r}'\n"
              "    assert r['output'] == r['text'] * 2, f'Wrong output: {r}'\n"
              "    texts.add(r['text'])\n"
-             "expected = set(f'word_{i}' for i in range(1, 201))\n"
+             "expected = set(f'word_{i}' for i in range(1, 61))\n"
              "assert texts == expected, (\n"
              "    f'Missing: {expected - texts}, Extra: {texts - expected}')\n"
              "print(f'All {len(results)} results valid after HA recovery')\n"

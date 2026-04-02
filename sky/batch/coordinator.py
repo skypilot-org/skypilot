@@ -37,6 +37,7 @@ from sky.batch import io_formats
 from sky.batch import utils
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
+from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 
 logger = logging.getLogger(__name__)
@@ -300,19 +301,9 @@ class BatchCoordinator:
         return None
 
     def _get_ready_workers(self) -> List[str]:
-        """Return cluster names for ready replicas via SDK."""
-        status = self._fetch_pool_status()
-        if status is None:
-            return []
-        replica_infos = status.get('replica_info', [])
-        ready = []
-        for info in replica_infos:
-            replica_status = str(info.get('status', ''))
-            if 'READY' in replica_status:
-                name = info.get('name')
-                if name:
-                    ready.append(name)
-        return ready
+        """Return cluster names for ready replicas from serve state."""
+        replicas = serve_utils.get_ready_replicas(self.pool_name)
+        return [info.cluster_name for info in replicas]
 
     # ------------------------------------------------------------------
     # Pool resource detection
