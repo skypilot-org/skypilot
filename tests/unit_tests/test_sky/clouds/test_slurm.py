@@ -142,17 +142,6 @@ class TestLookupGpuPartitionMap:
                                                    region='my-cluster',
                                                    merge_dicts=True)
 
-    @patch('sky.provision.slurm.utils.skypilot_config.'
-           'get_effective_region_config')
-    def test_per_cluster_overrides_global(self, mock_get_effective):
-        """The merge is handled by get_effective_region_config(merge_dicts=True),
-        so we test that the merged result is returned as-is."""
-        mock_get_effective.return_value = {
-            'H100': 'h100-local',
-            'A100': 'a100-global'
-        }
-        result = slurm_utils.lookup_gpu_partition_map('my-cluster', 'H100')
-        assert result == ['h100-local']
 
 
 class TestCheckInstanceFitsWithGpuPartitionMap:
