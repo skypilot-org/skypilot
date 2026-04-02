@@ -36,13 +36,11 @@ aws s3 rm "s3://${BUCKET}/.sky_batch_tmp/" --recursive 2>/dev/null && \
 echo "[3/3] Running batch job..."
 echo
 export SKY_BATCH_BUCKET="${BUCKET}"
-# Ensure custom_formats.py is importable from the example directory.
-export PYTHONPATH="$(cd "$(dirname "$0")" && pwd):${PYTHONPATH:-}"
 python examples/batch/custom_formats/process_range.py
 
 echo
 echo "Listing output files:"
 echo "--- texts/ ---"
 aws s3 ls "s3://${BUCKET}/output/texts/" 2>/dev/null || echo "  (none)"
-echo "--- metadata/ ---"
-aws s3 ls "s3://${BUCKET}/output/metadata/" 2>/dev/null || echo "  (none)"
+echo "--- metadata.yaml ---"
+aws s3 ls "s3://${BUCKET}/output/metadata.yaml" 2>/dev/null || echo "  (none)"

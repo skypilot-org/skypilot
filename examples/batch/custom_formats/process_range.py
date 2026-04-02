@@ -1,39 +1,124 @@
 """Custom format example: generate and process items from a range.
 
 Demonstrates defining custom input/output formats *outside* of SkyPilot
-source code.  The three custom formats live in ``custom_formats.py``:
+source code.  Custom formats are defined inline below:
 
-- ``RangeInput``     — generates ``{'index': i}`` items (no file I/O)
-- ``TextOutput``     — writes a ``.txt`` file per item
-- ``JsonFileOutput`` — writes a ``.json`` metadata file per item
+- ``RangeInput``   -- generates ``{'index': i}`` items (no file I/O)
+- ``TextOutput``   -- writes a ``.txt`` file per item (per-item pattern)
+- ``YamlOutput``   -- writes a single merged ``.yaml`` file (chunk+merge)
 
 Usage (from project root):
     bash examples/batch/custom_formats/run.sh
 """
+import logging
 import os
-
-# Import custom formats — this registers them with the global registries.
-from custom_formats import JsonFileOutput  # pylint: disable=import-error
-from custom_formats import RangeInput  # pylint: disable=import-error
-from custom_formats import TextOutput  # pylint: disable=import-error
+from dataclasses import dataclass
+from typing import Any, Dict, List
 
 import sky
+from sky.batch import io_formats
+from sky.batch import utils
 from sky.serve import serve_utils
+from sky.utils import registry
+
+logger = logging.getLogger(__name__)
+
+# ---- Custom formats ----------------------------------------------------------
+
+
+@registry.INPUT_FORMAT_REGISTRY.type_register(name='range')
+@dataclass
+class RangeInput(io_formats.InputFormat):
+    """Generate items from a Python ``range`` -- no file I/O needed."""
+
+    count: int = 0
+
+    def count_items(self, dataset_path: str) -> int:
+        return self.count
+
+    def download_chunk(self, dataset_path: str, start_idx: int, end_idx: int,
+                       cache_dir: str) -> List[Dict[str, Any]]:
+        return [{'index': i} for i in range(start_idx, end_idx + 1)]
+
+
+@registry.OUTPUT_FORMAT_REGISTRY.type_register(name='text')
+@dataclass
+class TextOutput(io_formats.OutputFormat):
+    """Per-item ``.txt`` file output."""
+
+    column: str = 'text'
+
+    def __post_init__(self) -> None:
+        if not self.path:
+            raise ValueError('TextOutput path cannot be empty')
+        if not self.path.startswith(('s3://', 'gs://')):
+            raise ValueError(f'Unsupported storage path: {self.path}')
+        if not self.path.endswith('/'):
+            raise ValueError(f'TextOutput path must end with /: {self.path}')
+
+    def upload_chunk(self, results: List[Dict[str, Any]], output_path: str,
+                     batch_idx: int, start_idx: int, end_idx: int,
+                     job_id: str) -> str:
+        output_dir = output_path.rstrip('/')
+        for i, result in enumerate(results):
+            global_idx = start_idx + i
+            text = str(result.get(self.column, ''))
+            cloud_path = f'{output_dir}/{global_idx:08d}.txt'
+            utils.upload_bytes_to_cloud(text.encode('utf-8'), cloud_path)
+        return output_dir
+
+    def merge_results(self, output_path: str, job_id: str) -> None:
+        pass
+
+
+@registry.OUTPUT_FORMAT_REGISTRY.type_register(name='yaml')
+@dataclass
+class YamlOutput(io_formats.OutputFormat):
+    """Single merged YAML file output (chunk + merge pattern)."""
+
+    column: str = 'metadata'
+
+    def __post_init__(self) -> None:
+        if not self.path:
+            raise ValueError('YamlOutput path cannot be empty')
+        if not self.path.startswith(('s3://', 'gs://')):
+            raise ValueError(f'Unsupported storage path: {self.path}')
+        if not self.path.endswith('.yaml'):
+            raise ValueError(
+                f'YamlOutput path must end with .yaml: {self.path}')
+
+    def upload_chunk(self, results: List[Dict[str, Any]], output_path: str,
+                     batch_idx: int, start_idx: int, end_idx: int,
+                     job_id: str) -> str:
+        chunk_path = utils.get_chunk_path(output_path, start_idx, end_idx,
+                                          job_id)
+        filtered = [{self.column: r.get(self.column)} for r in results]
+        utils.save_jsonl_to_cloud(filtered, chunk_path)
+        return chunk_path
+
+    def merge_results(self, output_path: str, job_id: str) -> None:
+        import yaml  # pylint: disable=import-outside-toplevel
+        all_items: List[Dict[str, Any]] = []
+        for chunk_path in utils.list_chunk_files(output_path, job_id):
+            all_items.extend(utils.load_jsonl_from_cloud(chunk_path))
+        yaml_bytes = yaml.dump(all_items, default_flow_style=False).encode()
+        utils.upload_bytes_to_cloud(yaml_bytes, output_path)
+
+
+# ---- Mapper function ---------------------------------------------------------
 
 
 @sky.batch.remote_function
 def process_items():
-    """Process each item: produce a text snippet and JSON metadata."""
+    """Process each item: produce a text snippet and YAML metadata."""
     import random  # pylint: disable=import-outside-toplevel
 
     for batch in sky.batch.load():
         results = []
         for item in batch:
             idx = item['index']
-            # Text output: concatenate some tokens
             tokens = [f'token_{j}' for j in range(idx, idx + 5)]
             text = f'Item {idx}: ' + ' | '.join(tokens)
-            # Metadata output: some random fields
             metadata = {
                 'id': idx,
                 'squared': idx**2,
@@ -41,6 +126,9 @@ def process_items():
             }
             results.append({'text': text, 'metadata': metadata})
         sky.batch.save_results(results)
+
+
+# ---- Main --------------------------------------------------------------------
 
 
 def ensure_pool(pool_name: str, pool_yaml: str) -> None:
@@ -77,9 +165,8 @@ def main():
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     text_output_path = f's3://{bucket}/output/texts/'
-    meta_output_path = f's3://{bucket}/output/metadata/'
+    meta_output_path = f's3://{bucket}/output/metadata.yaml'
 
-    # Create dataset from a range — no input file needed.
     ds = sky.batch.Dataset(RangeInput(count=20))
 
     ensure_pool(pool_name, pool_yaml)
@@ -91,12 +178,12 @@ def main():
         batch_size=5,
         output=[
             TextOutput(text_output_path, column='text'),
-            JsonFileOutput(meta_output_path, column='metadata'),
+            YamlOutput(meta_output_path, column='metadata'),
         ],
     )
 
     print(f'\nDone!  Text files  → {text_output_path}')
-    print(f'       JSON files  → {meta_output_path}')
+    print(f'       YAML file   → {meta_output_path}')
 
 
 if __name__ == '__main__':

@@ -201,8 +201,7 @@ def test_batch_custom_formats():
             (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
              f'--recursive 2>/dev/null || true'),
 
-            # --- Run batch job (RangeInput, TextOutput, JsonFileOutput) ---
-            f'PYTHONPATH=examples/batch/custom_formats:$PYTHONPATH '
+            # --- Run batch job (RangeInput, TextOutput, YamlOutput) ---
             f'python examples/batch/custom_formats/process_range.py',
 
             # --- Verify final job status ---
@@ -219,25 +218,25 @@ def test_batch_custom_formats():
             (f'aws s3 cp s3://{bucket}/output/texts/00000000.txt - '
              f'| grep "Item 0"'),
 
-            # --- Verify JSON metadata output files ---
-            # 20 items -> 20 .json files
-            (f'test $(aws s3 ls s3://{bucket}/output/metadata/ '
-             f'| grep -c "\\.json") -eq 20'),
-            f'aws s3 ls s3://{bucket}/output/metadata/ | grep "00000000.json"',
-            f'aws s3 ls s3://{bucket}/output/metadata/ | grep "00000019.json"',
-            # Validate JSON structure: parseable, has expected keys
+            # --- Verify merged YAML metadata file ---
+            # Single .yaml file with all 20 items
+            f'aws s3 ls s3://{bucket}/output/metadata.yaml',
+            # Validate YAML: parseable, correct count, expected keys
             (f"python3 << 'PYEOF'\n"
-             "import json, subprocess\n"
+             "import yaml, subprocess\n"
              f"bucket = '{bucket}'\n"
-             "for idx in [0, 5, 19]:\n"
-             "    path = f's3://{bucket}/output/metadata/{idx:08d}.json'\n"
-             "    data = subprocess.check_output(['aws', 's3', 'cp', path, '-'])\n"
-             "    meta = json.loads(data)\n"
-             "    assert meta['id'] == idx, f'Wrong id: {meta}'\n"
-             "    assert meta['squared'] == idx ** 2, f'Wrong squared: {meta}'\n"
+             "data = subprocess.check_output(\n"
+             "    ['aws', 's3', 'cp', f's3://{bucket}/output/metadata.yaml', '-'])\n"
+             "items = yaml.safe_load(data)\n"
+             "assert len(items) == 20, f'Expected 20 items, got {len(items)}'\n"
+             "for item in items:\n"
+             "    meta = item['metadata']\n"
+             "    assert 'id' in meta and 'squared' in meta and 'tag' in meta, (\n"
+             "        f'Missing keys: {meta}')\n"
+             "    assert meta['squared'] == meta['id'] ** 2, f'Wrong squared: {meta}'\n"
              "    assert meta['tag'] in ('alpha', 'beta', 'gamma'), (\n"
              "        f'Invalid tag: {meta}')\n"
-             "print('All JSON metadata files valid')\n"
+             "print('YAML metadata file valid')\n"
              "PYEOF"),
         ],
         # Teardown: remove pool, bucket
