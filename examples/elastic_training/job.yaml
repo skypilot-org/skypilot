@@ -1,0 +1,60 @@
+# Elastic Training — SkyPilot Job Group
+#
+# Two jobs: controller (1 node) + workers (DYNAMIC_NODE_SET)
+# The controller discovers workers via /nodes and pushes training state.
+#
+# Launch:
+#   # Add to ~/.sky/config.yaml: jobs: {use_v1: true}
+#   sky api start --deploy
+#   sky jobs launch -n elastic-train --infra kubernetes job.yaml
+#
+# Test recovery (kill workers while training runs):
+#   kubectl delete pod <workers-pod-name>-{3..5} --force --grace-period=0
+
+# Job group header: run controller and workers in parallel
+---
+name: elastic-train
+execution: parallel
+primary_tasks:
+  - controller
+
+---
+name: controller
+
+resources:
+  infra: kubernetes
+  cpus: 1
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    min_nodes: 1
+
+envs:
+  TOTAL_EPOCHS: 200
+  MIN_WORKERS: 1000
+
+workdir:
+  url: https://github.com/skypilot-org/skypilot.git
+  ref: elastic-training-example
+
+run: |
+  cd examples/elastic_training && python controller.py
+
+---
+name: workers
+
+resources:
+  infra: kubernetes
+  cpus: 0.1
+  memory: 0.1
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+    min_nodes: 1000
+
+workdir:
+  url: https://github.com/skypilot-org/skypilot.git
+  ref: elastic-training-example
+
+num_nodes: 1500
+
+run: |
+  cd examples/elastic_training && python worker.py
