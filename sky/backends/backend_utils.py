@@ -2060,6 +2060,9 @@ def _check_owner_identity_with_record(cluster_name: str,
     owner_identity = record['owner']
 
     def _try_set_k8s_owner() -> bool:
+        # TODO (kyuds): this is for backwards compatibility for k8s skypilot
+        # clusters that were launched before the identity update. Remove
+        # in v0.14.0.
         assert is_k8s_cloud
         config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         provider_config = config['provider']
