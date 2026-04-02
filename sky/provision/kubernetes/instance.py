@@ -1501,6 +1501,7 @@ def _create_managed_job(region: str, cluster_name: str,
     run_commands = managed_job_config.get('run')
     envs = managed_job_config.get('envs', {})
     num_gpus = managed_job_config.get('num_gpus_per_node', 0)
+    min_nodes = managed_job_config.get('min_nodes') or num_nodes
     workdir_config = managed_job_config.get('workdir')
     file_mounts = managed_job_config.get('file_mounts')
 
@@ -1553,7 +1554,7 @@ def _create_managed_job(region: str, cluster_name: str,
             namespace=namespace,
             pod_spec=pod_spec,
             num_nodes=num_nodes,
-            min_nodes=num_nodes,
+            min_nodes=min_nodes,
             setup_commands=setup_commands,
             run_commands=run_commands,
             envs=envs,
@@ -1574,7 +1575,7 @@ def _create_managed_job(region: str, cluster_name: str,
         job_name=cluster_name_on_cloud,
         namespace=namespace,
         context=context,
-        num_nodes=num_nodes,
+        num_nodes=min_nodes,
         timeout=provider_config.get('timeout', 600),
     )
 

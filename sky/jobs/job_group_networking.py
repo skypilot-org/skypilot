@@ -581,6 +581,7 @@ def generate_k8s_dns_mappings_from_tasks(
     """
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
+    from sky.utils import common_utils
 
     mappings = []
     for task in all_tasks:
@@ -589,11 +590,15 @@ def generate_k8s_dns_mappings_from_tasks(
             continue
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task_name, job_id)
+        # Compute the actual cluster_name_on_cloud (with user hash),
+        # matching what the backend will produce during provisioning.
+        cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            cluster_name,
+            max_length=sky_clouds.Kubernetes.max_cluster_name_length())
 
-        # Map the head node (node-0) for every task so all tasks
-        # can resolve each other via job group hostnames.
         k8s_dns = _construct_k8s_internal_svc(
-            cluster_name, namespace, node_idx=0, managed_job_v1=True)
+            cluster_name_on_cloud, namespace, node_idx=0,
+            managed_job_v1=True)
         hostname = f'{task_name}-0.{job_group_name}'
         mappings.append((k8s_dns, hostname))
 

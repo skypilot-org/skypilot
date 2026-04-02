@@ -841,6 +841,7 @@ class RetryingVmProvisioner(object):
             'run': self._task.run,
             'envs': envs,
             'num_nodes': self._task.num_nodes,
+            'min_nodes': getattr(self._task, 'min_nodes', None),
             'num_gpus_per_node': backend_utils.get_num_gpus_per_node(self._task
                                                                     ),
             'workdir': workdir_config,

@@ -981,229 +981,79 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         if task.num_nodes is not None and self.min_nodes > task.num_nodes:
             raise ValueError(f'min_nodes ({self.min_nodes}) cannot exceed '
                              f'num_nodes ({task.num_nodes})')
+        # Store on task so the backend can include it in managed_job_config
+        # for the K8s provisioner to use.
+        task.min_nodes = self.min_nodes
+        # These are populated by _populate_recover_state() after launch.
+        # Defaults are needed for _cleanup_cluster() which may be called
+        # before a successful launch.
         self._namespace: Optional[str] = None
         self._context: Optional[str] = None
-        self._image: str = 'python:3.11-slim'
-        self._setup_commands: Optional[str] = None
-        self._run_commands: Optional[str] = None
-        self._envs: Dict[str, str] = {}
-        self._num_gpus: int = 0
-        self._gpu_resource_key: Optional[str] = None
-        self._tolerations: List[Dict[str, str]] = []
-        self._node_selector: Dict[str, str] = {}
-        self._workdir_config: Optional[Dict[str, Any]] = None
-        self._file_mounts: Optional[Dict[str, str]] = None
+        self._cluster_name_on_cloud: Optional[str] = None
 
     async def _launch(self,
                       max_retry: Optional[int] = 3,
                       raise_on_failure: bool = True,
                       recovery: bool = False) -> Optional[float]:
-        """Launch pods directly via K8s API (bypass sdk.launch)."""
-        from sky.provision.kubernetes import managed_job as k8s_managed_job
+        """Launch via sdk.launch (unified with FailoverStrategyExecutor)."""
+        job_submitted_at = await super()._launch(
+            max_retry, raise_on_failure, recovery)
+        if job_submitted_at is not None and self.cluster_name is not None:
+            self._populate_recover_state()
+        return job_submitted_at
+
+    def _populate_recover_state(self) -> None:
+        """Extract state from handle and task needed by recover()."""
+        from sky.adaptors import kubernetes as k8s_adaptor
         from sky.provision.kubernetes import utils as kubernetes_utils
 
-        # The executor's DAG contains only this task (at index 0),
-        # even though task_id may be >0 in a job group.
+        # Get context/namespace/cluster_name_on_cloud from handle
+        handle = global_user_state.get_handle_from_cluster_name(
+            self.cluster_name)
+        if handle is not None:
+            self._cluster_name_on_cloud = handle.cluster_name_on_cloud
+            launched = handle.launched_resources
+            context_name = launched.region if launched else None
+            if context_name == k8s_adaptor.in_cluster_context_name():
+                self._context = None
+            else:
+                self._context = context_name
+            self._namespace = (
+                kubernetes_utils.get_kube_config_context_namespace(
+                    self._context))
+
+            # Persist infra info for dashboard/CLI display
+            state.set_job_infra(
+                self.job_id, cloud='Kubernetes', region=context_name)
+
+        # Extract task info for recover()
+        from sky import task as task_lib
         task = self.dag.tasks[0]
         self._setup_commands = task.setup
         self._run_commands = task.run
-        from sky import task as task_lib
         self._envs = task_lib.get_plaintext_envs_and_secrets(
             task.envs_and_secrets)
-        num_nodes = task.num_nodes
 
-        # Get K8s context from task resources (region = K8s context name)
+        # Get image and GPU info from task resources
         resource = list(task.resources)[0]
-        from sky.adaptors import kubernetes as k8s_adaptor
-        context_name = resource.region
-        if context_name is None:
-            context_name = (
-                kubernetes_utils.get_current_kube_config_context_name())
-        if context_name == k8s_adaptor.in_cluster_context_name():
-            self._context = None
-        else:
-            self._context = context_name
-        self._namespace = kubernetes_utils.get_kube_config_context_namespace(
-            self._context)
+        spec = kubernetes_utils.build_pod_resource_spec(
+            self._context, resource)
+        self._image = spec.image
+        self._num_gpus = spec.acc_count
+        self._gpu_resource_key = spec.gpu_resource_key
+        self._tolerations = spec.tolerations
+        self._node_selector = spec.node_selector
 
-        assert self.cluster_name is not None
-        # Note: job_name is cluster_name (no user hash), NOT
-        # cluster_name_on_cloud. This is safe because:
-        # 1. cluster_name is already sanitized (lowercase, hyphens only) and
-        #    truncated to <=27 chars by generate_managed_job_cluster_name(),
-        #    so it's a valid K8s DNS label / resource name.
-        # 2. job_id is auto-incremented per SkyPilot server, so even if two
-        #    users pick the same task name, they get different job_ids and
-        #    thus different job_names. No collision within a shared namespace.
-        # We intentionally avoid cluster_name_on_cloud here because the user
-        # hash suffix would make pod names harder to read and debug.
-        job_name = self.cluster_name
-
-        # Build pod spec from task resources
-        pod_spec = self._build_pod_spec_from_task(task)
-        self._image = (pod_spec.get('spec', {}).get('containers', [{}])[0].get(
-            'image', 'python:3.11-slim'))
-
-        # Serialize workdir for V1 path
-        workdir_config: Optional[Dict[str, Any]] = None
+        # Serialize workdir/file_mounts for pod replacement
+        self._workdir_config = None
+        self._file_mounts = None
         if task.workdir is not None:
             if isinstance(task.workdir, dict):
-                workdir_config = {'git': task.workdir}
+                self._workdir_config = {'git': task.workdir}
             else:
-                workdir_config = {'path': str(task.workdir)}
-
-        # Serialize file_mounts
-        file_mounts = dict(task.file_mounts) if task.file_mounts else None
-
-        # Save workdir and file_mounts for pod replacement during recovery
-        self._workdir_config = workdir_config
-        self._file_mounts = file_mounts
-
-        # Upload local workdir/file_mounts to a ConfigMap if needed.
-        # All K8s API calls and CPU-heavy manifest building are run in
-        # threads to avoid blocking the asyncio event loop (which would
-        # starve other tasks in a job group).
-        cm_name = await asyncio.to_thread(
-            k8s_managed_job.upload_local_files_to_configmap,
-            job_name=job_name,
-            namespace=self._namespace,
-            context=self._context,
-            workdir=workdir_config,
-            file_mounts=file_mounts,
-        )
-        if cm_name:
-            if 'volumes' not in pod_spec['spec']:
-                pod_spec['spec']['volumes'] = []
-            pod_spec['spec']['volumes'].append({
-                'name': 'skypilot-files',
-                'configMap': {
-                    'name': cm_name,
-                },
-            })
-
-        # Build and apply all manifests
-        pod_manifests, service_manifest, rbac_manifests = (
-            await asyncio.to_thread(
-                k8s_managed_job.build_job_manifests,
-                cluster_name=job_name,
-                namespace=self._namespace,
-                pod_spec=pod_spec,
-                num_nodes=num_nodes,
-                min_nodes=self.min_nodes,
-                setup_commands=self._setup_commands,
-                run_commands=self._run_commands,
-                envs=self._envs,
-                num_gpus_per_node=self._num_gpus,
-                tolerations=self._tolerations,
-                node_selector=self._node_selector,
-                workdir=workdir_config,
-                file_mounts=file_mounts,
-            ))
-
-        try:
-            await asyncio.to_thread(
-                k8s_managed_job.apply_job,
-                namespace=self._namespace,
-                context=self._context,
-                pod_manifests=pod_manifests,
-                service_manifest=service_manifest,
-                rbac_manifests=rbac_manifests,
-            )
-        except Exception as e:
-            logger.error(f'Failed to create elastic job: {e}')
-            if raise_on_failure:
-                raise
-            return None
-
-        # Wait for min_nodes pods to be running
-        start = time.time()
-        timeout = 300
-        while time.time() - start < timeout:
-            status, running, _, _ = (await asyncio.to_thread(
-                k8s_managed_job.get_job_pod_status, job_name, self._namespace,
-                self._context, self.min_nodes))
-            if running >= self.min_nodes:
-                logger.info(f'Elastic job {job_name}: {running} pods running '
-                            f'(min_nodes={self.min_nodes})')
-                # Persist infra info for dashboard/CLI display
-                await asyncio.to_thread(
-                    state.set_job_infra,
-                    self.job_id,
-                    cloud='Kubernetes',
-                    region=context_name,
-                )
-                # Register a cluster handle so that the standard
-                # cleanup path (core.down -> terminate_instances) can
-                # find and delete these pods.
-                await asyncio.to_thread(
-                    self._register_handle,
-                    job_name,
-                    num_nodes,
-                    resource,
-                    context_name,
-                    self._namespace,
-                )
-                return time.time()
-            logger.debug(f'Waiting for min_nodes={self.min_nodes} pods: '
-                         f'{running} running')
-            await asyncio.sleep(2)
-
-        logger.error(f'Timed out waiting for {self.min_nodes} pods to start')
-        if raise_on_failure:
-            raise TimeoutError(f'Elastic job {job_name}: timed out waiting for '
-                               f'{self.min_nodes} pods')
-        return None
-
-    def _register_handle(self, job_name: str, num_nodes: int,
-                         resource: resources_lib.Resources, context_name: str,
-                         namespace: str) -> None:
-        """Register a cluster handle for DynamicNodeSetExecutor pods.
-
-        This ensures that the standard cleanup path (core.down ->
-        terminate_instances) can find and clean up these pods, and that
-        the handle is only removed after pods are actually deleted.
-        """
-        from sky.backends import cloud_vm_ray_backend
-
-        launched = resource.copy(region=context_name,
-                                 instance_type=resource.instance_type or '-')
-        # Build a minimal cluster YAML with managed_job_config so
-        # is_v1_k8s_managed_job() recognises this handle and
-        # terminate_instances uses the V1 delete path.
-        provider_config: dict = {
-            'type': 'kubernetes',
-            'module': 'sky.provision.kubernetes',
-            'region': context_name,
-            'namespace': namespace,
-            'managed_job_config': {},
-        }
-        cluster_yaml_dict = {
-            'provider': provider_config,
-            'auth': {
-                'ssh_user': 'sky',
-            },
-        }
-        yaml_str = yaml_utils.dump_yaml_str(cluster_yaml_dict)
-        global_user_state.set_cluster_yaml(job_name, yaml_str)
-        # cluster_yaml must be a path whose basename (sans extension)
-        # equals the cluster_name key used in set_cluster_yaml above.
-        cluster_yaml_path = f'{job_name}.yml'
-
-        handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
-            cluster_name=job_name,
-            cluster_name_on_cloud=job_name,
-            cluster_yaml=cluster_yaml_path,
-            launched_nodes=num_nodes,
-            launched_resources=launched,
-        )
-        global_user_state.add_or_update_cluster(
-            job_name,
-            handle,
-            {launched},
-            ready=True,
-            is_managed=True,
-        )
-        logger.info(f'Registered cluster handle for elastic job {job_name}')
+                self._workdir_config = {'path': str(task.workdir)}
+        if task.file_mounts:
+            self._file_mounts = dict(task.file_mounts)
 
     async def recover(self) -> float:
         """Replace failed or missing pods individually.
@@ -1213,17 +1063,18 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         """
         from sky.provision.kubernetes import managed_job as k8s_managed_job
 
-        assert self.cluster_name is not None
+        job_name = self._cluster_name_on_cloud or self.cluster_name
+        assert job_name is not None
         assert self._namespace is not None
         task = self.dag.tasks[0]
         indices_to_replace = k8s_managed_job.get_pods_to_replace(
-            self.cluster_name, self._namespace, self._context, task.num_nodes)
+            job_name, self._namespace, self._context, task.num_nodes)
 
         failed_indices = []
         for idx in indices_to_replace:
             try:
                 k8s_managed_job.create_replacement_pod(
-                    job_name=self.cluster_name,
+                    job_name=job_name,
                     namespace=self._namespace,
                     context=self._context,
                     index=idx,
@@ -1253,52 +1104,11 @@ class DynamicNodeSetExecutor(StrategyExecutor):
     def _cleanup_cluster(self) -> None:
         """Delete all elastic job resources."""
         from sky.provision.kubernetes import managed_job as k8s_managed_job
-        if self.cluster_name is None:
+        job_name = self._cluster_name_on_cloud or self.cluster_name
+        if job_name is None:
             return
-        k8s_managed_job.delete_managed_job(self.cluster_name, self._namespace or
+        k8s_managed_job.delete_managed_job(job_name, self._namespace or
                                            'default', self._context)
-
-    def _build_pod_spec_from_task(self,
-                                  task: 'task_lib.Task') -> Dict[str, Any]:
-        """Build a minimal K8s pod spec from task resources.
-
-        Uses the shared build_pod_resource_spec() helper to resolve image,
-        GPU/TPU resources, tolerations, node selector, and runtime class.
-        """
-        from sky.provision.kubernetes import utils as kubernetes_utils
-
-        resource = list(task.resources)[0]
-        spec = kubernetes_utils.build_pod_resource_spec(self._context, resource)
-
-        # Store on self for use by recover() and _launch()
-        self._num_gpus = spec.acc_count
-        self._gpu_resource_key = spec.gpu_resource_key
-        self._tolerations = spec.tolerations
-        self._node_selector = spec.node_selector
-
-        container_spec: Dict[str, Any] = {
-            'name': 'main',
-            'image': spec.image,
-            'resources': {
-                'requests': spec.resource_requests
-            },
-        }
-        if spec.resource_limits:
-            container_spec['resources']['limits'] = spec.resource_limits
-
-        pod_spec: Dict[str, Any] = {
-            'metadata': {
-                'labels': {},
-                'annotations': {}
-            },
-            'spec': {
-                'containers': [container_spec],
-                'restartPolicy': 'Never',
-            },
-        }
-        if spec.runtime_class_name:
-            pod_spec['spec']['runtimeClassName'] = spec.runtime_class_name
-        return pod_spec
 
 
 def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:

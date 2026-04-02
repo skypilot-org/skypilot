@@ -1404,7 +1404,14 @@ class JobController:
                 continue
             t_cluster = (managed_job_utils.generate_managed_job_cluster_name(
                 t_name, self._job_id))
-            all_task_mappings.append(f'{t_name}:{t_cluster}')
+            # Use cluster_name_on_cloud (with user hash) so the
+            # discovery server can match pods by label.
+            t_cluster_on_cloud = (
+                common_utils.make_cluster_name_on_cloud(
+                    t_cluster,
+                    max_length=sky_clouds.Kubernetes
+                    .max_cluster_name_length()))
+            all_task_mappings.append(f'{t_name}:{t_cluster_on_cloud}')
         if all_task_mappings:
             task.envs['SKYPILOT_JOBGROUP_TASKS'] = ','.join(all_task_mappings)
 
