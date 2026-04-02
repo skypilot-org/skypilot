@@ -1583,11 +1583,28 @@ def _tail_logs_k8s_v1(
            f'(Ctrl-C to exit log streaming; job will not be killed)'
            f'{reset}\n')
 
+    # Cap the number of follow=True streams to avoid exhausting file
+    # descriptors at large pod counts (SKY-5034). Excess pods get a
+    # one-shot tail instead of a live stream.
+    max_streams = managed_job_utils._MAX_CONCURRENT_LOG_STREAMS
+    tail_lines = managed_job_utils._TAIL_LINES_FOR_EXCESS_PODS
+    sorted_pods = managed_job_utils._sort_pods_by_index(pods.items)
+    follow_pods = sorted_pods[:max_streams]
+    tail_pods = sorted_pods[max_streams:]
+
+    if tail_pods:
+        _write(f'{dim}├── Only streaming logs from first '
+               f'{len(follow_pods)} pods. Showing last {tail_lines} '
+               f'lines from remaining {len(tail_pods)} pods.{reset}\n')
+
     print_lock = threading.Lock()
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
+        try:
+            idx = k8s_managed_job._get_node_index(pod)
+        except (ValueError, AttributeError):
+            idx = '?'
         ip = (pod.status.pod_ip if pod.status and pod.status.pod_ip else '')
         # Match original format: (name, rank=N, ip=IP)
         if num_pods == 1:
@@ -1610,10 +1627,19 @@ def _tail_logs_k8s_v1(
             logger.warning(f'Log stream ended for pod {pod_name}: {e}')
 
     threads = []
-    for pod in pods.items:
+    for pod in follow_pods:
         t = threading.Thread(target=_stream_pod, args=(pod,), daemon=True)
         t.start()
         threads.append(t)
+
+    # Tail excess pods in the background alongside live streams.
+    if tail_pods:
+        tail_thread = threading.Thread(
+            target=managed_job_utils._tail_excess_pod_logs,
+            args=(tail_pods, context, namespace, _write),
+            daemon=True)
+        tail_thread.start()
+        threads.append(tail_thread)
 
     for t in threads:
         t.join()

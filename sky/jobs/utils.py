@@ -87,6 +87,16 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+# Maximum number of pods whose logs are streamed with follow=True. Each
+# streaming connection holds an open HTTP socket (= file descriptor). At 1k+
+# pods the default ulimit (1024) is exceeded, causing "too many open files"
+# errors (SKY-5034). Pods beyond this limit get a one-shot tail of recent
+# logs instead of a live stream.
+# TODO(kevinwang): add a --rank flag to `sky jobs logs` so users can follow a
+# specific pod instead of streaming all pods at once.
+_MAX_CONCURRENT_LOG_STREAMS = 128
+_TAIL_LINES_FOR_EXCESS_PODS = 10
+
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
@@ -1091,6 +1101,59 @@ def is_v1_k8s_managed_job(handle: 'backends.CloudVmRayResourceHandle',) -> bool:
         return False
 
 
+def _sort_pods_by_index(pods):
+    """Sort pods by node index so rank 0 (head) is always first.
+
+    Pods with missing or malformed labels sort to the end so they get
+    the one-shot tail treatment rather than occupying a live stream slot.
+    """
+
+    def _index(p):
+        try:
+            labels = p.metadata.labels
+            if not labels or 'skypilot-node-index' not in labels:
+                return float('inf')
+            return int(labels['skypilot-node-index'])
+        except (ValueError, TypeError, AttributeError):
+            return float('inf')
+
+    return sorted(pods, key=_index)
+
+
+_TAIL_CONCURRENT_WORKERS = 16
+
+
+def _tail_excess_pod_logs(pods, context, namespace, write_fn):
+    """Dump the last few log lines from pods that won't get live streaming.
+
+    Uses a small thread pool to fetch tails in parallel. Each call is a
+    one-shot GET (no streaming connection held open) so the FD usage is
+    bounded by the worker count, not the pod count.
+    """
+    import concurrent.futures
+
+    from sky.adaptors import kubernetes as k8s_adaptor
+
+    def _tail_one(pod):
+        pod_name = pod.metadata.name
+        try:
+            idx = k8s_managed_job._get_node_index(pod)
+        except (ValueError, AttributeError):
+            idx = '?'
+        try:
+            log = k8s_adaptor.core_api(context).read_namespaced_pod_log(
+                pod_name, namespace, tail_lines=_TAIL_LINES_FOR_EXCESS_PODS)
+            if log:
+                for line in log.splitlines():
+                    write_fn(f'(node {idx}) {line}\n')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to tail logs for {pod_name}: {e}')
+
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=_TAIL_CONCURRENT_WORKERS) as pool:
+        list(pool.map(_tail_one, pods))
+
+
 def _stream_k8s_managed_job_logs(
     handle: 'backends.CloudVmRayResourceHandle',
     follow: bool = True,
@@ -1135,12 +1198,28 @@ def _stream_k8s_managed_job_logs(
             print(logs, flush=True)
         return 0
 
-    # Follow mode: stream from all pods concurrently
+    # Follow mode: stream from all pods concurrently.
+    # Cap the number of follow=True streams to avoid exhausting file
+    # descriptors at large pod counts (SKY-5034). Excess pods get a
+    # one-shot tail instead of a live stream.
+    sorted_pods = _sort_pods_by_index(pods.items)
+    follow_pods = sorted_pods[:_MAX_CONCURRENT_LOG_STREAMS]
+    tail_pods = sorted_pods[_MAX_CONCURRENT_LOG_STREAMS:]
+
+    if tail_pods:
+        logger.info(f'Streaming logs from first {len(follow_pods)} pods. '
+                    f'Showing last {_TAIL_LINES_FOR_EXCESS_PODS} lines from '
+                    f'remaining {len(tail_pods)} pods (too many pods for '
+                    f'live streaming).')
+
     print_lock = threading.Lock()
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
+        try:
+            idx = k8s_managed_job._get_node_index(pod)
+        except (ValueError, AttributeError):
+            idx = '?'
         try:
             resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=True, _preload_content=False)
@@ -1153,12 +1232,21 @@ def _stream_k8s_managed_job_logs(
                 logger.debug(f'Log stream ended for {pod_name}: {e}')
 
     threads = []
-    for pod in pods.items:
+    for pod in follow_pods:
         t = threading.Thread(target=_stream_pod, args=(pod,), daemon=True)
         t.start()
         threads.append(t)
 
-    # Wait for all threads (pods to complete)
+    # Tail excess pods in the background alongside live streams.
+    if tail_pods:
+        tail_thread = threading.Thread(
+            target=_tail_excess_pod_logs,
+            args=(tail_pods, context, namespace,
+                  lambda msg: print(msg, end='', flush=True)),
+            daemon=True)
+        tail_thread.start()
+        threads.append(tail_thread)
+
     for t in threads:
         t.join()
 
@@ -1204,12 +1292,28 @@ def _stream_k8s_managed_job_logs_direct(
             print(logs, flush=True)
         return 0
 
-    # Follow mode: stream from all pods concurrently
+    # Follow mode: stream from all pods concurrently.
+    # Cap the number of follow=True streams to avoid exhausting file
+    # descriptors at large pod counts (SKY-5034). Excess pods get a
+    # one-shot tail instead of a live stream.
+    sorted_pods = _sort_pods_by_index(pods.items)
+    follow_pods = sorted_pods[:_MAX_CONCURRENT_LOG_STREAMS]
+    tail_pods = sorted_pods[_MAX_CONCURRENT_LOG_STREAMS:]
+
+    if tail_pods:
+        logger.info(f'Streaming logs from first {len(follow_pods)} pods. '
+                    f'Showing last {_TAIL_LINES_FOR_EXCESS_PODS} lines from '
+                    f'remaining {len(tail_pods)} pods (too many pods for '
+                    f'live streaming).')
+
     print_lock = threading.Lock()
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
+        try:
+            idx = k8s_managed_job._get_node_index(pod)
+        except (ValueError, AttributeError):
+            idx = '?'
         try:
             resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=True, _preload_content=False)
@@ -1222,10 +1326,20 @@ def _stream_k8s_managed_job_logs_direct(
                 logger.debug(f'Log stream ended for {pod_name}: {e}')
 
     threads = []
-    for pod in pods.items:
+    for pod in follow_pods:
         t = threading.Thread(target=_stream_pod, args=(pod,), daemon=True)
         t.start()
         threads.append(t)
+
+    # Tail excess pods in the background alongside live streams.
+    if tail_pods:
+        tail_thread = threading.Thread(
+            target=_tail_excess_pod_logs,
+            args=(tail_pods, context, namespace,
+                  lambda msg: print(msg, end='', flush=True)),
+            daemon=True)
+        tail_thread.start()
+        threads.append(tail_thread)
 
     for t in threads:
         t.join()
