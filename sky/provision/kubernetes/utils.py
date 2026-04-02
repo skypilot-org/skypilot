@@ -64,10 +64,11 @@ else:
 # to root:root.
 # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # pylint: disable=line-too-long
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
+DEFAULT_HOME_DIRECTORY = '/home/sky'
 # Path where the persistent volume for HA controller is mounted.
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
-HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = DEFAULT_HOME_DIRECTORY
 
 IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
@@ -87,6 +88,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
       low-latency networking
     - COREWEAVE: CoreWeave clusters with InfiniBand support.
+    - TOGETHER: Together AI clusters with InfiniBand support for
+      high-throughput, low-latency networking
+    - AWS_EFA: AWS EKS/HyperPod clusters with Elastic Fabric Adapter (EFA)
+      support for high-performance inter-node communication
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -94,6 +99,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - GCP settings match
       sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
     - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    - AWS EFA settings match the EFA configuration used in AWS VMs
     """
 
     GCP_TCPX = 'gcp_tcpx'

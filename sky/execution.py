@@ -2,8 +2,11 @@
 
 See `Stage` for a Task's life cycle.
 """
+import asyncio
 import enum
 import logging
+import os
+import tempfile
 import time
 import typing
 from typing import Callable, List, Optional, Tuple, Union
@@ -17,6 +20,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
@@ -24,6 +28,7 @@ from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -102,6 +107,52 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     task.best_resources = None
     logger.debug(f'Overridden task resources: {task.resources}')
     return task
+
+
+def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
+    """Resolve managed secret references for all tasks in the DAG."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import plugins
+
+    for task in dag.tasks:
+        if not task.managed_secret_refs:
+            continue
+
+        ext_ctx = plugins.get_extension_context()
+        if ext_ctx is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no plugin system '
+                'is available.')
+        provider = ext_ctx.managed_secrets_provider
+        if provider is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no managed secrets '
+                'provider is configured. Install a secrets management '
+                'plugin.')
+
+        # The provider.resolve() is async; run it from this sync context.
+        resolved = asyncio.run(
+            provider.resolve(
+                task.managed_secret_refs,
+                user_hash=common_utils.get_user_hash(),
+                workspace=skypilot_config.get_active_workspace(),
+            ))
+
+        # Merge resolved env vars into the task.
+        if resolved.env_vars:
+            task.update_envs(resolved.env_vars)
+
+        # Write resolved file mounts to temp files and add to task.
+        # Uses tempstore so files are cleaned up when the request ends.
+        if resolved.file_mounts:
+            secret_dir = tempstore.mkdtemp(prefix='skypilot-secrets-')
+            for fm in resolved.file_mounts:
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix='secret-',
+                                                    dir=secret_dir)
+                with os.fdopen(tmp_fd, 'wb') as f:
+                    f.write(fm.content)
+                os.chmod(tmp_path, 0o600)
+                task.update_file_mounts({fm.mount_path: tmp_path})
 
 
 def _execute(
@@ -217,6 +268,7 @@ def _execute(
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
                     storage.construct()
+        _resolve_managed_secrets(dag)
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -834,6 +886,16 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
+    # File-mount secret refs are not supported with exec because exec skips
+    # the SYNC_FILE_MOUNTS stage.
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
+    for t in tasks:
+        for ref in t.managed_secret_refs:
+            if ref.mount_path is not None:
+                raise ValueError(
+                    f'File-mount secret {ref.name!r} is not supported '
+                    'with `sky exec`. Use `sky launch` instead.')
 
     # Check if cluster is autostopping - reject exec on autostopping clusters
     if not dryrun:

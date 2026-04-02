@@ -697,6 +697,15 @@ def get_storage_schema():
                             },
                         },
                     },
+                    'mount': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
                 },
             },
             '_is_sky_managed': {
@@ -1044,15 +1053,45 @@ def get_task_schema():
                 'additionalProperties': False,
             },
             'secrets': {
-                'type': 'object',
-                'required': [],
-                'patternProperties': {
-                    # Checks secret keys are valid env var names.
-                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': ['string', 'null']
-                    }
+                'oneOf': [
+                    {
+                        'type': 'object',
+                        # Dict form: inline secrets + managed refs
+                        'additionalProperties': {
+                            'type': ['string', 'null']
+                        },
+                    },
+                    {
+                        'type': 'array',
+                        # Array form: managed secret refs only
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
+                ],
+            },
+            'managed_secrets': {
+                'type': 'array',
+                'items': {
+                    'oneOf': [
+                        {
+                            'type': 'string'
+                        },
+                        {
+                            'type': 'object',
+                            'maxProperties': 1,
+                            'additionalProperties': {
+                                'type': 'object',
+                                'properties': {
+                                    'mount_path': {
+                                        'type': 'string'
+                                    },
+                                },
+                                'additionalProperties': False,
+                            },
+                        },
+                    ],
                 },
-                'additionalProperties': False,
             },
             # inputs and outputs are experimental
             'inputs': {
@@ -1276,6 +1315,21 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+_GPU_PARTITION_MAP_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'array',
+            'items': {
+                'type': 'string',
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1436,6 +1490,27 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'auto_mounts': {
+        'type': 'array',
+        'items': {
+            'type': 'object',
+            'required': ['volume_name', 'mount_paths'],
+            'additionalProperties': False,
+            'properties': {
+                'volume_name': {
+                    'type': 'string',
+                },
+                'mount_paths': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'pattern': '^(/|~/|~$)',
+                    },
+                    'minItems': 1,
+                },
+            },
+        },
+    },
     'enable_docker': {
         'oneOf': [
             # Simple form: enable_docker: true / false
@@ -1765,6 +1840,7 @@ def get_config_schema():
                 },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1782,6 +1858,7 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],

@@ -473,7 +473,9 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% set seen_volumes = [] %}
         {% for volume_mount in volume_mounts %}
+        {% if volume_mount.name not in seen_volumes %}
         {% if volume_mount.volume_type == 'k8s-hostpath' %}
         - name: {{volume_mount.name}}
           hostPath:
@@ -483,6 +485,8 @@ available_node_types:
         - name: {{volume_mount.name}}
           persistentVolumeClaim:
             claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endif %}
+        {% if seen_volumes.append(volume_mount.name) %}{% endif %}
         {% endif %}
         {% endfor %}
         {% if k8s_enable_gpudirect_tcpx %}
@@ -700,13 +704,11 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
-              {% for vm in volume_mounts %}
-              {% if vm.volume_type == 'k8s-hostpath' %}
-              # Fix permissions for hostPath volume {{vm.name}}.
-              # hostPath directories are created as root:root by Kubernetes,
-              # but the container may run as a non-root user.
-              $(prefix_cmd) chown -R :$(id -g) {{vm.path}} && $(prefix_cmd) chmod -R g+rwx {{vm.path}};
-              {% endif %}
+              {% for path in volume_mount_rw_paths %}
+              # Fix write permissions for volume mount if needed.
+              # Directories may be created as root:root by kubelet (hostPath,
+              # subPath) or may not respect fsGroup (NFS-backed volumes).
+              test -w "{{path}}" || ($(prefix_cmd) chown :$(id -g) "{{path}}" && $(prefix_cmd) chmod g+rwx "{{path}}") || true;
               {% endfor %}
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
@@ -996,7 +998,10 @@ available_node_types:
               (
                 (
                 set -e
-                mkdir -p ~/.sky
+                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # writes python_path there before ray_installation_commands (which
+                # contains SETUP_SKY_DIRS_COMMANDS) creates it.
+                mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
@@ -1009,16 +1014,16 @@ available_node_types:
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # ~/.sky/python_path is seeded by conda_installation_commands
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
