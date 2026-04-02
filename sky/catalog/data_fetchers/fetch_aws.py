@@ -144,7 +144,16 @@ def _get_instance_type_offerings(region: str) -> 'pd.DataFrame':
 
 
 def _get_availability_zones(region: str) -> 'pd.DataFrame':
-    client = aws.client('ec2', region_name=region)
+    # Use a shorter timeout than the default 60s connect / 60s read to avoid
+    # blocking sky check when a region endpoint is unreachable or unresponsive.
+    # With max_attempts=3, worst case is ~45s per region, but since regions are
+    # checked in parallel this only affects total wall time by ~45s.
+    client = aws.client('ec2',
+                        region_name=region,
+                        config=aws.botocore_config().Config(
+                            connect_timeout=10,
+                            read_timeout=15,
+                            retries={'max_attempts': 3}))
     zones = []
     try:
         response = client.describe_availability_zones()
@@ -169,7 +178,8 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
                     AZ_PERMISSION_DENIED) from None
         else:
             raise
-    except aws.botocore_exceptions().ConnectionError:
+    except (aws.botocore_exceptions().ConnectionError,
+            aws.botocore_exceptions().ReadTimeoutError):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.AWSAzFetchingError(
                 region,
