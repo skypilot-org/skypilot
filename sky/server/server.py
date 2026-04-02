@@ -1635,11 +1635,38 @@ async def unzip_file(zip_file_path: pathlib.Path,
     await asyncio.to_thread(_do_unzip)
 
 
+def _resize_via_launch(**kwargs):
+    """Wrapper to call core.resize from the /launch endpoint.
+
+    Extracts num_nodes from the DAG task and returns the result in the
+    same (job_id, handle) format as a normal launch.
+    """
+    dag = kwargs.get('task')
+    cluster_name = kwargs.get('cluster_name')
+    num_nodes = 1
+    if dag is not None and dag.tasks:
+        num_nodes = dag.tasks[0].num_nodes
+    handle = core.resize(cluster_name=cluster_name, num_nodes=num_nodes)
+    return (None, handle)
+
+
 @app.post('/launch')
 async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
-    """Launches a cluster or task."""
+    """Launches a cluster or task, or resizes an existing cluster."""
     request_id = request.state.request_id
+    if launch_body.resize:
+        logger.info(f'Resize request via /launch: {request_id}')
+        await executor.schedule_request_async(
+            request_id,
+            request_name=request_names.RequestName.CLUSTER_LAUNCH,
+            request_body=launch_body,
+            func=_resize_via_launch,
+            schedule_type=requests_lib.ScheduleType.LONG,
+            request_cluster_name=launch_body.cluster_name,
+            auth_user=request.state.auth_user,
+        )
+        return
     logger.info(f'Launching request: {request_id}')
     await executor.schedule_request_async(
         request_id,
@@ -1751,21 +1778,6 @@ async def start(request: fastapi.Request,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=start_body.cluster_name,
-        auth_user=request.state.auth_user,
-    )
-
-
-@app.post('/resize')
-async def resize(request: fastapi.Request,
-                 resize_body: payloads.ResizeBody) -> None:
-    """Resizes a cluster to a different number of nodes."""
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_RESIZE,
-        request_body=resize_body,
-        func=core.resize,
-        schedule_type=requests_lib.ScheduleType.LONG,
-        request_cluster_name=resize_body.cluster_name,
         auth_user=request.state.auth_user,
     )
 

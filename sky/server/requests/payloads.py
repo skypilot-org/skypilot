@@ -293,6 +293,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -314,6 +317,7 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs.pop('resize', None)
         return kwargs
 
 
@@ -369,12 +373,6 @@ class StartBody(RequestBody):
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
-
-
-class ResizeBody(RequestBody):
-    """The request body for the resize endpoint."""
-    cluster_name: str
-    num_nodes: int
 
 
 class AutostopBody(RequestBody):

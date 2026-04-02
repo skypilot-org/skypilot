@@ -101,11 +101,6 @@ def decode_start(return_value: str) -> 'backends.CloudVmRayResourceHandle':
     return decode_and_unpickle(return_value)
 
 
-@register_decoders('resize')
-def decode_resize(return_value: str) -> 'backends.CloudVmRayResourceHandle':
-    return decode_and_unpickle(return_value)
-
-
 @register_decoders('queue')
 def decode_queue(return_value: List[dict],) -> List[responses.ClusterJobRecord]:
     jobs = return_value

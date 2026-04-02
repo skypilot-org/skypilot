@@ -1279,7 +1279,7 @@ def launch(
                 '--resize requires --num-nodes or a YAML with num_nodes set.')
 
         request_id = sdk.resize(cluster, resize_num_nodes)
-        _async_call_or_wait(request_id, async_call, 'sky.resize')
+        _async_call_or_wait(request_id, async_call, 'sky.launch')
         if not async_call:
             _get_cluster_records_and_set_ssh_config(clusters=[cluster])
         return

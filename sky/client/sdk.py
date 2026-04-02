@@ -1305,12 +1305,23 @@ def resize(
             cluster (e.g., scale-down requested).
         ValueError: if num_nodes is invalid.
     """
-    body = payloads.ResizeBody(
+    # Build a minimal task with the desired num_nodes and post to /launch
+    # with resize=True.
+    if typing.TYPE_CHECKING:
+        import sky as sky_mod
+    else:
+        sky_mod = adaptors_common.LazyImport('sky')
+    with sky_mod.Dag() as dag:
+        dummy_task = sky_mod.Task()
+        dummy_task.num_nodes = num_nodes
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
+    body = payloads.LaunchBody(
+        task=dag_str,
         cluster_name=cluster_name,
-        num_nodes=num_nodes,
+        resize=True,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/resize', json=json.loads(body.model_dump_json()), timeout=5)
+        'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
