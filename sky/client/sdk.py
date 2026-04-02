@@ -1279,32 +1279,6 @@ def start(
     return server_common.get_request_id(response)
 
 
-def resize(
-    cluster_name: str,
-    num_nodes: int,
-) -> server_common.RequestId[Tuple[Optional[int],
-                                   Optional['backends.ResourceHandle']]]:
-    """Resize a running cluster to a different number of nodes.
-
-    Convenience wrapper around :func:`launch` with ``resize=True``.
-
-    Args:
-        cluster_name: name of the cluster to resize.
-        num_nodes: the desired total number of nodes (including head).
-
-    Returns:
-        The request ID of the resize request (same format as launch).
-    """
-    if typing.TYPE_CHECKING:
-        import sky as sky_mod
-    else:
-        sky_mod = adaptors_common.LazyImport('sky')
-    with sky_mod.Dag():
-        dummy_task = sky_mod.Task()
-        dummy_task.num_nodes = num_nodes
-    return launch(dummy_task, cluster_name=cluster_name, resize=True)
-
-
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api

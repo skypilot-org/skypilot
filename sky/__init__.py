@@ -110,7 +110,6 @@ from sky.client.sdk import launch
 from sky.client.sdk import optimize
 from sky.client.sdk import queue
 from sky.client.sdk import reload_config
-from sky.client.sdk import resize
 from sky.client.sdk import start
 from sky.client.sdk import status
 from sky.client.sdk import stop
