@@ -53,6 +53,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import instance as kubernetes_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
@@ -5635,16 +5636,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Terminate the specific worker instances (K8s only for now).
         if cloud_name.lower() in ('kubernetes', 'ssh'):
-            from sky.provision.kubernetes import instance as k8s_instance
-            from sky.provision.kubernetes import utils as k8s_utils
-            namespace = k8s_utils.get_namespace_from_config(provider_config)
-            context = k8s_utils.get_context_from_config(provider_config)
+            assert provider_config is not None
+            namespace = kubernetes_utils.get_namespace_from_config(
+                provider_config)
+            context = kubernetes_utils.get_context_from_config(provider_config)
             for inst in workers_to_remove:
                 logger.info(f'Terminating worker pod {inst.instance_id}')
-                k8s_instance._terminate_node(namespace,
-                                             context,
-                                             inst.instance_id,
-                                             is_head=False)
+                # pylint: disable=protected-access
+                kubernetes_instance._terminate_node(namespace,
+                                                    context,
+                                                    inst.instance_id,
+                                                    is_head=False)
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
@@ -6287,15 +6289,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         as a sink for all the cluster info.
         """
         return {
-            'SKYPILOT_CLUSTER_INFO':
-                json.dumps({
-                    'cluster_name': handle.cluster_name,
-                    'cloud': str(handle.launched_resources.cloud),
-                    'region': handle.launched_resources.region,
-                    'zone': handle.launched_resources.zone,
-                }),
-            constants.USER_ENV_VAR:
-                common_utils.get_current_user_name(),
+            'SKYPILOT_CLUSTER_INFO': json.dumps({
+                'cluster_name': handle.cluster_name,
+                'cloud': str(handle.launched_resources.cloud),
+                'region': handle.launched_resources.region,
+                'zone': handle.launched_resources.zone,
+            }),
+            constants.USER_ENV_VAR: common_utils.get_current_user_name(),
         }
 
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
