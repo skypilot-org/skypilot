@@ -1239,55 +1239,6 @@ def launch(
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
 
-    # --- Handle --resize early ---
-    if resize:
-        if cluster is None:
-            raise click.UsageError(
-                '--resize requires -c/--cluster to specify an existing '
-                'cluster.')
-        # Determine num_nodes: from --num-nodes flag, or from YAML entrypoint.
-        resize_num_nodes = num_nodes
-        if resize_num_nodes is None and entrypoint:
-            # Try to parse a YAML to get num_nodes.
-            task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
-                entrypoint=entrypoint,
-                name=name,
-                workdir=None,
-                cloud=None,
-                region=None,
-                zone=None,
-                gpus=None,
-                cpus=None,
-                memory=None,
-                instance_type=None,
-                num_nodes=None,
-                use_spot=None,
-                image_id=None,
-                env=[],
-                secret=[],
-                disk_size=None,
-                disk_tier=None,
-                network_tier=None,
-                local_disk=None,
-                ports=(),
-            )
-            if (not isinstance(task_or_dag, dag_lib.Dag) and
-                    task_or_dag.num_nodes > 1):
-                resize_num_nodes = task_or_dag.num_nodes
-        if resize_num_nodes is None:
-            raise click.UsageError(
-                '--resize requires --num-nodes or a YAML with num_nodes set.')
-
-        request_id = sdk.launch(
-            task_lib.Task(num_nodes=resize_num_nodes),
-            cluster_name=cluster,
-            resize=True,
-        )
-        _async_call_or_wait(request_id, async_call, 'sky.launch')
-        if not async_call:
-            _get_cluster_records_and_set_ssh_config(clusters=[cluster])
-        return
-
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
     # submitted, while the synchronous way of `sky launch` does. We should

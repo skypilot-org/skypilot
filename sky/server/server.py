@@ -1639,15 +1639,23 @@ def _resize_via_launch(**kwargs):
     """Wrapper to call core.resize from the /launch endpoint.
 
     Extracts num_nodes from the DAG task and returns the result in the
-    same (job_id, handle) format as a normal launch.
+    same (job_id, handle) format as a normal launch.  If the cluster
+    does not exist yet, falls through to a normal launch.
     """
+    from sky import exceptions
+    from sky.execution import launch as execution_launch
     dag = kwargs.get('task')
     cluster_name = kwargs.get('cluster_name')
     num_nodes = 1
     if dag is not None and dag.tasks:
         num_nodes = dag.tasks[0].num_nodes
-    handle = core.resize(cluster_name=cluster_name, num_nodes=num_nodes)
-    return (None, handle)
+    try:
+        handle = core.resize(cluster_name=cluster_name, num_nodes=num_nodes)
+        return (None, handle)
+    except exceptions.ClusterDoesNotExist:
+        logger.info(f'Cluster {cluster_name!r} does not exist; '
+                    'falling through to normal launch.')
+        return execution_launch(**kwargs)
 
 
 @app.post('/launch')
