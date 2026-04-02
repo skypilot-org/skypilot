@@ -632,12 +632,11 @@ def check_instance_fits(
                 node_acc_type, node_acc_count = get_gpu_type_and_count(
                     node_info.gres)
                 if node_acc_type is not None:
-                    logger.warning(
-                        f'gpu_partition_map is configured for '
-                        f'{acc_type!r}, but node {node_info.node!r} '
-                        f'has typed GRES {node_info.gres!r}. '
-                        f'gpu_partition_map may not be needed for '
-                        f'this cluster.')
+                    logger.warning(f'gpu_partition_map is configured for '
+                                   f'{acc_type!r}, but node {node_info.node!r} '
+                                   f'has typed GRES {node_info.gres!r}. '
+                                   f'gpu_partition_map may not be needed for '
+                                   f'this cluster.')
                 if node_acc_count >= acc_count:
                     gpu_nodes.append(node_info)
             candidate_nodes = gpu_nodes

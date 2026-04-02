@@ -328,16 +328,29 @@ class Slurm(clouds.Cloud):
                                 p for p in mapped if p in available
                             ]
                             if not partitions_to_check:
-                                logger.warning(
-                                    f'{colorama.Fore.YELLOW}'
-                                    f'gpu_partition_map maps '
-                                    f'{sit.accelerator_type!r} to '
-                                    f'partition(s) {mapped}, but none '
-                                    f'exist on cluster {cluster!r}. '
-                                    f'Please double-check the partition '
-                                    f'names in gpu_partition_map.'
-                                    f'{colorama.Style.RESET_ALL}'
-                                )
+                                if zone is not None:
+                                    logger.warning(
+                                        f'{colorama.Fore.YELLOW}'
+                                        f'gpu_partition_map maps '
+                                        f'{sit.accelerator_type!r} to '
+                                        f'partition(s) {mapped}, but '
+                                        f'the requested partition '
+                                        f'{zone!r} is not among them. '
+                                        f'Either add {zone!r} to '
+                                        f'gpu_partition_map or omit '
+                                        f'the partition from --infra.'
+                                        f'{colorama.Style.RESET_ALL}')
+                                else:
+                                    logger.warning(
+                                        f'{colorama.Fore.YELLOW}'
+                                        f'gpu_partition_map maps '
+                                        f'{sit.accelerator_type!r} to '
+                                        f'partition(s) {mapped}, but '
+                                        f'none exist on cluster '
+                                        f'{cluster!r}. Please '
+                                        f'double-check the partition '
+                                        f'names in gpu_partition_map.'
+                                        f'{colorama.Style.RESET_ALL}')
                 except ValueError:
                     pass
 
