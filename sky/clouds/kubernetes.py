@@ -518,7 +518,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones, dryrun  # Unused.
+        del cluster_name, zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -537,6 +537,11 @@ class Kubernetes(clouds.Cloud):
             resources.instance_type)
         cpus = k.cpus
         mem = k.memory
+        # Clamp resource requests to node allocatable capacity so that
+        # pods can schedule even when the request matches a node's total
+        # capacity (which exceeds allocatable due to system overhead).
+        cpus, mem = kubernetes_utils.adjust_resources_to_allocatable(
+            cpus, mem, context, dryrun=dryrun)
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
@@ -699,19 +704,6 @@ class Kubernetes(clouds.Cloud):
                 keys=('high_availability', 'storage_class_name'),
                 default_value=None))
 
-        # Get the config for setting pod CPU/memory limits relative to requests.
-        # This is useful for clusters that require limits to be set (e.g., for
-        # LimitRange enforcement or resource quotas).
-        # Can be: False (default, no limits), True (limits = requests),
-        # or a number (limits = requests * multiplier).
-        set_pod_resource_limits_config = (
-            skypilot_config.get_effective_workspace_region_config(
-                cloud='kubernetes',
-                region=context,
-                keys=('set_pod_resource_limits',),
-                default_value=False,
-                override_configs=resources.cluster_config_overrides))
-
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_workspace_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
@@ -829,17 +821,30 @@ class Kubernetes(clouds.Cloud):
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
-        # number -> that multiplier
+        # number -> that multiplier. Limits are calculated with unclamped
+        # values for maximum burst as intended.
+        set_pod_resource_limits_config = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('set_pod_resource_limits',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
         if set_pod_resource_limits_config is not False:
             if set_pod_resource_limits_config is True:
-                multiplier = 1.0
+                mul = 1.0
             else:
-                multiplier = float(set_pod_resource_limits_config)
-            deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
-            deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
+                mul = float(set_pod_resource_limits_config)
+            if mul == 1.0:
+                # For QoS purposes, we set the limit to match the request.
+                deploy_vars['k8s_cpu_limit'] = round(cpus, 3)
+                deploy_vars['k8s_memory_limit'] = round(mem, 3)
+            else:
+                deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
+                deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
             if ephemeral_storage is not None:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
-                    ephemeral_storage * multiplier, 3)
+                    ephemeral_storage * mul, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
