@@ -53,7 +53,6 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
-from sky.provision.kubernetes import instance as kubernetes_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
@@ -5636,6 +5635,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Terminate the specific worker instances (K8s only for now).
         if cloud_name.lower() in ('kubernetes', 'ssh'):
+            # pylint: disable=import-outside-toplevel
+            from sky.provision.kubernetes import instance as k8s_instance
             assert provider_config is not None
             namespace = kubernetes_utils.get_namespace_from_config(
                 provider_config)
@@ -5643,10 +5644,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for inst in workers_to_remove:
                 logger.info(f'Terminating worker pod {inst.instance_id}')
                 # pylint: disable=protected-access
-                kubernetes_instance._terminate_node(namespace,
-                                                    context,
-                                                    inst.instance_id,
-                                                    is_head=False)
+                k8s_instance._terminate_node(namespace,
+                                             context,
+                                             inst.instance_id,
+                                             is_head=False)
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
