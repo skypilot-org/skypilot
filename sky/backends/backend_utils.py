@@ -2059,84 +2059,49 @@ def _check_owner_identity_with_record(cluster_name: str,
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
 
-    def _try_set_k8s_owner() -> bool:
-        # TODO (kyuds): this is for backwards compatibility for k8s skypilot
-        # clusters that were launched before the identity update. Remove
-        # in v0.14.0.
-        assert is_k8s_cloud
-        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
-        provider_config = config['provider']
-        context = provider_config.get('context')
-        assert isinstance(context, str)
-        try:
-            identity = clouds.Kubernetes.get_identity_from_context_name(context)
-            global_user_state.set_owner_identity_for_cluster(
-                cluster_name, identity)
-            logger.debug(f'Successfully patched {cluster_name} owner identity '
-                         f'to {identity} (launched on {context}).')
-            return True
-        except exceptions.CloudUserIdentityError:
-            return False
-
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
-    # The user identity can be None, if the cluster is created by an older
-    # version of SkyPilot. In that case, we set the user identity to the
-    # current active one.
-    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
-    # immediately without `sky status --refresh` first, will cause a leakage
-    # of the existing cluster. We deem this an acceptable tradeoff mainly
-    # because multi-identity is not common (at least at the moment).
-    if owner_identity is None:
-        if is_k8s_cloud:
-            if _try_set_k8s_owner():
-                return
-        else:
-            global_user_state.set_owner_identity_for_cluster(
-                cluster_name, user_identities[0])
-            return
-    else:
-        assert isinstance(owner_identity, list)
-        # It is OK if the owner identity is shorter, which will happen when
-        # the cluster is launched before #1808. In that case, we only check
-        # the same length (zip will stop at the shorter one).
-        for identity in user_identities:
-            for i, (owner, current) in enumerate(zip(owner_identity, identity)):
-                # Clean up the owner identity for the backslash and newlines, caused
-                # by the cloud CLI output, e.g. gcloud.
-                owner = owner.replace('\n', '').replace('\\', '')
-                if owner == current:
-                    if not is_k8s_cloud:
-                        # We skip patching owner identities for Kubernetes as
-                        # we expect users to naturally have multiple clusters
-                        # in their kubeconfig. The "active" identity is
-                        # considered as the current context, but users can and
-                        # will use contexts other than their current context
-                        # intentionally.
-                        if i != 0:
-                            logger.warning(
-                                f'The cluster was owned by {owner_identity}, '
-                                f'but a new identity {identity} is activated. '
-                                'We still allow the operation as the two '
-                                'identities are likely to have the same '
-                                'access to the cluster. Please be aware that '
-                                'this can cause unexpected cluster leakage if '
-                                'the two identities are not actually equivalent '
-                                '(e.g., belong to the same person).')
-                        if i != 0 or len(owner_identity) != len(identity):
-                            # We update the owner of a cluster, when:
-                            # 1. The strictest identty (i.e. the first one)
-                            # does not match, but the latter ones match.
-                            # 2. The length of the two identities are different,
-                            # which will only happen when the cluster is launched
-                            # before #1808. Update the user identity to avoid
-                            # showing the warning above again.
-                            global_user_state.set_owner_identity_for_cluster(
-                                cluster_name, identity)
-                    return  # The user identity matches.
-        if is_k8s_cloud and _try_set_k8s_owner():
-            return
+
+    assert isinstance(owner_identity, list)
+    # It is OK if the owner identity is shorter, which will happen when
+    # the cluster is launched before #1808. In that case, we only check
+    # the same length (zip will stop at the shorter one).
+    for identity in user_identities:
+        for i, (owner, current) in enumerate(zip(owner_identity, identity)):
+            # Clean up the owner identity for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
+            if owner == current:
+                if not is_k8s_cloud:
+                    # We skip patching owner identities for Kubernetes as
+                    # we expect users to naturally have multiple clusters
+                    # in their kubeconfig. The "active" identity is
+                    # considered as the current context, but users can and
+                    # will use contexts other than their current context
+                    # intentionally.
+                    if i != 0:
+                        logger.warning(
+                            f'The cluster was owned by {owner_identity}, '
+                            f'but a new identity {identity} is activated. '
+                            'We still allow the operation as the two '
+                            'identities are likely to have the same '
+                            'access to the cluster. Please be aware that '
+                            'this can cause unexpected cluster leakage if '
+                            'the two identities are not actually equivalent '
+                            '(e.g., belong to the same person).')
+                    if i != 0 or len(owner_identity) != len(identity):
+                        # We update the owner of a cluster, when:
+                        # 1. The strictest identty (i.e. the first one)
+                        # does not match, but the latter ones match.
+                        # 2. The length of the two identities are different,
+                        # which will only happen when the cluster is launched
+                        # before #1808. Update the user identity to avoid
+                        # showing the warning above again.
+                        global_user_state.set_owner_identity_for_cluster(
+                            cluster_name, identity)
+                return  # The user identity matches.
+
     # Generate error message if no match found
     if len(user_identities) == 1:
         err_msg = f'the activated identity is {user_identities[0]!r}.'
