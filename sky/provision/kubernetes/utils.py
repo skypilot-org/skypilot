@@ -1858,11 +1858,11 @@ def adjust_resources_to_allocatable(
     nodes = get_kubernetes_nodes(context=context)
     ready_nodes = [n for n in nodes if n.is_ready()]
 
-    # Collect allocatable values independently: a node contributes its
-    # allocatable CPU if its CPU capacity matches the request, and its
-    # allocatable memory if its memory capacity matches the request.
-    min_alloc_cpu: Optional[float] = None
-    min_alloc_mem: Optional[float] = None
+    # If any node has strictly more capacity than requested for both
+    # CPU and memory, the scheduler can place the pod there without
+    # clamping.
+    min_clamp_cpu: Optional[float] = None
+    min_clamp_mem: Optional[float] = None
     for node in ready_nodes:
         node_cap_cpu = parse_cpu_or_gpu_resource_to_float(
             node.status.capacity.get('cpu', '0'))
@@ -1870,28 +1870,32 @@ def adjust_resources_to_allocatable(
             node.status.capacity.get('memory', '0'),
             unit='G',
         )
-        # Skip nodes that cannot fit the pod (capacity below request
-        # for either resource).
-        if node_cap_cpu < cpus - 0.01 or node_cap_mem < mem - 0.01:
-            continue
+        if (node_cap_cpu > cpus + 0.01 and node_cap_mem > mem + 0.01):
+            return cpus, mem
+        # Collect allocatable values independently from exact-match
+        # nodes: a node contributes its allocatable CPU if its CPU
+        # capacity matches the request, and likewise for memory.
         cpu_matches = abs(node_cap_cpu - cpus) < 0.01
         mem_matches = abs(node_cap_mem - mem) < 0.01
         if cpu_matches:
             alloc_cpu = parse_cpu_or_gpu_resource_to_float(
-                node.status.allocatable.get('cpu', '0')) - 0.01
-            if min_alloc_cpu is None or alloc_cpu < min_alloc_cpu:
-                min_alloc_cpu = alloc_cpu
+                node.status.allocatable.get('cpu', '0'))
+            clamp_cpu = alloc_cpu - node_cap_cpu * 0.01
+            if min_clamp_cpu is None or clamp_cpu < min_clamp_cpu:
+                min_clamp_cpu = clamp_cpu
         if mem_matches:
-            alloc_mem = parse_memory_resource(
-                node.status.allocatable.get('memory', '0'),
-                unit='G',
-            ) - 0.01
-            if min_alloc_mem is None or alloc_mem < min_alloc_mem:
-                min_alloc_mem = alloc_mem
+            alloc_mem = parse_memory_resource(node.status.allocatable.get(
+                'memory', '0'),
+                                              unit='G')
+            clamp_mem = alloc_mem - node_cap_mem * 0.05
+            if min_clamp_mem is None or clamp_mem < min_clamp_mem:
+                min_clamp_mem = clamp_mem
 
-    adjusted_cpus = min(cpus,
-                        min_alloc_cpu) if min_alloc_cpu is not None else cpus
-    adjusted_mem = min(mem, min_alloc_mem) if min_alloc_mem is not None else mem
+    adjusted_cpus = min_clamp_cpu or cpus
+    adjusted_mem = min_clamp_mem or mem
+
+    assert adjusted_cpus > 0.0, 'Adjusted cpu should be greater than 0.'
+    assert adjusted_mem > 0.0, 'Adjusted memory should be greater than 0.'
 
     if adjusted_cpus < cpus or adjusted_mem < mem:
         logger.info(f'Clamping resource request to node allocatable capacity. '
@@ -1936,10 +1940,6 @@ def check_instance_fits(context: Optional[str],
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
-            # When the request equals node capacity, the actual pod
-            # CPU/memory request is adjusted down to the allocatable
-            # amount in make_deploy_resources_variables() to account
-            # for kube-system resource consumption.
             if (node_cpus >= candidate_instance_type.cpus and
                     node_memory_gb >= candidate_instance_type.memory):
                 return True, None
