@@ -408,6 +408,7 @@ async def _get_k8s_managed_job_status(
         use the normal status checking path).
         (job_status, transient_error_reason) if it IS a K8s managed job.
     """
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     # Try to get namespace/context from the handle's cluster YAML
@@ -416,7 +417,7 @@ async def _get_k8s_managed_job_status(
     cluster_name_on_cloud = cluster_name
 
     if handle is not None:
-        from sky import clouds
+        from sky import clouds  # pylint: disable=import-outside-toplevel
         if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             return None
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -1080,7 +1081,7 @@ def controller_log_file_for_job(job_id: int,
 
 def is_v1_k8s_managed_job(handle: 'backends.CloudVmRayResourceHandle',) -> bool:
     """Check if a cluster is a V1 K8s managed job via its YAML config."""
-    from sky import clouds
+    from sky import clouds  # pylint: disable=import-outside-toplevel
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
         return False
     try:
@@ -1092,7 +1093,6 @@ def is_v1_k8s_managed_job(handle: 'backends.CloudVmRayResourceHandle',) -> bool:
 
 def _stream_k8s_managed_job_logs(
     handle: 'backends.CloudVmRayResourceHandle',
-    cluster_name: str,
     follow: bool = True,
     tail: Optional[int] = None,
 ) -> int:
@@ -1101,8 +1101,7 @@ def _stream_k8s_managed_job_logs(
     For follow mode, streams from all pods concurrently using threads.
     Returns an exit code compatible with JobExitCode.
     """
-    import threading
-
+    # pylint: disable=import-outside-toplevel
     from sky.adaptors import kubernetes as k8s_adaptor
     from sky.provision.kubernetes import utils as kubernetes_utils
 
@@ -1141,7 +1140,7 @@ def _stream_k8s_managed_job_logs(
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)
+        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
         try:
             resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=True, _preload_content=False)
@@ -1177,8 +1176,7 @@ def _stream_k8s_managed_job_logs_direct(
     Used for elastic jobs (DYNAMIC_NODE_SET) that create pods directly
     without registering in global_user_state.
     """
-    import threading
-
+    # pylint: disable=import-outside-toplevel
     from sky.adaptors import kubernetes as k8s_adaptor
     from sky.provision.kubernetes import utils as kubernetes_utils
 
@@ -1211,7 +1209,7 @@ def _stream_k8s_managed_job_logs_direct(
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)
+        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
         try:
             resp = k8s_adaptor.core_api(context).read_namespaced_pod_log(
                 pod_name, namespace, follow=True, _preload_content=False)
@@ -1394,12 +1392,12 @@ def stream_logs_by_id(
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
-            _pool_cluster_name, _ = managed_job_state.get_pool_submit_info(
+            pool_cluster_name, _ = managed_job_state.get_pool_submit_info(
                 job_id)
-            _pool_handle = (global_user_state.get_handle_from_cluster_name(
-                _pool_cluster_name) if _pool_cluster_name is not None else None)
-            _is_k8s_v1_job = (_pool_handle is not None and
-                              is_v1_k8s_managed_job(_pool_handle))
+            pool_handle = (global_user_state.get_handle_from_cluster_name(
+                pool_cluster_name) if pool_cluster_name is not None else None)
+            is_k8s_v1_job = (pool_handle is not None and
+                             is_v1_k8s_managed_job(pool_handle))
             # Filter tasks if task filter is specified
             if task is not None:
                 task_info = [
@@ -1434,7 +1432,7 @@ def stream_logs_by_id(
                         # Stream the logs to the console without reading the
                         # whole file into memory.
                         # V1 K8s logs don't have the streaming marker
-                        start_streaming = _is_k8s_v1_job
+                        start_streaming = is_k8s_v1_job
                         read_from: Union[TextIO, Deque[str]] = f
                         if tail is not None:
                             assert tail > 0
@@ -1519,6 +1517,7 @@ def stream_logs_by_id(
                     job_infra = managed_job_state.get_job_infra(job_id)
                     if (job_infra is not None and
                             job_infra['cloud'] == 'Kubernetes'):
+                        # pylint: disable=import-outside-toplevel
                         from sky.adaptors import kubernetes as k8s_adaptor
                         ctx = job_infra['region']
                         if (ctx is not None and
@@ -1571,9 +1570,7 @@ def stream_logs_by_id(
             # in the log streaming subprocess).
             is_v1 = is_v1_k8s_managed_job(handle)
             if is_v1:
-                assert cluster_name is not None
                 returncode = _stream_k8s_managed_job_logs(handle,
-                                                          cluster_name,
                                                           follow=follow,
                                                           tail=tail)
             else:

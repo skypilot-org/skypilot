@@ -1406,24 +1406,20 @@ def cancel(name: Optional[str] = None,
 
 def _read_saved_v1_logs(
     job_id: int,
-    task_id: int,
     status: 'managed_job_state.ManagedJobStatus',
 ) -> Optional[int]:
     """Read saved logs for a terminal V1 K8s managed job."""
+    # pylint: disable=import-outside-toplevel
     import sys
 
-    import colorama
-
-    from sky.jobs import state as managed_job_state
     from sky.utils import context as context_lib
-    from sky.utils import ux_utils
 
     task_info = managed_job_state.get_all_task_ids_names_statuses_logs(job_id)
     ctx = context_lib.get()
     out = ctx.output_stream(sys.stdout) if ctx else sys.stdout
 
     found_logs = False
-    for (t_id, t_name, t_status, log_file, logs_cleaned_at) in task_info:
+    for (_, _, _, log_file, logs_cleaned_at) in task_info:
         if log_file and logs_cleaned_at is None:
             try:
                 with open(os.path.expanduser(log_file), 'r') as f:
@@ -1453,16 +1449,13 @@ def _tail_logs_k8s_v1(
     job_name: Optional[str],
     follow: bool,
     tail: Optional[int],
-    task: Optional[Union[str, int]],
 ) -> Optional[int]:
     """Stream logs for a V1 K8s managed job directly via K8s API.
 
     Returns the exit code, or None if the job is not a V1 K8s job
     (caller should fall back to the standard path).
     """
-    from sky.jobs import state as managed_job_state
-    from sky.jobs import utils as managed_job_utils
-
+    # pylint: disable=import-outside-toplevel
     # Resolve job_id from name if needed
     if job_id is None and job_name is not None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
@@ -1494,7 +1487,7 @@ def _tail_logs_k8s_v1(
 
     # For terminal jobs, try to read from saved log file
     if handle is None and status is not None and status.is_terminal():
-        return _read_saved_v1_logs(job_id, task_id, status)
+        return _read_saved_v1_logs(job_id, status)
 
     # V1 elastic jobs don't register a cluster handle — they create
     # K8s pods directly. Use infra from the managed job state DB.
@@ -1522,12 +1515,15 @@ def _tail_logs_k8s_v1(
             context = None
 
     namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-    cloud_name = handle.cluster_name_on_cloud if handle is not None else cluster_name
+    cloud_name = (handle.cluster_name_on_cloud
+                  if handle is not None else cluster_name)
 
     # Get the output stream (context's log file for API server streaming)
+    # pylint: disable=import-outside-toplevel
+    import sys
+
     from sky.utils import context as context_lib
     ctx = context_lib.get()
-    import sys
     out = ctx.output_stream(sys.stdout) if ctx else sys.stdout
 
     def _write(msg: str) -> None:
@@ -1544,7 +1540,6 @@ def _tail_logs_k8s_v1(
             _write(logs + '\n')
         managed_job_status = managed_job_state.get_status(job_id)
         if managed_job_status is not None and managed_job_status.is_terminal():
-            from sky.utils import ux_utils
             _write(
                 ux_utils.finishing_message(
                     f'Job finished (status: {managed_job_status.value}).') +
@@ -1552,7 +1547,7 @@ def _tail_logs_k8s_v1(
         return 0
 
     # Follow mode: stream from pods
-    import threading
+    import threading  # pylint: disable=import-outside-toplevel
     label_selector = f'{k8s_managed_job.TAG_MANAGED_JOB_NAME}={cloud_name}'
     try:
         pods = k8s_adaptor.core_api(context).list_namespaced_pod(
@@ -1564,7 +1559,6 @@ def _tail_logs_k8s_v1(
     if not pods.items:
         return None
 
-    import colorama
     num_pods = len(pods.items)
     # Match original format: header lines then per-line streaming
     # Check for DYNAMIC_NODE_SET with min_nodes for gang scheduling info
@@ -1593,7 +1587,7 @@ def _tail_logs_k8s_v1(
 
     def _stream_pod(pod):
         pod_name = pod.metadata.name
-        idx = k8s_managed_job._get_node_index(pod)
+        idx = k8s_managed_job._get_node_index(pod)  # pylint: disable=protected-access
         ip = (pod.status.pod_ip if pod.status and pod.status.pod_ip else '')
         # Match original format: (name, rank=N, ip=IP)
         if num_pods == 1:
@@ -1626,7 +1620,6 @@ def _tail_logs_k8s_v1(
 
     managed_job_status = managed_job_state.get_status(job_id)
     if managed_job_status is not None and managed_job_status.is_terminal():
-        from sky.utils import ux_utils
         _write(
             ux_utils.finishing_message(
                 f'Job finished (status: {managed_job_status.value}).') + '\n')
@@ -1685,8 +1678,7 @@ def tail_logs(name: Optional[str],
         returncode = _tail_logs_k8s_v1(job_id=job_id,
                                        job_name=name,
                                        follow=follow,
-                                       tail=tail,
-                                       task=task)
+                                       tail=tail)
         if returncode is not None:
             return returncode
 

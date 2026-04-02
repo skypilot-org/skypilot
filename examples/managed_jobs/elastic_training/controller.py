@@ -44,10 +44,7 @@ def get_alive_workers():
     Used for liveness checks — a worker in 'training' status is still
     alive, just busy with the previous epoch.
     """
-    return [
-        n for n in get_all_workers()
-        if n.get('status') == 'RUNNING'
-    ]
+    return [n for n in get_all_workers() if n.get('status') == 'RUNNING']
 
 
 def send_state(worker, state):

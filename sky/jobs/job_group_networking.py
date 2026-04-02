@@ -596,9 +596,10 @@ def generate_k8s_dns_mappings_from_tasks(
             cluster_name,
             max_length=sky_clouds.Kubernetes.max_cluster_name_length())
 
-        k8s_dns = _construct_k8s_internal_svc(
-            cluster_name_on_cloud, namespace, node_idx=0,
-            managed_job_v1=True)
+        k8s_dns = _construct_k8s_internal_svc(cluster_name_on_cloud,
+                                              namespace,
+                                              node_idx=0,
+                                              managed_job_v1=True)
         hostname = f'{task_name}-0.{job_group_name}'
         mappings.append((k8s_dns, hostname))
 
@@ -628,16 +629,17 @@ def generate_k8s_networking_setup_script(
     Returns:
         Bash script as a string.
     """
-    dns_mappings = generate_k8s_dns_mappings_from_tasks(
-        job_group_name, all_tasks, job_id, namespace)
+    dns_mappings = generate_k8s_dns_mappings_from_tasks(job_group_name,
+                                                        all_tasks, job_id,
+                                                        namespace)
 
     if not dns_mappings:
-        return generate_wait_for_networking_script(
-            job_group_name, other_job_names)
+        return generate_wait_for_networking_script(job_group_name,
+                                                   other_job_names)
 
     # Generate the DNS updater script content
-    updater_script = generate_k8s_dns_updater_script(
-        dns_mappings, job_group_name)
+    updater_script = generate_k8s_dns_updater_script(dns_mappings,
+                                                     job_group_name)
 
     # Build the startup snippet that embeds and launches the updater
     process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
@@ -649,7 +651,7 @@ def generate_k8s_networking_setup_script(
     # script via concatenation rather than an indented f-string.
     startup_lines = [
         '# Start K8s DNS updater for JobGroup networking',
-        f"cat > {script_path} << 'SKYPILOT_DNS_UPDATER_EOF'",
+        f'cat > {script_path} << \'SKYPILOT_DNS_UPDATER_EOF\'',
         updater_script,
         'SKYPILOT_DNS_UPDATER_EOF',
         f'chmod +x {script_path}',
@@ -665,8 +667,8 @@ def generate_k8s_networking_setup_script(
     startup_script = '\n'.join(startup_lines)
 
     # Append the wait script (waits for marker + hostname resolution)
-    wait_script = generate_wait_for_networking_script(
-        job_group_name, other_job_names)
+    wait_script = generate_wait_for_networking_script(job_group_name,
+                                                      other_job_names)
 
     parts = [startup_script.strip()]
     if wait_script:
@@ -684,9 +686,6 @@ _extra_dns_mappings: List[Tuple[str, str]] = []
 
 
 def add_extra_dns_mapping(
-    job_group_name: str,
-    tasks_handles: List[Tuple['task_lib.Task',
-                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
     k8s_dns: str,
     hostname: str,
 ) -> None:
@@ -697,8 +696,6 @@ def add_extra_dns_mapping(
     to their headless service which returns any running worker pod.
 
     Args:
-        job_group_name: Name of the JobGroup.
-        tasks_handles: Existing tasks_handles (for context, unused).
         k8s_dns: K8s service DNS name (e.g., workers-123.default.svc...)
         hostname: Simple hostname (e.g., workers-0.job-group-name)
     """

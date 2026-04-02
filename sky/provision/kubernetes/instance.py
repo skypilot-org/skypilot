@@ -1484,11 +1484,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     )
 
 
-def _create_managed_job(region: str, cluster_name: str,
-                        cluster_name_on_cloud: str,
+def _create_managed_job(region: str, cluster_name_on_cloud: str,
                         config: common.ProvisionConfig,
                         managed_job_config: dict) -> common.ProvisionRecord:
     """Create a K8s Job for a managed job, bypassing the full pod setup."""
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import managed_job as k8s_managed_job
 
     provider_config = config.provider_config
@@ -1600,8 +1600,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     managed_job_config = config.provider_config.get('managed_job_config')
     if managed_job_config is not None:
         try:
-            return _create_managed_job(region, cluster_name,
-                                       cluster_name_on_cloud, config,
+            return _create_managed_job(region, cluster_name_on_cloud, config,
                                        managed_job_config)
         except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
             e_msg = common_utils.format_exception(e)
@@ -1759,6 +1758,7 @@ def terminate_instances(
     # of ray tags. Clean them up via dedicated delete functions which
     # use the correct label selectors.
     if 'managed_job_config' in provider_config:
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         k8s_managed_job.delete_managed_job(cluster_name_on_cloud, namespace,
                                            context)
@@ -1821,6 +1821,7 @@ def _get_managed_job_cluster_info(
 
     Returns None if no managed job pods found (falls back to standard path).
     """
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import managed_job as k8s_managed_job
 
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)

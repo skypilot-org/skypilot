@@ -21,6 +21,7 @@ DISCOVERY_SERVER_PORT = 9876
 
 # The discovery script is stored as a string constant so it can be embedded
 # directly in the pod entrypoint. No separate image needed.
+# pylint: disable-next=invalid-triple-quote
 DISCOVERY_SERVER_SCRIPT = r'''
 import http.server
 import json
@@ -254,7 +255,7 @@ if __name__ == "__main__":
     server.serve_forever()
 '''
 
-import base64 as _base64
+import base64 as _base64  # pylint: disable=wrong-import-position
 
 DISCOVERY_SERVER_SCRIPT_B64 = _base64.b64encode(
     DISCOVERY_SERVER_SCRIPT.encode()).decode()

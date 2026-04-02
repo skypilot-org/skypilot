@@ -11,13 +11,12 @@ import os
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
@@ -35,10 +34,9 @@ from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
-from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
+    from sky import resources  # pylint: disable=reimported
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -307,11 +305,11 @@ class StrategyExecutor:
             # SSH/skylet to query) and go straight to K8s API status.
             is_k8s_v1 = False
             if self.cluster_name is not None:
-                _handle = await asyncio.to_thread(
+                handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name,
                     self.cluster_name)
-                if _handle is not None:
-                    is_k8s_v1 = managed_job_utils.is_v1_k8s_managed_job(_handle)
+                if handle is not None:
+                    is_k8s_v1 = managed_job_utils.is_v1_k8s_managed_job(handle)
             if not is_k8s_v1:
                 try:
                     cluster_status, _ = (await asyncio.to_thread(
@@ -983,7 +981,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                              f'num_nodes ({task.num_nodes})')
         # Store on task so the backend can include it in managed_job_config
         # for the K8s provisioner to use.
-        task.min_nodes = self.min_nodes
+        task.min_nodes = self.min_nodes  # type: ignore[attr-defined]
         # These are populated by _populate_recover_state() after launch.
         # Defaults are needed for _cleanup_cluster() which may be called
         # before a successful launch.
@@ -996,14 +994,15 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                       raise_on_failure: bool = True,
                       recovery: bool = False) -> Optional[float]:
         """Launch via sdk.launch (unified with FailoverStrategyExecutor)."""
-        job_submitted_at = await super()._launch(
-            max_retry, raise_on_failure, recovery)
+        job_submitted_at = await super()._launch(max_retry, raise_on_failure,
+                                                 recovery)
         if job_submitted_at is not None and self.cluster_name is not None:
             self._populate_recover_state()
         return job_submitted_at
 
     def _populate_recover_state(self) -> None:
         """Extract state from handle and task needed by recover()."""
+        # pylint: disable=import-outside-toplevel
         from sky.adaptors import kubernetes as k8s_adaptor
         from sky.provision.kubernetes import utils as kubernetes_utils
 
@@ -1023,8 +1022,9 @@ class DynamicNodeSetExecutor(StrategyExecutor):
                     self._context))
 
             # Persist infra info for dashboard/CLI display
-            state.set_job_infra(
-                self.job_id, cloud='Kubernetes', region=context_name)
+            state.set_job_infra(self.job_id,
+                                cloud='Kubernetes',
+                                region=context_name)
 
         # Extract task info for recover()
         from sky import task as task_lib
@@ -1036,8 +1036,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
         # Get image and GPU info from task resources
         resource = list(task.resources)[0]
-        spec = kubernetes_utils.build_pod_resource_spec(
-            self._context, resource)
+        spec = kubernetes_utils.build_pod_resource_spec(self._context, resource)
         self._image = spec.image
         self._num_gpus = spec.acc_count
         self._gpu_resource_key = spec.gpu_resource_key
@@ -1051,7 +1050,10 @@ class DynamicNodeSetExecutor(StrategyExecutor):
             if isinstance(task.workdir, dict):
                 self._workdir_config = {'git': task.workdir}
             else:
-                self._workdir_config = {'path': str(task.workdir)}
+                self._workdir_config = {
+                    'path':
+                        str(task.workdir)  # type: ignore[dict-item]
+                }
         if task.file_mounts:
             self._file_mounts = dict(task.file_mounts)
 
@@ -1061,6 +1063,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
         Raises:
             RuntimeError: If any pod replacement failed.
         """
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
 
         job_name = self._cluster_name_on_cloud or self.cluster_name
@@ -1103,6 +1106,7 @@ class DynamicNodeSetExecutor(StrategyExecutor):
 
     def _cleanup_cluster(self) -> None:
         """Delete all elastic job resources."""
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         job_name = self._cluster_name_on_cloud or self.cluster_name
         if job_name is None:

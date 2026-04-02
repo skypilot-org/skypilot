@@ -3374,6 +3374,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     except Exception as e:
                         logger.error(f'Failed to get cluster info for V1 K8s '
                                      f'managed job: {e}')
+                        # pylint: disable-next=import-outside-toplevel
                         import traceback as tb
                         logger.error(tb.format_exc())
                         raise
@@ -3415,6 +3416,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 except Exception as e:
                     logger.error(f'V1 post-provision failed at '
                                  f'update_cluster_ips: {e}')
+                    # pylint: disable-next=import-outside-toplevel
                     import traceback as tb
                     logger.error(tb.format_exc())
                     raise

@@ -291,6 +291,7 @@ class JobController:
         task_id: int,
     ) -> None:
         """Download pod logs via K8s API and save to local log file."""
+        # pylint: disable=import-outside-toplevel,redefined-outer-name
         from sky.adaptors import kubernetes as k8s_adaptor
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
@@ -305,9 +306,10 @@ class JobController:
                         f'kubeconfig defaults for log download.')
             context_name = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            context = (None
-                       if context_name == k8s_adaptor.in_cluster_context_name()
-                       else context_name)
+            context = (
+                None  # pylint: disable=redefined-outer-name
+                if context_name == k8s_adaptor.in_cluster_context_name() else
+                context_name)
             cloud_name = cluster_name
         else:
             cloud_name = handle.cluster_name_on_cloud
@@ -340,6 +342,7 @@ class JobController:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to download K8s logs for '
                            f'{cloud_name}: {e}')
+            # pylint: disable-next=import-outside-toplevel,reimported
             import traceback as tb
             logger.warning(tb.format_exc())
 
@@ -353,12 +356,13 @@ class JobController:
         if not managed_job_utils.is_v1_k8s_managed_job(handle):
             return None
 
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
 
         # Get namespace/context with fallback to kubeconfig defaults
         namespace = kubernetes_utils.get_kube_config_context_namespace()
-        context = kubernetes_utils.get_current_kube_config_context_name()
+        context = kubernetes_utils.get_current_kube_config_context_name()  # pylint: disable=redefined-outer-name
         try:
             config = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)
@@ -392,15 +396,17 @@ class JobController:
         if self._pool is None:
             # For V1 K8s managed jobs, directly delete K8s resources
             # since core.down() may not find the cluster handle.
-            _h = await asyncio.to_thread(
+            tmp_handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
-            if (_h is not None and managed_job_utils.is_v1_k8s_managed_job(_h)):
+            if (tmp_handle is not None and
+                    managed_job_utils.is_v1_k8s_managed_job(tmp_handle)):
                 await self._cleanup_k8s_managed_job(cluster_name)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 
     async def _cleanup_k8s_managed_job(self, cluster_name: str) -> None:
         """Directly clean up K8s managed job resources."""
+        # pylint: disable=import-outside-toplevel
         from sky.adaptors import kubernetes as k8s_adaptor
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
@@ -410,7 +416,7 @@ class JobController:
         if handle is not None:
             cloud_name = handle.cluster_name_on_cloud
             # Get context from launched resources region
-            context = handle.launched_resources.region
+            context = handle.launched_resources.region  # pylint: disable=redefined-outer-name
             if context == k8s_adaptor.in_cluster_context_name():
                 context = None
             namespace = kubernetes_utils.get_kube_config_context_namespace(
@@ -442,10 +448,11 @@ class JobController:
         if 'managed_job_config' not in provider_config:
             return None
 
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_context_from_config(provider_config)  # pylint: disable=redefined-outer-name
         cluster_name = handle.cluster_name_on_cloud
 
         try:
@@ -794,9 +801,10 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
-        _handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        is_k8s_v1 = (_handle is not None and
-                     managed_job_utils.is_v1_k8s_managed_job(_handle))
+        cur_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
+        is_k8s_v1 = (cur_handle is not None and
+                     managed_job_utils.is_v1_k8s_managed_job(cur_handle))
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -1213,6 +1221,7 @@ class JobController:
         Instead of querying skylet/gRPC, this monitors K8s pod statuses
         directly and replaces failed pods individually.
         """
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
 
         min_nodes = executor.min_nodes
@@ -1223,7 +1232,7 @@ class JobController:
         # Capture in local variables so mypy knows they are non-None.
         namespace = executor._namespace  # pylint: disable=protected-access
         assert namespace is not None
-        context = executor._context  # pylint: disable=protected-access
+        context = executor._context  # pylint: disable=protected-access,redefined-outer-name
 
         while True:
             await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -1338,7 +1347,7 @@ class JobController:
     @staticmethod
     def _get_k8s_namespace_for_task(task: 'sky.Task') -> str:
         """Get K8s namespace from a task's resources."""
-        # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel,redefined-outer-name
         from sky.provision.kubernetes import utils as k8s_utils
         resource = list(task.resources)[0]
         context = resource.region
@@ -1406,11 +1415,9 @@ class JobController:
                 t_name, self._job_id))
             # Use cluster_name_on_cloud (with user hash) so the
             # discovery server can match pods by label.
-            t_cluster_on_cloud = (
-                common_utils.make_cluster_name_on_cloud(
-                    t_cluster,
-                    max_length=sky_clouds.Kubernetes
-                    .max_cluster_name_length()))
+            t_cluster_on_cloud = (common_utils.make_cluster_name_on_cloud(
+                t_cluster,
+                max_length=sky_clouds.Kubernetes.max_cluster_name_length()))
             all_task_mappings.append(f'{t_name}:{t_cluster_on_cloud}')
         if all_task_mappings:
             task.envs['SKYPILOT_JOBGROUP_TASKS'] = ','.join(all_task_mappings)
@@ -1866,7 +1873,7 @@ class JobController:
             for async_task in list(monitor_async_tasks.values()):
                 try:
                     await async_task
-                except (asyncio.CancelledError, Exception):
+                except (asyncio.CancelledError, Exception):  # pylint: disable=broad-except
                     pass
 
         # Check results (include terminal tasks)
@@ -2250,15 +2257,17 @@ class ControllerManager:
         since the pods may not have a standard cluster handle.
         For standard jobs, looks up the cluster and downloads via SSH.
         """
+        # pylint: disable=import-outside-toplevel
         from sky.provision.kubernetes import managed_job as k8s_managed_job
-        _log_handle = global_user_state.get_handle_from_cluster_name(
+        log_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
-        if (_log_handle is not None and
-                managed_job_utils.is_v1_k8s_managed_job(_log_handle)):
+        if (log_handle is not None and
+                managed_job_utils.is_v1_k8s_managed_job(log_handle)):
             # V1: download directly from K8s API
             log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
                                    f'job-id-{job_id}')
             try:
+                # pylint: disable=import-outside-toplevel
                 from sky.provision.kubernetes import utils as k8s_utils
                 ns = k8s_utils.get_kube_config_context_namespace()
                 ctx = k8s_utils.get_current_kube_config_context_name()
@@ -2272,7 +2281,7 @@ class ControllerManager:
                 logger.info(f'Downloaded K8s managed job logs to '
                             f'{log_file}')
                 managed_job_state.set_local_log_file(job_id, task_id, log_file)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception:  # pylint: disable=broad-except
                 logger.info(f'No pods found for job {cluster_name}')
             return
 

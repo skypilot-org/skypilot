@@ -4423,6 +4423,7 @@ def build_pod_resource_spec(
     Returns:
         PodResourceSpec with all scheduling-related fields populated.
     """
+    # pylint: disable=import-outside-toplevel
     from sky.catalog import kubernetes_catalog
     from sky.clouds import kubernetes as kubernetes_cloud
 
@@ -4475,8 +4476,7 @@ def build_pod_resource_spec(
         try:
             label_key, _, _, _ = get_accelerator_label_key_values(
                 context, acc_type, acc_count)
-            if (label_key ==
-                    GKELabelFormatter.TPU_LABEL_KEY):
+            if label_key == GKELabelFormatter.TPU_LABEL_KEY:
                 tpu_requested = True
         except Exception:  # pylint: disable=broad-except
             pass
@@ -4506,16 +4506,14 @@ def build_pod_resource_spec(
     node_selector: Dict[str, str] = {}
     if acc_count > 0 and acc_type is not None:
         try:
-            label_key, label_values, _, _ = (
-                get_accelerator_label_key_values(
-                    context, acc_type, acc_count))
+            label_key, label_values, _, _ = (get_accelerator_label_key_values(
+                context, acc_type, acc_count))
             if label_key and label_values:
                 node_selector = {label_key: label_values[0]}
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Failed to get accelerator label for '
-                f'{acc_type}: {e}. Pods may not be scheduled '
-                f'on correct GPU nodes.')
+            logger.warning(f'Failed to get accelerator label for '
+                           f'{acc_type}: {e}. Pods may not be scheduled '
+                           f'on correct GPU nodes.')
 
     # --- Runtime class ---
     runtime_class_name: Optional[str] = None

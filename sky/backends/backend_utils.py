@@ -2323,6 +2323,7 @@ def _update_cluster_status(
     # V1 K8s managed jobs: skip Ray/SSH checks. If pods exist and are
     # Running, the cluster is UP. This prevents the background refresh
     # daemon from removing the cluster record.
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import managed_job as k8s_managed_job
     if (k8s_managed_job.is_managed_jobs_v1_enabled() and
             isinstance(handle.launched_resources.cloud, clouds.Kubernetes)):

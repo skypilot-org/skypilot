@@ -10,7 +10,6 @@ mock.patch('sky.skypilot_config.get_nested',
            side_effect=lambda key, default=None: True
            if key == ('jobs', 'use_v1') else default).start()
 
-
 _POD_SPEC = lambda image='ubuntu:22.04', extra_containers=None, resources=None: {
     'metadata': {
         'labels': {},
@@ -151,15 +150,16 @@ class TestBuildElasticJobManifests:
         manifests, _, _ = build_job_manifests(
             cluster_name='test',
             namespace='default',
-            pod_spec=_POD_SPEC(resources={
-                'requests': {
-                    'cpu': '4',
-                    'nvidia.com/gpu': '1',
-                },
-                'limits': {
-                    'nvidia.com/gpu': '1',
-                },
-            }),
+            pod_spec=_POD_SPEC(
+                resources={
+                    'requests': {
+                        'cpu': '4',
+                        'nvidia.com/gpu': '1',
+                    },
+                    'limits': {
+                        'nvidia.com/gpu': '1',
+                    },
+                }),
             num_nodes=1,
             min_nodes=1,
             setup_commands=None,
@@ -259,9 +259,9 @@ class TestElasticJobStatus:
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
         status, running, succeeded, failed = get_job_pod_status('test',
-                                                                    'default',
-                                                                    None,
-                                                                    min_nodes=2)
+                                                                'default',
+                                                                None,
+                                                                min_nodes=2)
         assert status == ManagedJobStatus.RUNNING
         assert running == 4
         assert succeeded == 0
@@ -278,9 +278,9 @@ class TestElasticJobStatus:
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
         status, running, succeeded, failed = get_job_pod_status('test',
-                                                                    'default',
-                                                                    None,
-                                                                    min_nodes=2)
+                                                                'default',
+                                                                None,
+                                                                min_nodes=2)
         assert status == ManagedJobStatus.SUCCEEDED
         assert succeeded == 4
 
@@ -295,9 +295,9 @@ class TestElasticJobStatus:
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
         status, running, succeeded, failed = get_job_pod_status('test',
-                                                                    'default',
-                                                                    None,
-                                                                    min_nodes=2)
+                                                                'default',
+                                                                None,
+                                                                min_nodes=2)
         assert status == ManagedJobStatus.SETTING_UP
         assert running == 1
 
@@ -315,9 +315,9 @@ class TestElasticJobStatus:
         mock_core_api.return_value.list_namespaced_pod.return_value = (
             pods_response)
         status, running, succeeded, failed = get_job_pod_status('test',
-                                                                    'default',
-                                                                    None,
-                                                                    min_nodes=1)
+                                                                'default',
+                                                                None,
+                                                                min_nodes=1)
         # Should NOT be SUCCEEDED because pod-2 is pending
         assert status != ManagedJobStatus.SUCCEEDED
 
