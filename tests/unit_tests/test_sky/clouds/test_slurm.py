@@ -143,7 +143,6 @@ class TestLookupGpuPartitionMap:
                                                    merge_dicts=True)
 
 
-
 class TestCheckInstanceFitsWithGpuPartitionMap:
     """Test check_instance_fits with gpu_partition_map configured."""
 
