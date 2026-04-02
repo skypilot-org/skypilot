@@ -315,7 +315,7 @@ class Slurm(clouds.Cloud):
             # Check if gpu_partition_map narrows the partition list for
             # this GPU type.
             gpu_partition_map = slurm_utils.get_gpu_partition_map(cluster)
-            if gpu_partition_map is not None and instance_type is not None:
+            if gpu_partition_map is not None:
                 try:
                     sit = slurm_utils.SlurmInstanceType.from_instance_type(
                         instance_type)
@@ -328,7 +328,16 @@ class Slurm(clouds.Cloud):
                                 p for p in mapped if p in available
                             ]
                             if not partitions_to_check:
-                                partitions_to_check = list(mapped)
+                                logger.warning(
+                                    f'{colorama.Fore.YELLOW}'
+                                    f'gpu_partition_map maps '
+                                    f'{sit.accelerator_type!r} to '
+                                    f'partition(s) {mapped}, but none '
+                                    f'exist on cluster {cluster!r}. '
+                                    f'Please double-check the partition '
+                                    f'names in gpu_partition_map.'
+                                    f'{colorama.Style.RESET_ALL}'
+                                )
                 except ValueError:
                     pass
 
@@ -475,8 +484,6 @@ class Slurm(clouds.Cloud):
                 logger.debug(
                     f'gpu_partition_map: {acc_type!r} -> partitions '
                     f'{mapped_partitions!r}. Using GRES without GPU type.')
-                if partition is None:
-                    partition = mapped_partitions[0]
                 acc_type = None  # GRES without GPU type
 
         # Resolve the canonical GPU name to the raw GRES type on the cluster.

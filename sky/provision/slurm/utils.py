@@ -626,11 +626,18 @@ def check_instance_fits(
                                                      acc_type)
 
         if mapped_partitions is not None:
-            # Count-only check: accept any node with enough GPUs,
-            # regardless of GRES type name.
+            # Count-only check: assume GRES does not have a GPU type.
             gpu_nodes = []
             for node_info in nodes:
-                _, node_acc_count = get_gpu_type_and_count(node_info.gres)
+                node_acc_type, node_acc_count = get_gpu_type_and_count(
+                    node_info.gres)
+                if node_acc_type is not None:
+                    logger.warning(
+                        f'gpu_partition_map is configured for '
+                        f'{acc_type!r}, but node {node_info.node!r} '
+                        f'has typed GRES {node_info.gres!r}. '
+                        f'gpu_partition_map may not be needed for '
+                        f'this cluster.')
                 if node_acc_count >= acc_count:
                     gpu_nodes.append(node_info)
             candidate_nodes = gpu_nodes
@@ -840,8 +847,9 @@ def lookup_gpu_partition_map(
     """
     if gpu_partition_map is None:
         return None
+    acc_type_lower = acc_type.lower()
     for map_gpu, map_partitions in gpu_partition_map.items():
-        if map_gpu.lower() == acc_type.lower():
+        if map_gpu.lower() == acc_type_lower:
             if isinstance(map_partitions, str):
                 return [map_partitions]
             return list(map_partitions)
