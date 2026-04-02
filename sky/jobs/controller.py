@@ -400,31 +400,26 @@ class JobController:
                 global_user_state.get_handle_from_cluster_name, cluster_name)
             if (tmp_handle is not None and
                     managed_job_utils.is_v1_k8s_managed_job(tmp_handle)):
-                await self._cleanup_k8s_managed_job(cluster_name)
+                await self._cleanup_k8s_managed_job(tmp_handle)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 
-    async def _cleanup_k8s_managed_job(self, cluster_name: str) -> None:
+    async def _cleanup_k8s_managed_job(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> None:
         """Directly clean up K8s managed job resources."""
         # pylint: disable=import-outside-toplevel
         from sky.adaptors import kubernetes as k8s_adaptor
         from sky.provision.kubernetes import managed_job as k8s_managed_job
         from sky.provision.kubernetes import utils as kubernetes_utils
 
-        handle = await asyncio.to_thread(
-            global_user_state.get_handle_from_cluster_name, cluster_name)
-        if handle is not None:
-            cloud_name = handle.cluster_name_on_cloud
-            # Get context from launched resources region
-            context = handle.launched_resources.region  # pylint: disable=redefined-outer-name
-            if context == k8s_adaptor.in_cluster_context_name():
-                context = None
-            namespace = kubernetes_utils.get_kube_config_context_namespace(
-                context)
-        else:
-            cloud_name = cluster_name
+        cloud_name = handle.cluster_name_on_cloud
+        # Get context from launched resources region
+        context = handle.launched_resources.region  # pylint: disable=redefined-outer-name
+        if context == k8s_adaptor.in_cluster_context_name():
             context = None
-            namespace = kubernetes_utils.get_kube_config_context_namespace()
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
         try:
             await asyncio.to_thread(k8s_managed_job.delete_managed_job,
