@@ -5585,73 +5585,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'running (IDs: {job_ids}). Cancel them first with: '
                         f'sky cancel {cluster_name} -a')
 
-        # Get cluster info and terminate excess workers.
+        # Terminate all worker nodes. Since we verified no jobs are
+        # running, all workers are idle. The subsequent bulk_provision
+        # will recreate only the workers needed for the new count.
         launched = handle.launched_resources
         assert launched is not None and launched.cloud is not None
         cloud_name = repr(launched.cloud)
         config_from_yaml = global_user_state.get_cluster_yaml_dict(
             handle.cluster_yaml)
         provider_config = config_from_yaml.get('provider')
-        cluster_info = provision_lib.get_cluster_info(
-            cloud_name,
-            launched.region,
-            handle.cluster_name_on_cloud,
-            provider_config=provider_config)
-        worker_instances = cluster_info.get_worker_instances()
-        if len(worker_instances) < to_remove:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot remove {to_remove} worker(s): cluster only has '
-                    f'{len(worker_instances)} worker(s).')
 
-        workers_to_remove = worker_instances[-to_remove:]
-        remove_ids = {inst.instance_id for inst in workers_to_remove}
-        logger.info(f'Removing {to_remove} worker(s): '
-                    f'{[w.instance_id for w in workers_to_remove]}')
-
-        # Stop Ray on workers being removed.
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, ssh_user=cluster_info.ssh_user)
-        runners = provision_lib.get_command_runners(cloud_name, cluster_info,
-                                                    **ssh_credentials)
-        all_workers = cluster_info.get_worker_instances()
-        worker_runner_pairs = list(zip(all_workers, runners[1:]))
-        runners_to_stop = [(runner, inst)
-                           for inst, runner in worker_runner_pairs
-                           if inst.instance_id in remove_ids]
-
-        def _stop_ray(args):
-            runner, inst = args
-            logger.debug(f'Stopping Ray on worker {inst.instance_id}')
-            runner.run(
-                'ray stop -f 2>/dev/null || '
-                '$(command -v ray || '
-                'echo /home/sky/skypilot-runtime/bin/ray) stop -f',
-                stream_logs=False,
-                source_bashrc=True)
-
-        if runners_to_stop:
-            subprocess_utils.run_in_parallel(_stop_ray, runners_to_stop)
-
-        # Terminate the specific worker instances (K8s only for now).
-        if cloud_name.lower() in ('kubernetes', 'ssh'):
-            # pylint: disable=import-outside-toplevel
-            from sky.provision.kubernetes import instance as k8s_instance
-            assert provider_config is not None
-            namespace = kubernetes_utils.get_namespace_from_config(
-                provider_config)
-            context = kubernetes_utils.get_context_from_config(provider_config)
-            for inst in workers_to_remove:
-                logger.info(f'Terminating worker pod {inst.instance_id}')
-                # pylint: disable=protected-access
-                k8s_instance._terminate_node(namespace,
-                                             context,
-                                             inst.instance_id,
-                                             is_head=False)
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    'Scale-down is currently only supported on Kubernetes.')
+        logger.info(f'Terminating {to_remove} excess worker(s).')
+        provision_lib.terminate_instances(cloud_name,
+                                          handle.cluster_name_on_cloud,
+                                          provider_config,
+                                          worker_only=True)
 
     @timeline.event
     def _check_existing_cluster(
