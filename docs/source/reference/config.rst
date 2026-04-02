@@ -2097,7 +2097,7 @@ Pricing can also be set per-cluster and per-partition using
 Mapping of GPU types to Slurm partition names (optional).
 
 Some Slurm clusters configure
-`GRES without a GPU type <https://slurm.schedmd.com/gres.html>`_
+`GRES<https://slurm.schedmd.com/gres.html>`_ without a GPU type
 (e.g., ``--gres=gpu:8`` instead of ``--gres=gpu:h100:8``), and rely on
 partitions to select the correct node type. By default, SkyPilot generates
 typed GRES directives (``--gres=gpu:<type>:<count>``), which will fail on
@@ -2112,7 +2112,7 @@ types. When a GPU type is found in the map, SkyPilot will:
 Each key is a GPU type (case-insensitive) and each value is either a single
 partition name or a list of partition names.
 
-Default: not set (SkyPilot uses typed GRES).
+Default: not set.
 
 Example:
 
