@@ -130,58 +130,29 @@ class TestLookupGpuPartitionMap:
             # Empty map
             ({}, 'H100', None),
         ])
-    def test_lookup_gpu_partition_map(self, gpu_partition_map, acc_type,
-                                      expected):
-        result = slurm_utils.lookup_gpu_partition_map(gpu_partition_map,
-                                                      acc_type)
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config')
+    def test_lookup_gpu_partition_map(self, mock_get_effective,
+                                      gpu_partition_map, acc_type, expected):
+        mock_get_effective.return_value = gpu_partition_map
+        result = slurm_utils.lookup_gpu_partition_map('my-cluster', acc_type)
         assert result == expected
-
-
-class TestGetGpuPartitionMap:
-    """Test slurm_utils.get_gpu_partition_map() two-level merge."""
-
-    @patch(
-        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
-    def test_global_only(self, mock_get_effective):
-        """Global gpu_partition_map is returned when no per-cluster config."""
-        mock_get_effective.return_value = {'H100': 'h100'}
-        result = slurm_utils.get_gpu_partition_map('my-cluster')
-        assert result == {'H100': 'h100'}
         mock_get_effective.assert_called_once_with(cloud='slurm',
                                                    keys=('gpu_partition_map',),
                                                    region='my-cluster',
                                                    merge_dicts=True)
 
-    @patch(
-        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
-    def test_per_cluster_only(self, mock_get_effective):
-        """Per-cluster gpu_partition_map is returned when no global config."""
-        mock_get_effective.return_value = {'A100': 'a100'}
-        result = slurm_utils.get_gpu_partition_map('my-cluster')
-        assert result == {'A100': 'a100'}
-
-    @patch(
-        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config')
     def test_per_cluster_overrides_global(self, mock_get_effective):
-        """Per-cluster values override global for same GPU type.
-
-        The merge is handled by get_effective_region_config(merge_dicts=True),
-        so we test that the merged result is returned as-is.
-        """
+        """The merge is handled by get_effective_region_config(merge_dicts=True),
+        so we test that the merged result is returned as-is."""
         mock_get_effective.return_value = {
             'H100': 'h100-local',
             'A100': 'a100-global'
         }
-        result = slurm_utils.get_gpu_partition_map('my-cluster')
-        assert result == {'H100': 'h100-local', 'A100': 'a100-global'}
-
-    @patch(
-        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
-    def test_no_config(self, mock_get_effective):
-        """Returns None when neither global nor per-cluster is set."""
-        mock_get_effective.return_value = None
-        result = slurm_utils.get_gpu_partition_map('my-cluster')
-        assert result is None
+        result = slurm_utils.lookup_gpu_partition_map('my-cluster', 'H100')
+        assert result == ['h100-local']
 
 
 class TestCheckInstanceFitsWithGpuPartitionMap:

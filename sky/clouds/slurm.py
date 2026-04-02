@@ -314,45 +314,41 @@ class Slurm(clouds.Cloud):
 
             # Check if gpu_partition_map narrows the partition list for
             # this GPU type.
-            gpu_partition_map = slurm_utils.get_gpu_partition_map(cluster)
-            if gpu_partition_map is not None:
-                try:
-                    sit = slurm_utils.SlurmInstanceType.from_instance_type(
-                        instance_type)
-                    if sit.accelerator_type is not None:
-                        mapped = slurm_utils.lookup_gpu_partition_map(
-                            gpu_partition_map, sit.accelerator_type)
-                        if mapped is not None:
-                            available = set(partitions_to_check)
-                            partitions_to_check = [
-                                p for p in mapped if p in available
-                            ]
-                            if not partitions_to_check:
-                                if zone is not None:
-                                    logger.warning(
-                                        f'{colorama.Fore.YELLOW}'
-                                        f'gpu_partition_map maps '
-                                        f'{sit.accelerator_type!r} to '
-                                        f'partition(s) {mapped}, but '
-                                        f'the requested partition '
-                                        f'{zone!r} is not among them. '
-                                        f'Either add {zone!r} to '
-                                        f'gpu_partition_map or omit '
-                                        f'the partition from --infra.'
-                                        f'{colorama.Style.RESET_ALL}')
-                                else:
-                                    logger.warning(
-                                        f'{colorama.Fore.YELLOW}'
-                                        f'gpu_partition_map maps '
-                                        f'{sit.accelerator_type!r} to '
-                                        f'partition(s) {mapped}, but '
-                                        f'none exist on cluster '
-                                        f'{cluster!r}. Please '
-                                        f'double-check the partition '
-                                        f'names in gpu_partition_map.'
-                                        f'{colorama.Style.RESET_ALL}')
-                except ValueError:
-                    pass
+            try:
+                sit = slurm_utils.SlurmInstanceType.from_instance_type(
+                    instance_type)
+                if sit.accelerator_type is not None:
+                    mapped = slurm_utils.lookup_gpu_partition_map(
+                        cluster, sit.accelerator_type)
+                    if mapped is not None:
+                        available = set(partitions_to_check)
+                        partitions_to_check = [
+                            p for p in mapped if p in available
+                        ]
+                        if not partitions_to_check:
+                            if zone is not None:
+                                logger.warning(f'{colorama.Fore.YELLOW}'
+                                               f'gpu_partition_map maps '
+                                               f'{sit.accelerator_type!r} to '
+                                               f'partition(s) {mapped}, but '
+                                               f'the requested partition '
+                                               f'{zone!r} is not among them. '
+                                               f'Either add {zone!r} to '
+                                               f'gpu_partition_map or omit '
+                                               f'the partition from --infra.'
+                                               f'{colorama.Style.RESET_ALL}')
+                            else:
+                                logger.warning(f'{colorama.Fore.YELLOW}'
+                                               f'gpu_partition_map maps '
+                                               f'{sit.accelerator_type!r} to '
+                                               f'partition(s) {mapped}, but '
+                                               f'none exist on cluster '
+                                               f'{cluster!r}. Please '
+                                               f'double-check the partition '
+                                               f'names in gpu_partition_map.'
+                                               f'{colorama.Style.RESET_ALL}')
+            except ValueError:
+                pass
 
             # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
@@ -489,10 +485,9 @@ class Slurm(clouds.Cloud):
         # Check gpu_partition_map: if the requested GPU type is mapped,
         # use the mapped partition and generate GRES without GPU type
         # (i.e., #SBATCH --gres=gpu:N instead of gpu:type:N).
-        gpu_partition_map = slurm_utils.get_gpu_partition_map(cluster)
-        if gpu_partition_map is not None and acc_type is not None:
+        if acc_type is not None:
             mapped_partitions = slurm_utils.lookup_gpu_partition_map(
-                gpu_partition_map, acc_type)
+                cluster, acc_type)
             if mapped_partitions is not None:
                 logger.debug(
                     f'gpu_partition_map: {acc_type!r} -> partitions '

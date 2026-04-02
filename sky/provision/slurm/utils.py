@@ -621,9 +621,7 @@ def check_instance_fits(
 
         # Check if gpu_partition_map redirects this GPU type to use
         # GRES without GPU type (count-only check).
-        gpu_partition_map = get_gpu_partition_map(cluster)
-        mapped_partitions = lookup_gpu_partition_map(gpu_partition_map,
-                                                     acc_type)
+        mapped_partitions = lookup_gpu_partition_map(cluster, acc_type)
 
         if mapped_partitions is not None:
             # Count-only check: assume GRES does not have a GPU type.
@@ -815,30 +813,25 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
     return raw_name.upper()
 
 
-def get_gpu_partition_map(
-        cluster: str) -> Optional[Dict[str, Union[str, List[str]]]]:
-    """Get the gpu_partition_map for a cluster with two-level merge.
+def lookup_gpu_partition_map(
+    cluster: str,
+    acc_type: str,
+) -> Optional[List[str]]:
+    """Look up partitions for a GPU type from gpu_partition_map config.
 
-    Reads from global (slurm.gpu_partition_map) and per-cluster
-    (slurm.cluster_configs.<cluster>.gpu_partition_map), with per-cluster
-    values overriding global ones.
+    Reads the gpu_partition_map from global and per-cluster config (with
+    per-cluster values overriding global ones), then looks up the GPU type
+    (case-insensitive).
+
+    Returns a list of partition names, or None if the map is not configured
+    or the GPU type is not found. String values are normalized to
+    single-element lists.
     """
-    return skypilot_config.get_effective_region_config(
+    gpu_partition_map = skypilot_config.get_effective_region_config(
         cloud='slurm',
         keys=('gpu_partition_map',),
         region=cluster,
         merge_dicts=True)
-
-
-def lookup_gpu_partition_map(
-    gpu_partition_map: Optional[Dict[str, Union[str, List[str]]]],
-    acc_type: str,
-) -> Optional[List[str]]:
-    """Look up a GPU type in gpu_partition_map (case-insensitive).
-
-    Returns a list of partition names, or None if not found in the map.
-    String values are normalized to single-element lists.
-    """
     if gpu_partition_map is None:
         return None
     acc_type_lower = acc_type.lower()
