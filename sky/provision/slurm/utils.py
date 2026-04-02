@@ -823,16 +823,11 @@ def get_gpu_partition_map(
     (slurm.cluster_configs.<cluster>.gpu_partition_map), with per-cluster
     values overriding global ones.
     """
-    gpu_partition_map: Dict[str, Union[str, List[str]]] = {}
-    for config_keys in [
-        ('slurm', 'gpu_partition_map'),
-        ('slurm', 'cluster_configs', cluster, 'gpu_partition_map'),
-    ]:
-        level_config = skypilot_config.get_nested(config_keys,
-                                                  default_value=None)
-        if level_config is not None:
-            gpu_partition_map.update(level_config)
-    return gpu_partition_map if gpu_partition_map else None
+    return skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        keys=('gpu_partition_map',),
+        region=cluster,
+        merge_dicts=True)
 
 
 def lookup_gpu_partition_map(

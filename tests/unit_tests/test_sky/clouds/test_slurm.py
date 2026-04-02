@@ -140,53 +140,46 @@ class TestLookupGpuPartitionMap:
 class TestGetGpuPartitionMap:
     """Test slurm_utils.get_gpu_partition_map() two-level merge."""
 
-    @patch('sky.provision.slurm.utils.skypilot_config.get_nested')
-    def test_global_only(self, mock_get_nested):
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    def test_global_only(self, mock_get_effective):
         """Global gpu_partition_map is returned when no per-cluster config."""
-
-        def side_effect(keys, default_value=None):
-            if keys == ('slurm', 'gpu_partition_map'):
-                return {'H100': 'h100'}
-            return default_value
-
-        mock_get_nested.side_effect = side_effect
+        mock_get_effective.return_value = {'H100': 'h100'}
         result = slurm_utils.get_gpu_partition_map('my-cluster')
         assert result == {'H100': 'h100'}
+        mock_get_effective.assert_called_once_with(cloud='slurm',
+                                                   keys=('gpu_partition_map',),
+                                                   region='my-cluster',
+                                                   merge_dicts=True)
 
-    @patch('sky.provision.slurm.utils.skypilot_config.get_nested')
-    def test_per_cluster_only(self, mock_get_nested):
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    def test_per_cluster_only(self, mock_get_effective):
         """Per-cluster gpu_partition_map is returned when no global config."""
-
-        def side_effect(keys, default_value=None):
-            if keys == ('slurm', 'cluster_configs', 'my-cluster',
-                        'gpu_partition_map'):
-                return {'A100': 'a100'}
-            return default_value
-
-        mock_get_nested.side_effect = side_effect
+        mock_get_effective.return_value = {'A100': 'a100'}
         result = slurm_utils.get_gpu_partition_map('my-cluster')
         assert result == {'A100': 'a100'}
 
-    @patch('sky.provision.slurm.utils.skypilot_config.get_nested')
-    def test_per_cluster_overrides_global(self, mock_get_nested):
-        """Per-cluster values override global for same GPU type."""
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    def test_per_cluster_overrides_global(self, mock_get_effective):
+        """Per-cluster values override global for same GPU type.
 
-        def side_effect(keys, default_value=None):
-            if keys == ('slurm', 'gpu_partition_map'):
-                return {'H100': 'h100-global', 'A100': 'a100-global'}
-            if keys == ('slurm', 'cluster_configs', 'my-cluster',
-                        'gpu_partition_map'):
-                return {'H100': 'h100-local'}
-            return default_value
-
-        mock_get_nested.side_effect = side_effect
+        The merge is handled by get_effective_region_config(merge_dicts=True),
+        so we test that the merged result is returned as-is.
+        """
+        mock_get_effective.return_value = {
+            'H100': 'h100-local',
+            'A100': 'a100-global'
+        }
         result = slurm_utils.get_gpu_partition_map('my-cluster')
         assert result == {'H100': 'h100-local', 'A100': 'a100-global'}
 
-    @patch('sky.provision.slurm.utils.skypilot_config.get_nested')
-    def test_no_config(self, mock_get_nested):
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    def test_no_config(self, mock_get_effective):
         """Returns None when neither global nor per-cluster is set."""
-        mock_get_nested.return_value = None
+        mock_get_effective.return_value = None
         result = slurm_utils.get_gpu_partition_map('my-cluster')
         assert result is None
 
@@ -220,18 +213,17 @@ class TestCheckInstanceFitsWithGpuPartitionMap:
                 'H100': 'h100'
             }, False, 'No GPU nodes matching'),
         ])
-    @patch('sky.provision.slurm.utils.skypilot_config.get_nested')
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
     @patch('sky.provision.slurm.utils.kv_cache.get_cache_entry',
            return_value=None)
     @patch('sky.provision.slurm.utils.get_cluster_default_partition')
     @patch('sky.provision.slurm.utils.slurm.SlurmClient')
     @patch('sky.provision.slurm.utils.SSHConfig.from_path')
-    def test_check_instance_fits_with_map(self, mock_ssh_config,
-                                          mock_slurm_client,
-                                          mock_default_partition, mock_kv_cache,
-                                          mock_get_nested, nodes, instance_type,
-                                          partition, gpu_partition_map,
-                                          expected_fits, reason_contains):
+    def test_check_instance_fits_with_map(
+            self, mock_ssh_config, mock_slurm_client, mock_default_partition,
+            mock_kv_cache, mock_get_effective, nodes, instance_type, partition,
+            gpu_partition_map, expected_fits, reason_contains):
         """Test check_instance_fits with gpu_partition_map configured."""
         mock_default_partition.return_value = 'default'
         mock_ssh_config_obj = mock.MagicMock()
@@ -247,14 +239,7 @@ class TestCheckInstanceFitsWithGpuPartitionMap:
         mock_slurm_client_instance.info_nodes.return_value = nodes
         mock_slurm_client.return_value = mock_slurm_client_instance
 
-        # Mock get_nested to return gpu_partition_map for the right key
-        def get_nested_side_effect(keys, default_value=None):
-            if keys == ('slurm', 'cluster_configs', 'test-cluster',
-                        'gpu_partition_map'):
-                return gpu_partition_map
-            return default_value
-
-        mock_get_nested.side_effect = get_nested_side_effect
+        mock_get_effective.return_value = gpu_partition_map
 
         fits, reason = slurm_utils.check_instance_fits(
             cluster='test-cluster',
@@ -899,10 +884,10 @@ class TestSlurmProvisionTimeout:
         """Test provision_timeout matches expected value."""
         deploy_vars, mock_config = self._make_deploy_vars(zone, config_return)
         assert deploy_vars['provision_timeout'] == expected_timeout
-        mock_config.assert_called_once_with(cloud='slurm',
-                                            region='test-cluster',
-                                            keys=('provision_timeout',),
-                                            default_value=None)
+        mock_config.assert_any_call(cloud='slurm',
+                                    region='test-cluster',
+                                    keys=('provision_timeout',),
+                                    default_value=None)
 
 
 class TestProvisionTimeoutPassthrough:
