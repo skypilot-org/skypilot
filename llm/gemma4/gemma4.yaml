@@ -1,0 +1,31 @@
+envs:
+  MODEL_NAME: google/gemma-4-26B-A4B-it
+  MAX_MODEL_LEN: 131072
+
+resources:
+  accelerators: {L4:4, A100:1, A100-80GB:1, H100:1}
+  ports: 8081
+  disk_tier: best
+
+setup: |
+  uv pip install vllm
+
+run: |
+  echo 'Starting vllm api server...'
+
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len $MAX_MODEL_LEN
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
