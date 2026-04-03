@@ -1164,8 +1164,9 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     is_flag=True,
     default=False,
     required=False,
-    help=('Resize an existing cluster to --num-nodes without disrupting '
-          'existing nodes. Only scaling up (adding workers) is supported. '
+    help=('Resize an existing cluster to --num-nodes. Supports both '
+          'scaling up (adding workers) and scaling down (removing workers). '
+          'Scale-down requires no running jobs. '
           'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
@@ -1222,9 +1223,9 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
 
-    With ``--resize``, scale an existing cluster to ``--num-nodes`` without
-    disrupting existing nodes.  Only scaling up (adding workers) is currently
-    supported.
+    With ``--resize``, scale an existing cluster up or down to ``--num-nodes``.
+    Scale-up adds new workers while preserving existing nodes. Scale-down
+    requires no running jobs and re-provisions workers to the new count.
 
     Examples:
 

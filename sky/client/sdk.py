@@ -628,6 +628,10 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 

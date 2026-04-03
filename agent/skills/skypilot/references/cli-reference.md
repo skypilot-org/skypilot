@@ -50,7 +50,7 @@ Launch a cluster or task.
 - `--no-setup` — Skip setup phase when (re-)launching cluster.
 - `--clone-disk-from`, `--clone` — [Experimental] Clone disk from an existing cluster to launch a new one. This is useful when the new cluster needs to have the same data on the boot disk as an existing cluster.
 - `--fast` — [Experimental] If the cluster is already up and available, skip provisioning and setup steps.
-- `--resize` — Resize an existing cluster to --num-nodes without disrupting existing nodes. Only scaling up (adding workers) is supported. Requires -c to specify an existing cluster.
+- `--resize` — Resize an existing cluster to --num-nodes. Supports both scaling up (adding workers) and scaling down (removing workers). Scale-down requires no running jobs. Requires -c to specify an existing cluster.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
 
