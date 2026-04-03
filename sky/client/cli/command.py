@@ -920,6 +920,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored '
                     'for JobGroup YAML.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
 
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
@@ -934,6 +937,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
