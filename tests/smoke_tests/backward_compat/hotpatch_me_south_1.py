@@ -156,15 +156,9 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
         return False
 
     # Find the check_credentials pop line and inject the new kwargs handling
-    # after it. The old code looks like:
-    #     check_credentials = kwargs.pop('check_credentials', True)
-    #     profile = get_workspace_profile()
-    old_pattern = (
-        "    check_credentials = kwargs.pop('check_credentials', True)\n"
-        "\n"
-        "    profile = get_workspace_profile()")
-    new_code = (
-        "    check_credentials = kwargs.pop('check_credentials', True)\n"
+    # after it. The code may have 0 or 1 blank lines between the two lines
+    # depending on the version (v0.12.0 has a blank line, PyPI release doesn't).
+    new_kwargs_code = (
         "    connect_timeout = kwargs.pop('connect_timeout', None)\n"
         "    read_timeout = kwargs.pop('read_timeout', None)\n"
         "    total_max_attempts = kwargs.pop('total_max_attempts', None)\n"
@@ -178,16 +172,27 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
         "        config_kwargs['retries'] = "
         "{'total_max_attempts': total_max_attempts}\n"
         "    if config_kwargs:\n"
-        "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n"
-        "\n"
-        "    profile = get_workspace_profile()")
+        "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n")
 
-    if old_pattern not in src:
+    # Try with blank line first (v0.12.0), then without (PyPI release)
+    for sep in ['\n\n', '\n']:
+        old_pattern = (
+            "    check_credentials = kwargs.pop('check_credentials', True)"
+            f"{sep}"
+            "    profile = get_workspace_profile()")
+        if old_pattern in src:
+            new_code = (
+                "    check_credentials = kwargs.pop('check_credentials', "
+                "True)\n"
+                f"{new_kwargs_code}"
+                "\n"
+                "    profile = get_workspace_profile()")
+            src = src.replace(old_pattern, new_code, 1)
+            break
+    else:
         print(f'[hotpatch] WARNING: Could not find check_credentials pattern '
               f'in {aws_path}. The old version structure may differ.')
         return False
-
-    src = src.replace(old_pattern, new_code, 1)
     aws_path.write_text(src)
     print(f'[hotpatch] Patched {aws_path} with botocore.Config timeout support')
     return True
