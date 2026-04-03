@@ -823,7 +823,13 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
-_QUEUE_NAME_KEYS = [('kueue', 'local_queue_name')]
+_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('kueue', 'local_queue_name')]
+
+
+def register_queue_name_key(key: Tuple[str, ...]) -> None:
+    """Register a new queue name key to be removed from the config."""
+    if key not in _QUEUE_NAME_KEYS:
+        _QUEUE_NAME_KEYS.append(key)
 
 
 @contextlib.contextmanager

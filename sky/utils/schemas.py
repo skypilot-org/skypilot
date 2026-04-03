@@ -13,10 +13,10 @@ from sky.utils import kubernetes_enums
 
 # Registry for plugin-provided job_recovery schema properties.
 # Plugins call register_job_recovery_property() to add strategy-specific
-# config fields. On the server (is_on_api_server=True), plugins have
-# registered their properties so additionalProperties is False. On
-# the client (is_on_api_server=False), additionalProperties is True
-# to let plugin config pass through for server-side validation.
+# config fields. On the server, once plugins have loaded, their properties
+# are registered so additionalProperties is False. On the client (or
+# before plugins load), additionalProperties is True to let plugin
+# config pass through for server-side validation.
 _extra_job_recovery_properties: Dict[str, Any] = {}
 
 
@@ -61,6 +61,11 @@ def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
     kubernetes-specific configuration fields. The property is merged into
     the schema's properties dict, so it passes JSON schema validation
     even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
     """
     _extra_kubernetes_properties[name] = schema
 
