@@ -173,7 +173,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 if request.url.query:
                     redirect_path += f'?{request.url.query}'
                 rd = urllib.parse.quote(redirect_path)
-                signin_url = (f'{request.base_url}oauth2/start?'
+                signin_url = (f'/oauth2/start?'
                               f'rd={rd}')
                 return fastapi.responses.RedirectResponse(url=signin_url)
             else:
