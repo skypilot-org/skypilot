@@ -362,12 +362,13 @@ def get_effective_workspace_region_config(
                                        override_configs)
 
 
-def get_effective_region_config(
-        cloud: str,
-        keys: Tuple[str, ...],
-        region: Optional[str] = None,
-        default_value: Optional[Any] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+def get_effective_region_config(cloud: str,
+                                keys: Tuple[str, ...],
+                                region: Optional[str] = None,
+                                default_value: Optional[Any] = None,
+                                override_configs: Optional[Dict[str,
+                                                                Any]] = None,
+                                merge_dicts: bool = False) -> Any:
     """Returns the nested key value by reading from config
     Order to get the property_name value:
     1. if region is specified,
@@ -377,9 +378,8 @@ def get_effective_region_config(
     3. if not found at cloud level,
        return either default_value if specified or None
 
-    Note: This function currently only supports getting region-specific
-    config from "kubernetes" cloud. For other clouds, this function behaves
-    identically to get_nested().
+    If merge_dicts is True and both levels return dicts, the region-level
+    dict is shallow-merged into the cloud-level dict (region keys override).
     """
     return config_utils.get_cloud_config_value_from_dict(
         dict_config=_get_loaded_config(),
@@ -387,7 +387,8 @@ def get_effective_region_config(
         keys=keys,
         region=region,
         default_value=default_value,
-        override_configs=override_configs)
+        override_configs=override_configs,
+        merge_dicts=merge_dicts)
 
 
 def get_workspace_cloud(cloud: str,

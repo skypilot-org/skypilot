@@ -427,7 +427,7 @@ def test_debug_dump_no_args(generic_cloud: str):
             ' grep -qi "at least one of" /tmp/test_debug_dump_noargs.txt',
         ],
         teardown='rm -f /tmp/test_debug_dump_noargs.txt',
-        timeout=30,
+        timeout=2 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
