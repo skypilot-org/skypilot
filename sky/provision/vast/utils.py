@@ -73,6 +73,10 @@ def launch(name: str,
       - template_hash/template_hash_id: Use a template
       - args: Custom docker command arguments as list of strings
       - user: Run as specific user
+      - query: Custom query string or list of query components when searching
+          for an instance, e.g. 'cuda_vers>=13.0'. See
+          https://docs.vast.ai/cli/commands#search-offers for more details.
+      - order: Order of search results, defaults to 'dlperf_usd-'.
 
     Notes:
       *  `georegion`: This is a feature flag to provide an additional
@@ -107,6 +111,8 @@ def launch(name: str,
          catalog/vast_catalog.py for the current construction
          of the type.
     """
+    create_instance_kwargs = create_instance_kwargs or {}
+
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
@@ -123,9 +129,17 @@ def launch(name: str,
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
+
+    user_query = create_instance_kwargs.pop('query', None)
+    if isinstance(user_query, str):
+        query.append(user_query)
+    elif isinstance(user_query, list):
+        query.extend(user_query)
+
     query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query_str)
+    order = create_instance_kwargs.pop('order', 'dlperf_usd-')
+    instance_list = vast.vast().search_offers(query=query_str, order=order)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
@@ -135,7 +149,7 @@ def launch(name: str,
     instance_touse = instance_list[0]
 
     # Start with user-provided kwargs as the base
-    launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
+    launch_params: Dict[str, Any] = dict(create_instance_kwargs)
     # Remove None values to avoid overriding defaults
     launch_params = {k: v for k, v in launch_params.items() if v is not None}
 
