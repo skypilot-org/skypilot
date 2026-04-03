@@ -37,25 +37,32 @@ def _patch_exceptions(exc_path: pathlib.Path) -> bool:
         return False
 
     # Add enum value after AZ_PERMISSION_DENIED
-    src = src.replace(
-        "AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'",
-        "AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'\n"
-        "        ENDPOINT_CONNECTION_ERROR = 'ENDPOINT_CONNECTION_ERROR'",
+    src, n1 = re.subn(
+        r"(AZ_PERMISSION_DENIED\s*=\s*['\"]AZ_PERMISSION_DENIED['\"])",
+        r"\1\n"
+        r"        ENDPOINT_CONNECTION_ERROR = 'ENDPOINT_CONNECTION_ERROR'",
+        src,
     )
 
     # Add message handler before the else:raise ValueError fallback
-    src = src.replace(
-        "            else:\n"
-        "                raise ValueError(f'Unknown reason {self}')",
-        "            elif self == self.ENDPOINT_CONNECTION_ERROR:\n"
-        "                return ('Failed to connect to the AWS EC2 endpoint. '\n"
-        "                        'This may be due to network issues or the "
-        "region being '\n"
-        "                        'unreachable from the current network "
-        "environment.')\n"
-        "            else:\n"
-        "                raise ValueError(f'Unknown reason {self}')",
+    src, n2 = re.subn(
+        r"(            else:\n"
+        r"                raise ValueError\(f'Unknown reason \{self\}'\))",
+        r"            elif self == self.ENDPOINT_CONNECTION_ERROR:\n"
+        r"                return ('Failed to connect to the AWS EC2 endpoint. '\n"
+        r"                        'This may be due to network issues or the "
+        r"region being '\n"
+        r"                        'unreachable from the current network "
+        r"environment.')\n"
+        r"\1",
+        src,
     )
+
+    if n1 == 0 or n2 == 0:
+        print(f'[hotpatch] WARNING: Could not fully patch {exc_path} '
+              f'(enum: {n1}, message: {n2} replacements). '
+              'The old version structure may differ.')
+        return False
 
     exc_path.write_text(src)
     print(f'[hotpatch] Patched {exc_path} with ENDPOINT_CONNECTION_ERROR')
@@ -74,12 +81,9 @@ def _patch_fetch_aws(fetch_aws_path: pathlib.Path) -> bool:
         return False
 
     # Patch 1: Add timeouts to the EC2 client constructor.
-    # Old code:  client = aws.client('ec2', region_name=region)
-    # New code:  client = aws.client('ec2', region_name=region,
-    #                                 connect_timeout=10, read_timeout=10,
-    #                                 total_max_attempts=3)
+    # Use flexible regex to handle quote/whitespace variations across versions.
     src, n = re.subn(
-        r"client = aws\.client\('ec2', region_name=region\)",
+        r"client\s*=\s*aws\.client\(\s*['\"]ec2['\"]\s*,\s*region_name\s*=\s*region\s*\)",
         "client = aws.client('ec2',\n"
         "                    region_name=region,\n"
         "                    connect_timeout=10,\n"
@@ -100,9 +104,12 @@ def _patch_fetch_aws(fetch_aws_path: pathlib.Path) -> bool:
     #     for resp in response['AvailabilityZones']:
     #
     # We insert the new except block between "raise" and "for resp".
-    pattern = re.compile(r"(        else:\n"
-                         r"            raise\n)"
-                         r"(    for resp in response\['AvailabilityZones'\]:)")
+    # Use flexible regex to handle optional blank lines and quote variations.
+    pattern = re.compile(
+        r"(        else:\n"
+        r"\s+raise\n)"
+        r"\s*"
+        r"(    for resp in response\[['\"]AvailabilityZones['\"]\]:)",)
     replacement = (
         r"\1"
         r"    except (aws.botocore_exceptions().ConnectionError,\n"
