@@ -1897,7 +1897,7 @@ def is_batch_job(job_id: int) -> bool:
     with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(job_info_table.c.is_batch).where(
-                job_info_table.c.job_id == job_id))
+                job_info_table.c.spot_job_id == job_id))
         row = result.one_or_none()
         return row is not None and bool(row[0])
 
