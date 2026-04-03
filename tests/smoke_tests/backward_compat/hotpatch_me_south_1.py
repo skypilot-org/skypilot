@@ -175,19 +175,35 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
         "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n"
     )
 
-    # Try with blank line first (v0.12.0), then without (PyPI release)
+    # Match the client() function specifically, not resource().
+    # Both have check_credentials + profile, but client() is followed by
+    # .client(service_name, **kwargs) while resource() has .resource(...).
+    # Use the return statement to distinguish: client() returns via
+    # _create_aws_object(lambda: session(...).client(...), 'client')
     for sep in ['\n\n', '\n']:
         old_pattern = (
             "    check_credentials = kwargs.pop('check_credentials', True)"
             f"{sep}"
-            "    profile = get_workspace_profile()")
+            "    profile = get_workspace_profile()\n"
+            "\n"
+            "    # Need to use the client retrieved from the per-thread "
+            "session to avoid\n"
+            "    # thread-safety issues (Directly creating the client with "
+            "boto3.client() is\n"
+            "    # not thread-safe).")
         if old_pattern in src:
             new_code = (
                 "    check_credentials = kwargs.pop('check_credentials', "
                 "True)\n"
                 f"{new_kwargs_code}"
                 "\n"
-                "    profile = get_workspace_profile()")
+                "    profile = get_workspace_profile()\n"
+                "\n"
+                "    # Need to use the client retrieved from the per-thread "
+                "session to avoid\n"
+                "    # thread-safety issues (Directly creating the client with "
+                "boto3.client() is\n"
+                "    # not thread-safe).")
             src = src.replace(old_pattern, new_code, 1)
             break
     else:
