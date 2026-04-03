@@ -1251,7 +1251,7 @@ class JobLibCodeGen:
                        f'execution={execution!r}')
         if is_batch:
             set_job_info_code = (
-                '\n  if int(constants.SKYLET_VERSION) < 35:'
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
                 '\n    raise RuntimeError('
                 '"The jobs controller does not support batch jobs. '
                 'Please update it with: sky jobs controller up --yes")'
@@ -1260,7 +1260,7 @@ class JobLibCodeGen:
                 f'is_batch={is_batch!r})')
         else:
             set_job_info_code = (
-                '\n  if int(constants.SKYLET_VERSION) < 35:'
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
                 '\n    job_id = managed_job_state.set_job_info_without_job_id('
                 f'{base_kwargs})'
                 '\n  else:'
