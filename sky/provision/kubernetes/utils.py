@@ -64,10 +64,11 @@ else:
 # to root:root.
 # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # pylint: disable=line-too-long
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
+DEFAULT_HOME_DIRECTORY = '/home/sky'
 # Path where the persistent volume for HA controller is mounted.
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
-HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = DEFAULT_HOME_DIRECTORY
 
 IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
@@ -87,6 +88,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
       low-latency networking
     - COREWEAVE: CoreWeave clusters with InfiniBand support.
+    - TOGETHER: Together AI clusters with InfiniBand support for
+      high-throughput, low-latency networking
+    - AWS_EFA: AWS EKS/HyperPod clusters with Elastic Fabric Adapter (EFA)
+      support for high-performance inter-node communication
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -94,6 +99,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - GCP settings match
       sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
     - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    - AWS EFA settings match the EFA configuration used in AWS VMs
     """
 
     GCP_TCPX = 'gcp_tcpx'
@@ -1816,6 +1822,89 @@ def get_allocated_gpu_qty_by_node(
     return allocated_qty_by_node
 
 
+def adjust_resources_to_allocatable(
+    cpus: float,
+    mem: float,
+    context: Optional[str],
+    dryrun: bool = False,
+) -> Tuple[float, float]:
+    """Clamps resource requests to the minimum allocatable values across
+    nodes whose capacity matches the request.
+
+    Each K8s node reserves resources for system services (kubelet,
+    kube-system pods, eviction thresholds). When a user requests
+    resources that match a node's total capacity, the pod may fail to
+    schedule because the allocatable amount is less than capacity.
+
+    CPU and memory are evaluated independently. A node contributes its
+    allocatable CPU if its CPU capacity matches the request, and its
+    allocatable memory if its memory capacity matches the request.
+    Nodes that don't match either resource are ignored. The final
+    clamped values are the minimums across all contributing nodes for
+    each resource, ensuring the pod can schedule on the node with the
+    most system overhead.
+
+    Args:
+        cpus: Requested CPU count.
+        mem: Requested memory in GB.
+        context: Kubernetes context.
+        dryrun: Is a dry run.
+
+    Returns:
+        Tuple of (adjusted_cpus, adjusted_mem).
+    """
+    if dryrun:
+        return cpus, mem
+    nodes = get_kubernetes_nodes(context=context)
+    ready_nodes = [n for n in nodes if n.is_ready()]
+
+    # If any node has strictly more capacity than requested for both
+    # CPU and memory, the scheduler can place the pod there without
+    # clamping.
+    min_clamp_cpu: Optional[float] = None
+    min_clamp_mem: Optional[float] = None
+    for node in ready_nodes:
+        node_cap_cpu = parse_cpu_or_gpu_resource_to_float(
+            node.status.capacity.get('cpu', '0'))
+        node_cap_mem = parse_memory_resource(
+            node.status.capacity.get('memory', '0'),
+            unit='G',
+        )
+        if (node_cap_cpu > cpus + 0.01 and node_cap_mem > mem + 0.01):
+            return cpus, mem
+        # Collect allocatable values independently from exact-match
+        # nodes: a node contributes its allocatable CPU if its CPU
+        # capacity matches the request, and likewise for memory.
+        cpu_matches = abs(node_cap_cpu - cpus) < 0.01
+        mem_matches = abs(node_cap_mem - mem) < 0.01
+        if cpu_matches:
+            alloc_cpu = parse_cpu_or_gpu_resource_to_float(
+                node.status.allocatable.get('cpu', '0'))
+            clamp_cpu = alloc_cpu - node_cap_cpu * 0.1
+            if min_clamp_cpu is None or clamp_cpu < min_clamp_cpu:
+                min_clamp_cpu = clamp_cpu
+        if mem_matches:
+            alloc_mem = parse_memory_resource(node.status.allocatable.get(
+                'memory', '0'),
+                                              unit='G')
+            clamp_mem = alloc_mem - node_cap_mem * 0.05
+            if min_clamp_mem is None or clamp_mem < min_clamp_mem:
+                min_clamp_mem = clamp_mem
+
+    adjusted_cpus = min_clamp_cpu or cpus
+    adjusted_mem = min_clamp_mem or mem
+
+    assert adjusted_cpus > 0.0, 'Adjusted cpu should be greater than 0.'
+    assert adjusted_mem > 0.0, 'Adjusted memory should be greater than 0.'
+
+    if adjusted_cpus < cpus or adjusted_mem < mem:
+        logger.info(f'Clamping resource request to node allocatable capacity. '
+                    f'Requested: {cpus} CPUs, {mem}G memory. '
+                    f'Adjusted: {adjusted_cpus} CPUs, {adjusted_mem}G memory.')
+
+    return adjusted_cpus, adjusted_mem
+
+
 def check_instance_fits(context: Optional[str],
                         instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
@@ -1851,12 +1940,8 @@ def check_instance_fits(context: Optional[str],
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
-            # We don't consider nodes that have exactly the same amount of
-            # CPU or memory as the candidate instance type.
-            # This is to account for the fact that each node always has some
-            # amount kube-system pods running on it and consuming resources.
-            if (node_cpus > candidate_instance_type.cpus and
-                    node_memory_gb > candidate_instance_type.memory):
+            if (node_cpus >= candidate_instance_type.cpus and
+                    node_memory_gb >= candidate_instance_type.memory):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
@@ -1940,16 +2025,16 @@ def check_instance_fits(context: Optional[str],
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type} do not have '
-            f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
-            f'memory (> {k8s_instance_type.memory} G). ')
+            f'enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
+            f'memory (>= {k8s_instance_type.memory} G). ')
     else:
         candidate_nodes = [node for node in nodes if node.is_ready()]
         if not candidate_nodes:
             return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
-                                 f'CPU (> {k8s_instance_type.cpus} CPUs) '
+                                 f'CPU (>= {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
-                                 f'(> {k8s_instance_type.memory} G). ')
+                                 f'(>= {k8s_instance_type.memory} G). ')
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
@@ -4067,8 +4152,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
-    context = provider_config.get('context',
-                                  get_current_kube_config_context_name())
+    context = provider_config.get('context')
+    assert isinstance(context, str)
     if context == kubernetes.in_cluster_context_name():
         # If the context (also used as the region) is in-cluster, we need
         # to use in-cluster auth by setting the context to None.

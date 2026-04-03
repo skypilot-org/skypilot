@@ -8,7 +8,32 @@ from typing import Any, Dict, List, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import kubernetes_enums
+
+# Registry for plugin-provided job_recovery schema properties.
+# Plugins call register_job_recovery_property() to add strategy-specific
+# config fields. On the server (is_on_api_server=True), plugins have
+# registered their properties so additionalProperties is False. On
+# the client (is_on_api_server=False), additionalProperties is True
+# to let plugin config pass through for server-side validation.
+_extra_job_recovery_properties: Dict[str, Any] = {}
+
+
+def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the job_recovery schema.
+
+    This allows plugins to extend the job_recovery dict schema with
+    strategy-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'integer'}).
+    """
+    _extra_job_recovery_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -222,7 +247,15 @@ def _get_single_resources_schema():
                     {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_job_recovery_property(), so we
+                        # can be strict. On the client (where
+                        # is_on_api_server is False), we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties':
+                            not annotations.is_on_api_server,
                         'properties': {
                             'strategy': {
                                 'anyOf': [{
@@ -255,6 +288,10 @@ def _get_single_resources_schema():
                                     },
                                 ],
                             },
+                            # Plugin-registered strategy-specific
+                            # properties (validated on server side
+                            # where plugins are loaded).
+                            **_extra_job_recovery_properties,
                         }
                     }
                 ],
@@ -294,6 +331,14 @@ def _get_single_resources_schema():
                 },
             },
             'disk_size': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
+            },
+            'ephemeral_storage': {
                 'anyOf': [{
                     'type': 'string',
                     'pattern': constants.MEMORY_SIZE_PATTERN,
@@ -522,6 +567,12 @@ def get_volume_schema():
                     'namespace': {
                         'type': 'string',
                     },
+                    'host_path': {
+                        'type': 'string',
+                    },
+                    'cleanup_on_deletion': {
+                        'type': 'boolean',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
@@ -641,6 +692,15 @@ def get_storage_schema():
                                 'type': 'string',
                                 'pattern': rclone_duration_pattern,
                             },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                    'mount': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
                             'read_only': {
                                 'type': 'boolean',
                             },
@@ -993,15 +1053,45 @@ def get_task_schema():
                 'additionalProperties': False,
             },
             'secrets': {
-                'type': 'object',
-                'required': [],
-                'patternProperties': {
-                    # Checks secret keys are valid env var names.
-                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': ['string', 'null']
-                    }
+                'oneOf': [
+                    {
+                        'type': 'object',
+                        # Dict form: inline secrets + managed refs
+                        'additionalProperties': {
+                            'type': ['string', 'null']
+                        },
+                    },
+                    {
+                        'type': 'array',
+                        # Array form: managed secret refs only
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
+                ],
+            },
+            'managed_secrets': {
+                'type': 'array',
+                'items': {
+                    'oneOf': [
+                        {
+                            'type': 'string'
+                        },
+                        {
+                            'type': 'object',
+                            'maxProperties': 1,
+                            'additionalProperties': {
+                                'type': 'object',
+                                'properties': {
+                                    'mount_path': {
+                                        'type': 'string'
+                                    },
+                                },
+                                'additionalProperties': False,
+                            },
+                        },
+                    ],
                 },
-                'additionalProperties': False,
             },
             # inputs and outputs are experimental
             'inputs': {
@@ -1225,6 +1315,21 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+_GPU_PARTITION_MAP_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'array',
+            'items': {
+                'type': 'string',
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1385,6 +1490,27 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'auto_mounts': {
+        'type': 'array',
+        'items': {
+            'type': 'object',
+            'required': ['volume_name', 'mount_paths'],
+            'additionalProperties': False,
+            'properties': {
+                'volume_name': {
+                    'type': 'string',
+                },
+                'mount_paths': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'pattern': '^(/|~/|~$)',
+                    },
+                    'minItems': 1,
+                },
+            },
+        },
+    },
     'enable_docker': {
         'oneOf': [
             # Simple form: enable_docker: true / false
@@ -1714,6 +1840,7 @@ def get_config_schema():
                 },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1731,6 +1858,7 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],

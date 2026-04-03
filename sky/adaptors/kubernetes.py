@@ -16,7 +16,7 @@ import platform
 import threading
 import time
 import typing
-from typing import Any, Callable, Optional, Set
+from typing import Any, Callable, List, Optional, Set
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -47,6 +47,7 @@ DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
 ENV_KUBECONFIG_PATH_SEPARATOR = ';' if platform.system() == 'Windows' else ':'
 
 DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
+IN_CLUSTER_IDENTITY_PREFIX = 'skypilot-in-cluster-identity'
 # The name for the environment variable that stores the in-cluster context name
 # for Kubernetes clusters. This is used to associate a name with the current
 # context when running with in-cluster auth. If not set, the context name is
@@ -423,7 +424,7 @@ def stream():
     return kubernetes.stream.stream
 
 
-def in_cluster_context_name() -> Optional[str]:
+def in_cluster_context_name() -> str:
     """Returns the name of the in-cluster context from the environment.
 
     If the environment variable is not set, returns the default in-cluster
@@ -431,3 +432,9 @@ def in_cluster_context_name() -> Optional[str]:
     """
     return (os.environ.get(IN_CLUSTER_CONTEXT_NAME_ENV_VAR) or
             DEFAULT_IN_CLUSTER_REGION)
+
+
+def in_cluster_identity() -> List[str]:
+    """Returns the cluster owner identity for contexts launched with
+    in-cluster authentication."""
+    return [f'{IN_CLUSTER_IDENTITY_PREFIX}-{in_cluster_context_name()}']

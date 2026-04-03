@@ -37,6 +37,7 @@ resources:
   instance_type: p3.8xlarge
   use_spot: false
   disk_size: 256
+  ephemeral_storage: 50
   disk_tier: medium
   network_tier: best
   max_hourly_cost: 10.0
@@ -544,6 +545,48 @@ resources:
 ```
 
 
+### ``resources.ephemeral_storage``
+
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., `50GB`).
+
+This sets the `resources.requests.ephemeral-storage` field in the Kubernetes pod spec.
+When set_pod_resource_limits is configured in the SkyPilot config, it also sets
+`resources.limits.ephemeral-storage` using the multiplier defined there.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+> **WARNING**:
+>
+> The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50
+```
+
+OR
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50GB
+
+
+```
+
+
 ### ``resources.disk_tier``
 Disk tier to use for OS (optional).
 
@@ -581,11 +624,23 @@ Could be one of `'standard'` or `'best'` (default: `'standard'`).
 
 If `'best'` is specified, use the best network tier available on the specified infra. This currently supports:
 
-- `infra: gcp`: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- `infra: nebius`: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+**VM-based:**
+
+- `infra: aws`: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
+- `infra: gcp`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
+- `infra: nebius`: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+
+**Kubernetes-based:**
+
+- `infra: k8s/my-eks-or-hyperpod-cluster`: Enable EFA for high-performance inter-node communication across pods on AWS EKS/HyperPod clusters.
+- `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 - `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
-- `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+- `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+
+**Slurm-based:**
+
+- `infra: slurm`: On AWS HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.), EFA is available by default. No `network_tier` setting is needed.
 
 ```yaml
 resources:
@@ -1089,6 +1144,14 @@ file_mounts:
     mode: MOUNT_CACHED
     type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
 
+  # Mount a bucket as read-only to prevent accidental writes.
+  /readonly-data:
+    source: s3://my-dataset-bucket
+    mode: MOUNT
+    config:
+      mount:
+        read_only: true
+
   # Copies a cloud object store URI to the cluster. Can be private buckets.
   /datasets-s3: s3://my-awesome-dataset
 
@@ -1119,6 +1182,10 @@ file_mounts:
 The `type` field specifies a pre-tuned workload type for `MOUNT_CACHED` mode.
 Available types: `MODEL_CHECKPOINT_RO`, `MODEL_CHECKPOINT_RW`, `DATASET_RO`, `DATASET_RW`.
 See mount_cached_workload_types for details on workload types and `config.mount_cached` parameters.
+
+The `config.mount` section supports parameters for `MOUNT` mode.
+Setting `read_only: true` mounts the bucket as read-only, preventing accidental writes.
+See storage-yaml-reference for all available parameters.
 
 
 ### ``setup``

@@ -104,3 +104,55 @@ def get_cache_entry(key: str) -> Optional[str]:
                 kv_cache_table.c.key == key).where(
                     kv_cache_table.c.expires_at > time.time()))
         return result.scalar()
+
+
+_LIKE_ESCAPE_CHAR = '\\'
+
+
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcard characters (%, _) in a literal value."""
+    return (value.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2).replace(
+        '%', f'{_LIKE_ESCAPE_CHAR}%').replace('_', f'{_LIKE_ESCAPE_CHAR}_'))
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_prefix(prefix: str) -> None:
+    """Delete all cache entries whose key starts with the given prefix.
+
+    Any SQL LIKE wildcards (%, _) in *prefix* are escaped so they are
+    matched literally.
+
+    Args:
+        prefix: The literal prefix to match against cache keys.
+    """
+    escaped = _escape_like(prefix)
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(f'{escaped}%',
+                                          escape=_LIKE_ESCAPE_CHAR)))
+        session.commit()
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_prefix_suffix(prefix: str, suffix: str) -> None:
+    """Delete all cache entries whose key starts with *prefix* and ends
+    with *suffix*, with any content in between.
+
+    Both *prefix* and *suffix* are treated as literal strings — any SQL
+    LIKE wildcards (%, _) they contain are escaped automatically.
+
+    Args:
+        prefix: Literal prefix to match against cache keys.
+        suffix: Literal suffix to match against cache keys.
+    """
+    escaped_prefix = _escape_like(prefix)
+    escaped_suffix = _escape_like(suffix)
+    pattern = f'{escaped_prefix}%{escaped_suffix}'
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(pattern, escape=_LIKE_ESCAPE_CHAR)))
+        session.commit()

@@ -143,16 +143,18 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     if region_filter is None:
-        # Get the first available cluster as default
+        # Query all available clusters and aggregate results
         all_clusters = slurm_utils.get_all_slurm_cluster_names()
         if not all_clusters:
             return {}, {}, {}
-        slurm_cluster = all_clusters[0]
+        clusters_to_query = all_clusters
     else:
-        slurm_cluster = region_filter
+        clusters_to_query = [region_filter]
 
-    slurm_nodes_info = slurm_utils.slurm_node_info(
-        slurm_cluster_name=slurm_cluster)
+    slurm_nodes_info = [
+        info for cluster in clusters_to_query
+        for info in slurm_utils.slurm_node_info(slurm_cluster_name=cluster)
+    ]
 
     if not slurm_nodes_info:
         # Customize error message based on filters
@@ -202,7 +204,8 @@ def list_accelerators_realtime(
         # Generate powers-of-2 GPU counts up to node_total_gpus,
         # plus the actual total if it is not a power of 2.
         if node_total_gpus > 0:
-            pricing = _get_pricing(region=slurm_cluster, zone=partition)
+            pricing = _get_pricing(region=node_info['slurm_cluster_name'],
+                                   zone=partition)
             per_accel = common.get_hourly_cost_from_pricing(
                 pricing,
                 cpus=0,

@@ -518,7 +518,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones, dryrun  # Unused.
+        del cluster_name, zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -537,6 +537,11 @@ class Kubernetes(clouds.Cloud):
             resources.instance_type)
         cpus = k.cpus
         mem = k.memory
+        # Clamp resource requests to node allocatable capacity so that
+        # pods can schedule even when the request matches a node's total
+        # capacity (which exceeds allocatable due to system overhead).
+        cpus, mem = kubernetes_utils.adjust_resources_to_allocatable(
+            cpus, mem, context, dryrun=dryrun)
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
@@ -699,19 +704,6 @@ class Kubernetes(clouds.Cloud):
                 keys=('high_availability', 'storage_class_name'),
                 default_value=None))
 
-        # Get the config for setting pod CPU/memory limits relative to requests.
-        # This is useful for clusters that require limits to be set (e.g., for
-        # LimitRange enforcement or resource quotas).
-        # Can be: False (default, no limits), True (limits = requests),
-        # or a number (limits = requests * multiplier).
-        set_pod_resource_limits_config = (
-            skypilot_config.get_effective_workspace_region_config(
-                cloud='kubernetes',
-                region=context,
-                keys=('set_pod_resource_limits',),
-                default_value=False,
-                override_configs=resources.cluster_config_overrides))
-
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_workspace_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
@@ -763,6 +755,8 @@ class Kubernetes(clouds.Cloud):
             keys=('provision_timeout',),
             default_value=timeout,
             override_configs=resources.cluster_config_overrides)
+
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -820,26 +814,41 @@ class Kubernetes(clouds.Cloud):
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
+            'k8s_context': context,
+            'k8s_namespace': namespace,
         }
+
+        # Add ephemeral storage to deploy vars if specified.
+        ephemeral_storage = resources.ephemeral_storage
+        if ephemeral_storage is not None:
+            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
-        # number -> that multiplier
+        # number -> that multiplier. Limits are calculated with unclamped
+        # values for maximum burst as intended.
+        set_pod_resource_limits_config = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('set_pod_resource_limits',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
         if set_pod_resource_limits_config is not False:
             if set_pod_resource_limits_config is True:
-                multiplier = 1.0
+                mul = 1.0
             else:
-                multiplier = float(set_pod_resource_limits_config)
-            deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
-            deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
-
-        # Add kubecontext if it is set. It may be None if SkyPilot is running
-        # inside a pod with in-cluster auth.
-        if context is not None:
-            deploy_vars['k8s_context'] = context
-
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        deploy_vars['k8s_namespace'] = namespace
+                mul = float(set_pod_resource_limits_config)
+            if mul == 1.0:
+                # For QoS purposes, we set the limit to match the request.
+                deploy_vars['k8s_cpu_limit'] = round(cpus, 3)
+                deploy_vars['k8s_memory_limit'] = round(mem, 3)
+            else:
+                deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
+                deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
+            if ephemeral_storage is not None:
+                deploy_vars['k8s_ephemeral_storage_limit'] = round(
+                    ephemeral_storage * mul, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -1142,6 +1151,14 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def get_identity_from_context(context):
+        # TODO (kyuds): remove `namespace` from the identity formation. The
+        # issue with namespace is that it represents the default namespace of
+        # the cluster, not necessarily the actual namespace the cluster was
+        # launched on. We store the namespace in the provider config too
+        # anyways. Therefore, if users launch a SkyPilot cluster on one
+        # namespace and switches, then the a CloudUserIdentityError will
+        # be raised. Currently, this is difficult as there is no good
+        # forward compatibility mechanism (upgrade -> downgrade).
         if 'namespace' in context['context']:
             namespace = context['context']['namespace']
         else:
@@ -1152,6 +1169,37 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
+    def get_identity_from_context_name(cls,
+                                       context: str) -> Optional[List[str]]:
+        """Returns the user identity for a specific Kubernetes context.
+
+        Args:
+            context: The name of the Kubernetes context to get the
+                identity for.
+
+        Returns:
+            None if the kubeconfig is not available, otherwise
+            the identity for the given context.
+
+        Raises:
+            CloudUserIdentityError: If the context is not found in kubeconfig.
+        """
+        k8s = kubernetes.kubernetes
+        err = f'Kubernetes context {context!r} not found in kubeconfig.'
+        if context == kubernetes.in_cluster_context_name():
+            if kubernetes_utils.is_incluster_config_available():
+                return kubernetes.in_cluster_identity()
+            raise exceptions.CloudUserIdentityError(err)
+        try:
+            all_contexts, _ = kubernetes.list_kube_config_contexts()
+        except k8s.config.config_exception.ConfigException:
+            raise exceptions.CloudUserIdentityError(err) from None
+        context_map = {ctx['name']: ctx for ctx in all_contexts}
+        if context not in context_map:
+            raise exceptions.CloudUserIdentityError(err)
+        return [cls.get_identity_from_context(context_map[context])]
+
+    @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         identities = []
         k8s = kubernetes.kubernetes
@@ -1159,14 +1207,18 @@ class Kubernetes(clouds.Cloud):
             all_contexts, current_context = (
                 kubernetes.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
-            return None
-        # Add current context at the head of the list
-        current_identity = [cls.get_identity_from_context(current_context)]
-        identities.append(current_identity)
+            all_contexts = []
+            current_context = None
+        if current_context:
+            # Add current context at the head of the list
+            current_identity = [cls.get_identity_from_context(current_context)]
+            identities.append(current_identity)
         for context in all_contexts:
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
-        return identities
+        if kubernetes_utils.is_incluster_config_available():
+            identities.append(kubernetes.in_cluster_identity())
+        return identities if identities else None
 
     @classmethod
     def is_volume_name_valid(cls,
