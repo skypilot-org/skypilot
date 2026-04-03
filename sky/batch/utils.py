@@ -501,10 +501,12 @@ def _extract_batch_start_index(batch_path: str) -> int:
 def _list_s3_objects(bucket: str, prefix: str) -> List[str]:
     """List objects in an S3 bucket with a prefix."""
     s3 = aws.client('s3')
-    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    if 'Contents' not in response:
-        return []
-    return [obj['Key'] for obj in response['Contents']]
+    paginator = s3.get_paginator('list_objects_v2')
+    keys = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get('Contents', []):
+            keys.append(obj['Key'])
+    return keys
 
 
 def _list_gcs_objects(bucket: str, prefix: str) -> List[str]:
