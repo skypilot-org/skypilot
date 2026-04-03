@@ -30,7 +30,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_MAX_RETRY = 6
+_MAX_RETRY = 30
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
@@ -232,7 +232,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     @_auto_retry()
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
-            returncode, stdout, stderr = runner.run_setup(
+            returncode, stdout, stderr = runner.run(
                 cmd,
                 stream_logs=False,
                 log_path=log_path,
@@ -250,12 +250,11 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                             'Retrying setup in 10 seconds.')
                 time.sleep(10)
                 retry_cnt += 1
-                returncode, stdout, stderr = runner.run_setup(
-                    cmd,
-                    stream_logs=False,
-                    log_path=log_path,
-                    require_outputs=True,
-                    source_bashrc=True)
+                returncode, stdout, stderr = runner.run(cmd,
+                                                        stream_logs=False,
+                                                        log_path=log_path,
+                                                        require_outputs=True,
+                                                        source_bashrc=True)
                 if not returncode:
                     break
 
@@ -562,17 +561,18 @@ def _internal_file_mounts(file_mounts: Dict,
             mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
         else:
             mkdir_command = f'mkdir -p {dst}'
-        rc, stdout, stderr = runner.run_setup(mkdir_command,
-                                              log_path=log_path,
-                                              stream_logs=False,
-                                              require_outputs=True)
+
+        rc, stdout, stderr = runner.run(mkdir_command,
+                                        log_path=log_path,
+                                        stream_logs=False,
+                                        require_outputs=True)
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
                             f'{src} -> {dst}.'),
             stderr=stdout + stderr)
 
-        runner.rsync_setup(
+        runner.rsync(
             source=src,
             target=dst,
             up=True,

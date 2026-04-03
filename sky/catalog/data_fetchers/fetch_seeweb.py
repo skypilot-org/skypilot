@@ -12,6 +12,7 @@ import configparser
 import csv
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from sky.adaptors.seeweb import ecsapi
@@ -31,20 +32,32 @@ SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
     'Tenstorrent Grayskull e150': 'GRAYSKULL-E150',
 }
 
-# GPU VRAM mapping in MB
-VRAM = {
-    'RTXA6000': 48384,  # 48GB
-    'H200': 144384,  # 141GB
-    'A100': 81920,  # 80GB
-    'L4': 24576,  # 24GB
-    'L40S': 49152,  # 48GB
-    'H100': 81920,  # 80GB
-    'MI300X': 192000,  # 192GB
-    'A30': 24576,  # 24GB
-    'RTX6000': 24576,  # 24GB
-    'GRAYSKULL-E75': 8192,  # 8GB
-    'GRAYSKULL-E150': 8192,  # 8GB
+# Fallback GPU VRAM mapping in MiB for labels that do not contain
+# a GB suffix (e.g. 'A30'). Values are calculated as GB * 1024.
+_VRAM_FALLBACK = {
+    'RTXA6000': 49152,  # 48 GB
+    'H200': 144384,  # 141 GB
+    'A100': 81920,  # 80 GB
+    'L4': 24576,  # 24 GB
+    'L40S': 49152,  # 48 GB
+    'H100': 81920,  # 80 GB
+    'MI300X': 196608,  # 192 GB
+    'A30': 24576,  # 24 GB
+    'RTX6000': 24576,  # 24 GB
+    'GRAYSKULL-E75': 8192,  # 8 GB
+    'GRAYSKULL-E150': 8192,  # 8 GB
 }
+
+
+def parse_vram_from_label(gpu_label: str) -> int:
+    """Extract VRAM in MiB from gpu_label string.
+
+    The Seeweb API includes VRAM in the gpu_label field
+    (e.g. 'H200 141GB' -> 144384 MiB). Returns 0 if no GB
+    value is found in the label.
+    """
+    match = re.search(r'(\d+)\s*GB', gpu_label or '')
+    return int(match.group(1)) * 1024 if match else 0
 
 
 def is_tenstorrent_gpu_name(gpu_name: Optional[str]) -> bool:
@@ -153,8 +166,13 @@ def parse_plan_info(plan: Any) -> Dict[str, Any]:
             else:
                 gpu_name = None
 
-        # Get GPU VRAM from mapping using the normalized name
-        gpu_vram_mb = VRAM.get(gpu_name, 0) if gpu_name else 0
+        # Extract GPU VRAM: parse from gpu_label first, fall back to
+        # the hardcoded dict for labels without a GB suffix (e.g. 'A30').
+        gpu_vram_mb = 0
+        if gpu_label:
+            gpu_vram_mb = parse_vram_from_label(gpu_label)
+        if gpu_vram_mb == 0 and gpu_name:
+            gpu_vram_mb = _VRAM_FALLBACK.get(gpu_name, 0)
     else:
         raise ValueError(f'Unsupported plan format: {type(plan)}')
 
@@ -327,3 +345,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

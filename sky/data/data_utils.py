@@ -24,7 +24,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
-from sky.adaptors import vastdata
+from sky.adaptors import seeweb
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -107,6 +107,18 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
       nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
     """
     path_parts = nebius_path.replace('nebius://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_seeweb_path(seeweb_path: str) -> Tuple[str, str]:
+    """Splits Seeweb Path into Bucket name and Relative Path to Bucket.
+
+    Args:
+      seeweb_path: str; e.g. seeweb://dataset/train/
+    """
+    path_parts = seeweb_path.replace('seeweb://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -330,6 +342,13 @@ def create_nebius_client() -> Client:
     return nebius.client('s3')
 
 
+def create_seeweb_client(region: Optional[str] = None) -> Client:
+    """Helper to create a Seeweb S3-compatible client."""
+    del region  # Seeweb endpoint encodes datacenter; region not required.
+    client = seeweb.client('s3')
+    return client
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -350,6 +369,14 @@ def verify_nebius_bucket(name: str) -> bool:
     nebius_s = nebius.resource('s3')
     bucket = nebius_s.Bucket(name)
     return bucket in nebius_s.buckets.all()
+
+
+def verify_seeweb_bucket(name: str) -> bool:
+    """Helper to verify a Seeweb bucket exists."""
+    seeweb_resource = seeweb.resource('s3')
+    bucket = seeweb_resource.Bucket(name)
+    result = bucket in seeweb_resource.buckets.all()
+    return result
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
@@ -628,7 +655,7 @@ class Rclone:
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
-        VASTDATA = 'VASTDATA'
+        SEEWEB = 'SEEWEB'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -648,7 +675,7 @@ class Rclone:
                 Rclone.RcloneStores.AZURE: 'sky-azure',
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
-                Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
+                Rclone.RcloneStores.SEEWEB: 'sky-seeweb',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -679,32 +706,18 @@ class Rclone:
                 assert bucket_name is not None
                 rclone_profile_name = self.get_profile_name(bucket_name)
             if self is Rclone.RcloneStores.S3:
-                if clouds.AWS.should_use_env_auth_for_s3():
-                    # Use environment-based auth for SSO, IAM roles, etc.
-                    # This allows rclone to use the AWS SDK credential chain
-                    # which properly handles temporary credentials and
-                    # container credentials (Pod Identity, IRSA, etc.)
-                    config = textwrap.dedent(f"""\
-                        [{rclone_profile_name}]
-                        type = s3
-                        provider = AWS
-                        env_auth = true
-                        acl = private
-                        """)
-                else:
-                    # Use static credentials for shared-credentials-file
-                    aws_credentials = (aws.session().get_credentials().
-                                       get_frozen_credentials())
-                    access_key_id = aws_credentials.access_key
-                    secret_access_key = aws_credentials.secret_key
-                    config = textwrap.dedent(f"""\
-                        [{rclone_profile_name}]
-                        type = s3
-                        provider = AWS
-                        access_key_id = {access_key_id}
-                        secret_access_key = {secret_access_key}
-                        acl = private
-                        """)
+                aws_credentials = (
+                    aws.session().get_credentials().get_frozen_credentials())
+                access_key_id = aws_credentials.access_key
+                secret_access_key = aws_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = AWS
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    acl = private
+                    """)
             elif self is Rclone.RcloneStores.GCS:
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
@@ -787,21 +800,20 @@ class Rclone:
                     acl = private
                     force_path_style = false
                     """)
-            elif self is Rclone.RcloneStores.VASTDATA:
-                vastdata_session = vastdata.session()
-                vastdata_credentials = vastdata.get_vastdata_credentials(
-                    vastdata_session)
-                endpoint_url = vastdata.get_endpoint()
-                access_key_id = vastdata_credentials.access_key
-                secret_access_key = vastdata_credentials.secret_key
+            elif self is Rclone.RcloneStores.SEEWEB:
+                seeweb_session = seeweb.session()
+                seeweb_credentials = seeweb.get_seeweb_credentials(
+                    seeweb_session)
+                endpoint = seeweb.get_endpoint()
+                access_key_id = seeweb_credentials.access_key
+                secret_access_key = seeweb_credentials.secret_key
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
                     type = s3
                     provider = Other
                     access_key_id = {access_key_id}
                     secret_access_key = {secret_access_key}
-                    endpoint = {endpoint_url}
-                    region = auto
+                    endpoint = {endpoint}
                     acl = private
                     """)
             else:
@@ -1033,41 +1045,3 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
 
     # Should not reach here, but just in case
     return False
-
-
-def create_vastdata_client() -> Client:
-    """Create VastData S3 client."""
-    return vastdata.client('s3')
-
-
-def split_vastdata_path(vastdata_path: str) -> Tuple[str, str]:
-    """Splits VastData Path into Bucket name and Relative Path to Bucket
-
-    Args:
-      vastdata_path: str; VastData Path, e.g. vastdata://imagenet/train/
-    """
-    path_parts = vastdata_path.replace('vastdata://', '').split('/')
-    bucket = path_parts.pop(0)
-    key = '/'.join(path_parts)
-    return bucket, key
-
-
-def verify_vastdata_bucket(name: str) -> bool:
-    """Verify VastData bucket exists and is accessible."""
-    vastdata_client = create_vastdata_client()
-    try:
-        vastdata_client.head_bucket(Bucket=name)
-        return True
-    except vastdata.botocore_exceptions().ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == '403':
-            logger.error(f'Access denied to bucket {name}')
-        elif error_code == '404':
-            logger.debug(f'Bucket {name} does not exist')
-        else:
-            logger.debug(
-                f'Unexpected error checking VastData bucket {name}: {e}')
-        return False
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Unexpected error checking VastData bucket {name}: {e}')
-        return False

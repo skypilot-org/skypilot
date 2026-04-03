@@ -22,7 +22,7 @@ from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
-from sky.adaptors import vastdata
+from sky.adaptors import seeweb
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.skylet import constants
@@ -681,48 +681,53 @@ class CoreWeaveCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
-class VastDataCloudStorage(CloudStorage):
-    """VastData Cloud Storage (S3-compatible).
+class SeewebCloudStorage(CloudStorage):
+    """Seeweb Cloud Storage."""
 
-    Note: VastData (object storage) is a separate company from Vast.ai
-    (GPU compute).
-    """
-
+    # List of commands to install AWS CLI
     _GET_AWSCLI = [
         'aws --version >/dev/null 2>&1 || '
         f'{constants.SKY_UV_PIP_CMD} install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
-        """Returns whether VastData 'url' is a directory."""
-        vd_s3 = vastdata.resource('s3')
-        bucket_name, path = data_utils.split_vastdata_path(url)
-        bucket = vd_s3.Bucket(bucket_name)
+        """Checks if the seeweb object is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+
+        Args:
+            url: seeweb object URL.
+        """
+        sw = seeweb.resource('s3')
+        bucket_name, path = data_utils.split_seeweb_path(url)
+        bucket = sw.Bucket(bucket_name)
 
         num_objects = 0
         for obj in bucket.objects.filter(Prefix=path):
             num_objects += 1
             if obj.key == path:
                 return False
+            # If there are more than 1 object in filter, then it is a directory
             if num_objects == 3:
                 return True
 
+        # A directory with few or no items
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
-        assert 'vastdata://' in source, 'vastdata:// is not in source'
-        source = source.replace('vastdata://', 's3://')
-        endpoint_url = vastdata.get_endpoint()
-        download_via_awscli = (
-            'AWS_SHARED_CREDENTIALS_FILE='
-            f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
-            f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-            'sync --no-follow-symlinks '
-            f'{source} {destination} '
-            f'--endpoint {endpoint_url} '
-            f'--profile={vastdata.VASTDATA_PROFILE_NAME}')
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        assert 'seeweb://' in source, 'seeweb:// is not in source'
+        source = source.replace('seeweb://', 's3://')
+        endpoint_url = seeweb.get_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--profile={seeweb.SEEWEB_PROFILE_NAME} '
+                               f'--endpoint-url={endpoint_url}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -730,17 +735,13 @@ class VastDataCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        assert 'vastdata://' in source, 'vastdata:// is not in source'
-        source = source.replace('vastdata://', 's3://')
-        endpoint_url = vastdata.get_endpoint()
-        download_via_awscli = (
-            'AWS_SHARED_CREDENTIALS_FILE='
-            f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
-            f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-            f'cp {source} {destination} '
-            f'--endpoint {endpoint_url} '
-            f'--profile={vastdata.VASTDATA_PROFILE_NAME}')
+        assert 'seeweb://' in source, 'seeweb:// is not in source'
+        source = source.replace('seeweb://', 's3://')
+        endpoint_url = seeweb.get_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--profile={seeweb.SEEWEB_PROFILE_NAME} '
+                               f'--endpoint-url={endpoint_url}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -765,7 +766,7 @@ _REGISTRY = {
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
-    'vastdata': VastDataCloudStorage(),
+    'seeweb': SeewebCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`
