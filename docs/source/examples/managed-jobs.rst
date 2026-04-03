@@ -5,7 +5,7 @@ Managed Jobs
 
 .. tip::
 
-  Use managed jobs for auto-recovery and scaling out --- running a single job for long durations, or running many jobs in parallel.
+  Use managed jobs for auto-recovery when scaling out --- running a single job for long durations, or running many jobs in parallel.
 
 .. seealso::
 
@@ -47,7 +47,7 @@ The job is launched on a temporary SkyPilot cluster, managed end-to-end, and aut
 
 Managed jobs have several benefits:
 
-#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from job preemptions, GPU failures, NCCL timeouts, node crashes, and or hardware issues. Application errors are also automatically retried for a configurable number of times.
+#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from job preemptions, GPU failures, NCCL timeouts, node crashes, or hardware issues. Application errors can also be retried for a configurable number of times.
 #. :ref:`Scale across infra (clusters, regions, clouds) <scaling-to-many-jobs>`: Easily run and manage many jobs across your infrastructure choices.
 #. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks.
    Useful for running a sequence of tasks that depend on each other, e.g., data
@@ -208,9 +208,9 @@ The UI shows the same information as the CLI ``sky jobs queue -au``.
 Checkpointing and recovery
 --------------------------
 
-To recover quickly from failures (hardware issues, preemptions, etc.), your job should checkpoint its state periodically. Any data on local disk that is not stored in persistent storage will be lost during the recovery process.
+To recover quickly from failures (hardware issues, preemptions, etc.), your job should checkpoint its state periodically to persistent storage. When a job is auto-recovered after a failure, it can reload the latest checkpoint and resume from there instead of starting over.
 
-SkyPilot supports several storage options for checkpointing:
+SkyPilot supports several persistent storage options for checkpointing:
 
 Using Kubernetes volumes
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -229,7 +229,7 @@ On Kubernetes, :ref:`persistent volumes <volumes-on-kubernetes>` provide high-pe
     # Your training script saves checkpoints to /checkpoint
     python train.py --checkpoint-dir /checkpoint
 
-Volumes offer better performance than cloud buckets and work well for Kubernetes and Slurm-based deployments. See :ref:`Volumes <volumes-all>` for setup instructions.
+Volumes offer better performance than cloud buckets. See :ref:`Volumes <volumes-all>` for setup instructions.
 
 Using cloud buckets
 ~~~~~~~~~~~~~~~~~~~
@@ -259,7 +259,7 @@ Recovering from application failures
 
 Hardware failures (GPU errors, node crashes) and preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
 
-In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue, NCCL timeout, or GPU memory error, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
+In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
 .. code-block:: yaml
 
@@ -313,8 +313,8 @@ Here's how various kinds of failures will be handled by SkyPilot:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
-   * - Can't find available resources due to cloud quota or capacity restrictions:
-     - Try other regions and other clouds indefinitely until resources are found.
+   * - Can't find available resources due to capacity:
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
