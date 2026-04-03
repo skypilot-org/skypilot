@@ -150,10 +150,11 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
     """
     src = aws_path.read_text()
 
-    if 'connect_timeout' in src:
-        print(f'[hotpatch] {aws_path} already handles connect_timeout, '
-              'skipping')
-        return False
+    # No early idempotency check here — the pattern matching below is
+    # inherently idempotent: once client() is patched, the old_pattern
+    # won't match anymore. An early `if 'connect_timeout' in src` check
+    # would incorrectly skip if connect_timeout exists only in the
+    # resource() function (from a previous buggy patch).
 
     # Find the check_credentials pop line and inject the new kwargs handling
     # after it. The code may have 0 or 1 blank lines between the two lines
@@ -207,8 +208,13 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
             src = src.replace(old_pattern, new_code, 1)
             break
     else:
-        print(f'[hotpatch] WARNING: Could not find check_credentials pattern '
-              f'in {aws_path}. The old version structure may differ.')
+        # Pattern not found — either already patched or unsupported version.
+        if ("connect_timeout = kwargs.pop('connect_timeout'" in src and
+                'boto3.client() is' in src):
+            print(f'[hotpatch] {aws_path} client() already patched, skipping')
+            return False
+        print(f'[hotpatch] WARNING: Could not find client() pattern in '
+              f'{aws_path}. The old version structure may differ.')
         return False
     aws_path.write_text(src)
     print(f'[hotpatch] Patched {aws_path} with botocore.Config timeout support')
