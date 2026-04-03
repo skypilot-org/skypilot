@@ -1326,6 +1326,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        resize=resize,
         _need_confirmation=not yes,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
