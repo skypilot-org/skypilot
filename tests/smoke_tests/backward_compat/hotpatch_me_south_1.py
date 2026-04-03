@@ -172,7 +172,8 @@ def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
         "        config_kwargs['retries'] = "
         "{'total_max_attempts': total_max_attempts}\n"
         "    if config_kwargs:\n"
-        "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n")
+        "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n"
+    )
 
     # Try with blank line first (v0.12.0), then without (PyPI release)
     for sep in ['\n\n', '\n']:
