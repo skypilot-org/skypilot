@@ -36,6 +36,7 @@ import {
   getClusters,
   getClusterHistory,
   useClusterData,
+  DELETED_CLUSTERS_STORAGE_KEY,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
@@ -59,7 +60,11 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
@@ -600,6 +605,34 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Soft delete: mark history rows as deleted (persisted in localStorage)
+  const loadDeletedFromHistory = () => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const stored = localStorage.getItem(DELETED_CLUSTERS_STORAGE_KEY);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  };
+  const [deletedFromHistory, setDeletedFromHistory] = useState(
+    loadDeletedFromHistory
+  );
+  const removeFromHistory = (clusterHash) => {
+    const next = new Set(deletedFromHistory);
+    next.add(clusterHash);
+    setDeletedFromHistory(next);
+    try {
+      localStorage.setItem(
+        DELETED_CLUSTERS_STORAGE_KEY,
+        JSON.stringify(Array.from(next))
+      );
+    } catch (e) {
+      console.warn('Failed to persist deleted clusters:', e);
+    }
+    refresh();
+  };
+
   // Use the cluster data hook (supports plugin override for server-side pagination)
   const {
     data: hookData,
@@ -621,6 +654,7 @@ export function ClusterTable({
     refreshInterval: preloadingComplete ? refreshInterval : null,
     sortConfig,
     filters,
+    deletedFromHistory,
   });
 
   // Track loading state for parent component
@@ -1057,13 +1091,23 @@ export function ClusterTable({
       ),
       renderCell: (item) => (
         <TableCell className="text-left md:sticky md:right-0 md:bg-white">
-          {!item.isHistorical && (
+          {!item.isHistorical ? (
             <Status2Actions
               cluster={item.cluster}
               status={item.status}
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
             />
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-gray-500 hover:text-red-600"
+              onClick={() => removeFromHistory(item.cluster_hash)}
+              title="Remove from history"
+            >
+              <Trash2Icon className="h-4 w-4" />
+            </Button>
           )}
         </TableCell>
       ),
