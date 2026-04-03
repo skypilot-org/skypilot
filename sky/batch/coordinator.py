@@ -89,7 +89,6 @@ class BatchCoordinator:
         self.batches: List[List[int]] = []
         self.pending_batches: Deque[int] = collections.deque()
         self.completed_count: int = 0
-        self._completed_lock = threading.Lock()
 
         # Retry tracking: batch_idx -> retry count.  Persisted across
         # resume so that a batch cannot be retried indefinitely.
@@ -555,11 +554,10 @@ class BatchCoordinator:
                     # Mark batch as completed in DB.
                     managed_job_state.set_batch_status(self._managed_job_id,
                                                        batch_idx, 'COMPLETED')
-                    with self._completed_lock:
-                        self.completed_count += 1
-                        if self.completed_count == len(self.batches):
-                            managed_job_state.set_winding_down(
-                                self._managed_job_id, task_id=0)
+                    self.completed_count += 1
+                    if self.completed_count == len(self.batches):
+                        managed_job_state.set_winding_down(self._managed_job_id,
+                                                           task_id=0)
                     logger.info(
                         f'Batch {batch_idx} completed on {cluster_name} '
                         f'({self.completed_count}/{len(self.batches)})')

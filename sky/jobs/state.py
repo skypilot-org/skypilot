@@ -1892,14 +1892,14 @@ def save_batch_states(job_id: int, batches: List[List[int]]) -> None:
 
 
 def is_batch_job(job_id: int) -> bool:
-    """Check if a job is a batch coordinator job (has batch_state records)."""
+    """Check if a job is a batch coordinator job."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         result = session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
-                             ).select_from(batch_state_table).where(
-                                 batch_state_table.c.job_id == job_id))
-        return result.scalar_one() > 0
+            sqlalchemy.select(job_info_table.c.is_batch).where(
+                job_info_table.c.job_id == job_id))
+        row = result.one_or_none()
+        return row is not None and bool(row[0])
 
 
 def get_batch_states(job_id: int) -> List[Dict[str, Any]]:
