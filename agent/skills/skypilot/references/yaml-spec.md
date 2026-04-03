@@ -1279,6 +1279,11 @@ service:
     post_data: {'model_name': 'model'}
     initial_delay_seconds: 1200
     timeout_seconds: 15
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
   readiness_probe: /v1/models
 
@@ -1323,6 +1328,11 @@ service:
     post_data: '{"model_name": "my_model"}'
     initial_delay_seconds: 600
     timeout_seconds: 10
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
 ```
 
@@ -1387,6 +1397,66 @@ Note, having a too high timeout will delay the detection of a real failure of yo
   service:
     readiness_probe:
       timeout_seconds: 10
+
+```
+
+
+### ``service.readiness_probe.endpoint_probe_interval_seconds``
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+```yaml
+  service:
+    readiness_probe:
+      endpoint_probe_interval_seconds: 5
+
+```
+
+
+### ``service.readiness_probe.consecutive_failure_threshold_timeout``
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: `10` seconds for pools and
+`180` seconds for regular services.
+
+```yaml
+  service:
+    readiness_probe:
+      consecutive_failure_threshold_timeout: 30
+
+```
+
+
+### ``service.load_balancer``
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
+
+```
+
+
+### ``service.load_balancer.stream_timeout_seconds``
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
 
 ```
 

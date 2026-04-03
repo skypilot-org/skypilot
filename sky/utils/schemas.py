@@ -799,6 +799,12 @@ def get_service_schema():
                         'timeout_seconds': {
                             'type': 'number',
                         },
+                        'endpoint_probe_interval_seconds': {
+                            'type': 'number',
+                        },
+                        'consecutive_failure_threshold_timeout': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -814,6 +820,16 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'load_balancer': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'stream_timeout_seconds': {
+                        'type': 'number',
+                    },
+                },
             },
             'pool': {
                 'type': 'object',
