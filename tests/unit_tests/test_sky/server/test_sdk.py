@@ -512,17 +512,7 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
     # Step 2: Login again without token. The residual sa token should be
     # cleared before the first health check. With the sa token gone, the
     # server returns NEEDS_AUTH, triggering the SSO flow.
-    sso_user = {'id': sso_user_hash, 'name': 'hailong@assemblesys.com'}
-    auth_token = base64.b64encode(
-        json.dumps({
-            'v': 1,
-            'user': sso_user_hash,
-            'cookies': {}
-        }).encode('utf-8')).decode('utf-8')
-
     sa_token_at_health_check = []
-
-    original_check_server_healthy = server_common.check_server_healthy
 
     def _capture_check_server_healthy(endpoint):
         # Capture whether sa token is still in config at the time of
