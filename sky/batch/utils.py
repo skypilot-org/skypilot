@@ -186,6 +186,17 @@ def parse_cloud_path(path: str) -> Tuple[str, str, str]:
                          'Supported prefixes: s3://, gs://')
 
 
+def download_from_cloud(path: str, dest: str) -> None:
+    """Download a file from cloud storage to a local path.
+
+    Args:
+        path: Cloud storage path (s3:// or gs://).
+        dest: Local destination file path.
+    """
+    provider, bucket, key = parse_cloud_path(path)
+    _download_file(provider, bucket, key, dest)
+
+
 def load_jsonl_from_cloud(path: str) -> List[Dict[str, Any]]:
     """Load a JSONL file from cloud storage.
 
@@ -195,14 +206,12 @@ def load_jsonl_from_cloud(path: str) -> List[Dict[str, Any]]:
     Returns:
         List of dictionaries, one per line in the JSONL file.
     """
-    provider, bucket, key = parse_cloud_path(path)
-
     with tempfile.NamedTemporaryFile(mode='w+', suffix='.jsonl',
                                      delete=False) as f:
         temp_path = f.name
 
     try:
-        _download_file(provider, bucket, key, temp_path)
+        download_from_cloud(path, temp_path)
         return _load_jsonl_file(temp_path)
     finally:
         if os.path.exists(temp_path):

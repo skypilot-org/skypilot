@@ -235,10 +235,7 @@ class JsonInput(InputReader):
 
         if not os.path.exists(cache_path):
             os.makedirs(cache_dir, exist_ok=True)
-            full_data = utils.load_jsonl_from_cloud(self.path)
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                for item in full_data:
-                    f.write(json.dumps(item) + '\n')
+            utils.download_from_cloud(self.path, cache_path)
 
         data = []
         with open(cache_path, 'r', encoding='utf-8') as f:

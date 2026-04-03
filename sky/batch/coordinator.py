@@ -97,6 +97,7 @@ class BatchCoordinator:
 
         # Worker tracking: cluster_name → worker_job_id
         self._active_workers: Dict[str, int] = {}
+        self._active_workers_lock = threading.Lock()
 
         # Cancellation flag for inline (controller) mode.
         self._cancelled = False
@@ -156,7 +157,9 @@ class BatchCoordinator:
         then shuts down any active worker services.
         """
         self._cancelled = True
-        for cluster_name, worker_job_id in list(self._active_workers.items()):
+        with self._active_workers_lock:
+            workers_snapshot = list(self._active_workers.items())
+        for cluster_name, worker_job_id in workers_snapshot:
             try:
                 self._shutdown_worker(cluster_name, worker_job_id)
             except Exception:  # pylint: disable=broad-except
@@ -489,7 +492,8 @@ class BatchCoordinator:
         job_id = str(self._managed_job_id)
 
         worker_job_id = self._launch_worker_service(cluster_name)
-        self._active_workers[cluster_name] = worker_job_id
+        with self._active_workers_lock:
+            self._active_workers[cluster_name] = worker_job_id
 
         try:
             while not self._cancelled:
@@ -588,7 +592,8 @@ class BatchCoordinator:
                             f'{constants.MAX_RETRIES} retries: {e}') from e
         finally:
             self._shutdown_worker(cluster_name, worker_job_id=worker_job_id)
-            self._active_workers.pop(cluster_name, None)
+            with self._active_workers_lock:
+                self._active_workers.pop(cluster_name, None)
 
     # ------------------------------------------------------------------
     # Dispatch orchestration

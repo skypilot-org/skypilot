@@ -128,7 +128,19 @@ class _WorkerHandler(http_server.BaseHTTPRequestHandler):
         _batch_queue.put(item)
 
         # Block until save_results() (or an error) sets the event.
-        item.done_event.wait()
+        completed = item.done_event.wait(
+            timeout=constants.BATCH_COMPLETION_TIMEOUT)
+
+        if not completed:
+            timeout_msg = (
+                f'Batch [{start_idx}-{end_idx}] timed out after '
+                f'{constants.BATCH_COMPLETION_TIMEOUT}s waiting for '
+                f'save_results(). This usually means the mapper function '
+                f'is taking too long or forgot to call '
+                f'sky.batch.save_results().')
+            logger.error(timeout_msg)
+            item.error = timeout_msg
+            item.done_event.set()
 
         if item.error:
             self._send_json(500, {'error': item.error})
