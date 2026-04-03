@@ -19,12 +19,14 @@ This script patches two files in the old env's installed sky package:
 The patch is idempotent: if the old version already has the fix,
 it skips patching.
 
-This should be removed once the minimum compatible version (used as
-base_branch in backward compat tests) includes commit 6e5d73633.
+TODO: Remove this file once the base version tested against in backward
+compat tests is newer than 2026-04-03 (which includes commit 6e5d73633).
 """
 import pathlib
 import re
 import sys
+
+import sky
 
 
 def _patch_exceptions(exc_path: pathlib.Path) -> bool:
@@ -134,13 +136,7 @@ def _patch_fetch_aws(fetch_aws_path: pathlib.Path) -> bool:
 
 
 def main():
-    try:
-        import sky
-        sky_dir = pathlib.Path(sky.__file__).parent
-    except ImportError:
-        print('[hotpatch] ERROR: Could not import sky from current environment',
-              file=sys.stderr)
-        sys.exit(1)
+    sky_dir = pathlib.Path(sky.__file__).parent
 
     exc_path = sky_dir / 'exceptions.py'
     fetch_aws_path = sky_dir / 'catalog' / 'data_fetchers' / 'fetch_aws.py'

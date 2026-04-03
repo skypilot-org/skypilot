@@ -162,6 +162,8 @@ class TestBackwardCompatibility:
         # in _get_availability_zones(), causing ThreadPool crashes when
         # me-south-1 is unreachable. Remove once the minimum compatible
         # version includes commit 6e5d73633.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-03 (which includes commit 6e5d73633).
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && python '
             f'{pathlib.Path(__file__).parent / "hotpatch_me_south_1.py"}')
