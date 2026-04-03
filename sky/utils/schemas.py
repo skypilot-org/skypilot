@@ -36,6 +36,20 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
     _extra_job_recovery_properties[name] = schema
 
 
+_extra_kubernetes_properties: Dict[str, Any] = {}
+
+
+def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the kubernetes schema.
+
+    This allows plugins to extend the kubernetes dict schema with
+    kubernetes-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+    """
+    _extra_kubernetes_properties[name] = schema
+
+
 def _check_not_both_fields_present(field1: str, field2: str):
     return {
         'oneOf': [{
@@ -1760,7 +1774,14 @@ def get_config_schema():
         'kubernetes': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered
+            # their properties via
+            # register_kubernetes_property(), so we
+            # can be strict. On the client (where
+            # is_on_api_server is False), we allow
+            # unknown properties to pass through for
+            # server-side validation.
+            'additionalProperties': not annotations.is_on_api_server,
             'properties': {
                 'allowed_contexts': {
                     'oneOf': [{
@@ -1781,13 +1802,23 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_kubernetes_property(), so we
+                        # can be strict. On the client (where
+                        # is_on_api_server is False), we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties':
+                            not annotations.is_on_api_server,
                         'properties': {
                             **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                            **_extra_kubernetes_properties,
                         },
                     },
                 },
                 **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                **_extra_kubernetes_properties,
             }
         },
         'ssh': {
@@ -2233,7 +2264,15 @@ def get_config_schema():
                             'additionalProperties': {
                                 'type': 'object',
                                 'required': [],
-                                'additionalProperties': False,
+                                # On the server, plugins have registered
+                                # their properties via
+                                # register_kubernetes_property(), so we
+                                # can be strict. On the client (where
+                                # is_on_api_server is False), we allow
+                                # unknown properties to pass through for
+                                # server-side validation.
+                                'additionalProperties':
+                                    not annotations.is_on_api_server,
                                 'properties': {
                                     'kueue': {
                                         'type': 'object',
@@ -2245,11 +2284,20 @@ def get_config_schema():
                                             },
                                         },
                                     },
+                                    **_extra_kubernetes_properties,
                                 },
                             },
                         },
+                        **_extra_kubernetes_properties,
                     },
-                    'additionalProperties': False,
+                    # On the server, plugins have registered
+                    # their properties via
+                    # register_kubernetes_property(), so we
+                    # can be strict. On the client (where
+                    # is_on_api_server is False), we allow
+                    # unknown properties to pass through for
+                    # server-side validation.
+                    'additionalProperties': not annotations.is_on_api_server,
                 },
                 'nebius': {
                     'type': 'object',

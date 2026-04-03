@@ -1,9 +1,11 @@
 """Tests for schemas.py"""
 import unittest
+from unittest import mock
 
 import jsonschema
 
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import schemas
 
 
@@ -780,6 +782,138 @@ class TestAWSConfigSchema(unittest.TestCase):
         """Test that AWS accepts an empty list for subnet_names."""
         config = {'subnet_names': []}
         jsonschema.validate(instance=config, schema=self.aws_schema)
+
+
+class TestRegisterKubernetesProperty(unittest.TestCase):
+    """Tests for register_kubernetes_property and schema validation."""
+
+    def setUp(self):
+        # Save original state so we can restore after each test.
+        self._saved_extra = schemas._extra_kubernetes_properties.copy()
+        self._saved_is_on_api_server = annotations.is_on_api_server
+
+    def tearDown(self):
+        schemas._extra_kubernetes_properties.clear()
+        schemas._extra_kubernetes_properties.update(self._saved_extra)
+        annotations.is_on_api_server = self._saved_is_on_api_server
+
+    # -- helpers --
+
+    def _get_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['kubernetes']
+
+    def _get_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['kubernetes']['properties']
+                ['context_configs']['additionalProperties'])
+
+    def _get_workspace_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes'])
+
+    def _get_workspace_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes']['properties']['context_configs']
+                ['additionalProperties'])
+
+    # -- client side (is_on_api_server = False) --
+
+    def test_client_allows_unknown_k8s_root_property(self):
+        """On the client, unknown kubernetes fields pass validation."""
+        annotations.is_on_api_server = False
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    def test_client_allows_unknown_k8s_context_config_property(self):
+        """On the client, unknown fields in context_configs pass."""
+        annotations.is_on_api_server = False
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    def test_client_allows_unknown_workspace_k8s_property(self):
+        """On the client, unknown workspace kubernetes fields pass."""
+        annotations.is_on_api_server = False
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    def test_client_allows_unknown_workspace_k8s_context_config_property(self):
+        """On the client, unknown fields in workspace context_configs pass."""
+        annotations.is_on_api_server = False
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    # -- server side (is_on_api_server = True) --
+
+    def test_server_registered_property_passes_k8s_root(self):
+        """On the server, a registered property passes root validation."""
+        annotations.is_on_api_server = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        k8s_schema = self._get_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    def test_server_registered_property_passes_context_config(self):
+        """On the server, a registered property passes context_config."""
+        annotations.is_on_api_server = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    def test_server_registered_property_passes_workspace_k8s(self):
+        """On the server, a registered property passes workspace k8s."""
+        annotations.is_on_api_server = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    def test_server_registered_property_passes_workspace_context_config(self):
+        """On the server, a registered property passes workspace ctx cfg."""
+        annotations.is_on_api_server = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    def test_server_unregistered_property_rejected_k8s_root(self):
+        """On the server, an unregistered property fails root validation."""
+        annotations.is_on_api_server = True
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=k8s_schema)
+
+    def test_server_unregistered_property_rejected_context_config(self):
+        """On the server, an unregistered property fails context_config."""
+        annotations.is_on_api_server = True
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ctx_schema)
+
+    def test_server_unregistered_property_rejected_workspace_k8s(self):
+        """On the server, an unregistered property fails workspace k8s."""
+        annotations.is_on_api_server = True
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    def test_server_unregistered_property_rejected_workspace_ctx_cfg(self):
+        """On the server, unregistered property fails workspace ctx cfg."""
+        annotations.is_on_api_server = True
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
 if __name__ == "__main__":

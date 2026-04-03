@@ -823,29 +823,32 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
+_QUEUE_NAME_KEYS = [('kueue', 'local_queue_name')]
+
+
 @contextlib.contextmanager
 def remove_queue_name_from_config() -> Iterator[None]:
     """Removes the local_queue_name from the config."""
     config = to_dict()
 
     def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
-        if config.get_nested(keys, None) is not None:
-            logger.debug(f'removing local queue name: setting {keys} to None')
-            config.set_nested(keys, None)
+        for queue_key in _QUEUE_NAME_KEYS:
+            if config.get_nested(keys + queue_key, None) is not None:
+                logger.debug(f'removing local queue name: setting '
+                             f'{keys + queue_key} to None')
+                config.set_nested(keys + queue_key, None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
                                                  {}).items():
-            update_to_none_if_set((*keys, 'context_configs', context_name,
-                                   'kueue', 'local_queue_name'))
+            update_to_none_if_set((*keys, 'context_configs', context_name))
 
     # remove from global config
-    update_to_none_if_set(('kubernetes', 'kueue', 'local_queue_name'))
+    update_to_none_if_set(('kubernetes',))
     remove_from_context_configs(('kubernetes',))
     # remove from all workspaces configs
     for workspace_name, _ in config.get_nested(('workspaces',), {}).items():
-        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes',
-                               'kueue', 'local_queue_name'))
+        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes'))
         remove_from_context_configs(
             ('workspaces', workspace_name, 'kubernetes'))
     logger.debug(
