@@ -11,10 +11,14 @@ environment, the old code's ThreadPool crashes, causing `sky launch`
 to fail in backward compatibility tests with:
   FAILED_PRECHECKS: Task requires aws which is not enabled
 
-This script patches two files in the old env's installed sky package:
+This script patches three files in the old env's installed sky package:
 1. exceptions.py — adds ENDPOINT_CONNECTION_ERROR enum value + message
 2. catalog/data_fetchers/fetch_aws.py — adds EC2 client timeouts and
    catches both ConnectionError and ReadTimeoutError
+3. adaptors/aws.py — adds connect_timeout/read_timeout/total_max_attempts
+   kwargs support to aws.client(), converting them to botocore.Config
+   (required because older boto3 versions don't accept these as direct
+   kwargs to Session.client())
 
 The patch is idempotent: if the old version already has the fix,
 it skips patching.
@@ -135,11 +139,66 @@ def _patch_fetch_aws(fetch_aws_path: pathlib.Path) -> bool:
     return True
 
 
+def _patch_aws_adaptor(aws_path: pathlib.Path) -> bool:
+    """Patch adaptors/aws.py to handle timeout kwargs via botocore.Config.
+
+    The old aws.client() passes **kwargs directly to boto3.Session.client().
+    Older boto3 versions (e.g. 1.35.x on the controller VM) don't accept
+    connect_timeout/read_timeout/total_max_attempts as direct kwargs —
+    these must go through botocore.Config. This patch extracts those kwargs
+    and converts them, matching the fix in the new codebase.
+    """
+    src = aws_path.read_text()
+
+    if 'connect_timeout' in src:
+        print(f'[hotpatch] {aws_path} already handles connect_timeout, '
+              'skipping')
+        return False
+
+    # Find the check_credentials pop line and inject the new kwargs handling
+    # after it. The old code looks like:
+    #     check_credentials = kwargs.pop('check_credentials', True)
+    #     profile = get_workspace_profile()
+    old_pattern = (
+        "    check_credentials = kwargs.pop('check_credentials', True)\n"
+        "\n"
+        "    profile = get_workspace_profile()")
+    new_code = (
+        "    check_credentials = kwargs.pop('check_credentials', True)\n"
+        "    connect_timeout = kwargs.pop('connect_timeout', None)\n"
+        "    read_timeout = kwargs.pop('read_timeout', None)\n"
+        "    total_max_attempts = kwargs.pop('total_max_attempts', None)\n"
+        "\n"
+        "    config_kwargs = {}\n"
+        "    if connect_timeout is not None:\n"
+        "        config_kwargs['connect_timeout'] = connect_timeout\n"
+        "    if read_timeout is not None:\n"
+        "        config_kwargs['read_timeout'] = read_timeout\n"
+        "    if total_max_attempts is not None:\n"
+        "        config_kwargs['retries'] = "
+        "{'total_max_attempts': total_max_attempts}\n"
+        "    if config_kwargs:\n"
+        "        kwargs['config'] = botocore_config().Config(**config_kwargs)\n"
+        "\n"
+        "    profile = get_workspace_profile()")
+
+    if old_pattern not in src:
+        print(f'[hotpatch] WARNING: Could not find check_credentials pattern '
+              f'in {aws_path}. The old version structure may differ.')
+        return False
+
+    src = src.replace(old_pattern, new_code, 1)
+    aws_path.write_text(src)
+    print(f'[hotpatch] Patched {aws_path} with botocore.Config timeout support')
+    return True
+
+
 def main():
     sky_dir = pathlib.Path(sky.__file__).parent
 
     exc_path = sky_dir / 'exceptions.py'
     fetch_aws_path = sky_dir / 'catalog' / 'data_fetchers' / 'fetch_aws.py'
+    aws_adaptor_path = sky_dir / 'adaptors' / 'aws.py'
 
     if not exc_path.exists():
         print(f'[hotpatch] ERROR: {exc_path} not found', file=sys.stderr)
@@ -149,10 +208,16 @@ def main():
         print(f'[hotpatch] ERROR: {fetch_aws_path} not found', file=sys.stderr)
         sys.exit(1)
 
+    if not aws_adaptor_path.exists():
+        print(f'[hotpatch] ERROR: {aws_adaptor_path} not found',
+              file=sys.stderr)
+        sys.exit(1)
+
     print(f'[hotpatch] Sky package at: {sky_dir}')
 
     patched = False
     patched |= _patch_exceptions(exc_path)
+    patched |= _patch_aws_adaptor(aws_adaptor_path)
     patched |= _patch_fetch_aws(fetch_aws_path)
 
     if patched:
