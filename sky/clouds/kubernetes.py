@@ -480,7 +480,7 @@ class Kubernetes(clouds.Cloud):
             Timeout in seconds
         """
         if is_using_queueing:
-            # Return a large timeout to let kueue handle the provisioning
+            # Return a large timeout to let the queue system handle the provisioning
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node

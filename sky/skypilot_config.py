@@ -827,7 +827,11 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('kueue', 'local_queue_name')]
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
-    """Register a new queue name key to be removed from the config."""
+    """Register a new queue name key to be removed from the config.
+
+    This is called during plugin loading at server startup, which is
+    single-threaded, so no lock is needed.
+    """
     if key not in _QUEUE_NAME_KEYS:
         _QUEUE_NAME_KEYS.append(key)
 
