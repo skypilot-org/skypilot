@@ -19,7 +19,7 @@ from sky import skypilot_config
 
 # ---------- Test simple batch (text doubling) ----------
 @pytest.mark.batch
-def test_batch_simple():
+def test_batch_simple(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-smpl-{name}'
     pool_name = 'test-batch-pool'
@@ -30,6 +30,11 @@ def test_batch_simple():
             # --- Pre-cleanup: remove stale pool from previous runs ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool with generic_cloud ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup (extracted from examples/batch/simple/run.sh) ---
             # Create S3 bucket
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
@@ -44,7 +49,7 @@ def test_batch_simple():
             (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
              f'--recursive 2>/dev/null || true'),
 
-            # --- Run batch job (creates pool if needed, blocks until done) ---
+            # --- Run batch job (pool already created, blocks until done) ---
             f'python examples/batch/simple/double_text.py',
 
             # --- Verify job queue format (header columns) ---
@@ -105,7 +110,7 @@ def test_batch_simple():
 @pytest.mark.aws
 @pytest.mark.batch
 @pytest.mark.resource_heavy
-def test_batch_diffusion():
+def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
     pool_name = 'diffusion-pool'
@@ -116,6 +121,11 @@ def test_batch_diffusion():
             # --- Pre-cleanup: remove stale pool from previous runs ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create GPU pool with generic_cloud ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/diffusion/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup (extracted from examples/batch/diffusion/) ---
             # Create S3 bucket
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
@@ -132,7 +142,7 @@ def test_batch_diffusion():
              f'--recursive 2>/dev/null || true'),
             f'aws s3 rm s3://{bucket}/manifest.jsonl 2>/dev/null || true',
 
-            # --- Run batch job (creates GPU pool if needed) ---
+            # --- Run batch job (pool already created, blocks until done) ---
             f'python examples/batch/diffusion/generate_images.py',
 
             # --- Verify job queue ---
@@ -183,7 +193,7 @@ def test_batch_diffusion():
 
 # ---------- Test custom formats (range input, text + JSON file output) --------
 @pytest.mark.batch
-def test_batch_custom_formats():
+def test_batch_custom_formats(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cfmt-{name}'
     pool_name = 'custom-fmt-pool'
@@ -194,6 +204,11 @@ def test_batch_custom_formats():
             # --- Pre-cleanup: remove stale pool from previous runs ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool with generic_cloud ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/custom_formats/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
             # --- Create S3 bucket (output only — no input data needed) ---
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
             # Clean previous output
@@ -240,7 +255,7 @@ def test_batch_custom_formats():
              "print('YAML metadata file valid')\n"
              "PYEOF"),
         ],
-        # Teardown: remove pool, bucket
+        # Teardown: remove pool, bucket, and temp files
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
          f' aws s3 rb s3://{bucket} --force'),
@@ -252,7 +267,7 @@ def test_batch_custom_formats():
 
 # ---------- Test batch cancel ----------
 @pytest.mark.batch
-def test_batch_cancel():
+def test_batch_cancel(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cncl-{name}'
     pool_name = 'test-batch-pool'
@@ -263,6 +278,11 @@ def test_batch_cancel():
             # --- Pre-cleanup: remove stale pool from previous runs ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool with generic_cloud ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
             # --- Setup with large dataset so the job runs long enough ---
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
             # 500 items / batch_size 2 = 250 batches -> plenty of time to cancel
@@ -352,6 +372,11 @@ def test_batch_ha_kill_running(generic_cloud: str):
             # --- Pre-cleanup ---
             f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
             f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool with generic_cloud ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup: 60 items / batch_size 2 = 30 batches ---
             f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
             (f'for i in $(seq 1 60); do '
