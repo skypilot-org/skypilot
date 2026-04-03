@@ -127,13 +127,13 @@ class BatchCoordinator:
                 # Crash happened after all batches done but before merge.
                 logger.info('All batches already completed, skipping '
                             'to merge.')
-                self._merge_results()
+                self._reduce_results()
                 return
 
             self._discover_workers()
             self._shutdown_stale_workers()
             self._dispatch_all()
-            self._merge_results()
+            self._reduce_results()
             logger.info('Batch job completed successfully.')
         except Exception:
             self._cleanup_on_failure()
@@ -168,17 +168,17 @@ class BatchCoordinator:
 
     def _resolve_formats(self) -> None:
         """Resolve typed input/output format handlers from dicts."""
-        self._input_format = io_formats.InputFormat.from_dict(
+        self._input_format = io_formats.InputReader.from_dict(
             self._input_format_dict)
         self._output_formats = [
-            io_formats.OutputFormat.from_dict(d)
+            io_formats.OutputWriter.from_dict(d)
             for d in self._output_formats_dict
         ]
 
     def _count_and_split(self) -> None:
         """Count dataset items and create batch index ranges."""
         logger.info(f'Counting items in {self.dataset_path}')
-        total_items = self._input_format.count_items(self.dataset_path)
+        total_items = len(self._input_format)
         logger.info(f'Dataset contains {total_items} items')
 
         self.batches = []
@@ -680,12 +680,12 @@ class BatchCoordinator:
     # Result merging
     # ------------------------------------------------------------------
 
-    def _merge_results(self) -> None:
-        """Merge per-batch results into the final output."""
+    def _reduce_results(self) -> None:
+        """Reduce per-batch results into the final output."""
         job_id = str(self._managed_job_id)
-        logger.info('Merging results...')
+        logger.info('Reducing results...')
         for fmt in self._output_formats:
-            fmt.merge_results(fmt.path, job_id)
+            fmt.reduce_results(job_id)
             logger.info(f'Results written to {fmt.path}')
 
     # ------------------------------------------------------------------
@@ -698,7 +698,7 @@ class BatchCoordinator:
         for fmt in getattr(self, '_output_formats', []):
             try:
                 logger.info('Cleaning up temporary files for %s...', fmt.path)
-                utils.delete_chunk_files(fmt.path, job_id=job_id)
+                utils.delete_batch_files(fmt.path, job_id=job_id)
                 logger.info('Temporary files cleaned up for %s', fmt.path)
             except Exception as cleanup_error:  # pylint: disable=broad-except
                 logger.warning(f'Failed to clean up temporary files: '

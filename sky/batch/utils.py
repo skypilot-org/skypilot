@@ -359,11 +359,11 @@ def save_jsonl_to_cloud(data: List[Dict[str, Any]], cloud_path: str) -> None:
             os.remove(temp_path)
 
 
-def get_input_chunk_path(output_path: str,
+def get_input_batch_path(output_path: str,
                          start_idx: int,
                          end_idx: int,
                          job_id: Optional[str] = None) -> str:
-    """Generate an input chunk file path for intermediate input data.
+    """Generate an input batch file path for intermediate input data.
 
     Args:
         output_path: Final output path (e.g., 's3://bucket/output.jsonl').
@@ -372,7 +372,7 @@ def get_input_chunk_path(output_path: str,
         job_id: Optional job ID for namespacing.
 
     Returns:
-        Cloud path for the input chunk file.
+        Cloud path for the input batch file.
     """
     provider, bucket, key = parse_cloud_path(output_path)
     base_dir = os.path.dirname(key)
@@ -384,23 +384,23 @@ def get_input_chunk_path(output_path: str,
     else:
         temp_dir = f'{base_dir}{constants.TEMP_DIR_NAME}'
 
-    chunk_name = constants.INPUT_CHUNK_NAME_PATTERN.format(start=start_idx,
+    batch_name = constants.INPUT_BATCH_NAME_PATTERN.format(start=start_idx,
                                                            end=end_idx)
-    chunk_key = f'{temp_dir}/{chunk_name}'
+    batch_key = f'{temp_dir}/{batch_name}'
 
     if provider == 's3':
-        return f's3://{bucket}/{chunk_key}'
+        return f's3://{bucket}/{batch_key}'
     elif provider == 'gs':
-        return f'gs://{bucket}/{chunk_key}'
+        return f'gs://{bucket}/{batch_key}'
     else:
         raise ValueError(f'Unsupported provider: {provider}')
 
 
-def get_chunk_path(output_path: str,
+def get_batch_path(output_path: str,
                    start_idx: int,
                    end_idx: int,
                    job_id: Optional[str] = None) -> str:
-    """Generate a chunk file path for intermediate results.
+    """Generate a batch file path for intermediate results.
 
     Args:
         output_path: Final output path (e.g., 's3://bucket/output.jsonl').
@@ -409,7 +409,7 @@ def get_chunk_path(output_path: str,
         job_id: Optional job ID for namespacing.
 
     Returns:
-        Cloud path for the chunk file.
+        Cloud path for the batch file.
     """
     provider, bucket, key = parse_cloud_path(output_path)
     base_dir = os.path.dirname(key)
@@ -421,28 +421,28 @@ def get_chunk_path(output_path: str,
     else:
         temp_dir = f'{base_dir}{constants.TEMP_DIR_NAME}'
 
-    chunk_name = constants.CHUNK_NAME_PATTERN.format(start=start_idx,
+    batch_name = constants.BATCH_NAME_PATTERN.format(start=start_idx,
                                                      end=end_idx)
-    chunk_key = f'{temp_dir}/{chunk_name}'
+    batch_key = f'{temp_dir}/{batch_name}'
 
     if provider == 's3':
-        return f's3://{bucket}/{chunk_key}'
+        return f's3://{bucket}/{batch_key}'
     elif provider == 'gs':
-        return f'gs://{bucket}/{chunk_key}'
+        return f'gs://{bucket}/{batch_key}'
     else:
         raise ValueError(f'Unsupported provider: {provider}')
 
 
-def list_chunk_files(output_path: str,
+def list_batch_files(output_path: str,
                      job_id: Optional[str] = None) -> List[str]:
-    """List all chunk files for a job.
+    """List all batch files for a job.
 
     Args:
         output_path: Final output path.
         job_id: Optional job ID for namespacing.
 
     Returns:
-        List of chunk file paths, sorted by starting index.
+        List of batch file paths, sorted by starting index.
     """
     provider, bucket, key = parse_cloud_path(output_path)
     base_dir = os.path.dirname(key)
@@ -455,32 +455,32 @@ def list_chunk_files(output_path: str,
         prefix = f'{base_dir}{constants.TEMP_DIR_NAME}/'
 
     if provider == 's3':
-        chunks = _list_s3_objects(bucket, prefix)
+        objects = _list_s3_objects(bucket, prefix)
     elif provider == 'gs':
-        chunks = _list_gcs_objects(bucket, prefix)
+        objects = _list_gcs_objects(bucket, prefix)
     else:
         raise ValueError(f'Unsupported provider: {provider}')
 
-    # Filter to only result chunk files (exclude input_chunk_* files)
-    chunk_files = [
-        c for c in chunks
-        if c.endswith('.jsonl') and os.path.basename(c).startswith('chunk_')
+    # Filter to only result batch files (exclude input_batch_* files)
+    batch_files = [
+        c for c in objects
+        if c.endswith('.jsonl') and os.path.basename(c).startswith('batch_')
     ]
-    chunk_files.sort(key=_extract_chunk_start_index)
+    batch_files.sort(key=_extract_batch_start_index)
 
     # Convert back to full cloud paths
     if provider == 's3':
-        return [f's3://{bucket}/{c}' for c in chunk_files]
+        return [f's3://{bucket}/{c}' for c in batch_files]
     elif provider == 'gs':
-        return [f'gs://{bucket}/{c}' for c in chunk_files]
+        return [f'gs://{bucket}/{c}' for c in batch_files]
     return []
 
 
-def _extract_chunk_start_index(chunk_path: str) -> int:
-    """Extract the starting index from a chunk file path."""
-    # chunk_00000000-00000031.jsonl -> 0
-    filename = os.path.basename(chunk_path)
-    if filename.startswith('chunk_') and '-' in filename:
+def _extract_batch_start_index(batch_path: str) -> int:
+    """Extract the starting index from a batch file path."""
+    # batch_00000000-00000031.jsonl -> 0
+    filename = os.path.basename(batch_path)
+    if filename.startswith('batch_') and '-' in filename:
         start_str = filename.split('_')[1].split('-')[0]
         try:
             return int(start_str)
@@ -506,8 +506,8 @@ def _list_gcs_objects(bucket: str, prefix: str) -> List[str]:
     return [blob.name for blob in blobs]
 
 
-def delete_chunk_files(output_path: str, job_id: Optional[str] = None) -> None:
-    """Delete all chunk files for a specific job.
+def delete_batch_files(output_path: str, job_id: Optional[str] = None) -> None:
+    """Delete all batch files for a specific job.
 
     IMPORTANT: Always provide job_id to avoid deleting files from other jobs
     when multiple batch jobs share the same bucket.
@@ -521,26 +521,26 @@ def delete_chunk_files(output_path: str, job_id: Optional[str] = None) -> None:
         ValueError: If job_id is not provided.
     """
     if job_id is None:
-        raise ValueError('job_id is required for delete_chunk_files().')
+        raise ValueError('job_id is required for delete_batch_files().')
 
-    chunk_files = list_chunk_files(output_path, job_id)
-    for chunk_path in chunk_files:
-        provider, bucket, key = parse_cloud_path(chunk_path)
+    batch_files = list_batch_files(output_path, job_id)
+    for batch_path in batch_files:
+        provider, bucket, key = parse_cloud_path(batch_path)
         if provider == 's3':
             _delete_s3_object(bucket, key)
         elif provider == 'gs':
             _delete_gcs_object(bucket, key)
 
 
-def delete_input_chunk_files(output_path: str,
+def delete_input_batch_files(output_path: str,
                              job_id: Optional[str] = None) -> None:
-    """Delete all input chunk files for a specific job.
+    """Delete all input batch files for a specific job.
 
     IMPORTANT: Always provide job_id to avoid deleting files from other jobs
     when multiple batch jobs share the same bucket.
 
     Lists objects in the job-specific temp directory and deletes those matching
-    the ``input_chunk_*`` prefix.
+    the ``input_batch_*`` prefix.
 
     Args:
         output_path: Final output path.
@@ -551,7 +551,7 @@ def delete_input_chunk_files(output_path: str,
         ValueError: If job_id is not provided.
     """
     if job_id is None:
-        raise ValueError('job_id is required for delete_input_chunk_files().')
+        raise ValueError('job_id is required for delete_input_batch_files().')
 
     provider, bucket, key = parse_cloud_path(output_path)
     base_dir = os.path.dirname(key)
@@ -568,12 +568,12 @@ def delete_input_chunk_files(output_path: str,
     else:
         raise ValueError(f'Unsupported provider: {provider}')
 
-    input_chunks = [
+    input_batches = [
         obj for obj in all_objects
-        if os.path.basename(obj).startswith('input_chunk_')
+        if os.path.basename(obj).startswith('input_batch_')
     ]
 
-    for obj_key in input_chunks:
+    for obj_key in input_batches:
         if provider == 's3':
             _delete_s3_object(bucket, obj_key)
         elif provider == 'gs':
@@ -594,15 +594,15 @@ def _delete_gcs_object(bucket: str, key: str) -> None:
     blob.delete()
 
 
-def concatenate_chunks_to_output(output_path: str,
-                                 job_id: Optional[str] = None) -> None:
-    """Concatenate all chunk files into the final output file and clean up.
+def concatenate_batches_to_output(output_path: str,
+                                  job_id: Optional[str] = None) -> None:
+    """Concatenate all batch files into the final output file and clean up.
 
     IMPORTANT: Always provide job_id to ensure only this job's temp files are
     processed and cleaned up when multiple batch jobs share the same bucket.
 
-    Chunks are processed in order based on their starting indices to maintain
-    the original data order. After concatenation, temporary chunk files are
+    Batches are processed in order based on their starting indices to maintain
+    the original data order. After concatenation, temporary batch files are
     automatically deleted from the job-specific directory.
 
     Args:
@@ -615,23 +615,23 @@ def concatenate_chunks_to_output(output_path: str,
     """
     if job_id is None:
         raise ValueError(
-            'job_id is required for concatenate_chunks_to_output() to prevent '
-            'accidentally processing or deleting files from other jobs sharing '
-            'the same bucket.')
+            'job_id is required for concatenate_batches_to_output() to '
+            'prevent accidentally processing or deleting files from other '
+            'jobs sharing the same bucket.')
 
-    chunk_files = list_chunk_files(output_path, job_id)
-    if not chunk_files:
+    batch_files = list_batch_files(output_path, job_id)
+    if not batch_files:
         return
 
-    # Download and concatenate all chunks
+    # Download and concatenate all batches
     all_data: List[Dict[str, Any]] = []
-    for chunk_path in chunk_files:
-        chunk_data = load_jsonl_from_cloud(chunk_path)
-        all_data.extend(chunk_data)
+    for batch_path in batch_files:
+        batch_data = load_jsonl_from_cloud(batch_path)
+        all_data.extend(batch_data)
 
     # Upload the concatenated result
     save_jsonl_to_cloud(all_data, output_path)
 
     # Clean up job-specific temp files only (safe for multi-job environments)
-    delete_chunk_files(output_path, job_id)
-    delete_input_chunk_files(output_path, job_id)
+    delete_batch_files(output_path, job_id)
+    delete_input_batch_files(output_path, job_id)

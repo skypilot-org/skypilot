@@ -56,8 +56,8 @@ _current_batch_lock = threading.Lock()
 
 _output_path: Optional[str] = None
 _job_id: Optional[str] = None
-_dataset_format: Optional[io_formats.InputFormat] = None
-_output_formats: List[io_formats.OutputFormat] = []
+_dataset_format: Optional[io_formats.InputReader] = None
+_output_formats: List[io_formats.OutputWriter] = []
 
 # ---------------------------------------------------------------------------
 # HTTP handler (localhost only)
@@ -102,23 +102,22 @@ class _WorkerHandler(http_server.BaseHTTPRequestHandler):
     # ---- endpoints --------------------------------------------------------
 
     def _handle_feed_batch(self) -> None:
-        """Download chunk from source, feed to load(), wait for completion."""
+        """Download batch from source, feed to load(), wait for completion."""
         body = self._read_json()
         dataset_path = body['dataset_path']
         start_idx = int(body['start_idx'])
         end_idx = int(body['end_idx'])
         batch_idx = int(body['batch_idx'])
 
-        logger.info('Downloading chunk [%d-%d] from %s', start_idx, end_idx,
+        logger.info('Downloading batch [%d-%d] from %s', start_idx, end_idx,
                     dataset_path)
 
-        # Download chunk directly from source dataset using format handler
+        # Download batch directly from source dataset using format handler
         assert _dataset_format is not None, 'Worker not initialized'
         # Use per-job cache directory to avoid stale data from previous jobs
         # that used the same S3 path with different content.
         cache_dir = f'/tmp/sky_batch_cache/{_job_id}'
-        data = _dataset_format.download_chunk(dataset_path, start_idx, end_idx,
-                                              cache_dir)
+        data = _dataset_format.download_batch(start_idx, end_idx, cache_dir)
         logger.info('Loaded %d items for batch [%d-%d]', len(data), start_idx,
                     end_idx)
 
@@ -229,7 +228,7 @@ def load() -> Iterator[List[Dict[str, Any]]]:
 def save_results(results: List[Dict[str, Any]]) -> None:
     """Save results for the current batch.
 
-    Uploads the result chunk to cloud storage and signals the worker
+    Uploads the results to cloud storage and signals the worker
     service that this batch is complete.  This causes the ``sky.exec()``
     notify job on the worker to exit with SUCCEEDED, which the controller
     detects via ``sdk.job_status()`` polling.
@@ -260,10 +259,9 @@ def save_results(results: List[Dict[str, Any]]) -> None:
     # Upload results using all output formats.
     assert _output_formats and _job_id, 'Worker not initialized'
     for fmt in _output_formats:
-        chunk_path = fmt.upload_chunk(results, fmt.path, batch_item.batch_idx,
-                                      batch_item.start_idx, batch_item.end_idx,
-                                      _job_id)
-        logger.info('Saved results to %s', chunk_path)
+        result_path = fmt.upload_batch(results, batch_item.start_idx,
+                                       batch_item.end_idx, _job_id)
+        logger.info('Saved results to %s', result_path)
 
     # Signal completion — unblocks the HTTP handler in worker.py.
     signal_batch_done()
@@ -274,15 +272,15 @@ def save_results(results: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_input_format() -> io_formats.InputFormat:
+def _resolve_input_format() -> io_formats.InputReader:
     """Resolve input format from the ``SKY_BATCH_INPUT_FORMAT`` env var."""
     env_val = os.environ.get('SKY_BATCH_INPUT_FORMAT')
     if not env_val:
         raise ValueError('SKY_BATCH_INPUT_FORMAT env var is required')
-    return io_formats.InputFormat.from_dict(json.loads(env_val))
+    return io_formats.InputReader.from_dict(json.loads(env_val))
 
 
-def _resolve_output_formats() -> List[io_formats.OutputFormat]:
+def _resolve_output_formats() -> List[io_formats.OutputWriter]:
     """Resolve output formats from the ``SKY_BATCH_OUTPUT_FORMATS`` env var."""
     env_val = os.environ.get('SKY_BATCH_OUTPUT_FORMATS')
     if not env_val:
@@ -290,7 +288,7 @@ def _resolve_output_formats() -> List[io_formats.OutputFormat]:
     dicts = json.loads(env_val)
     if not dicts:
         raise ValueError('SKY_BATCH_OUTPUT_FORMATS env var is empty')
-    return [io_formats.OutputFormat.from_dict(d) for d in dicts]
+    return [io_formats.OutputWriter.from_dict(d) for d in dicts]
 
 
 # ---------------------------------------------------------------------------

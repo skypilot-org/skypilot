@@ -127,10 +127,10 @@ JOBS_RECOVERY_STRATEGY_REGISTRY: _Registry = (
         exclude=None,
         type_register=True))
 
-INPUT_FORMAT_REGISTRY: _Registry = _Registry['io_formats.InputFormat'](
-    registry_name='input format', exclude=None, type_register=True)
+INPUT_READER_REGISTRY: _Registry = _Registry['io_formats.InputReader'](
+    registry_name='input reader', exclude=None, type_register=True)
 
-OUTPUT_FORMAT_REGISTRY: _Registry = _Registry['io_formats.OutputFormat'](
-    registry_name='output format', exclude=None, type_register=True)
+OUTPUT_WRITER_REGISTRY: _Registry = _Registry['io_formats.OutputWriter'](
+    registry_name='output writer', exclude=None, type_register=True)
 
 # TODO(tian): Add a registry for spot placer.

@@ -2,7 +2,7 @@
 
 Provides a simple interface for distributing batch processing workloads
 across a pool of workers via managed jobs.  The Dataset is created from
-a typed ``InputFormat`` (e.g. ``JsonInput``) and dispatched with ``map()``.
+a typed ``InputReader`` (e.g. ``JsonInput``) and dispatched with ``map()``.
 """
 import logging
 import time
@@ -112,11 +112,11 @@ class Dataset:
         input_format: The typed input format descriptor.
     """
 
-    def __init__(self, input_format: io_formats.InputFormat) -> None:
+    def __init__(self, input_format: io_formats.InputReader) -> None:
         """Initialize a Dataset from a typed input format.
 
         Args:
-            input_format: An ``InputFormat`` descriptor (e.g.
+            input_format: An ``InputReader`` descriptor (e.g.
                           ``JsonInput('s3://bucket/data.jsonl')``).
         """
         self.input_format = input_format
@@ -126,8 +126,8 @@ class Dataset:
             mapper_fn: Callable,
             pool_name: str,
             batch_size: int,
-            output: Union[io_formats.OutputFormat,
-                          List[io_formats.OutputFormat]],
+            output: Union[io_formats.OutputWriter,
+                          List[io_formats.OutputWriter]],
             activate_env: Optional[str] = None) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
@@ -139,7 +139,7 @@ class Dataset:
                        decorated with @sky.batch.remote_function.
             pool_name: Name of the worker pool to use.
             batch_size: Number of items per batch sent to each worker.
-            output: An ``OutputFormat`` descriptor or a list of descriptors.
+            output: An ``OutputWriter`` descriptor or a list of descriptors.
                     Examples:
                       - ``JsonOutput('s3://bucket/out.jsonl')``
                       - ``[ImageOutput('s3://…/', column='image'),
@@ -166,7 +166,7 @@ class Dataset:
             raise ValueError(f'batch_size must be positive, got: {batch_size}')
 
         # Normalize to list internally.
-        outputs: List[io_formats.OutputFormat] = (output if isinstance(
+        outputs: List[io_formats.OutputWriter] = (output if isinstance(
             output, list) else [output])
 
         for fmt in outputs:
