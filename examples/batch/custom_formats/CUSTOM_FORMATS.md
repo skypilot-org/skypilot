@@ -117,10 +117,14 @@ creates 4 batches. The first batch calls
 
 ### Example: JSONL file with caching (built-in `JsonInput`)
 
-This is how the built-in `JsonInput` reader works. It downloads the
-full JSONL file from cloud storage on the first batch, caches it
-locally, and then reads from the cache for subsequent batches on the
-same worker. This avoids re-downloading the file for every batch.
+This is how the built-in `JsonInput` reader works. Cloud storage APIs
+(S3, GCS) only support downloading entire objects -- there is no way to
+fetch just lines 10-19 from a single JSONL file. So `JsonInput`
+downloads the full file on the first batch, caches it locally on the
+worker, and reads from the cache for subsequent batches. If your dataset
+is very large and you want each worker to only download the portion it
+needs, split your data into multiple files and write a custom reader
+that downloads only the relevant file(s) per batch.
 
 ```python
 @registry.INPUT_READER_REGISTRY.type_register(name='json')
