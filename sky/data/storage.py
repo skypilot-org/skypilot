@@ -5247,8 +5247,12 @@ class SeewebStore(S3CompatibleStore):
                               read_only: bool = False) -> str:
         endpoint_url = seeweb_adaptor.get_endpoint()
         return mounting_utils.get_seeweb_mount_cmd(
-            seeweb_adaptor.SEEWEB_PROFILE_NAME, bucket_name, endpoint_url,
-            mount_path, bucket_sub_path, read_only=read_only)
+            seeweb_adaptor.SEEWEB_PROFILE_NAME,
+            bucket_name,
+            endpoint_url,
+            mount_path,
+            bucket_sub_path,
+            read_only=read_only)
 
     def mount_cached_command(self,
                              mount_path: str,

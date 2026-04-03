@@ -270,9 +270,13 @@ class Seeweb(clouds.Cloud):
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
     ) -> Optional[str]:
+        del local_disk, use_spot, max_hourly_cost  # unused
         result = catalog.get_default_instance_type(cpus=cpus,
                                                    memory=memory,
                                                    disk_tier=disk_tier,
