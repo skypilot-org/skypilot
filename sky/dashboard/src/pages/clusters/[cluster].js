@@ -249,7 +249,7 @@ function ClusterDetails() {
             refreshClusterJobsOnly={() => {}}
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
-            isGrafanaAvailable={false}
+            isGrafanaAvailable={isGrafanaAvailable}
             gpuMetricsRefreshTrigger={0}
             isHistoricalCluster={true}
           />
@@ -703,6 +703,8 @@ function ActiveTab({
               displayName={clusterData?.cluster}
               refreshTrigger={gpuMetricsRefreshTrigger}
               storageKey="skypilot-gpu-metrics-expanded"
+              startTime={clusterData?.time || clusterData?.start_at}
+              endTime={clusterData?.end_at}
             />
           </div>
         )}

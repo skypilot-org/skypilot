@@ -531,6 +531,8 @@ function JobDetails() {
                       detailJobData.name
                 }
                 storageKey={GPU_METRICS_EXPANDED_KEY}
+                startTime={gpuMetricsTask?.start_at}
+                endTime={gpuMetricsTask?.end_at}
                 noMetricsMessage={
                   gpuMetricsTask?.pool
                     ? 'GPU metrics are not available for pool jobs.'

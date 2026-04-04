@@ -208,6 +208,10 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Cloud-provider cluster name (for GPU metrics on terminated clusters)
+    sqlalchemy.Column('cluster_name_on_cloud',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 
@@ -812,6 +816,8 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+        cluster_name_on_cloud = getattr(cluster_handle, 'cluster_name_on_cloud',
+                                        None)
         if cluster_row and cluster_row.workspace:
             history_workspace = cluster_row.workspace
         if cluster_row and cluster_row.user_hash:
@@ -845,6 +851,7 @@ def add_or_update_cluster(cluster_name: str,
             region=region,
             zone=zone,
             node_names=node_names,
+            cluster_name_on_cloud=cluster_name_on_cloud,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -867,6 +874,8 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
+                cluster_history_table.c.cluster_name_on_cloud:
+                    cluster_name_on_cloud,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1999,8 +2008,9 @@ def get_clusters_from_history(
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
                 cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+                cluster_history_table.c.node_names,
+                cluster_history_table.c.cluster_name_on_cloud,
+                cluster_table.c.status, cluster_table.c.workspace)
         else:
             query = session.query(
                 cluster_history_table.c.cluster_hash,
@@ -2013,8 +2023,9 @@ def get_clusters_from_history(
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
                 cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+                cluster_history_table.c.node_names,
+                cluster_history_table.c.cluster_name_on_cloud,
+                cluster_table.c.status, cluster_table.c.workspace)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
@@ -2105,6 +2116,7 @@ def get_clusters_from_history(
             'workspace': workspace,
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
+            'cluster_name_on_cloud': row.cluster_name_on_cloud,
         }
         if not abbreviate_response:
             record['last_creation_yaml'] = row.last_creation_yaml

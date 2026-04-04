@@ -298,6 +298,8 @@ export async function getManagedJobs(options = {}) {
         current_cluster_name: job.current_cluster_name,
         cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
+        start_at: job.start_at ? new Date(job.start_at * 1000) : null,
+        end_at: job.end_at ? new Date(job.end_at * 1000) : null,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
         node_names: job.node_names, // Node names for dashboard display

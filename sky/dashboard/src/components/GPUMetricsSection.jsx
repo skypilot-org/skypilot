@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -20,6 +20,9 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
+// Duration multipliers for preset parsing
+const DURATION_MS = { m: 60000, h: 3600000, d: 86400000 };
+
 // GPU panels configuration
 const GPU_PANELS = [
   { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
@@ -27,6 +30,42 @@ const GPU_PANELS = [
   { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
   { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
 ];
+
+/**
+ * Parse a duration preset string (e.g., '1h', '15m', '7d') to milliseconds.
+ */
+const parseDurationMs = (preset) => {
+  const match = preset.match(/^(\d+)([mhd])$/);
+  if (!match) return 3600000;
+  return parseInt(match[1]) * (DURATION_MS[match[2]] || 3600000);
+};
+
+/**
+ * Format a time range value for display.
+ * Relative values like "now-1h" are shown as-is.
+ * Absolute epoch ms values are formatted as readable dates.
+ */
+const formatTimeDisplay = (value) => {
+  if (typeof value === 'string' && value.startsWith('now')) return value;
+  const ts = parseInt(value);
+  if (isNaN(ts)) return value;
+  return new Date(ts).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+/**
+ * Get epoch ms from a Date or number.
+ */
+const toEpochMs = (time) => {
+  if (!time) return null;
+  if (time instanceof Date) return time.getTime();
+  return typeof time === 'number' ? time : null;
+};
 
 /**
  * Build Grafana panel URL with filters
@@ -57,6 +96,8 @@ const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
  * @param {string} props.storageKey - LocalStorage key for expanded state
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
  * @param {string} props.noMetricsMessage - Custom message when no metrics available
+ * @param {Date|number|null} props.startTime - Workload start time (for lifetime range)
+ * @param {Date|number|null} props.endTime - Workload end time (null if still running)
  */
 export function GPUMetricsSection({
   clusterNameOnCloud,
@@ -65,8 +106,34 @@ export function GPUMetricsSection({
   storageKey = 'skypilot-gpu-metrics-expanded',
   headerExtra = null,
   noMetricsMessage = 'No GPU metrics available.',
+  startTime = null,
+  endTime = null,
 }) {
-  const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
+  const startMs = useMemo(() => toEpochMs(startTime), [startTime]);
+  const endMs = useMemo(() => toEpochMs(endTime), [endTime]);
+  const isTerminated = endMs != null;
+
+  const [timeRange, setTimeRange] = useState(() => {
+    if (startMs && endMs) {
+      // Terminated workload: default to lifetime
+      return { from: String(startMs), to: String(endMs) };
+    }
+    return { from: 'now-1h', to: 'now' };
+  });
+
+  // Reset time range when startMs/endMs change (e.g., switching tasks
+  // in multi-task job groups). useState lazy initializer only runs once,
+  // so we need this effect to keep the time range in sync with props.
+  useEffect(() => {
+    if (startMs && endMs) {
+      setTimeRange({ from: String(startMs), to: String(endMs) });
+    } else if (startMs) {
+      setTimeRange({ from: String(startMs), to: 'now' });
+    } else {
+      setTimeRange({ from: 'now-1h', to: 'now' });
+    }
+  }, [startMs, endMs]);
+
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(storageKey);
@@ -76,10 +143,46 @@ export function GPUMetricsSection({
   });
 
   const handleTimeRangePreset = (preset) => {
-    setTimeRange({
-      from: `now-${preset}`,
-      to: 'now',
-    });
+    if (isTerminated && endMs) {
+      // For terminated workloads, presets are relative to end time
+      const durationMs = parseDurationMs(preset);
+      setTimeRange({
+        from: String(endMs - durationMs),
+        to: String(endMs),
+      });
+    } else {
+      setTimeRange({
+        from: `now-${preset}`,
+        to: 'now',
+      });
+    }
+  };
+
+  const handleLifetimePreset = () => {
+    if (startMs && endMs) {
+      setTimeRange({ from: String(startMs), to: String(endMs) });
+    } else if (startMs) {
+      setTimeRange({ from: String(startMs), to: 'now' });
+    }
+  };
+
+  const isLifetimeActive = useMemo(() => {
+    if (!startMs) return false;
+    const expectedTo = endMs ? String(endMs) : 'now';
+    return timeRange.from === String(startMs) && timeRange.to === expectedTo;
+  }, [timeRange, startMs, endMs]);
+
+  const isPresetActive = (preset) => {
+    if (isTerminated && endMs) {
+      const durationMs = parseDurationMs(preset);
+      return (
+        timeRange.from === String(endMs - durationMs) &&
+        timeRange.to === String(endMs)
+      );
+    }
+    return (
+      timeRange.from === `now-${preset}` && timeRange.to === 'now'
+    );
   };
 
   const toggleExpanded = () => {
@@ -147,13 +250,24 @@ export function GPUMetricsSection({
                     Time Range:
                   </label>
                   <div className="flex gap-1">
+                    {isTerminated && startMs && (
+                      <button
+                        onClick={handleLifetimePreset}
+                        className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                          isLifetimeActive
+                            ? 'bg-sky-blue text-white border-sky-blue'
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        Lifetime
+                      </button>
+                    )}
                     {TIME_RANGE_PRESETS.map((preset) => (
                       <button
                         key={preset.value}
                         onClick={() => handleTimeRangePreset(preset.value)}
                         className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
-                          timeRange.from === `now-${preset.value}` &&
-                          timeRange.to === 'now'
+                          isPresetActive(preset.value)
                             ? 'bg-sky-blue text-white border-sky-blue'
                             : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
                         }`}
@@ -167,8 +281,9 @@ export function GPUMetricsSection({
 
               {/* Show current selection info */}
               <div className="mt-2 text-xs text-gray-500">
-                Showing: {displayName} • Time: {timeRange.from} to{' '}
-                {timeRange.to}
+                Showing: {displayName} • Time:{' '}
+                {formatTimeDisplay(timeRange.from)} to{' '}
+                {formatTimeDisplay(timeRange.to)}
               </div>
             </div>
 

@@ -158,8 +158,14 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
   try {
     const requestBody = {
       days: days,
-      dashboard_summary_response: true,
     };
+
+    // Only use dashboard_summary_response for listing all clusters.
+    // When fetching a specific cluster, we need usage_intervals for
+    // computing the time range for GPU metrics on terminated clusters.
+    if (!clusterHash) {
+      requestBody.dashboard_summary_response = true;
+    }
 
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
@@ -180,7 +186,17 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
       // Get user name - need to look up from user_hash if needed
       let user_name = cluster.user_name || '-';
 
-      // Extract resource info
+      // Compute end time from usage_intervals or duration
+      const usageIntervals = cluster.usage_intervals || [];
+      let endAt = null;
+      if (usageIntervals.length > 0) {
+        const lastInterval = usageIntervals[usageIntervals.length - 1];
+        if (lastInterval[1]) {
+          endAt = new Date(lastInterval[1] * 1000);
+        }
+      } else if (cluster.launched_at && cluster.duration) {
+        endAt = new Date((cluster.launched_at + cluster.duration) * 1000);
+      }
 
       return {
         status: cluster.status
@@ -204,9 +220,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
         autostop: -1,
         last_event: cluster.last_event,
         to_down: false,
-        cluster_name_on_cloud: null,
+        cluster_name_on_cloud: cluster.cluster_name_on_cloud || null,
         node_names: cluster.node_names || null,
         usage_intervals: cluster.usage_intervals,
+        start_at: cluster.launched_at
+          ? new Date(cluster.launched_at * 1000)
+          : null,
+        end_at: endAt,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
         events: [
