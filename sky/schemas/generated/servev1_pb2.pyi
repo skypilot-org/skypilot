@@ -113,3 +113,43 @@ class UpdateServiceRequest(_message.Message):
 class UpdateServiceResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class StreamReplicaLogsRequest(_message.Message):
+    __slots__ = ("service_name", "replica_id", "follow", "tail", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    REPLICA_ID_FIELD_NUMBER: _ClassVar[int]
+    FOLLOW_FIELD_NUMBER: _ClassVar[int]
+    TAIL_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    replica_id: int
+    follow: bool
+    tail: int
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., replica_id: _Optional[int] = ..., follow: bool = ..., tail: _Optional[int] = ..., pool: bool = ...) -> None: ...
+
+class StreamReplicaLogsResponse(_message.Message):
+    __slots__ = ("log_line",)
+    LOG_LINE_FIELD_NUMBER: _ClassVar[int]
+    log_line: str
+    def __init__(self, log_line: _Optional[str] = ...) -> None: ...
+
+class StreamServeProcessLogsRequest(_message.Message):
+    __slots__ = ("service_name", "stream_controller", "follow", "tail", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    STREAM_CONTROLLER_FIELD_NUMBER: _ClassVar[int]
+    FOLLOW_FIELD_NUMBER: _ClassVar[int]
+    TAIL_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    stream_controller: bool
+    follow: bool
+    tail: int
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., stream_controller: bool = ..., follow: bool = ..., tail: _Optional[int] = ..., pool: bool = ...) -> None: ...
+
+class StreamServeProcessLogsResponse(_message.Message):
+    __slots__ = ("log_line",)
+    LOG_LINE_FIELD_NUMBER: _ClassVar[int]
+    log_line: str
+    def __init__(self, log_line: _Optional[str] = ...) -> None: ...
