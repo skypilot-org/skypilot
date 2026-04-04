@@ -2309,8 +2309,20 @@ def check_credentials(context: Optional[str],
     """
     try:
         namespace = get_kube_config_context_namespace(context)
-        kubernetes.core_api(context).list_namespaced_pod(
-            namespace, limit=1, _request_timeout=timeout)
+        # Use _preload_content=False to avoid the kubernetes client's full
+        # deserialization, which can fail with OverflowError when parsing
+        # dates from API responses or exec-based auth credentials that have
+        # out-of-range expiry dates (e.g., year 9999 or 0001). We only need to verify
+        # that the API call succeeds, not parse the full response.
+        # Note: The kubernetes client still raises ApiException for HTTP errors
+        # (401, 403, etc.) before returning the response, so credential/permission
+        # errors are still properly caught by the except blocks below.
+        response = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            limit=1,
+            _request_timeout=timeout,
+            _preload_content=False)
+        response.release_conn()
         # This call is "free" because this function is a cached call,
         # and it will not be called again in this function.
         get_kubernetes_nodes(context=context)
@@ -2334,6 +2346,19 @@ def check_credentials(context: Optional[str],
                        'is stable.')
     except ValueError as e:
         return False, common_utils.format_exception(e)
+    except OverflowError as e:
+        # Safety net: most OverflowErrors from out-of-range expiry dates
+        # are handled by _patch_api_client_overflow in sky/adaptors/
+        # kubernetes.py, but this catches any remaining edge cases (e.g.,
+        # errors during config loading before the hook wrapper is applied).
+        return False, ('Failed to load kubeconfig: date parsing error. '
+                       'If your kubeconfig uses exec-based auth (has "exec:" '
+                       'under "users:"), the credential plugin may be '
+                       'returning an expirationTimestamp with an out-of-range '
+                       'date (e.g., year 9999 or year 0001). Try updating '
+                       'the credential plugin or reconfiguring the auth '
+                       'provider. '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
