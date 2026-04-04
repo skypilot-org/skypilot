@@ -5,16 +5,16 @@ Managed Jobs
 
 .. tip::
 
-  This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
+  Use managed jobs for auto-recovery when scaling out --- running a single job for long durations, or running many jobs in parallel.
 
 .. seealso::
 
-   :doc:`pools` for running batch inference workloads across multiple infrastructure.
+   :doc:`pools` for running batch inference workloads or workloads with expensive worker setup.
 
    :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
-   can communicate with each other.
+   can communicate with each other (e.g., RL workloads).
 
-SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from failures (job preemptions, GPU errors, node crashes, etc.), retry application errors, and clean up resources when done. Managed jobs also support cost-saving spot instances with automatic preemption recovery.
 
 To start a managed job, use :code:`sky jobs launch`:
 
@@ -47,12 +47,12 @@ The job is launched on a temporary SkyPilot cluster, managed end-to-end, and aut
 
 Managed jobs have several benefits:
 
-#. :ref:`Use spot instances <spot-jobs>`: Jobs can run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
-#. :ref:`Scale across regions and clouds <scaling-to-many-jobs>`: Easily run and manage **thousands of jobs at once**, using instances and GPUs across multiple regions/clouds.
-#. :ref:`Recover from failure <failure-recovery>`: When a job fails, you can automatically retry it on a new cluster, eliminating flaky failures.
+#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from job preemptions, GPU failures, NCCL timeouts, node crashes, or hardware issues. Application errors can also be retried for a configurable number of times.
+#. :ref:`Scale across infra (clusters, regions, clouds) <scaling-to-many-jobs>`: Easily run and manage many jobs across your infrastructure choices.
 #. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks.
    Useful for running a sequence of tasks that depend on each other, e.g., data
    processing, training a model, and then running inference on it.
+#. :ref:`Use spot instances <spot-jobs>`: Optionally run on auto-recovering spot instances to save ~70\% on GPU costs while maintaining reliability through automatic preemption recovery.
 
 
 .. contents:: Contents
@@ -74,7 +74,6 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For e
 
   resources:
     accelerators: V100:1
-    use_spot: true  # Use spot instances to save cost.
 
   envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
@@ -124,7 +123,7 @@ To see all flags, you can run :code:`sky jobs launch --help` or see the :ref:`CL
 SkyPilot will launch and start monitoring the job.
 
 - Under the hood, SkyPilot spins up a temporary cluster for the job.
-- If a spot preemption or any machine failure happens, SkyPilot will automatically search for resources across regions and clouds to re-launch the job.
+- If any failure happens (GPU errors, node crashes, or job preemptions), SkyPilot will automatically search for resources to re-launch the job.
 - Resources are cleaned up as soon as the job is finished.
 
 .. tip::
@@ -143,8 +142,8 @@ SkyPilot will launch and start monitoring the job.
      - :code:`sky jobs launch` (managed jobs)
    * - Long-lived, manually managed cluster
      - Dedicated auto-managed cluster for each job
-   * - Spot preemptions must be manually recovered
-     - Spot preemptions are auto-recovered
+   * - Failures must be manually recovered
+     - Failures are auto-recovered
    * - Number of parallel jobs limited by cluster resources
      - Easily manage hundreds or thousands of jobs at once
    * - Good for interactive dev
@@ -167,7 +166,7 @@ See a list of managed jobs:
   Fetching managed jobs...
   Managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  2  roberta  1x [A100:8]         2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
 This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
@@ -204,96 +203,38 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
 The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
-.. _spot-jobs:
-
-Running on spot instances
--------------------------
-
-Managed jobs can run on spot instances, and preemptions are auto-recovered by SkyPilot.
-
-To run on spot instances, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
-
-.. code-block:: yaml
-
-  name: spot-job
-
-  resources:
-    accelerators: A100:8
-    use_spot: true
-
-  run: ...
-
-.. tip::
-   Spot instances are cloud VMs that may be "preempted".
-   The cloud provider can forcibly shut down the underlying VM and remove your access to it, interrupting the job running on that instance.
-
-   In exchange, spot instances are significantly cheaper than normal instances that are not subject to preemption (so-called "on-demand" instances).
-   Depending on the cloud and VM type, spot instances can be 70-90% cheaper.
-
-SkyPilot automatically finds available spot instances across regions and clouds to maximize availability.
-Any spot preemptions are automatically handled by SkyPilot without user intervention.
-
-.. note::
-   By default, a job will be restarted from scratch after each preemption recovery.
-   To avoid redoing work after recovery, implement :ref:`checkpointing and recovery <checkpointing>`.
-   Your application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can then reload the latest checkpoint when restarted.
-
-Here is :ref:`an example of a training job <bert>` failing over different regions across AWS and GCP.
-
-.. image:: https://i.imgur.com/Vteg3fK.gif
-  :width: 600
-  :alt: GIF for BERT training on Spot V100
-  :align: center
-
-Quick comparison between *managed spot jobs* vs. *launching unmanaged spot clusters*:
-
-.. list-table::
-   :widths: 30 18 12 35
-   :header-rows: 1
-
-   * - Command
-     - Managed?
-     - SSH-able?
-     - Best for
-   * - :code:`sky jobs launch --use-spot`
-     - Yes, preemptions are auto-recovered
-     - No
-     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
-   * - :code:`sky launch --use-spot`
-     - No, preemptions are not handled
-     - Yes
-     - Interactive dev on spot instances (especially for hardware with low preemption rates)
-
-
-Either spot or on-demand/reserved
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-By default, on-demand instances will be used (not spot instances). To use spot instances, you must specify :code:`--use-spot` on the command line or :code:`use_spot: true` in your SkyPilot YAML.
-
-However, you can also tell SkyPilot to use **both spot instance and on-demand instances**, depending on availability. In your SkyPilot YAML, use ``any_of`` to specify either spot or on-demand/reserved instances as
-candidate resources for a job. See documentation :ref:`here
-<multiple-resources>` for more details.
-
-.. code-block:: yaml
-
-  resources:
-    accelerators: A100:8
-    any_of:
-      - use_spot: true
-      - use_spot: false
-
-In this example, SkyPilot will choose the cheapest resource to use, which almost certainly
-will be spot instances. If spot instances are not available, SkyPilot will fall back to launching on-demand/reserved instances.
-
-
 .. _checkpointing:
 
 Checkpointing and recovery
 --------------------------
 
-To recover quickly from spot instance preemptions, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints). Any data on disk that is not stored inside a cloud bucket will be lost during the recovery process.
+To recover quickly from failures (hardware issues, preemptions, etc.), your job should checkpoint its state periodically to persistent storage. When a job is auto-recovered after a failure, it can reload the latest checkpoint and resume from there instead of starting over.
 
-Below is an example of mounting a bucket to :code:`/checkpoint`:
+SkyPilot supports several persistent storage options for checkpointing:
+
+Using Kubernetes volumes
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Kubernetes, :ref:`persistent volumes <volumes-on-kubernetes>` provide high-performance storage for checkpoints. Volumes are ideal when your jobs run on Kubernetes clusters with shared filesystems (NFS, JuiceFS, Nebius shared filesystem, etc.).
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s
+
+  volumes:
+    /checkpoint: my-volume  # Mount a persistent volume
+
+  run: |
+    # Your training script saves checkpoints to /checkpoint
+    python train.py --checkpoint-dir /checkpoint
+
+Volumes offer better performance than cloud buckets. See :ref:`Volumes <volumes-all>` for setup instructions.
+
+Using cloud buckets
+~~~~~~~~~~~~~~~~~~~
+
+In cases where a volume is not available, use :ref:`cloud bucket mounts <sky-storage>`:
 
 .. code-block:: yaml
 
@@ -313,13 +254,12 @@ See the :ref:`Model training guide <training-guide>` for more training examples 
 
 .. _failure-recovery:
 
-Jobs restarts on user code failure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Recovering from application failures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Preemptions or hardware failures will be auto-recovered, but **by default, user code failures (non-zero exit codes) are not auto-recovered**.
+Hardware failures (GPU errors, node crashes) and preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
 
-In some cases, you may want a job to automatically restart even if it fails in application code. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To specify this, you
-can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
+In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
 .. code-block:: yaml
 
@@ -369,12 +309,12 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :widths: 1 2
    :header-rows: 0
 
+   * - Hardware fails (GPU errors, node crashes, preemptions):
+     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
-   * - Instances are preempted or underlying hardware fails:
-     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
-   * - Can't find available resources due to cloud quota or capacity restrictions:
-     - Try other regions and other clouds indefinitely until resources are found.
+   * - Can't find available resources due to capacity:
+     - Try other infra (clusters, regions, or clouds) indefinitely until resources are found.
    * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
@@ -382,6 +322,88 @@ To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:
 
 .. tip::
   Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. See :ref:`jobs-controller`.
+
+
+.. _spot-jobs:
+
+Running on spot instances (optional)
+------------------------------------
+
+To reduce costs, managed jobs can optionally run on spot instances. Spot preemptions are auto-recovered by SkyPilot, just like hardware failures.
+
+To run on spot instances, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
+
+.. code-block:: yaml
+
+  name: spot-job
+
+  resources:
+    accelerators: A100:8
+    use_spot: true
+
+  run: ...
+
+.. tip::
+   Spot instances are cloud VMs that may be "preempted".
+   The cloud provider can forcibly shut down the underlying VM and remove your access to it, interrupting the job running on that instance.
+
+   In exchange, spot instances are significantly cheaper than normal instances that are not subject to preemption (so-called "on-demand" instances).
+   Depending on the cloud and VM type, spot instances can be 70-90% cheaper.
+
+SkyPilot automatically finds available spot instances across regions and clouds to maximize availability.
+Any spot preemptions are automatically handled by SkyPilot without user intervention.
+
+.. note::
+   By default, a job will be restarted from scratch after each recovery (whether from preemption or hardware failure).
+   To avoid redoing work after recovery, implement :ref:`checkpointing <checkpointing>`.
+   Your application code can checkpoint its progress periodically to persistent storage (a :ref:`Kubernetes volume <volumes-on-kubernetes>` or :ref:`cloud bucket <sky-storage>`). The program can then reload the latest checkpoint when restarted.
+
+Here is :ref:`an example of a training job <bert>` failing over different regions across AWS and GCP.
+
+.. image:: https://i.imgur.com/Vteg3fK.gif
+  :width: 600
+  :alt: GIF for BERT training on Spot V100
+  :align: center
+
+Quick comparison between *managed spot jobs* vs. *launching unmanaged spot clusters*:
+
+.. list-table::
+   :widths: 30 18 12 35
+   :header-rows: 1
+
+   * - Command
+     - Managed?
+     - SSH-able?
+     - Best for
+   * - :code:`sky jobs launch --use-spot`
+     - Yes, preemptions are auto-recovered
+     - No
+     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
+   * - :code:`sky launch --use-spot`
+     - No, preemptions are not handled
+     - Yes
+     - Interactive dev on spot instances (especially for hardware with low preemption rates)
+
+
+Either spot or on-demand/reserved
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, on-demand instances will be used (not spot instances). To use spot instances, you must specify :code:`--use-spot` on the command line or :code:`use_spot: true` in your SkyPilot YAML.
+
+However, you can also tell SkyPilot to use **both spot instance and on-demand instances**, depending on availability. In your SkyPilot YAML, use ``any_of`` to specify either spot or on-demand/reserved instances as
+candidate resources for a job. See documentation :ref:`here
+<multiple-resources>` for more details.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    any_of:
+      - use_spot: true
+      - use_spot: false
+
+In this example, SkyPilot will choose the cheapest resource to use, which almost certainly
+will be spot instances. If spot instances are not available, SkyPilot will fall back to launching on-demand/reserved instances.
 
 
 .. _scaling-to-many-jobs:
@@ -837,7 +859,7 @@ To explicitly control this behavior, set :ref:`consolidation_mode <config-yaml-j
   When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
 
   .. code-block::
-    
+
     jobs:
       bucket: s3://xxx
 
