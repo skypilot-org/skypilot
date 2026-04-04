@@ -1891,7 +1891,8 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @annotations.client_api
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None,
+             path: Optional[str] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1905,7 +1906,10 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus,
+                                name=name,
+                                port_start=port_start,
+                                path=path)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1914,7 +1918,8 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down(name: Optional[str]) -> server_common.RequestId[None]:
+def local_down(name: Optional[str],
+               path: Optional[str] = None) -> server_common.RequestId[None]:
     """Tears down the Kubernetes cluster started by local_up."""
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
@@ -1924,7 +1929,7 @@ def local_down(name: Optional[str]) -> server_common.RequestId[None]:
             raise ValueError('`sky local down` is only supported when running '
                              'SkyPilot locally.')
 
-    body = payloads.LocalDownBody(name=name)
+    body = payloads.LocalDownBody(name=name, path=path)
     response = server_common.make_authenticated_request(
         'POST', '/local_down', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
