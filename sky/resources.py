@@ -2541,7 +2541,6 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)

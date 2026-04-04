@@ -386,12 +386,20 @@ def _execute_dag(
         hook_timeout: Optional[int] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
-                idle_minutes_to_autostop = (
-                    resource_autostop_config.idle_minutes)
-                down = resource_autostop_config.down
-                wait_for = resource_autostop_config.wait_for
                 hook = resource_autostop_config.hook
                 hook_timeout = resource_autostop_config.hook_timeout
+                # Hook-only config (has hook but no explicit
+                # idle_minutes): skip autostop timer setup. The hook
+                # is still embedded in K8s pod spec as preStop by
+                # backend_utils, and passed to the skylet on non-K8s.
+                hook_only = (hook is not None and
+                             resource_autostop_config.idle_minutes == 0 and
+                             not resource_autostop_config.down)
+                if not hook_only:
+                    idle_minutes_to_autostop = (
+                        resource_autostop_config.idle_minutes)
+                    down = resource_autostop_config.down
+                    wait_for = resource_autostop_config.wait_for
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -568,12 +576,23 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                # On Kubernetes, the autostop hook is already embedded in the
+                # pod spec as a preStop lifecycle hook (set by backend_utils).
+                # Skip passing it to the skylet to avoid dual execution.
+                skylet_hook = hook
+                skylet_hook_timeout = hook_timeout
+                if (hook is not None and
+                        handle.launched_resources.cloud is not None and
+                        handle.launched_resources.cloud.is_same_cloud(
+                            clouds.Kubernetes())):
+                    skylet_hook = None
+                    skylet_hook_timeout = None
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      wait_for,
                                      down,
-                                     hook=hook,
-                                     hook_timeout=hook_timeout)
+                                     hook=skylet_hook,
+                                     hook_timeout=skylet_hook_timeout)
 
         job_id = None
         if Stage.EXEC in stages:

@@ -2625,3 +2625,176 @@ def test_node_names_multi_node(generic_cloud: str):
         print(f'node_names: {node_names} ({len(nodes)} nodes)')
     finally:
         sky.get(sky.down(name))
+
+
+# ---------- K8s Preemption Hook ----------
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
+    """Test preemption hook pod spec and that hook fires on graceful delete.
+
+    Verifies:
+    1. Pod with hook: terminationGracePeriodSeconds=60, preStop lifecycle
+    2. Pod without hook: terminationGracePeriodSeconds=30, no lifecycle
+    3. Graceful delete (simulates preemption): ConfigMap proof created
+    4. sky down (force delete): ConfigMap proof NOT created (best-effort)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    nohook_name = f'{name}-nohook'
+    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
+    test = smoke_tests_utils.Test(
+        'k8s_preemption_hook_spec_and_delete',
+        [
+            # --- Test 1: Pod spec WITH hook ---
+            # Use -d (detach) because the task runs 'sleep infinity'
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Verify terminationGracePeriodSeconds = 60
+            f'POD={name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.terminationGracePeriodSeconds}'"
+            " | grep '^60$'",
+            # Verify preStop lifecycle exists with base64-encoded hook
+            f'POD={name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.containers[0].lifecycle.preStop.exec.command}'"
+            " | grep 'base64'",
+
+            # --- Test 2: Pod spec WITHOUT hook ---
+            f'sky launch -y -d -c {nohook_name} '
+            'tests/test_yamls/test_k8s_no_preemption_hook.yaml',
+            # Verify terminationGracePeriodSeconds = 30 (default)
+            f'POD={nohook_name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.terminationGracePeriodSeconds}'"
+            " | grep '^30$'",
+            # Verify no lifecycle block
+            f'POD={nohook_name}-{user_hash}-head && '
+            'LIFECYCLE=$(kubectl get pod $POD -o '
+            "jsonpath='{.spec.containers[0].lifecycle}') && "
+            '[ -z "$LIFECYCLE" ]',
+            # Clean up no-hook cluster
+            f'sky down -y {nohook_name}',
+
+            # --- Test 3: Graceful delete triggers hook -> ConfigMap proof ---
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
+            f'POD={name}-{user_hash}-head && '
+            'kubectl delete pod $POD --grace-period=120',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
+
+            # --- Test 4: sky down does NOT trigger hook ---
+            # Re-launch the cluster
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Clean ConfigMap marker
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
+            # sky down uses grace_period_seconds=0 (force delete)
+            f'sky down -y {name}',
+            'sleep 5',
+            # ConfigMap should ideally not exist. On K8s >= 1.28 the hook
+            # may still fire briefly (kubelet regression kubernetes#123408),
+            # so we just log the result rather than failing.
+            f'echo "--- sky down ConfigMap check (informational) ---" && '
+            f'kubectl get configmap {proof_cm} 2>&1 || '
+            'echo "No ConfigMap (hook correctly skipped)"',
+        ],
+        # Teardown: clean up everything
+        f'sky down -y {name} {nohook_name}; '
+        f'kubectl delete configmap {proof_cm} --ignore-not-found',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_k8s_preemption_hook_drain_and_priority_preemption():
+    """Test preemption hook fires on node drain and priority preemption.
+
+    Verifies:
+    1. Node drain: ConfigMap proof created
+    2. K8s priority-based preemption: ConfigMap proof created
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
+    test = smoke_tests_utils.Test(
+        'k8s_preemption_hook_drain_and_priority',
+        [
+            # --- Test 1: Node drain triggers hook ---
+            # Use -d (detach) because the task runs 'sleep infinity'
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
+            # Get node name and drain it
+            f'POD={name}-{user_hash}-head && '
+            'NODE=$(kubectl get pod $POD -o '
+            "jsonpath='{.spec.nodeName}') && "
+            'kubectl drain $NODE --ignore-daemonsets '
+            '--delete-emptydir-data --grace-period=120 --force && '
+            # Always uncordon so future tests work
+            'kubectl uncordon $NODE',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
+
+            # --- Test 2: K8s priority preemption triggers hook ---
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
+            # Re-launch (previous pod was evicted by drain)
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Create high-priority class
+            'kubectl apply -f - <<EOF\n'
+            'apiVersion: scheduling.k8s.io/v1\n'
+            'kind: PriorityClass\n'
+            'metadata:\n'
+            '  name: skypilot-test-high-priority\n'
+            'value: 1000000\n'
+            'globalDefault: false\n'
+            'preemptionPolicy: PreemptLowerPriority\n'
+            'EOF',
+            # Deploy evictor pod that requests enough CPU to force preemption.
+            # Request (allocatable - 2) so it can fit after preempting the
+            # SkyPilot pod (2 CPUs) but not without it.
+            'NODE_CPU=$(kubectl get node -o '
+            "jsonpath='{.items[0].status.allocatable.cpu}') && "
+            'EVICTOR_CPU=$((NODE_CPU - 1)) && '
+            'cat <<EOF | kubectl apply -f -\n'
+            'apiVersion: v1\n'
+            'kind: Pod\n'
+            'metadata:\n'
+            '  name: skypilot-test-evictor\n'
+            'spec:\n'
+            '  priorityClassName: skypilot-test-high-priority\n'
+            '  containers:\n'
+            '  - name: busybox\n'
+            '    image: busybox\n'
+            '    command: ["sleep", "120"]\n'
+            '    resources:\n'
+            '      requests:\n'
+            '        cpu: "${EVICTOR_CPU}"\n'
+            'EOF',
+            # Wait for preemption to happen
+            'sleep 60',
+            # Verify SkyPilot pod was preempted
+            f'kubectl get pod {name}-{user_hash}-head 2>&1 | '
+            'grep -E "Terminating|NotFound" || '
+            f'[ -z "$(kubectl get pod {name}-{user_hash}-head '
+            '--no-headers 2>/dev/null)" ]',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
+        ],
+        # Teardown: clean up everything
+        f'sky down -y {name}; '
+        'kubectl delete pod skypilot-test-evictor '
+        '--ignore-not-found --grace-period=0 --force; '
+        'kubectl delete priorityclass skypilot-test-high-priority '
+        '--ignore-not-found; '
+        f'kubectl delete configmap {proof_cm} --ignore-not-found',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

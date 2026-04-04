@@ -282,3 +282,63 @@ Common use cases for autostop hooks:
            hook: |
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
+
+.. _preemption-hooks:
+
+Autostop hooks on Kubernetes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Kubernetes, ``autostop.hook`` is automatically embedded as a
+Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time.
+This means the same hook fires on both idle autostop and involuntary
+termination (preemption, node drain, eviction).
+
+.. code-block:: yaml
+
+   resources:
+     cloud: kubernetes
+     autostop:
+       idle_minutes: 10
+       hook: |
+         echo "Saving checkpoint before shutdown"
+         cp checkpoint.pt s3://bucket/checkpoints/
+       hook_timeout: 600  # seconds
+
+**How it works:**
+
+- The hook runs on **all nodes** (head + workers) via the Kubernetes ``preStop`` lifecycle hook
+- On Kubernetes, the hook is only executed via the ``preStop`` path (not via the
+  skylet), so it fires exactly once per termination event
+- ``hook_timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
+  (default: uses the autostop hook timeout if set, otherwise 30s)
+- The hook is embedded in the pod spec at launch time; updating the hook requires
+  ``sky down`` followed by ``sky launch``
+
+**When the hook fires:**
+
+- Cluster autostop/autodown (idle timeout triggers pod deletion)
+- Kubernetes preemption (higher-priority pod needs resources)
+- Node drain (e.g., during cluster maintenance)
+- Pod eviction (e.g., resource pressure)
+
+**Behavior on** ``sky down``:
+
+SkyPilot uses ``grace_period_seconds=0`` (force delete) when tearing down clusters,
+which is intended to skip the ``preStop`` hook. However, due to a `known kubelet
+regression <https://github.com/kubernetes/kubernetes/issues/123408>`_, the
+``preStop`` hook may still execute briefly (~1-2 seconds) before the container is
+killed. Fast hooks (e.g., uploading a small file) may complete; longer hooks (e.g.,
+saving a large checkpoint) will be interrupted.
+
+Design your hook to be **best-effort** — it is guaranteed to run on genuine
+preemption events, but may or may not complete on user-initiated teardown.
+
+.. note::
+
+   ``sky stop`` is not supported on Kubernetes clusters.
+
+.. note::
+
+   Preemption hooks are separate from :ref:`autostop hooks <auto-stop-hooks>`.
+   Setting an autostop hook does **not** enable a preemption hook, and vice versa.
+   Each must be configured independently.
