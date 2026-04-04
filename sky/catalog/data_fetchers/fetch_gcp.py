@@ -196,6 +196,7 @@ SERIES_TO_DESCRIPTION = {
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
     'g2': 'G2 Instance',
+    'g4': 'G4 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
     'm3': 'M3 Memory-optimized Instance',
