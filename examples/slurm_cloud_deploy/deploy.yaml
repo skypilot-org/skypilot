@@ -1,0 +1,391 @@
+resources:
+  cloud: aws
+  cpus: 4+
+  disk_size: 50
+  # Uncomment the next line to request GPUs
+  # accelerators: V100:4  # Can be changed as needed (e.g., A100, T4, etc.)
+  accelerators: A10G:4  # Can be changed as needed (e.g., A100, T4, etc.)
+
+num_nodes: 2  # Can be adjusted based on your needs
+
+# Using block scalar with chomping indicator (|) for the script
+run: |
+  set -ex
+  sudo apt update
+  sudo apt install -y munge slurm-wlm slurm-wlm-basic-plugins slurmctld slurmd
+
+  # Skip NVIDIA driver installation as it's typically pre-installed on GPU instances
+  # If on a GPU instance, report driver status
+  if command -v nvidia-smi &> /dev/null; then
+    echo "Using pre-installed NVIDIA drivers"
+    nvidia-smi --query-gpu=driver_version --format=csv,noheader
+  fi
+
+  CONTROLLER_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # Get username - works on both AWS (ubuntu) and other clouds
+  USERNAME=$(whoami)
+
+  # Define barrier function
+  create_barrier() {
+    local barrier_name=$1
+    local barrier_file="/tmp/${barrier_name}${SKYPILOT_TASK_ID}_barrier"
+    
+    if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+      # Controller node creates and distributes barrier file
+      touch $barrier_file
+      for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+        scp -o StrictHostKeyChecking=no $barrier_file $node:$barrier_file
+      done
+    else
+      # Non-controller nodes wait for barrier file
+      while [ ! -f "$barrier_file" ]; do
+        echo "Waiting for $barrier_name barrier..."
+        sleep 5
+      done
+    fi
+  }
+
+  #################################################
+  # PART 1: SLURM CLUSTER SETUP
+  #################################################
+  echo "Setting up Slurm cluster..."
+
+  # Generate munge key manually on controller
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    sudo sh -c 'dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key'
+    sudo chown munge:munge /etc/munge/munge.key
+    sudo chmod 400 /etc/munge/munge.key
+
+    # Copy munge.key temporarily for scp
+    sudo cp /etc/munge/munge.key /tmp/munge.key
+    sudo chown $USERNAME:$USERNAME /tmp/munge.key
+
+    # Now you can scp from /tmp/munge.key
+    for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+      scp -o StrictHostKeyChecking=no /tmp/munge.key $node:/tmp/munge.key
+      ssh -o StrictHostKeyChecking=no $node "sudo mv /tmp/munge.key /etc/munge/munge.key && sudo chown munge:munge /etc/munge/munge.key && sudo chmod 400 /etc/munge/munge.key"
+    done
+
+    # cleanup
+    sudo rm /tmp/munge.key
+  fi
+  
+  # Create barrier to ensure munge key is distributed before continuing
+  create_barrier "munge_key_distributed"
+
+  sudo systemctl enable munge
+  sudo systemctl restart munge
+
+  echo "Nodes: $SKYPILOT_NODE_IPS"
+
+  # Create and distribute slurm.conf and gres.conf from controller
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    sudo mkdir -p /var/spool/slurmctld
+    sudo chown slurm:slurm /var/spool/slurmctld
+
+    CONTROLLER_HOSTNAME=$(hostname)
+    CONTROLLER_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+
+    # Detect GPU type on controller node (for information only)
+    GPU_TYPE=""
+    if command -v nvidia-smi &> /dev/null; then
+      gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+      if [ $gpu_count -gt 0 ]; then
+        # Get GPU type from nvidia-smi and clean up the name
+        GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g')
+        echo "Detected GPU type: $GPU_TYPE (will be configured as specific 'gpu' resources)"
+      fi
+    fi
+
+    # Initialize slurm.conf with tee command instead of heredoc
+    sudo bash -c "cat > /etc/slurm/slurm.conf" << 'EOF'
+  ClusterName=skypilot_cluster
+  SlurmctldHost=CONTROLLER_HOSTNAME_PLACEHOLDER
+  SlurmUser=slurm
+  StateSaveLocation=/var/spool/slurmctld
+  SlurmdSpoolDir=/var/spool/slurmd
+  AuthType=auth/munge
+  # Linear is required for support running multiple jobs on the same node
+  SelectType=select/linear
+  # SelectTypeParameters=CR_Core
+  # Use Linux process tracking instead of cgroups
+  ProctrackType=proctrack/linuxproc
+  # Enable GPU support via Generic Resources (if GPUs are present)
+  GresTypes=gpu
+  # Enable accounting
+  AccountingStorageType=accounting_storage/none
+  JobAcctGatherType=jobacct_gather/none
+  EOF
+
+    # Replace the placeholder with actual hostname
+    sudo sed -i "s/CONTROLLER_HOSTNAME_PLACEHOLDER/$CONTROLLER_HOSTNAME/" /etc/slurm/slurm.conf
+
+    # Create empty gres.conf to be populated if GPUs are detected
+    echo "# GPU configuration for Slurm" | sudo tee /etc/slurm/gres.conf
+
+    # Initialize a nodeinfo array to store all node info for partitioning later
+    declare -a nodeinfo=()
+
+    # Dynamically append Node definitions
+    RANK=0
+    while read -r node; do
+      if [ $RANK -eq 0 ]; then
+        node_hostname=$CONTROLLER_HOSTNAME
+        # Get actual CPU count for controller node
+        unset OMP_NUM_THREADS
+        node_cpus=$(nproc)
+        # Get more detailed CPU information
+        node_sockets=$(lscpu | grep "Socket(s):" | awk '{print $2}')
+        node_cores_per_socket=$(lscpu | grep "Core(s) per socket:" | awk '{print $4}')
+        node_threads_per_core=$(lscpu | grep "Thread(s) per core:" | awk '{print $4}')
+        
+        # Check for GPUs on controller node
+        if command -v nvidia-smi &> /dev/null; then
+          gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+          if [ $gpu_count -gt 0 ]; then
+            # Get GPU type from nvidia-smi and clean up the name
+            GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g')
+            # Add Gres information to slurm.conf node entry with specific GPU type
+            node_gres="Gres=gpu:${GPU_TYPE}:${gpu_count}"
+            gpu_id_max=$(($gpu_count - 1))
+            
+            # Add controller's GPU configuration to gres.conf with specific GPU type
+            echo "NodeName=${node_hostname} Name=gpu Type=${GPU_TYPE} File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
+          else
+            node_gres=""
+          fi
+        else
+          node_gres=""
+        fi
+        
+        # Store node info for partitioning
+        nodeinfo+=("$node_hostname:$gpu_count")
+      else
+        node_hostname=$(ssh -o StrictHostKeyChecking=no $node hostname </dev/null)
+        # Get actual CPU count for compute nodes
+        node_cpus=$(ssh -o StrictHostKeyChecking=no $node nproc </dev/null)
+        # Get more detailed CPU information
+        node_sockets=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Socket(s):\" | awk '{print \$2}'" </dev/null)
+        node_cores_per_socket=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Core(s) per socket:\" | awk '{print \$4}'" </dev/null)
+        node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'" </dev/null)
+        
+        # Check for GPUs on remote node
+        if ssh -o StrictHostKeyChecking=no $node "command -v nvidia-smi" &> /dev/null; then
+          gpu_count=$(ssh -o StrictHostKeyChecking=no $node "nvidia-smi --query-gpu=name --format=csv,noheader | wc -l" </dev/null)
+          if [ $gpu_count -gt 0 ]; then
+            # Get GPU type from nvidia-smi and clean up the name
+            GPU_TYPE=$(ssh -o StrictHostKeyChecking=no $node "nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g'" </dev/null)
+            # Add Gres information to slurm.conf node entry with specific GPU type
+            node_gres="Gres=gpu:${GPU_TYPE}:${gpu_count}"
+            gpu_id_max=$(($gpu_count - 1))
+            
+            # Add node's GPU configuration to gres.conf with specific GPU type
+            echo "NodeName=${node_hostname} Name=gpu Type=${GPU_TYPE} File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
+          else
+            node_gres=""
+          fi
+        else
+          node_gres=""
+        fi
+        
+        # Store node info for partitioning
+        nodeinfo+=("$node_hostname:$gpu_count")
+      fi
+      
+      echo "Adding node $RANK: $node_hostname with IP $node. All nodes: $SKYPILOT_NODE_IPS"
+      if [ -n "$node_gres" ]; then
+        printf "NodeName=%s NodeAddr=%s CPUs=%s Sockets=%s CoresPerSocket=%s ThreadsPerCore=%s %s State=UNKNOWN\n" "${node_hostname}" "${node}" "${node_cpus}" "${node_sockets}" "${node_cores_per_socket}" "${node_threads_per_core}" "${node_gres}" | sudo tee -a /etc/slurm/slurm.conf
+      else
+        printf "NodeName=%s NodeAddr=%s CPUs=%s Sockets=%s CoresPerSocket=%s ThreadsPerCore=%s State=UNKNOWN\n" "${node_hostname}" "${node}" "${node_cpus}" "${node_sockets}" "${node_cores_per_socket}" "${node_threads_per_core}" | sudo tee -a /etc/slurm/slurm.conf
+      fi
+      RANK=$((RANK+1))
+    done <<< "$SKYPILOT_NODE_IPS"
+
+    # Create partition definitions based on GPU availability
+    gpu_nodes=""
+    cpu_nodes=""
+    
+    for node_info in "${nodeinfo[@]}"; do
+      node_name=$(echo "$node_info" | cut -d: -f1)
+      node_gpus=$(echo "$node_info" | cut -d: -f2)
+      
+      if [ "$node_gpus" -gt 0 ]; then
+        if [ -z "$gpu_nodes" ]; then
+          gpu_nodes="$node_name"
+        else
+          gpu_nodes="$gpu_nodes,$node_name"
+        fi
+      fi
+      
+      if [ -z "$cpu_nodes" ]; then
+        cpu_nodes="$node_name"
+      else
+        cpu_nodes="$cpu_nodes,$node_name"
+      fi
+    done
+    
+    # Create partitions
+    echo "PartitionName=cpu Nodes=ALL Default=YES MaxTime=INFINITE State=UP OverSubscribe=FORCE:32" | sudo tee -a /etc/slurm/slurm.conf
+    
+    # Create GPU partition if GPU nodes exist
+    if [ -n "$gpu_nodes" ]; then
+      echo "PartitionName=gpu Nodes=${gpu_nodes} Default=NO MaxTime=INFINITE State=UP OverSubscribe=FORCE:32" | sudo tee -a /etc/slurm/slurm.conf
+    fi
+
+    # Distribute slurm.conf and gres.conf to all nodes
+    for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+      scp -o StrictHostKeyChecking=no /etc/slurm/slurm.conf $node:/tmp/
+      ssh $node "sudo mv /tmp/slurm.conf /etc/slurm/slurm.conf"
+      
+      scp -o StrictHostKeyChecking=no /etc/slurm/gres.conf $node:/tmp/
+      ssh $node "sudo mv /tmp/gres.conf /etc/slurm/gres.conf"
+    done
+
+    sudo systemctl enable slurmctld
+    sudo systemctl restart slurmctld
+  fi
+  # Create barrier to ensure slurm.conf is distributed before continuing
+  create_barrier "slurm_conf_distributed"
+
+  sudo mkdir -p /var/spool/slurmd
+  sudo chown slurm:slurm /var/spool/slurmd
+  sudo systemctl enable slurmd
+  sudo systemctl restart slurmd
+  
+  # Show cluster configuration and GPU status if applicable
+  echo "=== Slurm Cluster Status ==="
+  sinfo
+  
+  if command -v nvidia-smi &> /dev/null; then
+    echo "=== GPU Status ==="
+    nvidia-smi
+    echo "=== Available GPU Resources in Slurm ==="
+    scontrol show nodes | grep "Gres="
+    
+    echo "=== Example GPU job submission ==="
+    echo "To request a GPU job: sbatch --gres=gpu:1 --partition=gpu my_gpu_job.sh"
+    echo "To request multiple GPUs: sbatch --gres=gpu:4 --partition=gpu my_gpu_job.sh"
+  else
+    echo "=== Example CPU job submission ==="
+    echo "To submit a job: sbatch my_job.sh"
+  fi
+
+  #################################################
+  # PART 2: NFS SETUP
+  #################################################
+  echo "Setting up NFS for shared storage..."
+
+  # Install NFS on all nodes (server on controller, client on all)
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    # Controller node: Install NFS server if not already installed
+    if ! dpkg -l | grep -q nfs-kernel-server; then
+      echo "Installing NFS server..."
+      sudo apt install -y nfs-kernel-server
+    else
+      echo "NFS server already installed"
+    fi
+
+    # Create /mnt directory if it doesn't exist
+    sudo mkdir -p /mnt
+    sudo chmod 755 /mnt
+
+    # Add /mnt to exports if not already added
+    if ! grep -q "^/mnt " /etc/exports; then
+      echo "Adding /mnt to exports..."
+      echo "/mnt *(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
+      sudo exportfs -a
+    else
+      echo "/mnt already in exports"
+      # Check for and remove duplicate entries if they exist
+      if [ $(grep -c "^/mnt " /etc/exports) -gt 1 ]; then
+        echo "Cleaning up duplicate exports..."
+        # Create a temporary file with deduplicated entries
+        grep -v "^/mnt " /etc/exports > /tmp/exports.tmp
+        echo "/mnt *(rw,sync,no_subtree_check,no_root_squash)" >> /tmp/exports.tmp
+        sudo cp /tmp/exports.tmp /etc/exports
+        rm /tmp/exports.tmp
+      fi
+      # Re-export to ensure configuration is applied
+      sudo exportfs -ra
+    fi
+    
+    # Ensure NFS server is running
+    sudo systemctl restart nfs-kernel-server
+    
+    # Create a /mnt/home_template directory to copy for new users
+    sudo mkdir -p /mnt/home_template
+    if [ ! "$(ls -A /mnt/home_template)" ]; then
+      echo "Populating home template directory..."
+      sudo cp -r /etc/skel/. /mnt/home_template/
+    fi
+    
+    echo "NFS server setup complete on controller node"
+  else
+    # Worker nodes: Install NFS client only if not already installed
+    if ! dpkg -l | grep -q nfs-common; then
+      echo "Installing NFS client..."
+      sudo apt install -y nfs-common
+    else
+      echo "NFS client already installed"
+    fi
+  fi
+
+  # Configure NFS on all nodes
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    # On controller, create a script that will be used to mount NFS on worker nodes
+    cat > /tmp/mount_nfs.sh << EOF
+  #!/bin/bash
+  # Idempotent mount script
+  sudo mkdir -p /mnt
+
+  # Check if already mounted
+  if ! mount | grep -q " on /mnt type nfs"; then
+    echo "Mounting NFS share..."
+    sudo mount ${CONTROLLER_IP}:/mnt /mnt
+  else
+    echo "NFS share already mounted"
+  fi
+
+  # Check if already in fstab
+  if ! grep -q "${CONTROLLER_IP}:/mnt /mnt nfs" /etc/fstab; then
+    echo "Adding NFS mount to fstab..."
+    echo "${CONTROLLER_IP}:/mnt /mnt nfs defaults 0 0" | sudo tee -a /etc/fstab
+  else
+    echo "NFS mount already in fstab"
+  fi
+  EOF
+    sed -i "s/\${CONTROLLER_IP}/${CONTROLLER_IP}/g" /tmp/mount_nfs.sh
+    chmod +x /tmp/mount_nfs.sh
+    
+    # Distribute to all worker nodes
+    for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+      scp -o StrictHostKeyChecking=no /tmp/mount_nfs.sh $node:/tmp/
+      ssh -o StrictHostKeyChecking=no $node "bash /tmp/mount_nfs.sh"
+    done
+    
+    rm /tmp/mount_nfs.sh
+  fi
+  
+  # Create barrier to ensure NFS is mounted before continuing
+  create_barrier "nfs_setup_complete"
+  
+  echo "NFS setup complete. The /mnt directory is now shared across all nodes."
+  echo "You can now create users with home directories under /mnt."
+  
+  #################################################
+  # SUMMARY
+  #################################################
+  echo ""
+  echo "=== DEPLOYMENT SUMMARY ==="
+  echo "Slurm cluster is ready with $SKYPILOT_NODE_COUNT nodes"
+  echo "Controller node: $CONTROLLER_IP"
+  echo "NFS shared directory: /mnt"
+  echo ""
+  echo "Next step: Create users with 'sky exec <cluster> examples/slurm_cloud_deploy/setup-users.yaml [--env users=\"user1 user2 user3\"]'"
+  echo ""
+  echo "To use the cluster:"
+  echo " - Submit jobs with: sbatch <script.sh>"
+  echo " - View queue with: squeue"
+  echo " - Check node status with: sinfo"
+  echo ""
+  echo "All files placed in /mnt will be accessible from all nodes" 
