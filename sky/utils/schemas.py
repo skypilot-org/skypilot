@@ -1985,6 +1985,9 @@ def get_config_schema():
                 'domain': {
                     'type': 'string',
                 },
+                'use_personal_pricing': {
+                    'type': 'boolean',
+                },
                 'region_configs': {
                     'type': 'object',
                     'required': [],
