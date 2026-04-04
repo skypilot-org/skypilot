@@ -279,7 +279,7 @@ Cloud VMs
 SkyPilot can launch VMs on the clouds and regions you have access to.
 Run ``sky check`` to check access.
 
-SkyPilot supports most major cloud providers. See :ref:`cloud-account-setup` for details.
+SkyPilot supports most major cloud providers. See :ref:`Setup Credentials <cloud-account-setup>` for details.
 
 .. raw:: html
 
