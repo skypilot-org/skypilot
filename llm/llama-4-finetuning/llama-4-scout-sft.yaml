@@ -1,21 +1,29 @@
-# Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
+# Full finetuning of Llama-4 Scout 17B MoE model with 16 experts.
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+# HF_TOKEN=xxx sky launch llama-4-scout-sft.yaml -c scout --env HF_TOKEN
 #
 # This config requires at least 2 nodes with 8x H200 GPUs each.
 
 envs:
   HF_TOKEN:
+  WANDB_NAME: ""
+
+# Required if using W&B for experiment tracking
+# secrets:
+#   WANDB_API_KEY:
 
 resources:
   cpus: 100+
   memory: 1000+
   accelerators: H100:8
+  disk_size: 1024
   disk_tier: best
 
 num_nodes: 2
+
+workdir: .
 
 # Optional: configure buckets for dataset and checkpoints. You can then use the
 # /checkpoints directory to write checkpoints, which writes to local disk first
@@ -30,21 +38,25 @@ num_nodes: 2
 #    mode: MOUNT_CACHED  # MOUNT_CACHED mode will intelligently cache the checkpoint for faster writes
 
 setup: |
-  conda create -n training python=3.10 -y
-  conda activate training
-
-  # Install torch and torchtune nightly builds
-  pip install --pre --upgrade torch==2.8.0.dev20250610+cu126 torchvision==0.23.0.dev20250610+cu126 torchao==0.12.0.dev20250611+cu126 --index-url https://download.pytorch.org/whl/nightly/cu126 # full options are cpu/cu118/cu124/cu126/xpu/rocm6.2/rocm6.3/rocm6.4
-  pip install --pre --upgrade torchtune==0.7.0.dev20250610+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+  uv venv .venv --python 3.10
+  source .venv/bin/activate
+  uv pip install torch==2.9.0 torchvision==0.24.0 torchao==0.14.1
+  uv pip install git+https://github.com/meta-pytorch/torchtune.git@67ab86b94de9e7ac7dd9850113ebe69e2bbd307c
 
   # Download the model (~200 GB, may take time to download)
   tune download meta-llama/Llama-4-Scout-17B-16E-Instruct \
     --hf-token $HF_TOKEN
 
 run: |
-  conda activate training
-
-  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  source .venv/bin/activate
+  # Configure W&B if API key is set
+  if [ -n "$WANDB_API_KEY" ]; then
+    export WANDB_NAME=${WANDB_NAME:-llama4-scout-sft-run}
+    export WANDB_RUN_ID=$SKYPILOT_TASK_ID
+    echo "W&B tracking enabled"
+    uv pip install wandb
+  fi
+  export MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"
 
   tune run \
@@ -54,7 +66,7 @@ run: |
   --rdzv_backend c10d \
   --rdzv_endpoint=$MASTER_ADDR:29500 \
   full_finetune_distributed \
-  --config llama4/scout_17B_16E_full \
+  --config configs/scout_17B_16E_full.yaml \
   model_dir=/tmp/Llama-4-Scout-17B-16E-Instruct \
   max_steps_per_epoch=10 \
   epochs=1
