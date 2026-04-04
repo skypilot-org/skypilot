@@ -2160,6 +2160,14 @@ def _query_cluster_status_via_cloud_api(
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
     ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+    if ray_config is None:
+        yaml_str = global_user_state.get_cluster_yaml_str(handle.cluster_yaml)
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterStatusFetchingError(
+                f'Cluster {cluster_name_in_hint} has an empty or invalid '
+                f'YAML config ({handle.cluster_yaml}). '
+                f'Content: {yaml_str!r}. '
+                'Consider terminating and re-creating the cluster.')
     provider_config = ray_config['provider']
 
     # Query the cloud provider.
