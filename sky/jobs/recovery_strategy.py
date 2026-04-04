@@ -435,23 +435,30 @@ class StrategyExecutor:
                             # env vars/user, which we may not want.
                             # Instead, clear env vars here and call api_start
                             # explicitly.
-                            vars_to_restore = {}
-                            try:
-                                for env_var in ENV_VARS_TO_CLEAR:
-                                    vars_to_restore[env_var] = os.environ.pop(
-                                        env_var, None)
-                                    logger.debug('Cleared env var: '
-                                                 f'{env_var}')
-                                logger.debug('Env vars for api_start: '
-                                             f'{os.environ}')
-                                await asyncio.to_thread(sdk.api_start)
-                                logger.info('API server started.')
-                            finally:
-                                for env_var, value in vars_to_restore.items():
-                                    if value is not None:
-                                        logger.debug('Restored env var: '
-                                                     f'{env_var}: {value}')
-                                        os.environ[env_var] = value
+                            # In consolidation mode, the API server is already
+                            # running — skip the pop/restore to avoid a race
+                            # condition where concurrent job group launches
+                            # corrupt the shared context's env overrides.
+                            if not managed_job_utils.is_consolidation_mode():
+                                vars_to_restore = {}
+                                try:
+                                    for env_var in ENV_VARS_TO_CLEAR:
+                                        vars_to_restore[
+                                            env_var] = os.environ.pop(
+                                                env_var, None)
+                                        logger.debug('Cleared env var: '
+                                                     f'{env_var}')
+                                    logger.debug('Env vars for api_start: '
+                                                 f'{os.environ}')
+                                    await asyncio.to_thread(sdk.api_start)
+                                    logger.info('API server started.')
+                                finally:
+                                    for env_var, value in (
+                                            vars_to_restore.items()):
+                                        if value is not None:
+                                            logger.debug('Restored env var: '
+                                                         f'{env_var}: {value}')
+                                            os.environ[env_var] = value
 
                             request_id = None
                             try:
