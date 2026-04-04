@@ -1,7 +1,7 @@
 import React from 'react';
-import Link from 'next/link';
 import PropTypes from 'prop-types';
 import { getUserLink, isServiceAccount } from '@/utils/userUtils';
+import { BASE_PATH } from '@/data/connectors/constants';
 
 /**
  * ServiceAccountBadge component - A reusable badge for service accounts
@@ -30,13 +30,18 @@ export const UserDisplay = ({
   showBadge = true,
 }) => {
   const isServiceAcc = isServiceAccount(userHash);
-  const userUrl = getUserLink(userHash);
+  // Construct full URL with BASE_PATH to ensure correct navigation to the
+  // dashboard users page, not the API endpoint. The API server serves the
+  // dashboard at /dashboard/* and has an API endpoint at /users that returns
+  // JSON. Without the explicit BASE_PATH prefix, links may incorrectly
+  // navigate to /users (API) instead of /dashboard/users (dashboard page).
+  const userUrl = `${BASE_PATH}${getUserLink(userHash)}`;
 
   return (
     <div className={className}>
-      <Link href={userUrl} className={linkClassName}>
+      <a href={userUrl} className={linkClassName}>
         {username}
-      </Link>
+      </a>
       {showBadge && isServiceAcc && <ServiceAccountBadge />}
     </div>
   );
