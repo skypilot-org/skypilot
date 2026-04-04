@@ -43,6 +43,8 @@ RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
+_MEMORY_SPEC_PATTERN = re.compile(r'^[0-9]+[GgMmTt][Bb]\+?$')
+
 MEMORY_SIZE_UNITS = {
     'b': 1,
     'k': 2**10,
@@ -869,13 +871,25 @@ class Resources:
             accelerators: A string or a dict of accelerator types to counts.
             accelerator_args: A dict of accelerator types to args.
         """
+        self._memory_accel_spec: Optional[str] = None
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
+                # Memory-based specs (e.g., '40GB+', 'NVIDIA:40GB+') are
+                # stored as-is here. They are expanded into concrete
+                # accelerator names by from_yaml_config() when the task
+                # is deserialized on the API server side. This means
+                # self.accelerators will be None until expansion happens.
+                parsed = self.parse_accelerators_from_str(accelerators)
+                if any(not is_exact_name for _, is_exact_name in parsed):
+                    self._memory_accel_spec = accelerators
+                    self._accelerators: Optional[Dict[str, Union[int,
+                                                                 float]]] = None
+                    self._accelerator_args: Optional[Dict[
+                        str, Any]] = accelerator_args
+                    return
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
-                    assert isinstance(accelerators,
-                                      str), (type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -942,9 +956,8 @@ class Resources:
                                     'Cannot specify instance type (got '
                                     f'{self.instance_type!r}) for TPU VM.')
 
-        self._accelerators: Optional[Dict[str, Union[int,
-                                                     float]]] = accelerators
-        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+        self._accelerators = accelerators
+        self._accelerator_args = accelerator_args
 
     def _set_autostop_config(
         self,
@@ -2104,7 +2117,8 @@ class Resources:
             # Need to pass `self._accelerators` instead of `self.accelerators`
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.
-            accelerators=override.pop('accelerators', self._accelerators),
+            accelerators=override.pop(
+                'accelerators', self._memory_accel_spec or self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
@@ -2206,16 +2220,15 @@ class Resources:
                 del config[alias]
 
     @classmethod
-    def _parse_accelerators_from_str(
+    def parse_accelerators_from_str(
             cls, accelerators: str) -> List[Tuple[str, bool]]:
         """Parse accelerators string into a list of possible accelerators.
 
         Returns:
             A list of possible accelerators. Each element is a tuple of
-            (accelerator_name, was_user_specified). was_user_specified is True
-            if the accelerator was directly named by the user (for example
-            "H100:2" would be True, but "80GB+" would be False since it doesn't
-            mention the name of the accelerator).
+            (accelerator_str, is_exact_name). is_exact_name is True if the
+            accelerator was directly named by the user (e.g., "H100:2"), and
+            False if it was expanded from a memory-based spec (e.g., "80GB+").
         """
         # sanity check
         assert isinstance(accelerators, str), accelerators
@@ -2228,15 +2241,15 @@ class Resources:
         if len(split) == 3:
             manufacturer, memory, count_str = split
             count = int(count_str)
-            assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
+            assert _MEMORY_SPEC_PATTERN.match(memory), \
                 'If specifying a GPU manufacturer, you must also' \
                 'specify the memory size'
-        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+        elif len(split) == 2 and _MEMORY_SPEC_PATTERN.match(split[0]):
             memory = split[0]
             count = int(split[1])
-        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[1]):
+        elif len(split) == 2 and _MEMORY_SPEC_PATTERN.match(split[1]):
             manufacturer, memory = split
-        elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+        elif len(split) == 1 and _MEMORY_SPEC_PATTERN.match(split[0]):
             memory = split[0]
         else:
             # it is just an accelerator name, not a memory size
@@ -2326,11 +2339,15 @@ class Resources:
                 raise ValueError(
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
-        # Parse resources.accelerators field.
+        # Parse resources.accelerators field. This is where memory-based
+        # specs (e.g., '40GB+', 'NVIDIA:40GB+') get expanded into concrete
+        # accelerator names. This expansion happens on the API server side
+        # when the task YAML is deserialized (see _set_accelerators for
+        # how memory specs are stored as-is on the client side).
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
-                accelerators_list = cls._parse_accelerators_from_str(
+                accelerators_list = cls.parse_accelerators_from_str(
                     accelerators)
             elif isinstance(accelerators, dict):
                 accelerator_names = [
@@ -2339,13 +2356,13 @@ class Resources:
                 ]
                 accelerators_list = []
                 for accel_name in accelerator_names:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    parsed_accels = cls.parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             elif isinstance(accelerators, list) or isinstance(
                     accelerators, set):
                 accelerators_list = []
                 for accel_name in accelerators:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    parsed_accels = cls.parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             else:
                 assert False, ('Invalid accelerators type:'
@@ -2507,7 +2524,8 @@ class Resources:
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
-        add_if_not_none('accelerators', self._accelerators)
+        add_if_not_none('accelerators', self._memory_accel_spec or
+                        self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
         if self._use_spot_specified:

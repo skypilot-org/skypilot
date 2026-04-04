@@ -757,6 +757,29 @@ def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
     # If no exception is raised and exit code is 0, the test passes.
 
 
+@pytest.mark.parametrize('gpus_flag', [
+    '40GB+',
+    '80GB:8',
+    'NVIDIA:40GB+',
+    'NVIDIA:80GB:8',
+])
+def test_launch_dryrun_with_memory_based_gpus(enable_all_clouds, gpus_flag):
+    """Tests that 'sky launch --gpus <memory_spec> --dryrun' works.
+
+    This is the CLI equivalent of specifying memory-based accelerators in YAML.
+    Previously, formats like 'NVIDIA:40GB+' would fail with:
+      ValueError: The "accelerators" field as a str should be <name> or
+      <name>:<cnt>.
+    """
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(command.launch, ['--gpus', gpus_flag, '--dryrun'])
+    if result.exit_code != 0:
+        pytest.fail(f"'sky launch --gpus {gpus_flag} --dryrun' failed with "
+                    f"exit code {result.exit_code}.\n"
+                    f"Output:\n{result.output}\n"
+                    f"Exception Info: {result.exc_info}")
+
+
 def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     """Tests that helpful hints are shown when no matching resources are found."""
     # Test when there are no fuzzy candidates
