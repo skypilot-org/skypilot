@@ -7,9 +7,12 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
+# Remove any conflicting InfiniBand packages (if present) to avoid version conflicts
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
-    apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq -y && \
+    apt-get update -y && \
+    (apt-get purge -y ibverbs-utils libibverbs-dev libibverbs1 libmlx5-1 || true) && \
+    apt-get install -y --no-install-recommends git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq \
+        rdma-core libibverbs1 libmlx5-1 libibverbs-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
