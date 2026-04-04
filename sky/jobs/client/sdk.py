@@ -173,6 +173,13 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    *,
+    name_match: Optional[str] = None,
+    pool_match: Optional[str] = None,
+    user_match: Optional[str] = None,
+    workspace_match: Optional[str] = None,
+    statuses: Optional[List[str]] = None,
+    page: Optional[int] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -184,6 +191,12 @@ def queue_v2(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        name_match: Filter jobs by name (substring match).
+        pool_match: Filter jobs by pool name (substring match).
+        user_match: Filter jobs by user (substring match).
+        workspace_match: Filter jobs by workspace (substring match).
+        statuses: Filter jobs by statuses.
+        page: Page number for pagination.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
         sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
@@ -236,6 +249,12 @@ def queue_v2(
         skip_finished=skip_finished,
         all_users=all_users,
         job_ids=job_ids,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_match=user_match,
+        workspace_match=workspace_match,
+        statuses=statuses,
+        page=page,
         limit=limit,
         fields=fields,
         sort_by=sort_by,
