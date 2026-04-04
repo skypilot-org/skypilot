@@ -1250,6 +1250,9 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    if resize and cluster is None:
+        raise click.UsageError(
+            '--resize requires -c/--cluster to specify an existing cluster.')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:

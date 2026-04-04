@@ -159,3 +159,22 @@ def test_resize_scale_down_running_jobs_rejected(mock_load_queue):
     except ValueError as e:
         assert 'running' in str(e).lower()
         assert 'sky cancel' in str(e)
+
+
+def test_resize_scale_down_ssh_failure_aborts():
+    """Scale-down should abort if job queue check fails (SSH error)."""
+    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    # Mock run_on_head to fail (SSH error).
+    backend.run_on_head = mock.MagicMock(return_value=(255, '',
+                                                       'Connection refused'))
+
+    try:
+        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+        assert False, 'Expected RuntimeError about failed job queue check'
+    except RuntimeError as e:
+        assert 'failed to check job queue' in str(e).lower()
+        assert 'aborting' in str(e).lower()

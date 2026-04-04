@@ -5565,25 +5565,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{requested_nodes} node(s) (-{to_remove} worker(s)).')
 
         # Check for running jobs.
-        returncode, stdout, _ = self.run_on_head(
+        returncode, stdout, stderr = self.run_on_head(
             handle,
             job_lib.JobLibCodeGen.get_job_queue(user_hash=None, all_jobs=False),
             require_outputs=True,
             stream_logs=False)
-        if returncode == 0:
-            jobs = job_lib.load_job_queue(stdout)
-            in_progress = [
-                j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
-                                                   job_lib.JobStatus.SETTING_UP,
-                                                   job_lib.JobStatus.PENDING)
-            ]
-            if in_progress:
-                job_ids = ', '.join(str(j['job_id']) for j in in_progress)
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot scale down: {len(in_progress)} job(s) still '
-                        f'running (IDs: {job_ids}). Cancel them first with: '
-                        f'sky cancel {cluster_name} -a')
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(f'Failed to check job queue on cluster '
+                                   f'{cluster_name!r} before scale-down. '
+                                   f'Aborting resize for safety.\n'
+                                   f'stderr: {stderr}')
+        jobs = job_lib.load_job_queue(stdout)
+        in_progress = [
+            j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
+                                               job_lib.JobStatus.SETTING_UP,
+                                               job_lib.JobStatus.PENDING)
+        ]
+        if in_progress:
+            job_ids = ', '.join(str(j['job_id']) for j in in_progress)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot scale down: {len(in_progress)} job(s) still '
+                    f'running (IDs: {job_ids}). Cancel them first with: '
+                    f'sky cancel {cluster_name} -a')
 
         # Terminate all worker nodes. Since we verified no jobs are
         # running, all workers are idle. The subsequent bulk_provision
@@ -5857,6 +5862,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
                 prev_config_hash=prev_config_hash)
+        if resize:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cluster {cluster_name!r} does not exist. '
+                    'Cannot resize a non-existent cluster. '
+                    'Use `sky launch` without --resize to create a new '
+                    'cluster.')
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
