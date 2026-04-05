@@ -368,6 +368,12 @@ def override_request_env_and_config(
         request_body.env_vars.pop(
             kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
         os.environ.update(request_body.env_vars)
+        # Initialize per-request timeline if the client enabled tracing.
+        if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+            timeline_path = os.path.join(
+                os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+                f'{request_id}.timeline.json')
+            timeline.init_request_timeline(request_id, timeline_path)
         # Note: may be overridden by AuthProxyMiddleware.
         # TODO(zhwu): we need to make the entire request a context available to
         # the entire request execution, so that we can access info like user

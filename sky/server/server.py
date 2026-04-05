@@ -2164,6 +2164,25 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
     return request_task.encode()
 
 
+@app.get('/api/timeline')
+async def api_timeline(request_id: str) -> Dict[str, Any]:
+    """Gets saved timeline events for a request.
+
+    Used internally by the client-side auto-merge to fetch server-side
+    events when SKYPILOT_TIMELINE_FILE_PATH is set.
+    """
+    request_id = await get_expanded_request_id(request_id)
+    timeline_path = os.path.join(
+        os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+        f'{request_id}.timeline.json')
+    if not os.path.exists(timeline_path):
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Timeline not found for request {request_id!r}')
+    with open(timeline_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
 @app.get('/api/stream')
 async def stream(
     request: fastapi.Request,
