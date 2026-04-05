@@ -368,14 +368,26 @@ def get_remote_plugins_config_path() -> Optional[str]:
 _PLUGINS: Dict[str, BasePlugin] = {}
 _EXTENSION_CONTEXT: Optional[ExtensionContext] = None
 
+# Whether plugins have finished loading. On the server, schema validation
+# should only enforce additionalProperties: False after plugins have had
+# a chance to register their extra properties. Before that, we allow
+# additional properties so that plugin-provided fields are not rejected.
+_plugins_loaded: bool = False
+
+
+def plugins_loaded() -> bool:
+    """Return whether plugins have finished loading."""
+    return _plugins_loaded
+
 
 def load_plugins(extension_context: ExtensionContext):
     """Load and initialize plugins from the config."""
-    global _EXTENSION_CONTEXT
+    global _EXTENSION_CONTEXT, _plugins_loaded
     _EXTENSION_CONTEXT = extension_context
 
     config = _load_plugin_config()
     if not config:
+        _plugins_loaded = True
         return
 
     for plugin_config in config.get('plugins', []):
@@ -402,6 +414,8 @@ def load_plugins(extension_context: ExtensionContext):
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+
+    _plugins_loaded = True
 
 
 def get_plugins() -> List[BasePlugin]:
