@@ -1,0 +1,131 @@
+"""Batch image generation with Stable Diffusion on Sky Batch.
+
+This example generates images from text prompts using Stable Diffusion,
+distributed across a pool of GPU workers.
+
+Input:  JSONL file with "prompt" fields
+Output: PNG images in a cloud directory
+
+Usage (from project root):
+    1. Prepare bucket and prompts:
+       $ bash examples/batch/diffusion/prepare.sh
+
+    2. Run (uses bucket from prepare.sh, or a default based on $USER):
+       $ export SKY_BATCH_BUCKET=<bucket printed by prepare.sh>  # optional
+       $ python examples/batch/diffusion/generate_images.py
+
+    3. Check output:
+       $ aws s3 cp s3://$SKY_BATCH_BUCKET/generated_images/ \
+         ./generated_images/ --recursive
+"""
+import os
+
+import sky
+from sky.serve import serve_utils
+
+
+@sky.batch.remote_function
+def generate_images():
+    """Generate images from text prompts using Stable Diffusion.
+
+    The model is loaded once per worker and reused across all batches.
+    Each prompt produces one PNG image.
+    """
+    # pylint: disable=import-outside-toplevel
+    from diffusers import StableDiffusionPipeline
+    import torch
+
+    # pylint: enable=import-outside-toplevel
+    # Load model once (amortized across all batches on this worker).
+    # Using SD v1.5 (public, no HuggingFace auth required).
+    pipe = StableDiffusionPipeline.from_pretrained(
+        'stable-diffusion-v1-5/stable-diffusion-v1-5',
+        torch_dtype=torch.float16,
+    )
+    pipe = pipe.to('cuda')
+
+    for batch in sky.batch.load():
+        prompts = [item['prompt'] for item in batch]
+        result = pipe(prompts)
+
+        # Each result dict must contain an 'image' key with a PIL Image.
+        # The framework saves each image as a PNG file and records the
+        # filename in manifest.jsonl.
+        results = []
+        for item, img in zip(batch, result.images):
+            results.append({
+                'prompt': item['prompt'],
+                'image': img,
+            })
+
+        sky.batch.save_results(results)
+
+
+def ensure_pool(pool_name: str, pool_yaml: str) -> None:
+    """Create the pool if it doesn't already exist."""
+    try:
+        request_id = sky.jobs.pool_status([pool_name])
+        pool_statuses = sky.stream_and_get(request_id)
+        if pool_statuses:
+            print(f'Pool {pool_name} already exists, skipping pool apply.')
+            return
+    except sky.exceptions.ClusterNotUpError:
+        # No jobs controller running yet — pool definitely doesn't exist.
+        pass
+
+    print(f'Pool {pool_name} not found. Creating from {pool_yaml}...')
+    task = sky.Task.from_yaml(pool_yaml)
+    task.name = pool_name
+    request_id = sky.jobs.pool_apply(
+        task,
+        pool_name=pool_name,
+        mode=serve_utils.DEFAULT_UPDATE_MODE,
+    )
+    sky.stream_and_get(request_id)
+    print(f'Pool {pool_name} is ready.')
+
+
+def main():
+    # Configuration — set SKY_BATCH_BUCKET via prepare.sh, or falls back
+    # to a default bucket name derived from the OS username.
+    default_bucket = f'sky-batch-diffusion-{os.environ.get("USER", "default")}'
+    bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
+    print(f'Using bucket: s3://{bucket}  '
+          f'(override with SKY_BATCH_BUCKET env var)')
+
+    input_path = f's3://{bucket}/prompts.jsonl'
+    output_path = f's3://{bucket}/generated_images/'
+    manifest_path = f's3://{bucket}/manifest.jsonl'
+    pool_name = 'diffusion-pool'
+    pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
+
+    # Create dataset from cloud storage
+    ds = sky.batch.Dataset(sky.batch.JsonInput(input_path))
+
+    # Ensure the pool exists (creates it if needed)
+    ensure_pool(pool_name, pool_yaml)
+
+    # Process the dataset.
+    # Multi-output: ImageOutput saves PIL Images as PNGs, JsonOutput saves
+    # selected metadata columns as a manifest JSONL.
+    print(f'Generating images from {input_path}...')
+    ds.map(
+        generate_images,
+        pool_name=pool_name,
+        batch_size=3,
+        output=[
+            sky.batch.ImageOutput(output_path, column='image'),
+            sky.batch.JsonOutput(manifest_path, column=['prompt']),
+        ],
+        # Must match the venv created in pool.yaml setup.
+        activate_env='source .venv/bin/activate',
+    )
+
+    print(f'\nDone! Images saved to {output_path}')
+    print(f'Manifest written to {manifest_path}')
+    print('You can download them with:')
+    print(f'  aws s3 cp {output_path} ./generated_images/ --recursive')
+
+
+if __name__ == '__main__':
+    main()
