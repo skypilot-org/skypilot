@@ -22,9 +22,7 @@ provider:
     namespace: {{k8s_namespace}}
 
     # The kubecontext used to connect to the Kubernetes cluster.
-    {% if k8s_context is not none %}
     context: {{k8s_context}}
-    {% endif %}
 
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
@@ -48,6 +46,10 @@ provider:
 
     {% if ephemeral_volume_mounts %}
     ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
+    {% endif %}
+
+    {% if k8s_docker_config_dict %}
+    docker_config: {{k8s_docker_config_dict | tojson}}
     {% endif %}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
@@ -469,10 +471,21 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% set seen_volumes = [] %}
         {% for volume_mount in volume_mounts %}
+        {% if volume_mount.name not in seen_volumes %}
+        {% if volume_mount.volume_type == 'k8s-hostpath' %}
+        - name: {{volume_mount.name}}
+          hostPath:
+            path: {{volume_mount.host_path}}
+            type: DirectoryOrCreate
+        {% else %}
         - name: {{volume_mount.name}}
           persistentVolumeClaim:
             claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endif %}
+        {% if seen_volumes.append(volume_mount.name) %}{% endif %}
+        {% endif %}
         {% endfor %}
         {% if k8s_enable_gpudirect_tcpx %}
         - name: libraries
@@ -509,6 +522,14 @@ available_node_types:
           hostPath:
             path: /home/kubernetes/bin/gib
         {% endif %}
+        {% if k8s_enable_docker_all %}
+        - name: docker-sock
+          emptyDir: {}
+        {% endif %}
+        {% if k8s_enable_docker_build %}
+        - name: buildkit-sock
+          emptyDir: {}
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: Always
@@ -540,6 +561,14 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
+            {% if k8s_enable_docker_all %}
+            - name: DOCKER_HOST
+              value: unix:///var/run/dind/docker.sock
+            {% endif %}
+            {% if k8s_enable_docker_build %}
+            - name: BUILDKIT_HOST
+              value: unix:///run/buildkit/buildkitd.sock
+            {% endif %}
             # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#environment-variables-nccl
             # Page recommends setting NCCL values for GPUDirect TCPX for best performance.
             {% if k8s_enable_gpudirect_tcpx %}
@@ -672,6 +701,13 @@ available_node_types:
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
+
+              {% for path in volume_mount_rw_paths %}
+              # Fix write permissions for volume mount if needed.
+              # Directories may be created as root:root by kubelet (hostPath,
+              # subPath) or may not respect fsGroup (NFS-backed volumes).
+              test -w "{{path}}" || ($(prefix_cmd) chown :$(id -g) "{{path}}" && $(prefix_cmd) chmod g+rwx "{{path}}") || true;
+              {% endfor %}
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
@@ -858,6 +894,23 @@ available_node_types:
                   exit 1
                 fi;
 
+                {% if k8s_enable_docker_all or k8s_enable_docker_build %}
+                # Install Docker CLI and buildx plugin from Docker's official
+                # apt repo (same approach as paperspace provisioner).
+                # Use .asc (armored) key format to avoid requiring gpg binary.
+                set -e
+                $(prefix_cmd) install -m 0755 -d /etc/apt/keyrings
+                curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" \
+                  -o /tmp/docker.gpg.tmp
+                $(prefix_cmd) mv /tmp/docker.gpg.tmp /etc/apt/keyrings/docker.asc
+                $(prefix_cmd) chmod a+r /etc/apt/keyrings/docker.asc
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+                  https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+                  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+                  | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
+                {% endif %}
+
                 {% if k8s_fuse_device_required %}
                 set -e
                 # Mask fusermount binary before enabling SSH access
@@ -918,6 +971,14 @@ available_node_types:
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
 
+                {% if k8s_enable_docker_build %}
+                # Register BuildKit sidecar as a remote buildx builder so
+                # `docker buildx build` works out of the box.
+                docker buildx create --name skypilot-builder \
+                  --driver remote unix:///run/buildkit/buildkitd.sock || true
+                docker buildx use skypilot-builder || true
+                {% endif %}
+
                 touch /tmp/apt_ssh_setup_complete
                 echo "=== SSH setup completed ==="
                 ) > /tmp/${STEPS[0]}.log 2>&1
@@ -935,7 +996,10 @@ available_node_types:
               (
                 (
                 set -e
-                mkdir -p ~/.sky
+                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # writes python_path there before ray_installation_commands (which
+                # contains SETUP_SKY_DIRS_COMMANDS) creates it.
+                mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
@@ -948,16 +1012,16 @@ available_node_types:
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # ~/.sky/python_path is seeded by conda_installation_commands
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1199,6 +1263,14 @@ available_node_types:
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
           {% endif %}
+          {% if k8s_enable_docker_all %}
+          - name: docker-sock
+            mountPath: /var/run/dind
+          {% endif %}
+          {% if k8s_enable_docker_build %}
+          - name: buildkit-sock
+            mountPath: /run/buildkit
+          {% endif %}
           {% for volume_mount in volume_mounts %}
           - name: {{volume_mount.name}}
             mountPath: {{volume_mount.path}}
@@ -1210,6 +1282,9 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
+              {% if k8s_ephemeral_storage is defined %}
+              ephemeral-storage: {{k8s_ephemeral_storage}}G
+              {% endif %}
               {% if k8s_resource_key is not none %}
               # Number of requested google.com/tpu must be equal to the total
               # number of available TPU chips on the TPU slice node either it
@@ -1227,12 +1302,15 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
-            {% if k8s_resource_key is not none or k8s_cpu_limit is defined %}
+            {% if k8s_resource_key is not none or k8s_cpu_limit is defined or k8s_ephemeral_storage_limit is defined %}
             limits:
               {% if k8s_cpu_limit is defined %}
               # CPU/Memory limits set via set_pod_resource_limits config
               cpu: {{k8s_cpu_limit}}
               memory: {{k8s_memory_limit}}G
+              {% endif %}
+              {% if k8s_ephemeral_storage_limit is defined %}
+              ephemeral-storage: {{k8s_ephemeral_storage_limit}}G
               {% endif %}
               {% if k8s_resource_key is not none %}
               # Limits need to be defined for GPU/TPU/EFA requests
@@ -1315,6 +1393,40 @@ available_node_types:
           env:
             - name: LD_LIBRARY_PATH
               value: /usr/local/nvidia/lib64
+        {% endif %}
+        {% if k8s_enable_docker_all %}
+        # Docker-in-Docker (DinD) sidecar
+        - name: dind
+          image: {{k8s_docker_dind_image}}
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          args:
+            - "--host=unix:///var/run/dind/docker.sock"
+            - "--group=1000"
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/dind
+        {% endif %}
+        {% if k8s_enable_docker_build %}
+        # BuildKit daemon sidecar (rootless)
+        - name: buildkitd
+          image: {{k8s_docker_buildkit_image}}
+          args:
+            - "--addr=unix:///run/buildkit/buildkitd.sock"
+            - "--oci-worker-no-process-sandbox"
+          securityContext:
+            seccompProfile:
+              type: Unconfined
+            appArmorProfile:
+              type: Unconfined
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - name: buildkit-sock
+              mountPath: /run/buildkit
         {% endif %}
 
       {% if high_availability %}
@@ -1443,7 +1555,7 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
     ulimit -n 1048576;
-    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
     echo "=== Setup system configs and fuse completed in $(($end_epoch - $start_epoch)) secs ===";

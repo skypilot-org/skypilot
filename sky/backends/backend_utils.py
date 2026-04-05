@@ -948,14 +948,82 @@ def write_cluster_config(
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
                     sub_path=vol.sub_path,
+                    volume_type=vol.volume_config.type,
+                    host_path=vol.volume_config.config.get('host_path'),
                 )
                 volume_mount_vars.append(volume_info)
+
+    # Resolve auto_mounts from config and add them to volume_mount_vars so
+    # they go through the same Jinja2 template path as user volume mounts
+    # (volume definitions, volumeMounts, and permission fixes).
+    if isinstance(cloud, clouds.Kubernetes):
+        auto_mounts_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=to_provision.region,
+            keys=('auto_mounts',),
+            default_value=None)
+        if auto_mounts_config:
+            home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
+            for entry in auto_mounts_config:
+                volume_name = entry['volume_name']
+                mount_paths = entry.get('mount_paths', [])
+                record = global_user_state.get_volume_by_name(volume_name)
+                if record is None:
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} not found in '
+                        f'SkyPilot volume DB. Skipping. '
+                        f'Create it with: sky volumes apply')
+                    continue
+                volume_config = record['handle']
+                # Only hostPath and ReadWriteMany PVC volumes support
+                # concurrent multi-pod access required by auto_mounts.
+                if (volume_config.type == volume_utils.VolumeType.PVC.value and
+                        volume_config.config.get('access_mode') !=
+                        volume_utils.VolumeAccessMode.READ_WRITE_MANY.value):
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} has access '
+                        f'mode '
+                        f'{volume_config.config.get("access_mode")!r}, '
+                        f'which does not support concurrent multi-pod '
+                        f'access. Only hostPath volumes and '
+                        f'ReadWriteMany PVC volumes are supported for '
+                        f'auto_mounts. Skipping.')
+                    continue
+                k8s_volume_name = f'auto-mount-{volume_name}'
+                for path in mount_paths:
+                    if path.startswith('/'):
+                        mount_path = path
+                        sub_path = path.lstrip('/')
+                    elif path.startswith('~/'):
+                        mount_path = f'{home_dir}/{path[2:]}'
+                        sub_path = path[2:]
+                    elif path == '~':
+                        mount_path = home_dir
+                        sub_path = None
+                    else:
+                        continue
+                    volume_mount_vars.append(
+                        volume_utils.VolumeInfo(
+                            name=k8s_volume_name,
+                            path=mount_path,
+                            volume_name_on_cloud=(volume_config.name_on_cloud),
+                            volume_id_on_cloud=(volume_config.id_on_cloud),
+                            sub_path=sub_path if sub_path else None,
+                            volume_type=volume_config.type,
+                            host_path=volume_config.config.get('host_path'),
+                        ))
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
         keys=('post_provision_runcmd',),
         default_value=None)
+
+    # Build a list of read-write volume mount paths. The container startup
+    # script checks each path and fixes permissions if the current user cannot
+    # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
+    # dirs created as root, or NFS volumes that ignore fsGroup).
+    volume_mount_rw_paths: List[str] = [v.path for v in volume_mount_vars]
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -1077,6 +1145,7 @@ def write_cluster_config(
             # Volume mounts
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
+            'volume_mount_rw_paths': volume_mount_rw_paths,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
@@ -1986,65 +2055,82 @@ def _check_owner_identity_with_record(cluster_name: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
+    is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
-    # The user identity can be None, if the cluster is created by an older
-    # version of SkyPilot. In that case, we set the user identity to the
-    # current active one.
-    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
-    # immediately without `sky status --refresh` first, will cause a leakage
-    # of the existing cluster. We deem this an acceptable tradeoff mainly
-    # because multi-identity is not common (at least at the moment).
-    if owner_identity is None:
-        global_user_state.set_owner_identity_for_cluster(
-            cluster_name, user_identities[0])
-    else:
-        assert isinstance(owner_identity, list)
-        # It is OK if the owner identity is shorter, which will happen when
-        # the cluster is launched before #1808. In that case, we only check
-        # the same length (zip will stop at the shorter one).
-        for identity in user_identities:
-            for i, (owner, current) in enumerate(zip(owner_identity, identity)):
-                # Clean up the owner identity for the backslash and newlines, caused
-                # by the cloud CLI output, e.g. gcloud.
-                owner = owner.replace('\n', '').replace('\\', '')
-                if owner == current:
-                    if i != 0:
-                        logger.warning(
-                            f'The cluster was owned by {owner_identity}, but '
-                            f'a new identity {identity} is activated. We still '
-                            'allow the operation as the two identities are '
-                            'likely to have the same access to the cluster. '
-                            'Please be aware that this can cause unexpected '
-                            'cluster leakage if the two identities are not '
-                            'actually equivalent (e.g., belong to the same '
-                            'person).')
-                    if i != 0 or len(owner_identity) != len(identity):
-                        # We update the owner of a cluster, when:
-                        # 1. The strictest identty (i.e. the first one) does not
-                        # match, but the latter ones match.
-                        # 2. The length of the two identities are different,
-                        # which will only happen when the cluster is launched
-                        # before #1808. Update the user identity to avoid
-                        # showing the warning above again.
-                        global_user_state.set_owner_identity_for_cluster(
-                            cluster_name, identity)
-                    return  # The user identity matches.
+
+    def _raise_identity_error():
         # Generate error message if no match found
         if len(user_identities) == 1:
             err_msg = f'the activated identity is {user_identities[0]!r}.'
         else:
             err_msg = (f'available identities are {user_identities!r}.')
-        if cloud.is_same_cloud(clouds.Kubernetes()):
+        if is_k8s_cloud:
             err_msg += (' Check your kubeconfig file and make sure the '
                         'correct context is available.')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
+
+    if owner_identity is None and is_k8s_cloud:
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        provider_config = config['provider']
+        context = provider_config.get('context')
+        assert isinstance(context, str)
+        try:
+            identity = clouds.Kubernetes.get_identity_from_context_name(context)
+            global_user_state.set_owner_identity_for_cluster(
+                cluster_name, identity)
+            logger.debug(f'Successfully patched {cluster_name} owner identity '
+                         f'to {identity} (launched on {context}).')
+            return
+        except exceptions.CloudUserIdentityError:
+            _raise_identity_error()
+
+    assert isinstance(owner_identity, list)
+    # It is OK if the owner identity is shorter, which will happen when
+    # the cluster is launched before #1808. In that case, we only check
+    # the same length (zip will stop at the shorter one).
+    for identity in user_identities:
+        for i, (owner, current) in enumerate(zip(owner_identity, identity)):
+            # Clean up the owner identity for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
+            if owner == current:
+                if not is_k8s_cloud:
+                    # We skip patching owner identities for Kubernetes as
+                    # we expect users to naturally have multiple clusters
+                    # in their kubeconfig. The "active" identity is
+                    # considered as the current context, but users can and
+                    # will use contexts other than their current context
+                    # intentionally.
+                    if i != 0:
+                        logger.warning(
+                            f'The cluster was owned by {owner_identity}, '
+                            f'but a new identity {identity} is activated. '
+                            'We still allow the operation as the two '
+                            'identities are likely to have the same '
+                            'access to the cluster. Please be aware that '
+                            'this can cause unexpected cluster leakage if '
+                            'the two identities are not actually equivalent '
+                            '(e.g., belong to the same person).')
+                    if i != 0 or len(owner_identity) != len(identity):
+                        # We update the owner of a cluster, when:
+                        # 1. The strictest identty (i.e. the first one)
+                        # does not match, but the latter ones match.
+                        # 2. The length of the two identities are different,
+                        # which will only happen when the cluster is launched
+                        # before #1808. Update the user identity to avoid
+                        # showing the warning above again.
+                        global_user_state.set_owner_identity_for_cluster(
+                            cluster_name, identity)
+                return  # The user identity matches.
+    _raise_identity_error()
 
 
 def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:

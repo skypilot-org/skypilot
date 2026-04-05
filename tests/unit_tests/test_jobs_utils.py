@@ -643,3 +643,145 @@ class TestSetupConsolidationModeOnStartup:
             with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
                 utils.setup_consolidation_mode_on_startup(deploy=False)
                 assert not signal_file.exists()
+
+
+class TestCollectDebugDumpManifestParallel:
+    """Test that collect_debug_dump_manifest works correctly with many jobs."""
+
+    NUM_JOBS = 200
+
+    def _mock_get_managed_job_tasks(self, job_id):
+        return [{'user_yaml': f'name: job-{job_id}', 'status': 'RUNNING'}]
+
+    def _mock_get_job_events(self, job_id, limit=None):  # pylint: disable=unused-argument
+        return [{
+            'spot_job_id': job_id,
+            'task_id': 0,
+            'new_status': 'RUNNING',
+            'code': None,
+            'reason': None,
+            'timestamp': '2026-01-01',
+        }]
+
+    def _mock_get_all_task_ids_names_statuses_logs(self, job_id):
+        return [(0, f'task-{job_id}', 'RUNNING', f'/tmp/log-{job_id}', None)]
+
+    def _mock_get_pool_submit_info(self, job_id):
+        # Every 10 jobs share a cluster to test dedup
+        cluster_idx = (job_id - 1) // 10
+        return f'cluster-{cluster_idx}', job_id
+
+    def _mock_get_cluster_from_name(self, cluster_name):
+        return {
+            'name': cluster_name,
+            'cluster_hash': f'hash-{cluster_name}',
+            'handle': None,
+        }
+
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
+    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_parallel_collection_correctness(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_get_cluster,
+        mock_serialize,
+        mock_cluster_events,
+    ):
+        """All jobs collected, cluster info deduplicated, no data lost."""
+        mock_redact.side_effect = lambda y: y
+        mock_get_tasks.side_effect = self._mock_get_managed_job_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        mock_get_task_ids.side_effect = (
+            self._mock_get_all_task_ids_names_statuses_logs)
+        mock_get_pool.side_effect = self._mock_get_pool_submit_info
+        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
+        mock_serialize.side_effect = lambda r: {'name': r['name']}
+        mock_cluster_events.return_value = []
+
+        job_ids = list(range(1, self.NUM_JOBS + 1))
+        result = utils.collect_debug_dump_manifest(job_ids)
+
+        # Every job should produce job_info + job_events = 2 inline items
+        job_inline = [
+            p for p in result['inline_data']
+            if '/clusters/' not in p['relative_path']
+        ]
+        assert len(job_inline) == self.NUM_JOBS * 2, (
+            f'Expected {self.NUM_JOBS * 2} job inline items, '
+            f'got {len(job_inline)}')
+
+        # Cluster info should be deduplicated: 200 jobs / 10 per cluster = 20
+        cluster_inline = [
+            p for p in result['inline_data']
+            if '/clusters/' in p['relative_path']
+        ]
+        expected_clusters = self.NUM_JOBS // 10
+        assert len(cluster_inline) == expected_clusters, (
+            f'Expected {expected_clusters} cluster info entries, '
+            f'got {len(cluster_inline)}')
+
+        # No errors
+        assert len(result['errors']) == 0
+
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
+    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_partial_failures_isolated(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_get_cluster,
+        mock_serialize,
+        mock_cluster_events,
+    ):
+        """A failing job doesn't break collection for other jobs."""
+        mock_redact.side_effect = lambda y: y
+
+        def flaky_get_tasks(job_id):
+            if job_id % 3 == 0:
+                raise RuntimeError(f'DB error for job {job_id}')
+            return self._mock_get_managed_job_tasks(job_id)
+
+        mock_get_tasks.side_effect = flaky_get_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        mock_get_task_ids.side_effect = (
+            self._mock_get_all_task_ids_names_statuses_logs)
+        mock_get_pool.side_effect = self._mock_get_pool_submit_info
+        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
+        mock_serialize.side_effect = lambda r: {'name': r['name']}
+        mock_cluster_events.return_value = []
+
+        job_ids = list(range(1, self.NUM_JOBS + 1))
+        result = utils.collect_debug_dump_manifest(job_ids)
+
+        # Failing jobs should produce errors, not crash
+        failing_jobs = [j for j in job_ids if j % 3 == 0]
+        assert len(result['errors']) == len(failing_jobs)
+
+        # Non-failing jobs should still have their data
+        ok_jobs = [j for j in job_ids if j % 3 != 0]
+        job_info_items = [
+            p for p in result['inline_data']
+            if p['relative_path'].endswith('/job_info.json')
+        ]
+        assert len(job_info_items) == len(ok_jobs)

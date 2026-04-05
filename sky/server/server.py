@@ -6,7 +6,6 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
-from enum import IntEnum
 import hashlib
 import html
 import json
@@ -25,8 +24,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type)
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
 
@@ -37,6 +35,7 @@ from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import filelock
 import jwt as pyjwt
+import starlette.background
 import starlette.middleware.base
 import uvloop
 
@@ -64,6 +63,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import csp_utils
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -72,6 +72,7 @@ from sky.server import state
 from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
+from sky.server import websocket_utils
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
@@ -93,6 +94,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
@@ -641,7 +643,7 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
-            request_id='skypilot-server-on-boot-check',
+            request_id=server_constants.ON_BOOT_CHECK_REQUEST_ID,
             request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
@@ -651,7 +653,8 @@ async def schedule_on_boot_check_async():
     except exceptions.RequestAlreadyExistsError:
         # Lifespan will be executed in each uvicorn worker process, we
         # can safely ignore the error if the task is already scheduled.
-        logger.debug('Request skypilot-server-on-boot-check already exists.')
+        logger.debug(f'Request {server_constants.ON_BOOT_CHECK_REQUEST_ID} '
+                     'already exists.')
 
 
 @contextlib.asynccontextmanager
@@ -701,10 +704,14 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     # Content-Security-Policy directives:
     # - default-src 'self': Only allow resources from the same origin
-    # - script-src 'self' 'unsafe-inline': Allow same-origin scripts and
-    #   inline scripts (needed for Next.js __NEXT_DATA__)
-    # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
-    #   inline styles (needed for MUI/Emotion dynamic style injection)
+    # - script-src: For HTML responses a per-request nonce is used
+    #   ('nonce-<value>') so inline scripts are allowed only when they
+    #   carry the matching nonce attribute.  Non-HTML responses get a
+    #   strict 'self'-only policy (no inline allowance needed).
+    # - style-src: Uses 'unsafe-inline' because CSS-in-JS libraries
+    #   (Emotion, react-remove-scroll-bar) dynamically create <style>
+    #   elements that cannot easily carry nonces.  CSS cannot execute
+    #   scripts, so the risk is negligible.
     # - font-src 'self': Only allow same-origin fonts
     # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
     #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
@@ -717,22 +724,32 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - base-uri 'self': Restrict <base> element to same origin
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
-    _CSP_POLICY = ('default-src \'self\'; '
-                   'script-src \'self\' \'unsafe-inline\'; '
-                   'style-src \'self\' \'unsafe-inline\'; '
-                   'font-src \'self\'; '
-                   'connect-src \'self\' http://localhost:* '
-                   'http://127.0.0.1:*; '
-                   'frame-src \'self\'; '
-                   'img-src \'self\' data:; '
-                   'object-src \'none\'; '
-                   'base-uri \'self\'; '
-                   'form-action \'self\'; '
-                   'frame-ancestors \'self\'')
+    _CSP_TEMPLATE = ('default-src \'self\'; '
+                     'script-src {script_src}; '
+                     'style-src \'self\' \'unsafe-inline\'; '
+                     'font-src \'self\'; '
+                     'connect-src \'self\' http://localhost:* '
+                     'http://127.0.0.1:*; '
+                     'frame-src \'self\'; '
+                     'img-src \'self\' data:; '
+                     'object-src \'none\'; '
+                     'base-uri \'self\'; '
+                     'form-action \'self\'; '
+                     'frame-ancestors \'self\'')
 
     async def dispatch(self, request: fastapi.Request, call_next):
         response = await call_next(request)
-        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # Endpoints that serve HTML set request.state.csp_nonce so the
+        # CSP header can reference the nonce that was injected into the
+        # HTML body.  Non-HTML responses get a strict policy with no
+        # inline allowance.
+        nonce = getattr(request.state, 'csp_nonce', None)
+        if nonce:
+            script_src = f'\'self\' \'nonce-{nonce}\''
+        else:
+            script_src = '\'self\''
+        csp = self._CSP_TEMPLATE.format(script_src=script_src)
+        response.headers['Content-Security-Policy'] = csp
         # X-Frame-Options for legacy browsers that don't support CSP
         # frame-ancestors directive.
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
@@ -956,6 +973,10 @@ async def token(request: fastapi.Request,
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
 
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
     return fastapi.responses.HTMLResponse(
         content=html_content,
         headers={
@@ -1051,6 +1072,10 @@ async def authorize_page(
         html_content = f.read()
 
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
+
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,
@@ -2201,8 +2226,14 @@ async def stream(
         html_dir = pathlib.Path(__file__).parent / 'html'
         with open(html_dir / 'log.html', 'r', encoding='utf-8') as file:
             html_content = file.read()
+        html_content = html_content.replace('{stream_url}', str(stream_url))
+
+        nonce = csp_utils.generate_nonce()
+        request.state.csp_nonce = nonce
+        html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
         return fastapi.responses.HTMLResponse(
-            html_content.replace('{stream_url}', str(stream_url)),
+            html_content,
             headers={
                 'Cache-Control': 'no-cache, no-transform',
                 'X-Accel-Buffering': 'no'
@@ -2445,10 +2476,7 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
     )
 
 
-class SSHMessageType(IntEnum):
-    REGULAR_DATA = 0
-    PINGPONG = 1
-    LATENCY_MEASUREMENT = 2
+SSHMessageType = websocket_utils.SSHMessageType
 
 
 async def _get_cluster_and_validate(
@@ -2496,118 +2524,11 @@ async def _get_cluster_and_validate(
     return handle
 
 
-async def _run_websocket_proxy(
-    websocket: fastapi.WebSocket,
-    read_from_backend: Callable[[], Awaitable[bytes]],
-    write_to_backend: Callable[[bytes], Awaitable[None]],
-    close_backend: Callable[[], Awaitable[None]],
-    timestamps_supported: bool,
-) -> bool:
-    """Run bidirectional WebSocket-to-backend proxy.
-
-    Args:
-        websocket: FastAPI WebSocket connection
-        read_from_backend: Async callable to read bytes from backend
-        write_to_backend: Async callable to write bytes to backend
-        close_backend: Async callable to close backend connection
-        timestamps_supported: Whether to use message type framing
-
-    Returns:
-        True if SSH failed, False otherwise
-    """
-    ssh_failed = False
-    websocket_closed = False
-
-    async def websocket_to_backend():
-        try:
-            async for message in websocket.iter_bytes():
-                if timestamps_supported:
-                    type_size = struct.calcsize('!B')
-                    message_type = struct.unpack('!B', message[:type_size])[0]
-                    if message_type == SSHMessageType.REGULAR_DATA:
-                        # Regular data - strip type byte and forward to backend
-                        message = message[type_size:]
-                    elif message_type == SSHMessageType.PINGPONG:
-                        # PING message - respond with PONG
-                        ping_id_size = struct.calcsize('!I')
-                        if len(message) != type_size + ping_id_size:
-                            raise ValueError(
-                                f'Invalid PING message length: {len(message)}')
-                        # Return the same PING message for latency measurement
-                        await websocket.send_bytes(message)
-                        continue
-                    elif message_type == SSHMessageType.LATENCY_MEASUREMENT:
-                        # Latency measurement from client
-                        latency_size = struct.calcsize('!Q')
-                        if len(message) != type_size + latency_size:
-                            raise ValueError('Invalid latency measurement '
-                                             f'message length: {len(message)}')
-                        avg_latency_ms = struct.unpack(
-                            '!Q',
-                            message[type_size:type_size + latency_size])[0]
-                        latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # pylint: disable=line-too-long
-                            pid=os.getpid()).observe(latency_seconds)
-                        continue
-                    else:
-                        raise ValueError(
-                            f'Unknown message type: {message_type}')
-
-                try:
-                    await write_to_backend(message)
-                except Exception as e:  # pylint: disable=broad-except
-                    # Typically we will not reach here, if the conn to backend
-                    # is disconnected, backend_to_websocket will exit first.
-                    # But just in case.
-                    logger.error(f'Failed to write to backend through '
-                                 f'connection: {e}')
-                    nonlocal ssh_failed
-                    ssh_failed = True
-                    break
-        except fastapi.WebSocketDisconnect:
-            pass
-        nonlocal websocket_closed
-        websocket_closed = True
-        await close_backend()
-
-    async def backend_to_websocket():
-        try:
-            while True:
-                data = await read_from_backend()
-                if not data:
-                    if not websocket_closed:
-                        logger.warning(
-                            'SSH connection to backend is disconnected '
-                            'before websocket connection is closed')
-                        nonlocal ssh_failed
-                        ssh_failed = True
-                    break
-                if timestamps_supported:
-                    # Prepend message type byte (0 = regular data)
-                    message_type_bytes = struct.pack(
-                        '!B', SSHMessageType.REGULAR_DATA.value)
-                    data = message_type_bytes + data
-                await websocket.send_bytes(data)
-        except Exception:  # pylint: disable=broad-except
-            pass
-        try:
-            await websocket.close()
-        except Exception:  # pylint: disable=broad-except
-            # The websocket might have been closed by the client
-            pass
-
-    await asyncio.gather(websocket_to_backend(),
-                         backend_to_websocket(),
-                         return_exceptions=True)
-
-    return ssh_failed
-
-
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-        websocket: fastapi.WebSocket,
-        cluster_name: str,
-        client_version: Optional[int] = None) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str,
+                                   client_version: Optional[int] = None,
+                                   no_redirect: Optional[int] = None) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
@@ -2615,6 +2536,23 @@ async def kubernetes_pod_ssh_proxy(
     timestamps_supported = client_version is not None and client_version > 21
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
+
+    # Check if there is a hook wants to redirect this connection.
+    if (no_redirect != 1 and websocket_utils.ssh_redirect_hook is not None and
+            client_version is not None and client_version >=
+            server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION):
+        try:
+            redirect_info = await websocket_utils.ssh_redirect_hook(
+                websocket, cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'SSH redirect hook failed for {cluster_name}: {e}')
+            redirect_info = None
+        if redirect_info is not None:
+            frame = (struct.pack('!B', SSHMessageType.REDIRECT) +
+                     json.dumps(redirect_info).encode())
+            await websocket.send_bytes(frame)
+            await websocket.close()
+            return
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
@@ -2658,7 +2596,7 @@ async def kubernetes_pod_ssh_proxy(
         async def close_writer() -> None:
             writer.close()
 
-        ssh_failed = await _run_websocket_proxy(
+        ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
             read_from_backend=lambda: reader.read(1024),
             write_to_backend=write_and_drain,
@@ -2795,7 +2733,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         async def close_stdin() -> None:
             stdin.close()
 
-        ssh_failed = await _run_websocket_proxy(
+        ssh_failed = await websocket_utils.run_websocket_proxy(
             websocket,
             read_from_backend=lambda: stdout.read(4096),
             write_to_backend=write_and_drain,
@@ -2939,6 +2877,54 @@ async def all_contexts(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/debug/dump_create')
+async def create_debug_dump(
+        request: fastapi.Request,
+        create_debug_dump_body: payloads.CreateDebugDumpBody) -> None:
+    """Starts a debug dump."""
+
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CREATE_DEBUG_DUMP,
+        request_body=create_debug_dump_body,
+        func=core.create_debug_dump,
+        schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.get('/debug/dump_download/{dump_filename}')
+async def download_debug_dump(
+        dump_filename: str) -> fastapi.responses.FileResponse:
+    """Download a debug dump file.
+
+    The dump file is automatically deleted after the download completes.
+    """
+    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
+    dump_path = dump_dir / dump_filename
+
+    # Security: check path traversal before existence to avoid
+    # leaking whether arbitrary files exist on the filesystem.
+    try:
+        dump_path.resolve().relative_to(dump_dir.resolve())
+    except ValueError as path_err:
+        raise fastapi.HTTPException(status_code=403,
+                                    detail='Invalid path') from path_err
+
+    if not dump_path.exists():
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Debug dump not found')
+
+    # Delete the dump file after download completes
+    return fastapi.responses.FileResponse(
+        path=dump_path,
+        filename=dump_filename,
+        media_type='application/zip',
+        background=starlette.background.BackgroundTask(dump_path.unlink,
+                                                       missing_ok=True),
+    )
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
@@ -2963,66 +2949,132 @@ async def complete_api_request(incomplete: str,) -> List[str]:
     return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
+def _load_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:
+    """Load dynamic route patterns from the Next.js routes manifest.
+
+    Returns a list of ``(compiled_regex, page_path)`` tuples parsed from the
+    ``routes-manifest.json`` file generated by ``next build``.  The manifest is
+    read once and cached for the lifetime of the process.
+    """
+    manifest_path = os.path.join(server_constants.DASHBOARD_DIR,
+                                 'routes-manifest.json')
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+        return [(re.compile(r['regex']), r['page'])
+                for r in manifest.get('dynamicRoutes', [])]
+    except (OSError, json.JSONDecodeError, KeyError) as e:
+        logger.warning(f'Failed to load routes manifest: {e}')
+        return []
+
+
+# Cached dynamic routes loaded from the Next.js routes manifest.
+_DYNAMIC_ROUTES: Optional[List[Tuple['re.Pattern[str]', str]]] = None
+
+
+def _get_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:
+    """Return the cached dynamic routes, loading them on first call."""
+    global _DYNAMIC_ROUTES
+    if _DYNAMIC_ROUTES is None:
+        _DYNAMIC_ROUTES = _load_dynamic_routes()
+    return _DYNAMIC_ROUTES
+
+
+def _resolve_dynamic_route(dashboard_dir: str, path: str) -> Optional[str]:
+    """Resolve a URL path to a Next.js dynamic-route HTML file.
+
+    Uses the ``routes-manifest.json`` generated by ``next build`` to match
+    the *path* against pre-compiled dynamic route regexes.  The manifest
+    already orders routes from most-specific to least-specific (catch-all
+    routes come last), so the first match wins.
+
+    Args:
+        dashboard_dir: Absolute path to the dashboard ``out/`` directory.
+        path: URL path without leading slash,
+            e.g. ``clusters/my-cluster``.
+
+    Returns:
+        Absolute path to the matching HTML file, or ``None``.
+    """
+    for pattern, page in _get_dynamic_routes():
+        if pattern.match('/' + path):
+            html_file = page.lstrip('/') + '.html'
+            html_path = os.path.join(dashboard_dir, html_file)
+            if os.path.isfile(html_path):
+                return html_path
+    return None
+
+
+def _serve_html_with_nonce(
+    request: fastapi.Request,
+    file_path: str,
+) -> fastapi.responses.HTMLResponse:
+    """Read an HTML file, inject a CSP nonce, and return as HTMLResponse.
+
+    The nonce is also stored in ``request.state.csp_nonce`` so that
+    :class:`SecurityHeadersMiddleware` can reference it in the CSP header.
+    """
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    content = csp_utils.inject_nonce_into_html(content, nonce)
+    return fastapi.responses.HTMLResponse(content=content)
+
+
 @app.get('/dashboard/{full_path:path}')
-async def serve_dashboard(full_path: str):
+async def serve_dashboard(request: fastapi.Request, full_path: str):
     """Serves the Next.js dashboard application.
 
     Args:
+        request: The incoming HTTP request (used to attach the CSP nonce).
         full_path: The path requested by the client.
         e.g. /clusters, /jobs
 
     Returns:
-        FileResponse for static files or index.html for client-side routing.
+        FileResponse for static files, or nonce-injected HTMLResponse for
+        HTML pages.
 
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # Reject path traversal attempts before any filesystem access.
+    safe_full_path = full_path.lstrip('/')
+    if '..' in safe_full_path.split('/'):
+        raise fastapi.HTTPException(status_code=400, detail='Invalid path')
+
+    # Try to serve the static file directly e.g. /skypilot.svg,
     # /favicon.ico, and /_next/, etc.
-    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
+    file_path = os.path.join(server_constants.DASHBOARD_DIR, safe_full_path)
     if os.path.isfile(file_path):
+        if file_path.endswith('.html'):
+            return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
-    safe_full_path = full_path.lstrip('/')
-    if '..' in safe_full_path.split('/'):
-        raise fastapi.HTTPException(status_code=400, detail='Invalid path')
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
                              f'{safe_full_path}.html')
     if os.path.isfile(html_path):
-        return fastapi.responses.FileResponse(html_path)
+        return _serve_html_with_nonce(request, html_path)
 
-    # Serve plugin catch-all page for any /plugins/* paths so client-side
-    # routing can bootstrap correctly.
-    if full_path == 'plugins' or full_path.startswith('plugins/'):
-        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
-                                       'plugins', '[...slug].html')
-        if os.path.isfile(plugin_catchall):
-            return fastapi.responses.FileResponse(plugin_catchall)
-
-    # Serve recipe detail page for any /recipes/* paths (dynamic route)
-    if full_path.startswith('recipes/') and full_path != 'recipes/':
-        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
-                                   '[recipe].html')
-        if os.path.isfile(recipe_page):
-            return fastapi.responses.FileResponse(recipe_page)
-
-    # Serve the [...path] catch-all page for any remaining paths so
-    # client-side routing can bootstrap the correct plugin page.
-    # e.g. /quota, /cron
-    catchall_path = os.path.join(server_constants.DASHBOARD_DIR,
-                                 '[...path].html')
-    if safe_full_path and os.path.isfile(catchall_path):
-        return fastapi.responses.FileResponse(catchall_path)
+    # Resolve Next.js dynamic routes using the routes manifest.
+    # Handles patterns like:
+    #   /clusters/my-cluster  -> clusters/[cluster].html
+    #   /jobs/123/456         -> jobs/[job]/[task].html
+    #   /plugins/foo/bar      -> plugins/[...slug].html
+    if safe_full_path:
+        resolved = _resolve_dynamic_route(server_constants.DASHBOARD_DIR,
+                                          safe_full_path)
+        if resolved is not None:
+            return _serve_html_with_nonce(request, resolved)
 
     # Serve index.html as a last resort.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
-        with open(index_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        return fastapi.responses.HTMLResponse(content=content)
+        return _serve_html_with_nonce(request, index_path)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))

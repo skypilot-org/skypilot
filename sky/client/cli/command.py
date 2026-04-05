@@ -821,6 +821,11 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     return None
 
 
+# TODO(zhwu): All CLI command handlers should be wrapped with
+# @annotations.client_api so that is_on_api_server is False during
+# YAML parsing and schema validation. For now, we wrap this common
+# entry point to cover the majority of cases.
+@annotations.client_api
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
@@ -915,6 +920,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored '
                     'for JobGroup YAML.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
 
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
@@ -929,6 +937,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -1310,14 +1321,9 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'cluster',
-                'operator': ':',
-                'value': handle.get_cluster_name(),
-            })
             cluster_dashboard_url = server_common.get_dashboard_url(
                 server_common.get_server_url(),
-                starting_page=f'clusters?{query}')
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -5595,28 +5601,22 @@ def jobs_launch(
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
+        returncode = None
         if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
+        job_dashboard_url = None
+        if not server_common.is_api_server_local():
+            job_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
+        if returncode is not None:
             sys.exit(returncode)
-        else:
-            job_dashboard_url = None
-            if not server_common.is_api_server_local():
-                query = urllib.parse.urlencode({
-                    'property': 'id',
-                    'operator': '=',
-                    'value': job_id,
-                })
-                job_dashboard_url = server_common.get_dashboard_url(
-                    server_common.get_server_url(),
-                    starting_page=f'jobs?{query}')
-            click.secho(
-                ux_utils.command_hint_messages(
-                    ux_utils.CommandHintType.MANAGED_JOB,
-                    job_id=str(job_id),
-                    dashboard_url=job_dashboard_url))
     else:
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
@@ -7721,6 +7721,104 @@ def ssh_down(infra, async_call):
         print(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
+
+
+@cli.command('debug-dump', cls=_DocumentedCodeCommand)
+@click.option('--request-ids',
+              '-r',
+              multiple=True,
+              help='Request IDs or prefixes to include in the dump.')
+@click.option('--cluster-names',
+              '-c',
+              multiple=True,
+              help='Cluster names to include in the dump.')
+@click.option('--job-ids',
+              '-j',
+              multiple=True,
+              type=int,
+              help='Managed job IDs to include in the dump.')
+@click.option('--recent-minutes',
+              type=float,
+              default=None,
+              help='Include resources active within the last N minutes.')
+@click.option('--output', default=None, help='Output path for the dump file.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+@usage_lib.entrypoint
+def debug_dump(
+    request_ids: Tuple[str, ...],
+    cluster_names: Tuple[str, ...],
+    job_ids: Tuple[int, ...],
+    recent_minutes: Optional[float],
+    output: Optional[str],
+    async_call: bool,
+):
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+    Example usage:
+
+    \b
+    # Dump info for a specific cluster
+    $ sky debug-dump -c my-cluster
+
+    \b
+    # Dump info for a managed job
+    $ sky debug-dump -j 123
+
+    \b
+    # Dump info for a specific request
+    $ sky debug-dump -r abc123-def456
+
+    \b
+    # Dump resources from the last 60 minutes
+    $ sky debug-dump --recent-minutes 60
+
+    \b
+    # Combine multiple resources
+    $ sky debug-dump -c cluster1 -j 123 -r request-id
+
+    \b
+    # Save to a specific file
+    $ sky debug-dump -c my-cluster --output my-dump.zip
+    """
+    if (not request_ids and not cluster_names and not job_ids and
+            recent_minutes is None):
+        raise click.UsageError(
+            'At least one of --request-ids, --cluster-names, --job-ids, '
+            'or --recent-minutes must be provided.')
+    if recent_minutes is not None and recent_minutes <= 0:
+        raise click.UsageError('--recent-minutes must be a positive number.')
+
+    # Create the dump on the server
+    request_id = sdk.create_debug_dump(
+        request_ids=list(request_ids) if request_ids else None,
+        cluster_names=list(cluster_names) if cluster_names else None,
+        managed_job_ids=list(job_ids) if job_ids else None,
+        recent_minutes=recent_minutes,
+    )
+
+    if async_call:
+        click.echo(f'Request submitted with ID: {request_id}')
+        return
+
+    # Wait for the dump to be created
+    with rich_utils.client_status(
+            ux_utils.spinner_message('Creating debug dump')):
+        result = sdk.stream_and_get(request_id)
+
+    # Download the dump
+    dump_filename = pathlib.Path(result).name
+    local_path = output or dump_filename
+
+    click.echo(f'Downloading debug dump to {local_path}...')
+    sdk.download_debug_dump(dump_filename, local_path)
+    click.echo(f'Debug dump saved to: {local_path}')
 
 
 def main():

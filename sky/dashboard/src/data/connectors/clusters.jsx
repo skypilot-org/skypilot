@@ -265,6 +265,31 @@ export async function streamClusterJobLogs({
   }
 }
 
+export async function streamClusterProvisionLogs({
+  clusterName,
+  worker = null,
+  onNewLog,
+  signal,
+}) {
+  try {
+    // provision_logs takes follow and tail as query params, not body fields.
+    const params = `follow=false&tail=${DEFAULT_TAIL_LINES}`;
+    const body = { cluster_name: clusterName };
+    if (worker !== null) {
+      body.worker = worker;
+    }
+    await apiClient.stream(`/provision_logs?${params}`, body, onNewLog, {
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      return;
+    }
+    console.error('Error in streamClusterProvisionLogs:', error);
+    showToast(`Error fetching provision logs: ${error.message}`, 'error');
+  }
+}
+
 /**
  * Downloads job logs as a zip via the API server.
  * Flow:
@@ -293,12 +318,8 @@ export async function downloadJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();
