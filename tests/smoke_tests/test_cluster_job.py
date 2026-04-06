@@ -3503,3 +3503,61 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Cluster Resize ----------
+@pytest.mark.kubernetes
+def test_resize(generic_cloud: str):
+    """Test cluster resize: scale up, scale down, and busy-worker rejection."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'resize',
+        [
+            # Launch a single-node cluster.
+            f'sky launch -y -c {name} --infra kubernetes --cpus 2 --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
+            # --- Scale up ---
+            f'sky launch -c {name} --resize --num-nodes 3',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "3x"',
+            # --- No-op ---
+            f'sky launch -c {name} --resize --num-nodes 3 2>&1 | '
+            'grep "already has 3"',
+            # --- Scale down (idle) ---
+            f'sky launch -c {name} --resize --num-nodes 2',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x"',
+            # --- Scale down rejected when job running ---
+            f'sky exec {name} --num-nodes 2 -d -- sleep 300',
+            'sleep 5',
+            f'sky launch -c {name} --resize --num-nodes 1 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # Cancel jobs, then scale down succeeds.
+            f'sky cancel -y {name} -a',
+            'sleep 5',
+            f'sky launch -c {name} --resize --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x"',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_resize_cli_validation(generic_cloud: str):
+    """Test resize CLI validation: --resize without -c should error."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'resize_cli_validation',
+        [
+            # --resize without -c should error.
+            'sky launch --resize --num-nodes 4 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # --resize on a non-existent cluster should warn and create.
+            f'sky launch -y -c {name} --resize --infra kubernetes '
+            f'--cpus 2 --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

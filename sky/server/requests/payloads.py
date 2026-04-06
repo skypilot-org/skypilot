@@ -293,6 +293,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
