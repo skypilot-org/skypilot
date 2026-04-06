@@ -214,8 +214,23 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_utils.get_current_kube_config_context_name())
             if ((current_context is None or current_context.startswith('ssh-'))
                     and kubernetes_utils.is_incluster_config_available()):
-                # If no kubeconfig contexts found, use in-cluster if available
-                current_context = kubernetes.in_cluster_context_name()
+                # If no kubeconfig contexts found, use in-cluster if available.
+                # Verify in-cluster auth actually works before adding it,
+                # as the service account may not have proper permissions.
+                in_cluster_ctx = kubernetes.in_cluster_context_name()
+                try:
+                    is_valid, _ = kubernetes_utils.check_credentials(
+                        in_cluster_ctx, timeout=5)
+                    if is_valid:
+                        current_context = in_cluster_ctx
+                    elif not silent:
+                        logger.debug(
+                            f'In-cluster context {in_cluster_ctx!r} is not '
+                            'accessible, skipping auto-detection.')
+                except Exception as e:  # pylint: disable=broad-except
+                    if not silent:
+                        logger.debug(
+                            f'Failed to verify in-cluster context: {e}')
             allowed_contexts = []
             if current_context is not None:
                 allowed_contexts = [current_context]
