@@ -5,6 +5,12 @@ from typing import Any, Dict, Union
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
+# Peer metadata file for JobGroup networking on SSH clouds.
+# Written by the controller, polled by the background peer updater on each node.
+PEER_METADATA_FILE_TEMPLATE = '/tmp/skypilot-jobgroup-peers-{}.dat'
+# Process identifier for the SSH peer updater background script.
+PEER_UPDATER_PROCESS_ID_TEMPLATE = 'skypilot-jobgroup-peer-updater-{}'
+
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'

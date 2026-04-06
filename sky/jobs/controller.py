@@ -1087,7 +1087,15 @@ class JobController:
         """
 
         async def on_recovery() -> None:
-            """Re-setup networking after recovery (new node may have new IP)."""
+            """Re-setup networking after recovery (new node may have new IP).
+
+            Uses the lightweight update_peer_metadata() path which only
+            pushes the metadata file to SSH nodes. The background updater
+            (started during initial Phase 3 setup) picks up the change
+            within ~5 seconds. For K8s, the DNS updater handles changes
+            automatically. Falls back to full setup if the lightweight
+            path fails.
+            """
             updated_handles = []
             for t, _ in all_tasks_handles:
                 t_name = t.name
@@ -1099,8 +1107,15 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
 
-            await job_group_networking.setup_job_group_networking(
+            # Try lightweight metadata push first (sidecar already running)
+            success = await job_group_networking.update_peer_metadata(
                 job_group_name, updated_handles)
+            if not success:
+                # Fall back to full setup (restarts sidecars if needed)
+                logger.warning('Lightweight metadata update failed, '
+                               'falling back to full networking setup')
+                await job_group_networking.setup_job_group_networking(
+                    job_group_name, updated_handles)
 
         return await self._monitor_one_task(
             task_id=task_id,

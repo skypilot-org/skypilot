@@ -22,12 +22,14 @@ import asyncio
 import os
 import tempfile
 import textwrap
+import time
 import traceback
 import typing
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.jobs import constants as jobs_constants
 from sky.utils import command_runner
 
 if typing.TYPE_CHECKING:
@@ -197,6 +199,324 @@ def _generate_hosts_entries(
             logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
     return '\n'.join(entries)
+
+
+# ============================================================================
+# SSH Peer Metadata & Background Updater
+# ============================================================================
+
+
+def get_peer_metadata_path(job_group_name: str) -> str:
+    """Get the path to the peer metadata file on task nodes."""
+    return jobs_constants.PEER_METADATA_FILE_TEMPLATE.format(job_group_name)
+
+
+def _generate_peer_metadata_content(
+    job_group_name: str,
+    tasks_handles: List[Tuple['task_lib.Task',
+                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+    version: Optional[int] = None,
+) -> str:
+    """Generate peer metadata file content for SSH clouds.
+
+    The metadata file is a simple text format readable by a bash script:
+    - Lines starting with '# version:' contain a monotonic version number
+    - Lines starting with '# job_group:' identify the group
+    - Other non-comment lines are IP-hostname pairs (hosts-file format)
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        tasks_handles: List of (Task, ResourceHandle) tuples.
+        version: Version number. Defaults to current unix timestamp.
+
+    Returns:
+        Metadata file content as a string.
+    """
+    if version is None:
+        version = int(time.time())
+
+    lines = [
+        f'# version:{version}',
+        f'# job_group:{job_group_name}',
+    ]
+
+    for task, handle in tasks_handles:
+        if handle is None:
+            continue
+        if _is_kubernetes(handle):
+            continue
+        if handle.stable_internal_external_ips is None:
+            continue
+
+        task_name = task.name
+        for node_idx, (internal_ip,
+                       _) in enumerate(handle.stable_internal_external_ips):
+            hostname = f'{task_name}-{node_idx}.{job_group_name}'
+            lines.append(f'{internal_ip} {hostname}')
+
+    return '\n'.join(lines)
+
+
+def generate_ssh_peer_updater_script(job_group_name: str) -> str:
+    """Generate background script that polls a metadata file and updates hosts.
+
+    This is the SSH-cloud equivalent of the K8s DNS updater. Instead of
+    resolving K8s DNS names, it reads a local metadata file written by the
+    controller and updates /etc/hosts when the version changes.
+
+    Args:
+        job_group_name: Name of the job group.
+
+    Returns:
+        Bash script as a string.
+    """
+    metadata_path = get_peer_metadata_path(job_group_name)
+    marker = '# SkyPilot JobGroup SSH entries'
+
+    # Note: job_group_name is validated at YAML load time to be shell-safe
+    script = textwrap.dedent(f"""\
+        #!/bin/bash
+        # Background peer metadata updater for /etc/hosts (SSH clouds)
+
+        # Disable sudo for root user - handles containers without sudo installed
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
+
+        METADATA_FILE="{metadata_path}"
+        MARKER="{marker}"
+        LAST_VERSION=""
+
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting SSH peer updater for {job_group_name}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Watching metadata file: $METADATA_FILE"
+
+        while true; do
+          if [ -f "$METADATA_FILE" ]; then
+            # Read version from metadata file
+            current_version=$(grep '^# version:' "$METADATA_FILE" 2>/dev/null | head -1 | cut -d: -f2)
+
+            if [ -n "$current_version" ] && [ "$current_version" != "$LAST_VERSION" ]; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Metadata version changed: $LAST_VERSION -> $current_version"
+
+              # Extract IP-hostname lines (non-comment, non-empty lines)
+              new_entries=""
+              while IFS= read -r line; do
+                case "$line" in
+                  '#'*|'') continue ;;
+                  *) new_entries="${{new_entries}}$line  $MARKER
+" ;;
+                esac
+              done < "$METADATA_FILE"
+
+              if [ -n "$new_entries" ]; then
+                # Check if any IP actually differs from current /etc/hosts
+                needs_update=0
+                while IFS= read -r line; do
+                  case "$line" in
+                    '#'*|'') continue ;;
+                  esac
+                  entry_ip=$(echo "$line" | awk '{{print $1}}')
+                  entry_host=$(echo "$line" | awk '{{print $2}}')
+                  current_ip=$(getent hosts "$entry_host" 2>/dev/null | awk '{{print $1}}')
+                  if [ "$entry_ip" != "$current_ip" ]; then
+                    needs_update=1
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $entry_host: $current_ip -> $entry_ip"
+                  fi
+                done < "$METADATA_FILE"
+
+                if [ $needs_update -eq 1 ]; then
+                  echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
+                  existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
+                  if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
+                  else
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
+                  fi
+                fi
+              fi
+
+              LAST_VERSION="$current_version"
+            fi
+          fi
+          sleep 5
+        done
+        """)
+    return script.strip()
+
+
+async def _push_metadata_and_start_updater_on_node(
+    runner: 'command_runner.CommandRunner',
+    metadata_content: str,
+    job_group_name: str,
+    retry_count: int = 3,
+) -> bool:
+    """Push peer metadata file and start the background updater on an SSH node.
+
+    This is the SSH-cloud equivalent of _start_k8s_dns_updater_on_node.
+
+    Args:
+        runner: CommandRunner for the target node.
+        metadata_content: Content of the peer metadata file.
+        job_group_name: Name of the job group.
+        retry_count: Number of retry attempts for push failures.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    metadata_path = get_peer_metadata_path(job_group_name)
+    process_id = jobs_constants.PEER_UPDATER_PROCESS_ID_TEMPLATE.format(
+        job_group_name)
+    script_path = f'/tmp/{process_id}.sh'
+    log_path = f'/tmp/{process_id}.log'
+    marker_file = get_network_ready_marker_path(job_group_name)
+
+    loop = asyncio.get_running_loop()
+
+    for attempt in range(retry_count):
+        try:
+            # Write metadata file locally, then rsync to node
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_peer_metadata_',
+                                             suffix='.dat',
+                                             delete=False) as f:
+                f.write(metadata_content)
+                local_metadata_path = f.name
+
+            try:
+                await loop.run_in_executor(
+                    None, lambda: runner.rsync(source=local_metadata_path,
+                                               target=metadata_path,
+                                               up=True,
+                                               stream_logs=False))
+            finally:
+                os.remove(local_metadata_path)
+
+            # Check if updater is already running
+            check_cmd = f'pgrep -f "{process_id}" > /dev/null 2>&1'
+            returncode, _, _ = await loop.run_in_executor(
+                None, lambda: runner.run(
+                    check_cmd, stream_logs=False, require_outputs=True))
+
+            if returncode == 0:
+                # Updater already running, just create marker and return
+                touch_cmd = f'touch {marker_file}'
+                await loop.run_in_executor(
+                    None, lambda: runner.run(
+                        touch_cmd, stream_logs=False, require_outputs=True))
+                logger.debug(f'Peer updater already running for '
+                             f'{job_group_name}, metadata file updated')
+                return True
+
+            # Upload and start the updater script
+            updater_script = generate_ssh_peer_updater_script(job_group_name)
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_peer_updater_',
+                                             suffix='.sh',
+                                             delete=False) as f:
+                f.write(updater_script)
+                local_script_path = f.name
+
+            try:
+                await loop.run_in_executor(
+                    None, lambda: runner.rsync(source=local_script_path,
+                                               target=script_path,
+                                               up=True,
+                                               stream_logs=False))
+            finally:
+                os.remove(local_script_path)
+
+            # Start the updater in background and verify it started
+            run_cmd = (
+                f'chmod +x {script_path} && '
+                f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
+                f'sleep 0.5 && '
+                f'pgrep -f "{process_id}" > /dev/null && '
+                f'touch {marker_file}')
+            returncode, _, stderr = await loop.run_in_executor(
+                None, lambda: runner.run(
+                    run_cmd, stream_logs=False, require_outputs=True))
+
+            if returncode not in (0, 143):
+                logger.error(f'Failed to start SSH peer updater: '
+                             f'returncode={returncode}, stderr={stderr}')
+                if attempt < retry_count - 1:
+                    backoff = 2**(attempt + 1)
+                    logger.info(f'Retrying in {backoff}s '
+                                f'(attempt {attempt + 1}/{retry_count})')
+                    await asyncio.sleep(backoff)
+                    continue
+                return False
+
+            logger.info(f'SSH peer updater started for {job_group_name}')
+            return True
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Exception during SSH peer updater setup '
+                         f'(attempt {attempt + 1}/{retry_count}): {e}')
+            if attempt < retry_count - 1:
+                backoff = 2**(attempt + 1)
+                logger.info(f'Retrying in {backoff}s')
+                await asyncio.sleep(backoff)
+            else:
+                logger.error(traceback.format_exc())
+                return False
+
+    return False
+
+
+async def _push_metadata_to_node(
+    runner: 'command_runner.CommandRunner',
+    metadata_content: str,
+    job_group_name: str,
+    retry_count: int = 3,
+) -> bool:
+    """Push updated peer metadata file to a node (updater already running).
+
+    Lightweight version of _push_metadata_and_start_updater_on_node that
+    only pushes the metadata file. Used during recovery when the updater
+    is already running from initial setup.
+
+    Args:
+        runner: CommandRunner for the target node.
+        metadata_content: Content of the peer metadata file.
+        job_group_name: Name of the job group.
+        retry_count: Number of retry attempts.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    metadata_path = get_peer_metadata_path(job_group_name)
+    loop = asyncio.get_running_loop()
+
+    for attempt in range(retry_count):
+        try:
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_peer_metadata_',
+                                             suffix='.dat',
+                                             delete=False) as f:
+                f.write(metadata_content)
+                local_metadata_path = f.name
+
+            try:
+                await loop.run_in_executor(
+                    None, lambda: runner.rsync(source=local_metadata_path,
+                                               target=metadata_path,
+                                               up=True,
+                                               stream_logs=False))
+            finally:
+                os.remove(local_metadata_path)
+
+            return True
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to push metadata to node '
+                           f'(attempt {attempt + 1}/{retry_count}): {e}')
+            if attempt < retry_count - 1:
+                backoff = 2**(attempt + 1)
+                await asyncio.sleep(backoff)
+            else:
+                logger.error(traceback.format_exc())
+                return False
+
+    return False
 
 
 async def _inject_hosts_on_node(
@@ -408,8 +728,9 @@ class NetworkConfigurator:
     """Configures network infrastructure for JobGroups.
 
     Handles platform-specific network configuration:
-    - K8s: No configuration needed (DNS works automatically)
-    - SSH clouds: Injects /etc/hosts entries for hostname resolution
+    - K8s: Starts a background DNS updater that resolves K8s service DNS
+    - SSH clouds: Pushes a peer metadata file and starts a background
+      updater that polls it and maintains /etc/hosts
     """
 
     @staticmethod
@@ -439,8 +760,8 @@ class NetworkConfigurator:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
         This maps the unified hostname format to actual addresses:
-        - K8s: Write DNS mappings file for skylet's HostUpdater
-        - SSH: Inject static internal IPs
+        - K8s: Start background DNS updater on each node
+        - SSH: Push peer metadata file and start background updater
 
         Args:
             job_group_name: Name of the JobGroup.
@@ -451,8 +772,9 @@ class NetworkConfigurator:
         """
         logger.info(f'Setting up networking on all {len(tasks_handles)} jobs')
 
-        ssh_hosts_content = _generate_hosts_entries(job_group_name,
-                                                    tasks_handles)
+        # Generate platform-specific content
+        ssh_metadata_content = _generate_peer_metadata_content(
+            job_group_name, tasks_handles)
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
 
@@ -476,10 +798,8 @@ class NetworkConfigurator:
                         runner, k8s_dns_mappings, job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, True))
                 else:
-                    # ssh_hosts_content is always truthy (has header comment)
-                    assert ssh_hosts_content, 'unreachable'
-                    coro = _inject_hosts_on_node(runner, ssh_hosts_content,
-                                                 job_group_name)
+                    coro = _push_metadata_and_start_updater_on_node(
+                        runner, ssh_metadata_content, job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, False))
                 logger.debug(
                     f'Queued networking setup for {task.name}-{node_idx}')
@@ -506,7 +826,7 @@ class NetworkConfigurator:
 
             # Log error details for failed tasks
             _, task_name, node_idx, is_k8s = setup_tasks[i]
-            setup_type = 'K8s DNS updater' if is_k8s else '/etc/hosts'
+            setup_type = 'K8s DNS updater' if is_k8s else 'SSH peer updater'
             node_label = f'{task_name}-{node_idx}'
 
             if isinstance(result, Exception):
@@ -546,6 +866,80 @@ async def setup_job_group_networking(
     """
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
     return await NetworkConfigurator.setup(job_group_name, tasks_handles)
+
+
+async def update_peer_metadata(
+    job_group_name: str,
+    tasks_handles: List[Tuple['task_lib.Task',
+                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+) -> bool:
+    """Push updated peer metadata to all SSH cloud nodes in a JobGroup.
+
+    Lightweight alternative to setup_job_group_networking() for use during
+    recovery. Only pushes the metadata file; the background updater
+    (started during initial setup) picks up changes within 5 seconds.
+
+    For K8s nodes, this is a no-op (the K8s DNS updater handles IP changes
+    automatically via native DNS).
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        tasks_handles: List of (Task, ResourceHandle) tuples for each task.
+
+    Returns:
+        True if all pushes succeeded, False otherwise.
+    """
+    metadata_content = _generate_peer_metadata_content(job_group_name,
+                                                       tasks_handles)
+    # Only push to SSH cloud nodes (K8s DNS updater handles itself)
+    has_ssh_nodes = any(handle is not None and not _is_kubernetes(handle)
+                        for _, handle in tasks_handles)
+    if not has_ssh_nodes:
+        logger.debug('No SSH cloud nodes to update metadata for')
+        return True
+
+    logger.info(f'Pushing updated peer metadata for JobGroup: '
+                f'{job_group_name}')
+
+    push_tasks = []
+    for task, handle in tasks_handles:
+        if handle is None or _is_kubernetes(handle):
+            continue
+        try:
+            runners = handle.get_command_runners()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to get command runners for {task.name}: {e}')
+            continue
+
+        for node_idx, runner in enumerate(runners):
+            coro = _push_metadata_to_node(runner, metadata_content,
+                                          job_group_name)
+            push_tasks.append((coro, task.name, node_idx))
+
+    if not push_tasks:
+        return True
+
+    coroutines = [entry[0] for entry in push_tasks]
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*coroutines,
+                                                        return_exceptions=True),
+                                         timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.error('Peer metadata push timed out after 60 seconds')
+        return False
+
+    success_count = sum(1 for r in results if r is True)
+    if success_count < len(results):
+        for i, result in enumerate(results):
+            if result is not True:
+                _, task_name, node_idx = push_tasks[i]
+                logger.warning(f'Failed to push metadata to '
+                               f'{task_name}-{node_idx}: {result}')
+
+    logger.info(f'Peer metadata push: {success_count}/{len(results)} '
+                f'succeeded')
+    return success_count == len(results)
 
 
 def get_network_ready_marker_path(job_group_name: str) -> str:
@@ -596,12 +990,8 @@ def generate_wait_for_networking_script(job_group_name: str,
     updater_log = (f'/tmp/skypilot-jobgroup-dns-updater-'
                    f'{job_group_name}.log')
     updater_process = f'skypilot-jobgroup-dns-updater-{job_group_name}'
-
-    # TODO(zhwu): The current handling is not robust against the case where
-    # network setup fails. The job will continue but may get stuck if it
-    # depends on networking. We should make the job group automatically
-    # recover (e.g., re-trigger network setup or restart the job) if the
-    # network fails to initialize properly.
+    ssh_updater_process = (
+        jobs_constants.PEER_UPDATER_PROCESS_ID_TEMPLATE.format(job_group_name))
     wait_script = textwrap.dedent(f"""
         # Wait for JobGroup networking to be ready (best-effort, non-blocking)
         # If networking fails, we continue anyway to allow job group recovery
@@ -638,11 +1028,13 @@ def generate_wait_for_networking_script(job_group_name: str,
           ELAPSED=0
           UPDATER_LOG="{updater_log}"
           UPDATER_PROCESS="{updater_process}"
+          SSH_UPDATER_PROCESS="{ssh_updater_process}"
           for hostname in $HOSTNAMES; do
             while ! getent hosts "$hostname" >/dev/null 2>&1; do
               if [ $ELAPSED -ge $MAX_WAIT ]; then
                 echo "[SkyPilot] Warning: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
-                echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
+                echo "[SkyPilot] K8s DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
+                echo "[SkyPilot] SSH peer updater running: $(pgrep -f "$SSH_UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
                 echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
                 NETWORK_READY=false
                 break 2  # Break out of both loops
