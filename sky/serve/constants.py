@@ -36,8 +36,10 @@ LB_MAX_RETRY = 3
 # TODO(tian): Expose this option to users in yaml file.
 LB_STREAM_TIMEOUT = 120
 
-# Interval in seconds to probe replica endpoint.
-ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Default interval in seconds to probe replica endpoint.
+DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Backward compatibility alias.
+ENDPOINT_PROBE_INTERVAL_SECONDS = DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS
 
 # The default timeout in seconds for a readiness probe request. We set the
 # timeout to 15s since using actual generation in LLM services as readiness

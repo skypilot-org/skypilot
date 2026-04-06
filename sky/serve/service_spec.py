@@ -26,6 +26,8 @@ class SkyServiceSpec:
         readiness_path: str,
         initial_delay_seconds: int,
         readiness_timeout_seconds: int,
+        endpoint_probe_interval_seconds: int,
+        lb_stream_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
         num_overprovision: Optional[int] = None,
@@ -42,6 +44,7 @@ class SkyServiceSpec:
         load_balancing_policy: Optional[str] = None,
         pool: Optional[bool] = None,
         queue_length_threshold: Optional[int] = None,
+        consecutive_failure_threshold_timeout: Optional[int] = None,
     ) -> None:
         if pool:
             # For pools, max_replicas should never be specified directly by the
@@ -128,6 +131,9 @@ class SkyServiceSpec:
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
+        self._endpoint_probe_interval_seconds: int = (
+            endpoint_probe_interval_seconds)
+        self._lb_stream_timeout_seconds: int = lb_stream_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
         self._num_overprovision: Optional[int] = num_overprovision
@@ -148,6 +154,8 @@ class SkyServiceSpec:
         self._load_balancing_policy: Optional[str] = load_balancing_policy
         self._pool: Optional[bool] = pool
         self._queue_length_threshold: Optional[int] = queue_length_threshold
+        self._consecutive_failure_threshold_timeout: Optional[int] = (
+            consecutive_failure_threshold_timeout)
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -173,6 +181,8 @@ class SkyServiceSpec:
             initial_delay_seconds = None
             post_data = None
             readiness_timeout_seconds = None
+            endpoint_probe_interval_seconds = None
+            consecutive_failure_threshold_timeout = None
             readiness_headers = None
         else:
             service_config['readiness_path'] = readiness_section['path']
@@ -181,6 +191,10 @@ class SkyServiceSpec:
             post_data = readiness_section.get('post_data', None)
             readiness_timeout_seconds = readiness_section.get(
                 'timeout_seconds', None)
+            endpoint_probe_interval_seconds = readiness_section.get(
+                'endpoint_probe_interval_seconds', None)
+            consecutive_failure_threshold_timeout = readiness_section.get(
+                'consecutive_failure_threshold_timeout', None)
             readiness_headers = readiness_section.get('headers', None)
         if initial_delay_seconds is None:
             initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
@@ -189,6 +203,22 @@ class SkyServiceSpec:
             readiness_timeout_seconds = (
                 constants.DEFAULT_READINESS_PROBE_TIMEOUT_SECONDS)
         service_config['readiness_timeout_seconds'] = readiness_timeout_seconds
+        if endpoint_probe_interval_seconds is None:
+            endpoint_probe_interval_seconds = (
+                constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        service_config['endpoint_probe_interval_seconds'] = (
+            endpoint_probe_interval_seconds)
+        service_config['consecutive_failure_threshold_timeout'] = (
+            consecutive_failure_threshold_timeout)
+        load_balancer_section = config.get('load_balancer', None)
+        lb_stream_timeout_seconds = None
+        if load_balancer_section is not None:
+            lb_stream_timeout_seconds = load_balancer_section.get(
+                'stream_timeout_seconds', None)
+        if lb_stream_timeout_seconds is None:
+            lb_stream_timeout_seconds = constants.LB_STREAM_TIMEOUT
+        service_config['lb_stream_timeout_seconds'] = (
+            lb_stream_timeout_seconds)
         if isinstance(post_data, str):
             try:
                 post_data = json.loads(post_data)
@@ -422,6 +452,13 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
         add_if_not_none('readiness_probe', 'timeout_seconds',
                         self.readiness_timeout_seconds)
+        add_if_not_none('readiness_probe', 'endpoint_probe_interval_seconds',
+                        self.endpoint_probe_interval_seconds)
+        add_if_not_none('readiness_probe',
+                        'consecutive_failure_threshold_timeout',
+                        self.consecutive_failure_threshold_timeout)
+        add_if_not_none('load_balancer', 'stream_timeout_seconds',
+                        self.lb_stream_timeout_seconds)
         add_if_not_none('readiness_probe', 'headers', self._readiness_headers)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
@@ -547,6 +584,14 @@ class SkyServiceSpec:
         return self._readiness_timeout_seconds
 
     @property
+    def endpoint_probe_interval_seconds(self) -> int:
+        return self._endpoint_probe_interval_seconds
+
+    @property
+    def lb_stream_timeout_seconds(self) -> int:
+        return self._lb_stream_timeout_seconds
+
+    @property
     def min_replicas(self) -> int:
         return self._min_replicas
 
@@ -625,6 +670,10 @@ class SkyServiceSpec:
     def queue_length_threshold(self) -> Optional[int]:
         return self._queue_length_threshold
 
+    @property
+    def consecutive_failure_threshold_timeout(self) -> Optional[int]:
+        return self._consecutive_failure_threshold_timeout
+
     def copy(self, **override) -> 'SkyServiceSpec':
         return SkyServiceSpec(
             readiness_path=override.pop('readiness_path', self._readiness_path),
@@ -632,6 +681,11 @@ class SkyServiceSpec:
                                                self._initial_delay_seconds),
             readiness_timeout_seconds=override.pop(
                 'readiness_timeout_seconds', self._readiness_timeout_seconds),
+            endpoint_probe_interval_seconds=override.pop(
+                'endpoint_probe_interval_seconds',
+                self._endpoint_probe_interval_seconds),
+            lb_stream_timeout_seconds=override.pop(
+                'lb_stream_timeout_seconds', self._lb_stream_timeout_seconds),
             min_replicas=override.pop('min_replicas', self._min_replicas),
             max_replicas=override.pop('max_replicas', self._max_replicas),
             num_overprovision=override.pop('num_overprovision',
@@ -658,4 +712,7 @@ class SkyServiceSpec:
             pool=override.pop('pool', self._pool),
             queue_length_threshold=override.pop('queue_length_threshold',
                                                 self._queue_length_threshold),
+            consecutive_failure_threshold_timeout=override.pop(
+                'consecutive_failure_threshold_timeout',
+                self._consecutive_failure_threshold_timeout),
         )

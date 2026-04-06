@@ -373,7 +373,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                     args=(controller_addr, load_balancer_port,
                           service_spec.load_balancing_policy,
                           service_spec.tls_credential,
-                          service_spec.target_qps_per_replica))
+                          service_spec.target_qps_per_replica,
+                          service_spec.lb_stream_timeout_seconds))
                 load_balancer_process.start()
 
             if not is_recovery:
