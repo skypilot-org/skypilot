@@ -257,7 +257,7 @@ export function TopBar() {
       : 'border-transparent hover:text-blue-600';
 
     return `inline-flex items-center border-b-2 ${baseClasses} ${
-      isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2'
+      isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2 text-sm'
     }`;
   };
 
@@ -288,7 +288,7 @@ export function TopBar() {
   const renderNavLabel = (link) => (
     <>
       {link.icon && (
-        <span className="text-base leading-none mr-1" aria-hidden="true">
+        <span className="text-sm leading-none mr-1" aria-hidden="true">
           {renderPluginIcon(link.icon, 'w-4 h-4')}
         </span>
       )}
