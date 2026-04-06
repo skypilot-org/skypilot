@@ -199,6 +199,15 @@ _PER_CONTEXT_TIMEOUT_SECONDS = 8
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    # Let plugins sync environment state (e.g. KUBECONFIG) into the
+    # metrics server process, which is separate from request workers.
+    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
+    for plugin in plugins_mod.get_plugins():
+        try:
+            plugin.on_gpu_metrics_collect()
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(f'Plugin {plugin.name} on_gpu_metrics_collect failed',
+                           exc_info=True)
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0
