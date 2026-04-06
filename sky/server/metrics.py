@@ -167,6 +167,19 @@ def maybe_register_managed_jobs_collector():
 metrics_app = fastapi.FastAPI()
 
 
+@metrics_app.on_event('startup')
+async def _load_plugins_for_metrics():
+    """Load plugins in the metrics server process.
+
+    The metrics server runs in a separate uvicorn instance from the main
+    API server, so plugins are not automatically loaded. We need to load
+    them here so that plugin hooks (e.g. on_gpu_metrics_collect) work.
+    """
+    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
+    if not plugins_mod.get_plugins():
+        plugins_mod.load_plugins(plugins_mod.ExtensionContext())
+
+
 # Serve /metrics in dedicated thread to avoid blocking the event loop
 # of metrics server.
 @metrics_app.get('/metrics')
