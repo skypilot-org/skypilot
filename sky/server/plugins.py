@@ -217,15 +217,6 @@ class BasePlugin(abc.ABC):
         """Hook called by API server to let the plugin install itself."""
         raise NotImplementedError
 
-    def on_gpu_metrics_collect(self):
-        """Hook called in the metrics server before collecting GPU metrics.
-
-        Use this to ensure process-level state (e.g. environment variables)
-        is up to date in the metrics server process, which runs separately
-        from request worker processes.
-        """
-        pass
-
     def shutdown(self):
         """Hook called by API server to let the plugin shutdown."""
         pass

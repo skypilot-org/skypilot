@@ -20,6 +20,7 @@ from sky import core
 from sky import global_user_state
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
+from sky.utils import annotations
 
 logger = sky_logging.init_logger(__name__)
 
@@ -196,47 +197,14 @@ def metrics() -> fastapi.Response:
 _PER_CONTEXT_TIMEOUT_SECONDS = 8
 
 
-@metrics_app.get('/gpu-metrics-debug')
-def gpu_metrics_debug() -> dict:
-    """Debug endpoint to inspect metrics server state."""
-    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
-    from sky.utils import annotations as annotations_mod  # pylint: disable=import-outside-toplevel
-    plugin_names = [p.name for p in plugins_mod.get_plugins()]
-    kubeconfig = os.environ.get('KUBECONFIG', 'NOT SET')
-    # Show contexts before and after cache clear to verify the fix
-    contexts_before_clear = core.get_all_contexts()
-    cache_entries = len(annotations_mod._FUNCTIONS_NEED_RELOAD_CACHE)
-    annotations_mod.clear_request_level_cache()
-    contexts_after_clear = core.get_all_contexts()
-    return {
-        'plugins_count': len(plugin_names),
-        'plugin_names': plugin_names,
-        'kubeconfig': kubeconfig,
-        'contexts_before_cache_clear': contexts_before_clear,
-        'contexts_after_cache_clear': contexts_after_clear,
-        'request_cache_entries': cache_entries,
-        'pid': os.getpid(),
-    }
-
-
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    from sky.utils import annotations as annotations_mod  # pylint: disable=import-outside-toplevel
     # The metrics server runs as a daemon thread, not as a normal request
     # handler, so request-scoped caches (e.g. kubernetes API clients,
     # context names) are never cleared automatically. Clear them on each
     # scrape so that newly uploaded kubeconfigs are discovered.
-    annotations_mod.clear_request_level_cache()
-    # Let plugins sync environment state (e.g. KUBECONFIG) into the
-    # metrics server process, which is separate from request workers.
-    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
-    for plugin in plugins_mod.get_plugins():
-        try:
-            plugin.on_gpu_metrics_collect()
-        except Exception:  # pylint: disable=broad-except
-            logger.warning(f'Plugin {plugin.name} on_gpu_metrics_collect failed',
-                           exc_info=True)
+    annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0
