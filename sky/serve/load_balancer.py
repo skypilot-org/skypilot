@@ -36,7 +36,7 @@ class SkyServeLoadBalancer:
         load_balancing_policy_name: Optional[str] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
-        stream_timeout_seconds: int = constants.LB_STREAM_TIMEOUT,
+        stream_timeout_seconds: int = constants.DEFAULT_LB_STREAM_TIMEOUT,
     ) -> None:
         """Initialize the load balancer.
 
@@ -295,9 +295,9 @@ def run_load_balancer(
     load_balancing_policy_name: Optional[str] = None,
     tls_credential: Optional[serve_utils.TLSCredential] = None,
     target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
-    stream_timeout_seconds: int = constants.LB_STREAM_TIMEOUT,
+    stream_timeout_seconds: int = constants.DEFAULT_LB_STREAM_TIMEOUT,
 ) -> None:
-    """ Run the load balancer.
+    """Run the load balancer.
 
     Args:
         controller_addr: The address of the controller.
