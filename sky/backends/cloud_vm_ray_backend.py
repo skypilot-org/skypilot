@@ -5863,12 +5863,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_ever_up=cluster_ever_up,
                 prev_config_hash=prev_config_hash)
         if resize:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cluster {cluster_name!r} does not exist. '
-                    'Cannot resize a non-existent cluster. '
-                    'Use `sky launch` without --resize to create a new '
-                    'cluster.')
+            logger.warning(
+                f'Cluster {cluster_name!r} does not exist. '
+                'Ignoring --resize and proceeding with a normal launch.')
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
