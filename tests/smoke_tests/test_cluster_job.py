@@ -3540,3 +3540,24 @@ def test_resize(generic_cloud: str):
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_resize_cli_validation(generic_cloud: str):
+    """Test resize CLI validation: --resize without -c should error."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'resize_cli_validation',
+        [
+            # --resize without -c should error.
+            'sky launch --resize --num-nodes 4 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # --resize on a non-existent cluster should warn and create.
+            f'sky launch -y -c {name} --resize --infra kubernetes '
+            f'--cpus 2 --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

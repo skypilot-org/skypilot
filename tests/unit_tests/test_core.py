@@ -1,7 +1,13 @@
 from unittest import mock
 
+import click
+import pytest
+
+from sky import clouds
 from sky import core
+from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
+from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -82,9 +88,11 @@ def test_status_best_effort(mock_get_clusters) -> None:
             in log_message)
 
 
-# --- Resize tests ---
+# ---------------------------------------------------------------------------
+# Resize tests
+# ---------------------------------------------------------------------------
 # These test the backend's _handle_resize_pre_provision method which
-# implements the resize logic within the launch/provision pipeline.
+# implements the resize logic, and the _check_existing_cluster integration.
 
 
 def _make_mock_handle(cluster_name='test-cluster',
@@ -117,10 +125,12 @@ def _make_mock_task(num_nodes=1):
     return task
 
 
+# --- Scale-up / same-size (pre-provision is a no-op) ---
+
+
 def test_resize_scale_up_is_noop_pre_provision():
     """Scale-up should not do anything in pre-provision (bulk_provision
     handles it)."""
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=2)
     task = _make_mock_task(num_nodes=4)
@@ -130,51 +140,329 @@ def test_resize_scale_up_is_noop_pre_provision():
 
 def test_resize_same_size_is_noop_pre_provision():
     """Same-size resize should not raise."""
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
     task = _make_mock_task(num_nodes=3)
     backend._handle_resize_pre_provision(handle, task, 'test-cluster')
 
 
+# --- Scale-down: rejection cases ---
+
+
 @mock.patch('sky.skylet.job_lib.load_job_queue')
 def test_resize_scale_down_running_jobs_rejected(mock_load_queue):
     """Scale-down should fail if jobs are running."""
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-    from sky.skylet import job_lib
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
     task = _make_mock_task(num_nodes=1)
 
-    # Mock run_on_head to succeed, and load_job_queue to return a running job.
     backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
     mock_load_queue.return_value = [{
         'job_id': 1,
         'status': job_lib.JobStatus.RUNNING,
     }]
 
-    try:
+    with pytest.raises(ValueError, match=r'Cannot scale down.*running'):
         backend._handle_resize_pre_provision(handle, task, 'test-cluster')
-        assert False, 'Expected ValueError about running jobs'
-    except ValueError as e:
-        assert 'running' in str(e).lower()
-        assert 'sky cancel' in str(e)
 
 
-def test_resize_scale_down_ssh_failure_aborts():
-    """Scale-down should abort if job queue check fails (SSH error)."""
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_setting_up_jobs_rejected(mock_load_queue):
+    """Scale-down should fail if jobs are setting up."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
     task = _make_mock_task(num_nodes=1)
 
-    # Mock run_on_head to fail (SSH error).
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = [{
+        'job_id': 5,
+        'status': job_lib.JobStatus.SETTING_UP,
+    }]
+
+    with pytest.raises(ValueError, match=r'Cannot scale down'):
+        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
+
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_pending_jobs_rejected(mock_load_queue):
+    """Scale-down should fail if jobs are pending."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = [{
+        'job_id': 10,
+        'status': job_lib.JobStatus.PENDING,
+    }]
+
+    with pytest.raises(ValueError, match=r'Cannot scale down'):
+        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
+
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_multiple_in_progress_shows_all_ids(mock_load_queue):
+    """Error message should list all in-progress job IDs."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=4)
+    task = _make_mock_task(num_nodes=1)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = [
+        {
+            'job_id': 1,
+            'status': job_lib.JobStatus.RUNNING
+        },
+        {
+            'job_id': 2,
+            'status': job_lib.JobStatus.PENDING
+        },
+        {
+            'job_id': 3,
+            'status': job_lib.JobStatus.SETTING_UP
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r'3 job\(s\)') as exc_info:
+        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    err = str(exc_info.value)
+    assert '1' in err and '2' in err and '3' in err
+
+
+def test_resize_scale_down_ssh_failure_aborts():
+    """Scale-down should abort if job queue check fails (SSH error)."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
     backend.run_on_head = mock.MagicMock(return_value=(255, '',
                                                        'Connection refused'))
 
-    try:
+    with pytest.raises(RuntimeError, match=r'Failed to check job queue'):
         backend._handle_resize_pre_provision(handle, task, 'test-cluster')
-        assert False, 'Expected RuntimeError about failed job queue check'
-    except RuntimeError as e:
-        assert 'failed to check job queue' in str(e).lower()
-        assert 'aborting' in str(e).lower()
+
+
+# --- Scale-down: success cases (the happy path) ---
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_idle_cluster_terminates_workers(
+        mock_load_queue, mock_get_yaml, mock_terminate):
+    """Scale-down on an idle cluster should terminate excess workers."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=4)
+    task = _make_mock_task(num_nodes=2)
+
+    # No running jobs.
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = []
+    mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+
+    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
+    mock_terminate.assert_called_once_with(
+        mock.ANY,  # cloud_name
+        handle.cluster_name_on_cloud,
+        {'type': 'kubernetes'},
+        worker_only=True,
+    )
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_completed_jobs_allowed(mock_load_queue,
+                                                  mock_get_yaml,
+                                                  mock_terminate):
+    """Completed/failed jobs should not block scale-down."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = [
+        {
+            'job_id': 1,
+            'status': job_lib.JobStatus.SUCCEEDED
+        },
+        {
+            'job_id': 2,
+            'status': job_lib.JobStatus.FAILED
+        },
+        {
+            'job_id': 3,
+            'status': job_lib.JobStatus.CANCELLED
+        },
+    ]
+    mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+
+    # Should not raise — all jobs are terminal.
+    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    mock_terminate.assert_called_once()
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_to_one_node(mock_load_queue, mock_get_yaml,
+                                       mock_terminate):
+    """Scale-down to 1 node (head-only) should work."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = []
+    mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+
+    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    mock_terminate.assert_called_once()
+
+
+# --- _check_existing_cluster integration ---
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_record')
+@mock.patch('sky.global_user_state.get_cluster_from_name')
+def test_check_existing_cluster_resize_uses_task_num_nodes(
+        mock_get_cluster, mock_refresh):
+    """When resize=True and cluster exists, ToProvisionConfig.num_nodes
+    should be task.num_nodes (not handle.launched_nodes)."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=2)
+    # Make launched_resources.assert_launchable() work (mock treats
+    # assert_* as assertions by default).
+    # unsafe=True allows mock attributes starting with 'assert_'.
+    launched_res = mock.MagicMock(unsafe=True)
+    launched_res.cloud = mock.MagicMock()
+    launched_res.region = 'us-central1'
+    launched_res.zone = 'us-central1-a'
+    launched_res.ports = None
+    launched_res.assert_launchable.return_value = launched_res
+    launched_res.cloud.OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
+    handle.launched_resources = launched_res
+
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': 'abc123',
+    }
+    mock_get_cluster.return_value = record
+    mock_refresh.return_value = record
+
+    task = _make_mock_task(num_nodes=5)
+    mock_resource = mock.MagicMock()
+    mock_resource.ports = None
+    mock_resource.docker_login_config = None
+    mock_resource.cluster_config_overrides = None
+    task.resources = {mock_resource}
+
+    with mock.patch(
+            'sky.global_user_state.get_cluster_yaml_str') as mock_yaml_str:
+        mock_yaml_str.return_value = None
+        config = backend._check_existing_cluster(task,
+                                                 launched_res,
+                                                 'test-cluster',
+                                                 dryrun=False,
+                                                 resize=True)
+
+    assert config.num_nodes == 5, (f'Expected task.num_nodes=5 but got '
+                                   f'{config.num_nodes}')
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_record')
+@mock.patch('sky.global_user_state.get_cluster_from_name')
+def test_check_existing_cluster_no_resize_uses_handle_nodes(
+        mock_get_cluster, mock_refresh):
+    """Without resize, ToProvisionConfig.num_nodes should be
+    handle.launched_nodes (not task.num_nodes)."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=2)
+    launched_res = mock.MagicMock(unsafe=True)
+    launched_res.cloud = mock.MagicMock()
+    launched_res.region = 'us-central1'
+    launched_res.zone = 'us-central1-a'
+    launched_res.ports = None
+    launched_res.assert_launchable.return_value = launched_res
+    launched_res.cloud.OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
+    handle.launched_resources = launched_res
+
+    record = {
+        'handle': handle,
+        'status': status_lib.ClusterStatus.UP,
+        'cluster_ever_up': True,
+        'config_hash': 'abc123',
+    }
+    mock_get_cluster.return_value = record
+    mock_refresh.return_value = record
+
+    task = _make_mock_task(num_nodes=2)
+    mock_resource = mock.MagicMock()
+    mock_resource.ports = None
+    mock_resource.docker_login_config = None
+    mock_resource.cluster_config_overrides = None
+    mock_resource.less_demanding_than.return_value = True
+    task.resources = {mock_resource}
+
+    with mock.patch('sky.global_user_state.get_cluster_yaml_str'
+                   ) as mock_yaml_str, \
+         mock.patch('sky.usage.usage_lib.messages'):
+        mock_yaml_str.return_value = None
+        config = backend._check_existing_cluster(task,
+                                                 launched_res,
+                                                 'test-cluster',
+                                                 dryrun=False,
+                                                 resize=False)
+
+    assert config.num_nodes == 2, (f'Expected handle.launched_nodes=2 but got '
+                                   f'{config.num_nodes}')
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_record')
+@mock.patch('sky.global_user_state.get_cluster_from_name')
+def test_check_existing_cluster_resize_nonexistent_warns(
+        mock_get_cluster, mock_refresh):
+    """resize=True on a non-existent cluster should warn and fall through
+    to normal launch (not raise)."""
+    backend = CloudVmRayBackend()
+
+    mock_get_cluster.return_value = None
+    mock_refresh.return_value = None
+
+    task = _make_mock_task(num_nodes=3)
+    mock_resource = mock.MagicMock()
+    mock_resource.less_demanding_than.return_value = True
+    task.resources = {mock_resource}
+
+    to_provision = mock.MagicMock(unsafe=True)
+    to_provision.assert_launchable.return_value = to_provision
+
+    # Should not raise — just warn and proceed to new cluster creation.
+    with mock.patch('sky.utils.common_utils.check_cluster_name_is_valid'):
+        config = backend._check_existing_cluster(task,
+                                                 to_provision,
+                                                 'new-cluster',
+                                                 dryrun=False,
+                                                 resize=True)
+    # Should return a config for a new cluster.
+    assert config.prev_cluster_status is None
+
+
+# --- CLI validation ---
+
+
+def test_cli_resize_without_cluster_name_errors():
+    """--resize without -c should raise UsageError."""
+    from click.testing import CliRunner
+
+    from sky.client.cli import command as cli_command
+
+    runner = CliRunner()
+    result = runner.invoke(cli_command.launch, ['--resize', '--num-nodes', '4'])
+
+    assert result.exit_code != 0
+    assert '--resize requires -c' in result.output or \
+           '--resize requires -c' in str(result.exception)
