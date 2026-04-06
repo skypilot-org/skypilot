@@ -199,16 +199,22 @@ _PER_CONTEXT_TIMEOUT_SECONDS = 8
 @metrics_app.get('/gpu-metrics-debug')
 def gpu_metrics_debug() -> dict:
     """Debug endpoint to inspect metrics server state."""
-    import json as json_mod  # pylint: disable=import-outside-toplevel
     from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
+    from sky.utils import annotations as annotations_mod  # pylint: disable=import-outside-toplevel
     plugin_names = [p.name for p in plugins_mod.get_plugins()]
     kubeconfig = os.environ.get('KUBECONFIG', 'NOT SET')
-    contexts = core.get_all_contexts()
+    # Show contexts before and after cache clear to verify the fix
+    contexts_before_clear = core.get_all_contexts()
+    cache_entries = len(annotations_mod._FUNCTIONS_NEED_RELOAD_CACHE)
+    annotations_mod.clear_request_level_cache()
+    contexts_after_clear = core.get_all_contexts()
     return {
         'plugins_count': len(plugin_names),
         'plugin_names': plugin_names,
         'kubeconfig': kubeconfig,
-        'contexts': contexts,
+        'contexts_before_cache_clear': contexts_before_clear,
+        'contexts_after_cache_clear': contexts_after_clear,
+        'request_cache_entries': cache_entries,
         'pid': os.getpid(),
     }
 
