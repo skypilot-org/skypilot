@@ -216,6 +216,12 @@ def gpu_metrics_debug() -> dict:
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    from sky.utils import annotations as annotations_mod  # pylint: disable=import-outside-toplevel
+    # The metrics server runs as a daemon thread, not as a normal request
+    # handler, so request-scoped caches (e.g. kubernetes API clients,
+    # context names) are never cleared automatically. Clear them on each
+    # scrape so that newly uploaded kubeconfigs are discovered.
+    annotations_mod.clear_request_level_cache()
     # Let plugins sync environment state (e.g. KUBECONFIG) into the
     # metrics server process, which is separate from request workers.
     from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
