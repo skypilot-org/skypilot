@@ -196,37 +196,35 @@ def metrics() -> fastapi.Response:
 _PER_CONTEXT_TIMEOUT_SECONDS = 8
 
 
-def _ensure_kubeconfig_env():
-    """Ensure KUBECONFIG includes the credential manager kubeconfig path.
-
-    The metrics server runs in a separate uvicorn instance where plugins
-    are not fully loaded. When a kubeconfig is uploaded via the credential
-    manager, the file is written to disk but KUBECONFIG may not include
-    the credential manager path in this process. This function ensures it
-    does, so that get_all_contexts() discovers uploaded kubeconfigs.
-    """
-    cred_dir = os.environ.get('SKYPILOT_PLUGIN_CREDENTIALS_DIR')
-    if cred_dir:
-        cred_kubeconfig = os.path.join(cred_dir, 'kubeconfig', 'kubeconfig')
-    else:
-        import tempfile  # pylint: disable=import-outside-toplevel
-        cred_kubeconfig = os.path.join(tempfile.gettempdir(),
-                                       'skypilot_plugins_creds',
-                                       'kubeconfig', 'kubeconfig')
-    existing = os.environ.get('KUBECONFIG', '')
-    sep = ';' if os.name == 'nt' else ':'
-    paths = [p for p in existing.split(sep) if p]
-    if cred_kubeconfig not in paths:
-        if not paths:
-            paths = [os.path.expanduser('~/.kube/config')]
-        paths.append(cred_kubeconfig)
-        os.environ['KUBECONFIG'] = sep.join(paths)
+@metrics_app.get('/gpu-metrics-debug')
+def gpu_metrics_debug() -> dict:
+    """Debug endpoint to inspect metrics server state."""
+    import json as json_mod  # pylint: disable=import-outside-toplevel
+    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
+    plugin_names = [p.name for p in plugins_mod.get_plugins()]
+    kubeconfig = os.environ.get('KUBECONFIG', 'NOT SET')
+    contexts = core.get_all_contexts()
+    return {
+        'plugins_count': len(plugin_names),
+        'plugin_names': plugin_names,
+        'kubeconfig': kubeconfig,
+        'contexts': contexts,
+        'pid': os.getpid(),
+    }
 
 
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
-    _ensure_kubeconfig_env()
+    # Let plugins sync environment state (e.g. KUBECONFIG) into the
+    # metrics server process, which is separate from request workers.
+    from sky.server import plugins as plugins_mod  # pylint: disable=import-outside-toplevel
+    for plugin in plugins_mod.get_plugins():
+        try:
+            plugin.on_gpu_metrics_collect()
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(f'Plugin {plugin.name} on_gpu_metrics_collect failed',
+                           exc_info=True)
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0
