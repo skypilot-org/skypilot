@@ -428,8 +428,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
-    del retry_if_missing  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
