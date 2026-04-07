@@ -244,28 +244,31 @@ def delete_register_auth(registry_auth_id: str) -> None:
             'Please delete it manually.')
 
 
-def _create_template_for_docker_login(
+def _create_registry_auth_for_docker_login(
     cluster_name: str,
     image_name: str,
     docker_login_config: Optional[Dict[str, str]],
 ) -> Tuple[str, Optional[str]]:
-    """Creates a template for the given image with the docker login config.
+    """Creates registry auth for the given docker login config.
+
+    The registry auth ID is passed directly to the pod creation call
+    (via containerRegistryAuthId), rather than through a template. This
+    ensures the auth is applied to the pod's image pull.
 
     Returns:
         formatted_image_name: The formatted image name.
-        template_id: The template ID. None for no docker login config.
+        registry_auth_id: The registry auth ID. None for no docker login
+            config.
     """
     if docker_login_config is None:
         return image_name, None
     login_config = docker_utils.DockerLoginConfig(**docker_login_config)
     container_registry_auth_name = f'{cluster_name}-registry-auth'
-    container_template_name = _construct_docker_login_template_name(
-        cluster_name)
     # The `name` argument is only for display purpose and the registry server
     # will be splitted from the docker image name (Tested with AWS ECR).
     # Here we only need the username and password to create the registry auth.
-    # TODO(tian): Now we create a template and a registry auth for each cluster.
-    # Consider create one for each server and reuse them. Challenges including
+    # TODO(tian): Now we create a registry auth for each cluster. Consider
+    # create one for each server and reuse them. Challenges including
     # calculate the reference count and delete them when no longer needed.
     create_auth_resp = runpod.runpod.create_container_registry_auth(
         name=container_registry_auth_name,
@@ -273,12 +276,7 @@ def _create_template_for_docker_login(
         password=login_config.password,
     )
     registry_auth_id = create_auth_resp['id']
-    create_template_resp = runpod.runpod.create_template(
-        name=container_template_name,
-        image_name=None,
-        registry_auth_id=registry_auth_id,
-    )
-    return login_config.format_image(image_name), create_template_resp['id']
+    return login_config.format_image(image_name), registry_auth_id
 
 
 def launch(
@@ -352,8 +350,9 @@ def launch(
                  f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                  f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
-    image_name_formatted, template_id = _create_template_for_docker_login(
-        cluster_name, image_name, docker_login_config)
+    image_name_formatted, registry_auth_id = (
+        _create_registry_auth_for_docker_login(cluster_name, image_name,
+                                               docker_login_config))
 
     params = {
         'name': name,
@@ -364,7 +363,6 @@ def launch(
         'ports': ports_str,
         'support_public_ip': True,
         'docker_args': docker_args,
-        'template_id': template_id,
     }
 
     # Optional network volume mount.
@@ -395,10 +393,19 @@ def launch(
         })
 
     if preemptible is None or not preemptible:
-        new_instance = runpod.runpod.create_pod(**params)
+        if registry_auth_id is not None:
+            # Use custom pod creation to pass containerRegistryAuthId
+            # directly on the pod, which the runpod SDK does not support.
+            new_instance = runpod_commands.create_on_demand_pod(
+                container_registry_auth_id=registry_auth_id,
+                **params,  # type: ignore[arg-type]
+            )
+        else:
+            new_instance = runpod.runpod.create_pod(**params)
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
+            container_registry_auth_id=registry_auth_id,
             **params,  # type: ignore[arg-type]
         )
 
@@ -407,7 +414,23 @@ def launch(
 
 def get_registry_auth_resources(
         cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
-    """Gets the registry auth resources."""
+    """Gets the registry auth resources for cleanup.
+
+    Returns:
+        template_name: The template name to delete, or None if no template
+            was found (new-style clusters don't create templates).
+        registry_auth_id: The registry auth ID to delete, or None.
+    """
+    possible_names = [f'{cluster_name}-head', f'{cluster_name}-worker']
+
+    # New approach: check pods for containerRegistryAuthId set directly.
+    for pod in _sky_get_pods():
+        if (pod.get('name') in possible_names and
+                pod.get('containerRegistryAuthId')):
+            return None, pod['containerRegistryAuthId']
+
+    # Fallback: check templates for backward compatibility with clusters
+    # created before this fix.
     container_registry_auth_name = _construct_docker_login_template_name(
         cluster_name)
     for template in _list_pod_templates_with_container_registry():
