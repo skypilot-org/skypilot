@@ -70,7 +70,7 @@ def fetch_instance_types(api_key: str, api_url: str) -> List[Dict[str, Any]]:
 
 def fetch_instance_pricing(api_key: str, api_url: str,
                            instance_fid: str) -> float:
-    """Fetch minimum price for an instance type from Mithril Pricing API.
+    """Fetch on-demand price for an instance type from Mithril Pricing API.
 
     Args:
         api_key: API key for authentication
@@ -78,7 +78,7 @@ def fetch_instance_pricing(api_key: str, api_url: str,
         instance_fid: Instance type FID (e.g., 'it_XqgKWbhZ5gznAYsG')
 
     Returns:
-        Price in dollars (converted from minimum_price_cents).
+        On-demand price in dollars (from reserved_price_cents).
     """
     endpoint = f'{api_url}/v2/pricing/current'
 
@@ -91,10 +91,14 @@ def fetch_instance_pricing(api_key: str, api_url: str,
         )
         response.raise_for_status()
         data = response.json()
-        return data['minimum_price_cents'] / 100.0
+        return data['reserved_price_cents'] / 100.0
     except requests.exceptions.RequestException as e:
         raise mithril_utils.MithrilError(
             f'Failed to fetch pricing for {instance_fid}: {e}') from e
+    except KeyError as e:
+        raise mithril_utils.MithrilError(
+            f'Failed to parse pricing for {instance_fid}. '
+            f'Missing key in API response: {e}') from e
 
 
 def fetch_spot_availability(api_key: str,
@@ -197,7 +201,7 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
                     vcpus,
                     memory_gb,
                     price,
-                    price,
+                    item['spot_price'],
                     item['region'],
                     gpu_info,
                 ])
