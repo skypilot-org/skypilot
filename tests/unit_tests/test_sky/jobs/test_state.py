@@ -346,3 +346,34 @@ def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
                     state.job_info_table.c.spot_job_id == job_id)).fetchone()
         assert row is not None
         assert row[0] == now
+
+
+def test_get_managed_jobs_with_filters_matches_null_user_hash(
+        _mock_managed_jobs_db_conn):
+    job_with_user = state.set_job_info_without_job_id(name='job-a',
+                                                      workspace='ws',
+                                                      entrypoint='entry',
+                                                      pool=None,
+                                                      pool_hash=None,
+                                                      user_hash='user-a')
+    job_without_user = state.set_job_info_without_job_id(name='job-b',
+                                                         workspace='ws',
+                                                         entrypoint='entry',
+                                                         pool=None,
+                                                         pool_hash=None,
+                                                         user_hash=None)
+    engine = state._db_manager.get_engine()
+    _insert_task(engine, job_with_user, 0, status=ManagedJobStatus.RUNNING)
+    _insert_task(engine, job_without_user, 0, status=ManagedJobStatus.RUNNING)
+
+    jobs, total = state.get_managed_jobs_with_filters(
+        fields=['job_id', 'user_hash', 'status'],
+        accessible_workspaces=['ws'],
+        user_hashes=['user-a', None],
+    )
+
+    assert total == 2
+    assert sorted((job['job_id'], job.get('user_hash')) for job in jobs) == [
+        (job_with_user, 'user-a'),
+        (job_without_user, None),
+    ]

@@ -4,6 +4,9 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+import sky
+from sky import backends
+from sky import clouds
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
@@ -181,6 +184,18 @@ class TestFilterJobs:
 
 
 class TestQueue:
+
+    @staticmethod
+    def _make_local_handle() -> backends.LocalResourcesHandle:
+        cluster_name = 'local-test-consolidation'
+        return backends.LocalResourcesHandle(
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(),
+                                             instance_type=cluster_name),
+        )
 
     def _patch_backend_and_utils(self, monkeypatch: pytest.MonkeyPatch,
                                  jobs: List[Dict[str, Any]]):
@@ -615,6 +630,59 @@ class TestQueue:
         assert total == 2
         assert sorted([j['job_id'] for j in filtered]) == [2, 3]
         assert total_no_filter == 3
+
+    def test_queue_local_handle_uses_direct_db_path(self, monkeypatch):
+        expected = {
+            'jobs': [_make_job(1, workspace='ws')],
+            'total': 1,
+            'status_counts': {
+                'PENDING': 1
+            },
+            'total_no_filter': 2,
+        }
+        captured_kwargs = {}
+
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: self._make_local_handle())
+        monkeypatch.setattr(jobs_core.workspaces_core,
+                            'get_accessible_workspace_names', lambda: {'ws'})
+        monkeypatch.setattr(jobs_core.common_utils, 'get_user_hash',
+                            lambda: 'me')
+
+        def fake_get_managed_job_queue(**kwargs):
+            captured_kwargs.update(kwargs)
+            return expected
+
+        monkeypatch.setattr(jobs_core.managed_job_utils,
+                            'get_managed_job_queue', fake_get_managed_job_queue)
+        monkeypatch.setattr(
+            jobs_core.managed_job_utils.ManagedJobCodeGen, 'get_job_table',
+            lambda *args, **kwargs: pytest.fail(
+                'queue_v2() should not use codegen for local controllers'))
+        monkeypatch.setattr(
+            jobs_core.backend_utils, 'get_backend_from_handle',
+            lambda handle: pytest.fail(
+                'queue_v2() should not fetch a backend for local controllers'))
+
+        filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
+            refresh=False,
+            skip_finished=False,
+            all_users=False,
+            job_ids=None,
+            user_match=None,
+            workspace_match=None,
+            name_match=None,
+            pool_match=None,
+            page=None,
+            limit=None,
+        )
+
+        assert filtered == expected['jobs']
+        assert total == expected['total']
+        assert status_counts == expected['status_counts']
+        assert total_no_filter == expected['total_no_filter']
+        assert captured_kwargs['accessible_workspaces'] == ['ws']
+        assert captured_kwargs['user_hashes'] == ['me', None]
 
 
 class TestDumpManagedJobQueue:

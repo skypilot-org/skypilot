@@ -4676,33 +4676,38 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
 
-            use_legacy = not handle.is_grpc_enabled_with_flag
-            logger.info(f'handle.is_grpc_enabled_with_flag: '
-                        f'{handle.is_grpc_enabled_with_flag}')
-            if not use_legacy:
-                try:
-                    request = managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
-                        job_name=job_name)
-                    response = backend_utils.invoke_skylet_with_retries(
-                        lambda: SkyletClient(handle.get_grpc_channel(
-                        )).get_all_managed_job_ids_by_name(request))
-                    job_ids = list(response.job_ids)
-                except exceptions.SkyletMethodNotImplementedError:
-                    use_legacy = True
+            if isinstance(handle, LocalResourcesHandle):
+                # pylint: disable=import-outside-toplevel
+                from sky.jobs import state as managed_job_state
+                job_ids = managed_job_state.get_all_job_ids_by_name(job_name)
+            else:
+                use_legacy = not handle.is_grpc_enabled_with_flag
+                logger.info(f'handle.is_grpc_enabled_with_flag: '
+                            f'{handle.is_grpc_enabled_with_flag}')
+                if not use_legacy:
+                    try:
+                        request = (managed_jobsv1_pb2.GetAllJobIdsByNameRequest(
+                            job_name=job_name))
+                        response = backend_utils.invoke_skylet_with_retries(
+                            lambda: SkyletClient(handle.get_grpc_channel(
+                            )).get_all_managed_job_ids_by_name(request))
+                        job_ids = list(response.job_ids)
+                    except exceptions.SkyletMethodNotImplementedError:
+                        use_legacy = True
 
-            if use_legacy:
-                code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
-                    job_name=job_name)
-                returncode, job_ids_payload, stderr = self.run_on_head(
-                    handle,
-                    code,
-                    stream_logs=False,
-                    require_outputs=True,
-                    separate_stderr=True)
-                subprocess_utils.handle_returncode(returncode, code,
-                                                   'Failed to sync down logs.',
-                                                   stderr)
-                job_ids = message_utils.decode_payload(job_ids_payload)
+                if use_legacy:
+                    code = (
+                        managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                            job_name=job_name))
+                    returncode, job_ids_payload, stderr = self.run_on_head(
+                        handle,
+                        code,
+                        stream_logs=False,
+                        require_outputs=True,
+                        separate_stderr=True)
+                    subprocess_utils.handle_returncode(
+                        returncode, code, 'Failed to sync down logs.', stderr)
+                    job_ids = message_utils.decode_payload(job_ids_payload)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4829,28 +4834,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
-            # TODO(kevin): Migrate stream_logs to gRPC
-            code = managed_jobs.ManagedJobCodeGen.stream_logs(
-                job_name=None,
-                job_id=int(job_id),
-                follow=False,
-                controller=False)
-            # With the stdin=subprocess.DEVNULL, the ctrl-c will not
-            # kill the process, so we need to handle it manually here.
-            if threading.current_thread() is threading.main_thread():
-                signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-                signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+            if isinstance(handle, LocalResourcesHandle):
+                # pylint: disable=import-outside-toplevel
+                import contextlib
 
-            # We redirect the output to the log file
-            # and disable the STDOUT and STDERR
-            self.run_on_head(
-                handle,
-                code,
-                log_path=os.path.expanduser(log_file),
-                stream_logs=False,
-                process_stream=False,
-                ssh_mode=command_runner.SshMode.INTERACTIVE,
-            )
+                from sky.jobs import utils as managed_job_utils
+                log_file_expanded = os.path.expanduser(log_file)
+                with open(log_file_expanded, 'w', encoding='utf-8') as f:
+                    with contextlib.redirect_stdout(f):
+                        managed_job_utils.stream_logs(job_id=int(job_id),
+                                                      job_name=None,
+                                                      controller=False,
+                                                      follow=False)
+            else:
+                # TODO(kevin): Migrate stream_logs to gRPC
+                code = managed_jobs.ManagedJobCodeGen.stream_logs(
+                    job_name=None,
+                    job_id=int(job_id),
+                    follow=False,
+                    controller=False)
+                # With the stdin=subprocess.DEVNULL, the ctrl-c will not
+                # kill the process, so we need to handle it manually here.
+                if threading.current_thread() is threading.main_thread():
+                    signal.signal(signal.SIGINT,
+                                  backend_utils.interrupt_handler)
+                    signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+                # We redirect the output to the log file
+                # and disable the STDOUT and STDERR
+                self.run_on_head(
+                    handle,
+                    code,
+                    log_path=os.path.expanduser(log_file),
+                    stream_logs=False,
+                    process_stream=False,
+                    ssh_mode=command_runner.SshMode.INTERACTIVE,
+                )
 
         logger.debug(f'{colorama.Fore.CYAN}'
                      f'Job {job_id} logs: {local_log_dir}'

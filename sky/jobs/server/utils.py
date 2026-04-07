@@ -41,6 +41,9 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
         controller=jobs_controller_type,
         stopped_message='Jobs controller is not running.')
 
+    if isinstance(handle, backends.LocalResourcesHandle):
+        return
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 

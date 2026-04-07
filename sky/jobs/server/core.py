@@ -1,7 +1,9 @@
 """SDK functions for managed jobs."""
 import ipaddress
+import json
 import os
 import pathlib
+import shlex
 import tempfile
 import time
 import typing
@@ -30,6 +32,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
@@ -232,6 +235,13 @@ def _consolidated_launch(
     controller: controller_utils.Controllers,
     controller_task: 'sky.Task',
     job_ids: List[int],
+    remote_user_yaml_path: str,
+    remote_original_user_yaml_path: str,
+    remote_env_file_path: str,
+    controller_envs: Dict[str, Any],
+    priority: int,
+    priority_class: Optional[str],
+    job_id_to_rank: Optional[Dict[str, int]],
 ) -> Tuple[List[int], backends.ResourceHandle]:
     local_handle = backend_utils.is_controller_accessible(controller=controller,
                                                           stopped_message='')
@@ -241,21 +251,37 @@ def _consolidated_launch(
         backend.sync_file_mounts(handle=local_handle,
                                  all_file_mounts=controller_task.file_mounts,
                                  storage_mounts=controller_task.storage_mounts)
-    run_script = controller_task.run
-    assert isinstance(run_script, str)
-    # Manually add the env variables to the run script.
-    # Originally this is done in ray jobs submission but now
-    # we have to do it manually because there is no ray
-    # runtime on the API server.
-    env_cmds = [f'export {k}={v!r}' for k, v in controller_task.envs.items()]
-    run_script = '\n'.join(env_cmds + [run_script])
-    # Dump script for high availability recovery.
     assert job_ids is not None, 'job_ids not set'
     log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs')
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
-    backend.run_on_head(local_handle, run_script, log_path=log_path)
+
+    env_file_path = os.path.expanduser(remote_env_file_path)
+    os.makedirs(os.path.dirname(env_file_path), exist_ok=True)
+    env_lines = [
+        f'export {env_name}={shlex.quote(str(env_value))}'
+        for env_name, env_value in controller_envs.items()
+    ]
+    if job_id_to_rank is not None:
+        env_lines.append('export SKYPILOT_JOB_ID_TO_RANK=' +
+                         shlex.quote(json.dumps(job_id_to_rank)))
+    with open(env_file_path, 'w', encoding='utf-8') as env_file:
+        env_file.write('\n'.join(env_lines) + '\n')
+
+    with open(log_path, 'w', encoding='utf-8') as log_file:
+        log_file.write('Submitting managed jobs via direct scheduler call in '
+                       'consolidation mode.\n')
+        log_file.write(f'job_ids={job_ids_str}\n')
+
+    managed_job_scheduler.submit_jobs(
+        job_ids=job_ids,
+        dag_yaml_path=os.path.expanduser(remote_user_yaml_path),
+        original_user_yaml_path=os.path.expanduser(
+            remote_original_user_yaml_path),
+        env_file_path=env_file_path,
+        priority=priority,
+        priority_class=priority_class)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
 
@@ -881,8 +907,19 @@ def launch(
                 # intermediate bucket and newly created bucket should be in
                 # workspace A.
                 if is_consolidation_mode:
-                    return _consolidated_launch(controller, controller_task,
-                                                job_ids)
+                    return _consolidated_launch(
+                        controller=controller,
+                        controller_task=controller_task,
+                        job_ids=job_ids,
+                        remote_user_yaml_path=remote_user_yaml_path,
+                        remote_original_user_yaml_path=
+                        remote_orig_user_yaml_path,
+                        remote_env_file_path=remote_env_file_path,
+                        controller_envs=vars_to_fill['controller_envs'],
+                        priority=priority,
+                        priority_class=priority_class,
+                        job_id_to_rank=job_id_to_rank,
+                    )
                 else:
                     # TODO(lloyd-brown) The cluster should already be launched
                     # here so we should just be able to use exec, but we need
@@ -1167,8 +1204,6 @@ def queue_v2(
                                            'managed jobs.',
                                            spinner_message='Checking '
                                            'managed jobs')
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
     show_jobs_without_user_hash = False
@@ -1186,6 +1221,29 @@ def queue_v2(
 
     accessible_workspaces = list(
         workspaces_core.get_accessible_workspace_names())
+
+    if isinstance(handle, backends.LocalResourcesHandle):
+        with metrics_lib.time_it('jobs.queue.local_direct', group='jobs'):
+            queue_result = managed_job_utils.get_managed_job_queue(
+                skip_finished=skip_finished,
+                accessible_workspaces=accessible_workspaces,
+                job_ids=job_ids,
+                workspace_match=workspace_match,
+                name_match=name_match,
+                pool_match=pool_match,
+                page=page,
+                limit=limit,
+                user_hashes=user_hashes,
+                statuses=statuses,
+                fields=fields,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+        return (queue_result['jobs'], queue_result['total'],
+                queue_result['status_counts'], queue_result['total_no_filter'])
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -1338,6 +1396,34 @@ def cancel(name: Optional[str] = None,
 
         job_ids = None if (all_users or all) else job_ids
 
+        if isinstance(handle, backends.LocalResourcesHandle):
+            current_workspace = skypilot_config.get_active_workspace()
+            if all_users or all or job_ids is not None:
+                stdout = managed_job_utils.cancel_jobs_by_id(
+                    job_ids,
+                    all_users=all_users,
+                    current_workspace=current_workspace,
+                    user_hash=common_utils.get_user_hash() if all else None,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout,
+                )
+            elif name is not None:
+                stdout = managed_job_utils.cancel_job_by_name(
+                    name,
+                    current_workspace=current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
+            else:
+                assert pool is not None, (job_ids, name, pool, all)
+                stdout = managed_job_utils.cancel_jobs_by_pool(
+                    pool, current_workspace=current_workspace)
+            logger.info(stdout)
+            if 'Multiple jobs found with name' in stdout:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Please specify the job ID instead of the job name.')
+            return
+
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -1445,6 +1531,17 @@ def tail_logs(name: Optional[str],
             f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
             f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
         spinner_message='Retrieving job logs')
+
+    if isinstance(handle, backends.LocalResourcesHandle):
+        msg, exit_code = managed_job_utils.stream_logs(job_id=job_id,
+                                                       job_name=name,
+                                                       controller=controller,
+                                                       follow=follow,
+                                                       tail=tail,
+                                                       task=task)
+        if msg:
+            print(msg)
+        return exit_code
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend

@@ -1361,7 +1361,19 @@ def build_managed_jobs_with_filters_no_status_query(
     if pool_match is not None:
         query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
     if user_hashes is not None:
-        query = query.where(job_info_table.c.user_hash.in_(user_hashes))
+        user_hash_conditions = []
+        non_none_user_hashes = [
+            user_hash for user_hash in user_hashes if user_hash is not None
+        ]
+        if non_none_user_hashes:
+            user_hash_conditions.append(
+                job_info_table.c.user_hash.in_(non_none_user_hashes))
+        if any(user_hash is None for user_hash in user_hashes):
+            user_hash_conditions.append(job_info_table.c.user_hash.is_(None))
+        if user_hash_conditions:
+            query = query.where(sqlalchemy.or_(*user_hash_conditions))
+        else:
+            query = query.where(sqlalchemy.false())
     return query
 
 
