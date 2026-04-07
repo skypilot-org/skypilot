@@ -531,7 +531,7 @@ Units supported (case-insensitive):
 
 > **WARNING**:
 >
-> The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+> For Kubernetes, the disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 ```yaml
 resources:
@@ -543,7 +543,6 @@ OR
 ```yaml
 resources:
   disk_size: 256GB
-
 
 ```
 
