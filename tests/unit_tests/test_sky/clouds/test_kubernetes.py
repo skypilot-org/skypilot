@@ -375,6 +375,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.resources.cluster_config_overrides = {}
         self.resources.image_id = None  # Set image_id to None to use default
         self.resources.disk_size = 256  # DEFAULT_DISK_SIZE_GB
+        self.resources.disk_size_specified = False
 
         # Mock the assert_launchable method to return itself
         # Use setattr to avoid the assertion detection issue
@@ -1254,6 +1255,7 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
 
         # Set disk_size to a non-default value
         self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1305,6 +1307,7 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
 
         # Set disk_size to a non-default value
         self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1355,9 +1358,8 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=True)
 
-        # disk_size is the default (256) — should NOT set ephemeral-storage
-        from sky import resources as resources_lib
-        self.resources.disk_size = resources_lib.DEFAULT_DISK_SIZE_GB
+        # disk_size not explicitly specified — should NOT set ephemeral-storage
+        self.resources.disk_size_specified = False
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,

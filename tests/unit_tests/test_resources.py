@@ -294,7 +294,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'accelerators': {
             'A10': 1
         },
-        'disk_size': 256,
     }),
     ({
         'infra': 'gcp/*/us-east1-b',
@@ -310,7 +309,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'labels': {
             'key': 'value'
         },
-        'disk_size': 256,
     }),
 ])
 def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
@@ -1170,7 +1168,6 @@ def test_priority_with_ordered():
             'A10': 1
         },
         'priority': 400,
-        'disk_size': 256,
     }),
     ({
         'cpus': 4,
@@ -1180,7 +1177,6 @@ def test_priority_with_ordered():
         'cpus': '4',
         'memory': '8+',
         'priority': 0,
-        'disk_size': 256,
     }),
     ({
         'cpus': 2,
@@ -1188,7 +1184,6 @@ def test_priority_with_ordered():
     }, {
         'cpus': '2',
         'priority': 1000,
-        'disk_size': 256,
     }),
 ])
 def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
