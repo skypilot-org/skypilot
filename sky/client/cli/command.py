@@ -726,7 +726,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
+                f'{colorama.Fore.YELLOW}{entrypoint!r} looks like a yaml '
+                f'path but {invalid_reason}'
+                f'{colorama.Style.RESET_ALL}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml, result
@@ -1031,6 +1033,21 @@ def cli():
     pass
 
 
+def _warn_if_name_looks_like_file_path(name: Optional[str], yes: bool,
+                                       name_label: str,
+                                       command_hint: str) -> None:
+    """Warns or prompts if a name looks like a file path."""
+    if not common_utils.cluster_name_looks_like_file_path(name):
+        return
+    warning = (f'{colorama.Fore.YELLOW}{name_label} {name!r} looks like a '
+               f'file path. Did you mean: {command_hint}'
+               f'{colorama.Style.RESET_ALL}')
+    if yes:
+        logger.warning(warning)
+    else:
+        click.confirm(f'{warning}\nProceed anyway?', abort=True)
+
+
 def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                                             cloud: Optional[str],
                                             region: Optional[str],
@@ -1224,6 +1241,8 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    _warn_if_name_looks_like_file_path(
+        cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -5558,6 +5577,8 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
+    _warn_if_name_looks_like_file_path(name, yes, 'Job name',
+                                       f'sky jobs launch -n <job-name> {name}')
 
     if pool is not None:
         num_job_int = num_jobs if num_jobs is not None else 1
