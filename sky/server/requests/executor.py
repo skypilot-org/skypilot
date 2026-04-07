@@ -53,7 +53,7 @@ from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
-from sky.server.requests.queues import local_queue
+from sky.server.requests.queues import base as queue_base
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
@@ -113,30 +113,22 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
 
 
 class RequestQueue:
-    """The queue for the requests, either redis or multiprocessing.
+    """The queue for the requests.
 
-    The elements in the queue are tuples of (request_id, ignore_return_value).
+    Wraps a QueueBackend instance. The elements in the queue are tuples of
+    (request_id, ignore_return_value, retryable).
     """
 
-    def __init__(self,
-                 schedule_type: api_requests.ScheduleType,
-                 backend: Optional[server_config.QueueBackend] = None) -> None:
-        self.name = schedule_type.value
-        self.backend = backend
-        if backend == server_config.QueueBackend.MULTIPROCESSING:
-            self.queue = mp_queue.get_queue(self.name)
-        elif backend == server_config.QueueBackend.LOCAL:
-            self.queue = local_queue.get_queue(self.name)
-        else:
-            raise RuntimeError(f'Invalid queue backend: {backend}')
+    def __init__(self, queue_backend_impl: queue_base.QueueBackend) -> None:
+        self._backend = queue_backend_impl
 
     def put(self, request: Tuple[str, bool, bool]) -> None:
-        """Put and request to the queue.
+        """Put a request to the queue.
 
         Args:
             request: A tuple of request_id, ignore_return_value, and retryable.
         """
-        self.queue.put(request)  # type: ignore
+        self._backend.put(request)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
@@ -146,17 +138,15 @@ class RequestQueue:
         Returns:
             A tuple of request_id, ignore_return_value, and retryable.
         """
-        try:
-            return self.queue.get(block=False)
-        except queue_lib.Empty:
-            return None
+        return self._backend.get()
 
     def __len__(self) -> int:
         """Get the length of the queue."""
-        return self.queue.qsize()
+        return self._backend.qsize()
 
 
-queue_backend = server_config.QueueBackend.MULTIPROCESSING
+# The active queue factory, set during start().
+_queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
 def executor_initializer(proc_group: str):
@@ -341,7 +331,9 @@ class RequestWorker:
 
 @annotations.lru_cache(scope='global', maxsize=None)
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
-    return RequestQueue(schedule_type, backend=queue_backend)
+    assert _queue_factory is not None, (
+        'Queue factory not initialized. Call executor.start() first.')
+    return RequestQueue(_queue_factory.create_queue(schedule_type.value))
 
 
 @contextlib.contextmanager
@@ -477,6 +469,8 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # Event to signal the executor watch thread to stop.
+    watch_stop = threading.Event()
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -493,6 +487,16 @@ def _request_execution_wrapper(request_id: str,
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
+
+        # Start a background watch thread that detects
+        # cancellation
+        if not daemons.is_daemon_request_id(request_id):
+            heartbeat_thread = threading.Thread(
+                target=_executor_watch,
+                args=(request_id, pid, watch_stop),
+                daemon=True,
+                name=f'executor-hb-{request_id[:8]}')
+            heartbeat_thread.start()
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -565,6 +569,7 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
+        watch_stop.set()
         _restore_output()
         try:
             # Capture the peak RSS before GC.
@@ -579,6 +584,31 @@ def _request_execution_wrapper(request_id: str,
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
+
+
+# How often the executor heartbeat checks for remote cancellation (seconds).
+_EXECUTOR_HEARTBEAT_INTERVAL = 10
+
+
+def _executor_watch(request_id: str, pid: int,
+                        stop_event: threading.Event) -> None:
+    """Background thread that detects cancellation."""
+    while not stop_event.wait(timeout=_EXECUTOR_HEARTBEAT_INTERVAL):
+        try:
+            request = api_requests.get_request(request_id, fields=['status'])
+            if request is None:
+                break
+            if request.status == api_requests.RequestStatus.CANCELLED:
+                logger.info(f'Request {request_id} cancelled remotely — '
+                            f'sending SIGTERM to pid {pid}')
+                os.kill(pid, signal.SIGTERM)
+                break
+            if request.status > api_requests.RequestStatus.RUNNING:
+                # Already finished via another path.
+                break
+        except Exception:  # pylint: disable=broad-except
+            # Never crash the executor on heartbeat failure.
+            pass
 
 
 _first_request = True
@@ -877,35 +907,22 @@ def start(
         A tuple of the queue server process and the list of request worker
         threads.
     """
-    global queue_backend
-    queue_backend = config.queue_backend
-    queue_server = None
-    # Setup the queues.
-    if queue_backend == server_config.QueueBackend.MULTIPROCESSING:
-        logger.info('Creating shared request queues')
-        queue_names = [
-            schedule_type.value for schedule_type in api_requests.ScheduleType
-        ]
-        # TODO(aylei): make queue manager port configurable or pick an available
-        # port automatically.
-        port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
-        if not common_utils.is_port_available(port):
-            raise RuntimeError(
-                f'SkyPilot API server fails to start as port {port!r} is '
-                'already in use by another process.')
-        queue_server = multiprocessing.Process(
-            target=mp_queue.start_queue_manager, args=(queue_names, port))
-        queue_server.start()
-        mp_queue.wait_for_queues_to_be_ready(queue_names,
-                                             queue_server,
-                                             port=port)
-    elif queue_backend == server_config.QueueBackend.LOCAL:
-        # No setup is needed for local queue backend.
-        pass
-    else:
-        # Should be checked earlier, but just in case.
-        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
+    global _queue_factory
 
+    # Use plugin-provided factory if registered, otherwise create based on
+    # server config.
+    plugin_factory = queue_base.get_queue_backend_factory()
+    if plugin_factory is not None:
+        _queue_factory = plugin_factory
+    elif config.queue_backend == server_config.QueueBackend.MULTIPROCESSING:
+        _queue_factory = queue_base.MultiprocessingQueueFactory()
+    elif config.queue_backend == server_config.QueueBackend.LOCAL:
+        _queue_factory = queue_base.LocalQueueFactory()
+    else:
+        raise RuntimeError(f'Invalid queue backend: {config.queue_backend}')
+
+    logger.info('Creating shared request queues')
+    queue_server = _queue_factory.start()
     logger.info('Request queues created')
 
     workers = []

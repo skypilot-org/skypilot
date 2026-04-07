@@ -661,6 +661,11 @@ async def schedule_on_boot_check_async():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
+    # Startup: Start replica manager (heartbeat, failover).
+    from sky.server import replica_manager as replica_mgr
+    rm = replica_mgr.get_replica_manager()
+    await rm.start()
+
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
@@ -690,7 +695,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         # event loop (process).
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
-    # Shutdown: Add any cleanup code here if needed
+    # Shutdown: Stop replica manager.
+    await rm.stop()
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -2252,6 +2258,22 @@ async def stream(
         # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
+            # In multi-replica mode, the log file lives on the replica that
+            # owns the request.  The ReplicaManager may be able to proxy the
+            # stream to the correct replica.
+            from sky.server import replica_manager as replica_mgr
+            rm = replica_mgr.get_replica_manager()
+            try:
+                return fastapi.responses.StreamingResponse(
+                    content=rm.proxy_log_stream(request_id,
+                                                replica_id=''),
+                    headers={
+                        'Cache-Control': 'no-cache, no-transform',
+                        'X-Accel-Buffering': 'no',
+                        'Transfer-Encoding': 'chunked',
+                    })
+            except NotImplementedError:
+                pass  # Single-replica mode — fall through
             # The log file might be deleted by the request GC daemon but the
             # request task is still in the database.
             raise fastapi.HTTPException(
