@@ -45,6 +45,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -79,7 +80,6 @@ if typing.TYPE_CHECKING:
     from sky import catalog
     from sky import models
     from sky.provision.kubernetes import utils as kubernetes_utils
-    from sky.skylet import job_lib
 else:
     # only used in api_login()
     base64 = adaptors_common.LazyImport('base64')
@@ -97,6 +97,27 @@ logging.getLogger('httpx').setLevel(logging.CRITICAL)
 _LINE_PROCESSED_KEY = 'line_processed'
 
 T = TypeVar('T')
+
+_AGENT_REDIRECT_CACHE_PATH = os.path.expanduser(
+    '~/.sky/agent_redirect_cache.json')
+
+
+def _load_agent_redirect_cache() -> Dict[str, dict]:
+    """Load agent redirect cache from disk."""
+    try:
+        with open(_AGENT_REDIRECT_CACHE_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_agent_redirect_cache(cache: Dict[str, dict]) -> None:
+    """Save agent redirect cache to disk."""
+    try:
+        with open(_AGENT_REDIRECT_CACHE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(cache, f)
+    except OSError:
+        pass
 
 
 def reload_config() -> None:
@@ -1491,6 +1512,45 @@ def autostop(
     return server_common.get_request_id(response)
 
 
+def _call_agent_queue(
+    redirect_info: dict,
+    body_json: dict,
+) -> List[responses.ClusterJobRecord]:
+    """Call the agent's /api/queue endpoint directly.
+
+    Returns the job queue result immediately (not a RequestId).
+    """
+
+    agent_url = redirect_info['agent_url']
+    pod_name = redirect_info['pod_name']
+    namespace = redirect_info['namespace']
+    resp = requests.post(
+        f'{agent_url}/api/queue',
+        json={
+            'pod_name': pod_name,
+            'namespace': namespace,
+            'skip_finished': body_json.get('skip_finished', False),
+            'all_users': body_json.get('all_users', False),
+        },
+        headers={'Authorization': f'Bearer {redirect_info["token"]}'},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.info('Agent queue error body: %s', resp.text[:500])
+    resp.raise_for_status()
+
+    resp_json = resp.json()
+    jobs = []
+    for job_data in resp_json['jobs']:
+        # Convert status integer (protobuf enum) to JobStatus.
+        raw_status = job_data.get('status')
+        if isinstance(raw_status, int):
+            job_data['status'] = job_lib.JobStatus.from_protobuf(
+                raw_status)  # type: ignore[arg-type]
+        jobs.append(responses.ClusterJobRecord.model_validate(job_data))
+    return jobs
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -1547,8 +1607,47 @@ def queue(
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = server_common.make_authenticated_request(
-        'POST', '/queue', json=json.loads(body.model_dump_json()))
+    body_json = json.loads(body.model_dump_json())
+
+    # Check agent redirect cache — call agent directly if cached.
+    cache = _load_agent_redirect_cache()
+    cached = cache.get(cluster_name)
+    if cached and cached.get('expiry', 0) > time.time():
+        try:
+            return _call_agent_queue(cached,
+                                     body_json)  # type: ignore[return-value]
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug('Cached agent call failed for %s: %s, invalidating',
+                         cluster_name, e)
+            cache.pop(cluster_name, None)
+            _save_agent_redirect_cache(cache)
+
+    response = server_common.make_authenticated_request('POST',
+                                                        '/queue',
+                                                        json=body_json)
+
+    # Check for API redirect response from agent plugin.
+    if response.headers.get(server_constants.API_REDIRECT_HEADER) == 'true':
+        redirect_info = response.json()
+        cache[cluster_name] = {
+            **redirect_info,
+            'expiry': time.time() + redirect_info.get('ttl', 240),
+        }
+        _save_agent_redirect_cache(cache)
+        try:
+            return _call_agent_queue(redirect_info,
+                                     body_json)  # type: ignore[return-value]
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                'Agent call failed after redirect for %s: %s, '
+                'falling back to API server', cluster_name, e)
+            # Fallback: retry via API server without redirect.
+            response = server_common.make_authenticated_request(
+                'POST',
+                '/queue',
+                json=body_json,
+                headers={'X-No-Redirect': '1'})
+
     return server_common.get_request_id(response)
 
 
@@ -2258,6 +2357,12 @@ def stream_and_get(
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
+    # If request_id is already the final result (e.g. from agent redirect),
+    # return it directly without polling the API server.
+    if request_id is not None and not isinstance(request_id,
+                                                 server_common.RequestId):
+        return request_id  # type: ignore[return-value]
+
     params = {
         'request_id': request_id,
         'log_path': log_path,

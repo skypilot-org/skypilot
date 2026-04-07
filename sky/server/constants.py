@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 48  # mount config read_only support
+API_VERSION = 49  # API redirect to agent for queue
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -41,6 +41,12 @@ MIN_API_ACCESS_API_VERSION = 42
 
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
+
+# Minimum client API version that supports REST API redirect to agents.
+MIN_API_REDIRECT_VERSION = 49
+
+# HTTP header indicating the response is an API redirect to an agent.
+API_REDIRECT_HEADER = 'X-Skypilot-Api-Redirect'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
