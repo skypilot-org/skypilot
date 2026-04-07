@@ -5,13 +5,11 @@ import asyncio
 import collections
 import datetime
 import enum
-import ipaddress
 import json
 import time
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
                     Union)
-import urllib.parse
 
 import colorama
 import sqlalchemy
@@ -25,7 +23,6 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.skylet import constants
@@ -133,6 +130,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('priority',
                       sqlalchemy.Integer,
                       server_default=str(constants.DEFAULT_PRIORITY)),
+    sqlalchemy.Column('priority_class', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('original_user_yaml_path',
                       sqlalchemy.Text,
@@ -161,6 +159,15 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+)
+
+# Separate table for API access token IDs associated with managed jobs.
+# Maps job_id -> token_id for cleanup when the job completes.
+api_access_token_table = sqlalchemy.Table(
+    'api_access_tokens',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('token_id', sqlalchemy.Text, nullable=False),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -213,27 +220,6 @@ def create_table(engine: sqlalchemy.engine.Engine):
     migration_utils.safe_alembic_upgrade(engine,
                                          migration_utils.SPOT_JOBS_DB_NAME,
                                          migration_utils.SPOT_JOBS_VERSION)
-
-
-def force_no_postgres() -> bool:
-    """Force no postgres.
-
-    If the db is localhost on the api server, and we are not in consolidation
-    mode, we must force using sqlite and not using the api server on the jobs
-    controller.
-    """
-    conn_string = skypilot_config.get_nested(('db',), None)
-
-    if conn_string:
-        parsed = urllib.parse.urlparse(conn_string)
-        # it freezes if we use the normal get_consolidation_mode function
-        consolidation_mode = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-        if ((parsed.hostname == 'localhost' or
-             ipaddress.ip_address(parsed.hostname).is_loopback) and
-                not consolidation_mode):
-            return True
-    return False
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
@@ -313,6 +299,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'user_hash': r.get('user_hash'),
         'workspace': r.get('workspace'),
         'priority': r.get('priority'),
+        'priority_class': r.get('priority_class'),
         'entrypoint': r.get('entrypoint'),
         'original_user_yaml_path': r.get('original_user_yaml_path'),
         'original_user_yaml_content': r.get('original_user_yaml_content'),
@@ -1691,25 +1678,30 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
-def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
+def scheduler_set_waiting(job_ids: List[int],
+                          dag_yaml_content: str,
                           original_user_yaml_content: str,
                           env_file_content: str,
                           config_file_content: Optional[str],
-                          priority: int) -> None:
+                          priority: int,
+                          priority_class: Optional[str] = None) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        updates = {
+            job_info_table.c.schedule_state:
+                ManagedJobScheduleState.WAITING.value,
+            job_info_table.c.dag_yaml_content: dag_yaml_content,
+            job_info_table.c.original_user_yaml_content:
+                (original_user_yaml_content),
+            job_info_table.c.env_file_content: env_file_content,
+            job_info_table.c.config_file_content: config_file_content,
+            job_info_table.c.priority: priority,
+        }
+        if priority_class is not None:
+            updates[job_info_table.c.priority_class] = priority_class
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(job_info_table.c.spot_job_id.in_(job_ids),)).update(
-                {
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.WAITING.value,
-                    job_info_table.c.dag_yaml_content: dag_yaml_content,
-                    job_info_table.c.original_user_yaml_content:
-                        (original_user_yaml_content),
-                    job_info_table.c.env_file_content: env_file_content,
-                    job_info_table.c.config_file_content: config_file_content,
-                    job_info_table.c.priority: priority,
-                })
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id.in_(job_ids),)).update(updates)
         session.commit()
         assert updated_count == len(job_ids), (job_ids, updated_count)
 
@@ -1868,6 +1860,28 @@ async def get_pool_submit_info_async(
         if info is None:
             return None, None
         return info[0], info[1]
+
+
+def set_api_access_token_id(job_id: int, token_id: str) -> None:
+    """Store the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
+                                                             token_id=token_id))
+        session.commit()
+
+
+def get_api_access_token_id(job_id: int) -> Optional[str]:
+    """Get the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(api_access_token_table.c.token_id).where(
+                api_access_token_table.c.job_id == job_id)).fetchone()
+        if result is None:
+            return None
+        return result[0]
 
 
 async def scheduler_set_launching_async(job_id: int):
@@ -2298,17 +2312,16 @@ async def set_recovering_async(
     cluster_event_reason: Optional[str] = None,
 ):
     """Set the task to recovering state, and update the job duration."""
-    # Build code and reason from external failures for the event log
+    # Build code and reason from external failures for the event log.
+    # Prefer external_failures over cluster_event_reason to avoid
+    # duplicating the same message when a plugin writes the same reason
+    # to both cluster events and cluster failures.
     code = None
-    reason_parts = []
-    if cluster_event_reason:
-        reason_parts.append(cluster_event_reason)
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
-        external_failure_reason = '; '.join(f.reason for f in external_failures)
-        reason_parts.append(external_failure_reason)
-    if reason_parts:
-        reason = ': '.join(reason_parts)
+        reason = '; '.join(f.reason for f in external_failures)
+    elif cluster_event_reason:
+        reason = cluster_event_reason
     else:
         assert code is None, 'Code should be None if there are no reasons.'
         reason = 'Cluster preempted or failed, recovering'

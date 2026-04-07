@@ -98,7 +98,9 @@ from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
+from sky.client.sdk import create_debug_dump
 from sky.client.sdk import down
+from sky.client.sdk import download_debug_dump
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
@@ -117,6 +119,7 @@ from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
 from sky.dag import Dag
 from sky.dag import DagExecution
+from sky.data import FileMountType
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
@@ -191,6 +194,7 @@ __all__ = [
     'backends',
     'list_accelerators',
     '__root_dir__',
+    'FileMountType',
     'Storage',
     'StorageMode',
     'StoreType',
@@ -235,6 +239,9 @@ __all__ = [
     'api_start',
     'api_stop',
     'api_server_logs',
+    # Debug Dump
+    'create_debug_dump',
+    'download_debug_dump',
     # Admin Policy
     'UserRequest',
     'MutatedUserRequest',

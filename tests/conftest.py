@@ -300,6 +300,13 @@ def pytest_configure(config):
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
     # Validate incompatible option combinations
+    # TODO(cooperc): --remote-server now auto-enables consolidation mode
+    # (deploy-mode Docker servers). The --jobs-consolidation flag is redundant
+    # for remote servers. To test --remote-server without consolidation, we
+    # need a --no-jobs-consolidation flag that writes consolidation_mode: false
+    # into the Docker container's ~/.sky/config.yaml before the API server
+    # starts (the entrypoint runs `sky api start --deploy`). This would also
+    # let us lift this block and allow --remote-server --jobs-consolidation.
     if config.getoption('--remote-server'):
         if config.getoption('--jobs-consolidation'):
             raise ValueError(

@@ -1,4 +1,5 @@
-"""Kubernetes pvc provisioning."""
+"""Kubernetes volume provisioning (PVC and hostPath)."""
+import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import global_user_state
@@ -63,6 +64,13 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
 
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a volume."""
+    if config.type == volume_lib.VolumeType.HOSTPATH.value:
+        return _apply_hostpath_volume(config)
+    return _apply_pvc_volume(config)
+
+
+def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Creates or registers a PVC volume."""
     context, namespace = _get_context_namespace(config)
     pvc_spec = _get_pvc_spec(namespace, config)
     # Check if the storage class exists
@@ -79,8 +87,37 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
+def _apply_hostpath_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Registers a hostPath volume (no K8s API call needed).
+
+    hostPath volumes are node-local directories. The actual directory is
+    created automatically by Kubernetes using DirectoryOrCreate when a pod
+    mounts it. This function only validates config and registers metadata.
+    """
+    host_path = config.config.get('host_path')
+    if not host_path:
+        raise config_lib.KubernetesError(
+            'host_path is required in config for k8s-hostpath volumes.')
+    if not host_path.startswith('/'):
+        raise config_lib.KubernetesError(
+            f'host_path must be an absolute path, got: {host_path!r}')
+    # Use the volume name as name_on_cloud since there is no K8s resource
+    if not config.name_on_cloud:
+        config.name_on_cloud = config.name
+    logger.info(f'Registered hostPath volume {config.name!r} '
+                f'with path {host_path!r}')
+    return config
+
+
 def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Deletes a volume."""
+    if config.type == volume_lib.VolumeType.HOSTPATH.value:
+        return _delete_hostpath_volume(config)
+    return _delete_pvc_volume(config)
+
+
+def _delete_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Deletes a PVC volume."""
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
     kubernetes_utils.delete_k8s_resource_with_retry(
@@ -93,6 +130,134 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
         resource_name=pvc_name)
     logger.info(f'Deleted PVC {pvc_name} in namespace {namespace}')
     return config
+
+
+def _delete_hostpath_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Deletes a hostPath volume.
+
+    If cleanup_on_deletion is true, launches a DaemonSet to clean up the
+    host directory on all nodes, then removes the DaemonSet.
+    """
+    cleanup = config.config.get('cleanup_on_deletion', False)
+    if not cleanup:
+        logger.info(f'Removed hostPath volume {config.name!r} from SkyPilot '
+                    f'(host directory not cleaned up)')
+        return config
+
+    host_path = config.config.get('host_path', '')
+    context, namespace = _get_context_namespace(config)
+    ds_name = f'skypilot-hostpath-cleanup-{config.name}'
+    # Truncate to K8s name limit
+    ds_name = ds_name[:63]
+
+    daemonset_spec = {
+        'apiVersion': 'apps/v1',
+        'kind': 'DaemonSet',
+        'metadata': {
+            'name': ds_name,
+            'namespace': namespace,
+            'labels': {
+                'parent': 'skypilot',
+                'skypilot-volume': config.name,
+            },
+        },
+        'spec': {
+            'selector': {
+                'matchLabels': {
+                    'app': ds_name,
+                },
+            },
+            'template': {
+                'metadata': {
+                    'labels': {
+                        'app': ds_name,
+                    },
+                },
+                'spec': {
+                    'tolerations': [{
+                        'operator': 'Exists',
+                    }],
+                    'containers': [{
+                        'name': 'cleanup',
+                        'image': 'busybox:1.36',
+                        'command': [
+                            'sh', '-c',
+                            'find /cleanup-target -mindepth 1 -delete '
+                            '&& sleep infinity'
+                        ],
+                        'volumeMounts': [{
+                            'name': 'target',
+                            'mountPath': '/cleanup-target',
+                        }],
+                    }],
+                    'volumes': [{
+                        'name': 'target',
+                        'hostPath': {
+                            'path': host_path,
+                            'type': 'DirectoryOrCreate',
+                        },
+                    }],
+                },
+            },
+        },
+    }
+
+    logger.info(f'Cleaning up hostPath {host_path!r} on all nodes...')
+    try:
+        kubernetes.apps_api(context).create_namespaced_daemon_set(
+            namespace=namespace,
+            body=daemonset_spec,
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            # DaemonSet already exists (e.g., from a previous failed cleanup)
+            kubernetes.apps_api(context).delete_namespaced_daemon_set(
+                name=ds_name,
+                namespace=namespace,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            kubernetes.apps_api(context).create_namespaced_daemon_set(
+                namespace=namespace,
+                body=daemonset_spec,
+                _request_timeout=kubernetes.API_TIMEOUT)
+        else:
+            raise
+
+    # Wait for all DaemonSet pods to become ready (cleanup complete)
+    _wait_for_daemonset_ready(context, namespace, ds_name)
+
+    # Delete the DaemonSet
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.apps_api(context).
+        delete_namespaced_daemon_set(name=ds_name,
+                                     namespace=namespace,
+                                     _request_timeout=kubernetes.API_TIMEOUT),
+        resource_type='daemonset',
+        resource_name=ds_name)
+    logger.info(f'Cleaned up hostPath volume {config.name!r}')
+    return config
+
+
+def _wait_for_daemonset_ready(context: Optional[str],
+                              namespace: str,
+                              ds_name: str,
+                              timeout: int = 300) -> None:
+    """Waits for all DaemonSet pods to be ready."""
+    start = time_module.time()
+    while time_module.time() - start < timeout:
+        try:
+            ds = kubernetes.apps_api(context).read_namespaced_daemon_set(
+                name=ds_name,
+                namespace=namespace,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            desired = ds.status.desired_number_scheduled or 0
+            ready = ds.status.number_ready or 0
+            if desired > 0 and ready >= desired:
+                return
+        except kubernetes.api_exception():
+            pass
+        time_module.sleep(5)
+    logger.warning(f'Timed out waiting for DaemonSet {ds_name} to be ready. '
+                   f'Some nodes may not have been cleaned up.')
 
 
 def _get_volume_usedby(
@@ -172,6 +337,9 @@ def _get_cluster_name_on_cloud_to_cluster_name_map() -> Dict[str, str]:
 def get_volume_usedby(
     config: models.VolumeConfig,) -> Tuple[List[str], List[str]]:
     """Gets the usedby resources of a volume."""
+    # hostPath volumes have no PVC — cannot track usage via K8s API
+    if config.type == volume_lib.VolumeType.HOSTPATH.value:
+        return [], []
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
     return _get_volume_usedby(context, namespace, pvc_name)
@@ -219,6 +387,9 @@ def get_all_volumes_usedby(
     pvc_names = set()
     original_volume_names: Dict[str, Dict[str, List[str]]] = {}
     for config in configs:
+        # Skip hostPath volumes — they have no PVC to track
+        if config.type == volume_lib.VolumeType.HOSTPATH.value:
+            continue
         context, namespace = _get_context_namespace(config)
         context_to_namespaces.setdefault(context, set()).add(namespace)
         original_volume_names.setdefault(context,
@@ -272,9 +443,9 @@ def get_all_volumes_usedby(
                     cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)
                     if cluster_name is None:
                         continue
-                    if cluster_name not in used_by_clusters[context][namespace]:
-                        used_by_clusters[context][namespace][cluster_name] = []
-                    used_by_clusters[context][namespace][cluster_name].append(
+                    if volume_name not in used_by_clusters[context][namespace]:
+                        used_by_clusters[context][namespace][volume_name] = []
+                    used_by_clusters[context][namespace][volume_name].append(
                         cluster_name)
     return used_by_pods, used_by_clusters, failed_volume_names
 
@@ -308,6 +479,9 @@ def get_all_volumes_errors(
     config_by_pvc_name: Dict[str, Dict[str, models.VolumeConfig]] = {}
 
     for config in configs:
+        # Skip hostPath volumes — they have no PVC to check
+        if config.type == volume_lib.VolumeType.HOSTPATH.value:
+            continue
         context, namespace = _get_context_namespace(config)
         context_to_namespaces.setdefault(context, set()).add(namespace)
         config_by_pvc_name.setdefault(context,

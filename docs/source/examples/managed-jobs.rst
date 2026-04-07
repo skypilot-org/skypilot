@@ -559,6 +559,27 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 .. tip::
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
+.. _nested-skypilot-managed-jobs:
+
+Nested SkyPilot from managed jobs
+----------------------------------
+
+By default (:code:`api_server_access: true`), SkyPilot automatically injects API server credentials into the job's environment when the server supports it. This means managed jobs can call the SkyPilot CLI/SDK to launch nested operations without any extra configuration:
+
+.. code-block:: yaml
+
+  setup: |
+    pip install "skypilot-nightly[remote]"
+
+  run: |
+    sky jobs launch -y -n nested --cpus 2 "echo hello from nested job"
+
+The credentials are automatically injected and revoked when the job finishes. To disable this, set :code:`api_server_access: false`.
+
+.. note::
+
+  Credential injection requires the SkyPilot API server to have :ref:`service accounts <service-accounts>` enabled. If not enabled, injection is silently skipped.
+
 .. _jobs-controller:
 
 How it works: The jobs controller
@@ -787,7 +808,9 @@ Consolidating the API server and the jobs controller has a few advantages:
 - Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
 - No extra VM/pod is needed for the jobs controller, saving cost.
 
-To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
+For deploy-mode API servers (``--deploy``), consolidation mode is **automatically enabled** when no existing jobs controller clusters are found. No configuration is needed.
+
+To explicitly control this behavior, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config:
 
 .. code-block:: yaml
 
@@ -797,7 +820,7 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
       # any specified resources will be ignored
 
 .. note::
-  You must **restart the API server** after making this change for it to take effect.
+  You must **restart the API server** after changing this setting for it to take effect.
 
   .. code-block:: bash
 

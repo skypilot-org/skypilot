@@ -430,6 +430,11 @@ class InvalidRecipeNameError(Exception):
     pass
 
 
+class InvalidWorkspaceNameError(Exception):
+    """Raised when the workspace name is invalid."""
+    pass
+
+
 class RecipeAlreadyExistsError(Exception):
     """Raised when attempting to create a recipe with an existing name."""
     pass
@@ -458,6 +463,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
 
         AUTH_FAILURE = 'AUTH_FAILURE'
         AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
+        ENDPOINT_CONNECTION_ERROR = 'ENDPOINT_CONNECTION_ERROR'
 
         @property
         def message(self) -> str:
@@ -471,6 +477,10 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'action is enabled for your AWS account in IAM. '
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
                 )
+            elif self == self.ENDPOINT_CONNECTION_ERROR:
+                return ('Failed to connect to the AWS EC2 endpoint. '
+                        'This may be due to network issues or the region being '
+                        'unreachable from the current network environment.')
             else:
                 raise ValueError(f'Unknown reason {self}')
 

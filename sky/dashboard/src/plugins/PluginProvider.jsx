@@ -23,6 +23,7 @@ const PluginContext = createContext({
   dataEnhancements: {},
   tableColumns: {},
   dataProviders: {},
+  recipeTypes: [],
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -63,6 +64,7 @@ const initialState = {
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
+  recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
 
 const actions = {
@@ -73,6 +75,7 @@ const actions = {
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
+  REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
 };
 
 function pluginReducer(state, action) {
@@ -159,6 +162,11 @@ function pluginReducer(state, action) {
       return {
         ...state,
         topNavLinks: state.topNavLinks.filter((link) => !link._cached),
+      };
+    case actions.REGISTER_RECIPE_TYPE:
+      return {
+        ...state,
+        recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
     default:
       return state;
@@ -700,6 +708,30 @@ function createPluginApi(dispatch) {
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
     },
+    registerRecipeType(config) {
+      if (!config || !config.id || !config.label) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid recipe type registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        label: String(config.label),
+        fullLabel: config.fullLabel
+          ? String(config.fullLabel)
+          : String(config.label),
+        icon: config.icon || null,
+        color: config.color ? String(config.color) : 'gray',
+        template: config.template ? String(config.template) : '',
+      };
+      dispatch({
+        type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -712,6 +744,8 @@ function createPluginApi(dispatch) {
         id: String(config.id),
         name: config.name || config.id,
         useHook: config.useHook,
+        hooks: config.hooks || {},
+        components: config.components || {},
       };
       dispatch({
         type: actions.REGISTER_DATA_PROVIDER,
@@ -749,17 +783,26 @@ export function PluginProvider({ children }) {
     }
   }, []);
 
-  // Expose state reference for getDataEnhancements to access outside React context
+  // Expose state reference for plugins to access outside React context.
+  // Use a stable ref updated during render (not in useEffect) so that child
+  // components' effects always read the latest state — even on the same commit
+  // that first mounts them.  The previous approach (useEffect with [state] dep)
+  // deleted and recreated __pluginStateRef on every state change; because React
+  // runs all cleanups before all new effects (children-first), a child mounting
+  // on the same render would read undefined during its effect.
+  const pluginStateRef = useRef(state);
+  pluginStateRef.current = state;
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.__pluginStateRef = { current: state };
+      window.__pluginStateRef = pluginStateRef;
       return () => {
-        if (window.__pluginStateRef) {
+        if (window.__pluginStateRef === pluginStateRef) {
           delete window.__pluginStateRef;
         }
       };
     }
-  }, [state]);
+  }, []);
 
   // Persist nav links to localStorage after plugins have fully loaded
   useEffect(() => {
@@ -808,6 +851,10 @@ export function PluginProvider({ children }) {
       if (!cancelled) {
         pluginsLoadedRef.current = true;
         dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+        // Signal that all plugin scripts have finished loading.
+        // layout.jsx listens for this to avoid showing the fallback top bar
+        // before the sidebar plugin has had a chance to register.
+        window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
       }
     };
     void bootstrapPlugins();
@@ -869,6 +916,11 @@ export function useGroupedNavLinks() {
 export function usePluginRoutes() {
   const { routes } = usePluginState();
   return routes;
+}
+
+export function usePluginRecipeTypes() {
+  const { recipeTypes } = usePluginState();
+  return recipeTypes;
 }
 
 export function usePluginRoute(pathname) {

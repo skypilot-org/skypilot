@@ -940,3 +940,71 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: slurm-config
+
+  # Test cases for apiService.serveServerLog configuration
+  - it: should tee server logs to file by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "tee -a /root/.sky/api_server/server.log"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "mkdir -p /root/.sky/api_server"
+
+  - it: should tee server logs to file when serveServerLog is true
+    set:
+      apiService.serveServerLog: true
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "tee -a /root/.sky/api_server/server.log"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "mkdir -p /root/.sky/api_server"
+
+  - it: should not tee server logs to file when serveServerLog is false
+    set:
+      apiService.serveServerLog: false
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "tee -a /root/.sky/api_server/server.log"
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "mkdir -p /root/.sky/api_server"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .* --foreground"
+
+  - it: should include logrotate sidecar when serveServerLog is true and retention is enabled
+    set:
+      apiService.serveServerLog: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers
+          any: true
+          content:
+            name: logrotate
+
+  - it: should not include logrotate sidecar when serveServerLog is false
+    set:
+      apiService.serveServerLog: false
+      apiService.logs.retention.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers
+          any: true
+          content:
+            name: logrotate
+
+  - it: should not include logrotate sidecar when retention is disabled even if serveServerLog is true
+    set:
+      apiService.serveServerLog: true
+      apiService.logs.retention.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers
+          any: true
+          content:
+            name: logrotate

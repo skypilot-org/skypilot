@@ -30,11 +30,11 @@ DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 _alembic_thread_lock = threading.Lock()
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '015'  # add node_names column
+GLOBAL_USER_STATE_VERSION = '016'  # add volume creation_yaml column
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '015'  # add node_names column
+SPOT_JOBS_VERSION = '017'  # add priority_class column
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'

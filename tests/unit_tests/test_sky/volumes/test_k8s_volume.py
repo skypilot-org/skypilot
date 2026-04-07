@@ -751,8 +751,10 @@ class TestGetAllVolumesUsedBy:
             'test-pvc', [])
         assert pods_list == ['running-pod']
         # used_by_clusters is keyed by cluster_name
-        assert 'cluster-1' in used_by_clusters['my-context']['my-namespace']
-        assert 'cluster-2' not in used_by_clusters['my-context']['my-namespace']
+        assert 'cluster-1' in used_by_clusters['my-context']['my-namespace'][
+            'test-pvc']
+        assert 'cluster-2' not in used_by_clusters['my-context'][
+            'my-namespace']['test-pvc']
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     @patch(

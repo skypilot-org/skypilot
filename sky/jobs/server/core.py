@@ -3,12 +3,14 @@ import ipaddress
 import os
 import pathlib
 import tempfile
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
 import colorama
+from pydantic import SecretStr as _SecretStr
 
 from sky import backends
 from sky import core
@@ -460,6 +462,39 @@ def _submit_remotely(controller: controller_utils.Controllers,
     return job_ids
 
 
+def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
+                          dag_uuid: str) -> Tuple[str, str]:
+    """Create a service account token for a managed job with api_server_access.
+
+    Issues a token as the original user so nested jobs have the same
+    identity and permissions as the launching user.
+
+    Returns:
+        A tuple of (token_string, token_id).
+    """
+    # Lazy imports to avoid circular dependencies and keep import time low.
+    # pylint: disable=import-outside-toplevel
+    from sky.users.token_service import token_service
+
+    token_name = f'managed-job-{job_name or "unnamed"}-{dag_uuid[:8]}'
+
+    token_data = token_service.create_token(
+        creator_user_id=creator_user_id,
+        service_account_user_id=creator_user_id,
+        token_name=token_name,
+        expires_in_days=7)
+
+    global_user_state.add_service_account_token(
+        token_id=token_data['token_id'],
+        token_name=token_name,
+        token_hash=token_data['token_hash'],
+        creator_user_hash=creator_user_id,
+        service_account_user_id=creator_user_id,
+        expires_at=token_data['expires_at'])
+
+    return token_data['token'], token_data['token_id']
+
+
 @timeline.event
 @usage_lib.entrypoint
 def launch(
@@ -585,6 +620,7 @@ def launch(
 
     task_names = set()
     priority = None
+    priority_class = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -597,11 +633,13 @@ def launch(
 
         # Check for priority in resources
         task_priority = None
+        task_priority_class = None
         if task_.resources:
             # Convert set to list to access elements by index
             resources_list = list(task_.resources)
             # Take first resource's priority as reference
             task_priority = resources_list[0].priority
+            task_priority_class = resources_list[0].priority_class
 
             # Check all other resources have same priority
             for resource in resources_list[1:]:
@@ -612,6 +650,13 @@ def launch(
                             'same priority. Found priority '
                             f'{resource.priority} but expected {task_priority}.'
                         )
+                if resource.priority_class != task_priority_class:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority class. Found priority class '
+                            f'{resource.priority_class} but expected '
+                            f'{task_priority_class!r}.')
 
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
@@ -621,6 +666,8 @@ def launch(
                         'Either specify a priority in only one task, or set '
                         'the same priority for each task.')
             priority = task_priority
+        if task_priority_class is not None:
+            priority_class = task_priority_class
 
     if priority is None:
         priority = skylet_constants.DEFAULT_PRIORITY
@@ -711,6 +758,48 @@ def launch(
         for task_ in dag.tasks:
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
+        # Inject API server credentials for tasks with api_server_access.
+        # Create a single token for the entire DAG and reuse it across all
+        # tasks that need API access, rather than creating one per task.
+        # Note: the API server endpoint env var is injected client-side
+        # (sky/jobs/client/sdk.py) where get_server_url() returns the
+        # externally reachable endpoint.
+        any_api_access = any(task_.api_server_access for task_ in dag.tasks)
+        inject_token = any_api_access
+        if inject_token:
+            sa_enabled = os.environ.get(
+                skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                'false').lower()
+            if sa_enabled != 'true':
+                logger.debug('Skipping api_server_access token injection: '
+                             'service accounts not enabled on the API server.')
+                inject_token = False
+
+            user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
+            if inject_token and user_id is None:
+                logger.debug('Skipping api_server_access token injection: '
+                             'cannot determine user identity.')
+                inject_token = False
+
+        if inject_token:
+            assert user_id is not None
+            token, token_id = _create_job_api_token(
+                creator_user_id=user_id,
+                job_name=dag.name,
+                dag_uuid=dag_uuid,
+            )
+
+            for task_ in dag.tasks:
+                if task_.api_server_access:
+                    task_._secrets[  # pylint: disable=protected-access
+                        skylet_constants.
+                        SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)
+
+            # Store the token ID so it can be cleaned up when the
+            # job completes.
+            for job_id in job_ids:
+                managed_job_state.set_api_access_token_id(job_id, token_id)
+
         dag_utils.dump_dag_to_yaml(dag, f.name)
 
         vars_to_fill: Dict[str, Any] = {
@@ -726,6 +815,7 @@ def launch(
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs': modified_catalogs,
             'priority': priority,
+            'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
             'pool': pool,
             'job_controller_indicator_file':
@@ -943,7 +1033,7 @@ def _maybe_restart_controller(
 
 
 # For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
+# TODO(lloyd): Remove before 0.13.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -1366,6 +1456,110 @@ def tail_logs(name: Optional[str],
                                          controller=controller,
                                          tail=tail,
                                          task=task)
+
+
+def wait(name: Optional[str],
+         job_id: Optional[int],
+         timeout: Optional[int],
+         poll_interval: int,
+         task: Optional[Union[str, int]] = None) -> int:
+    """Waits for a managed job to reach a terminal state.
+
+    Polls the job status via queue_v2_api at the given interval until the job
+    reaches a terminal state or the timeout is exceeded.
+
+    For JobGroups (jobs with multiple tasks), if ``task`` is specified, waits
+    only for that specific task. Otherwise, waits until all tasks in the job
+    are in a terminal state. The returned exit code reflects the worst outcome
+    across all tasks (i.e. if any task failed, returns FAILED).
+
+    Args:
+        name: Name of the managed job to wait for.
+        job_id: ID of the managed job to wait for.
+        timeout: Maximum time to wait in seconds. None means wait forever.
+        poll_interval: Time between status polls in seconds.
+        task: Task identifier for a specific task in a JobGroup. If an int,
+            matched against task_id. If a str, matched against task_name.
+            If None, waits for all tasks.
+
+    Returns:
+        Exit code based on the terminal job status. See
+        exceptions.JobExitCode for possible values.
+
+    Raises:
+        ValueError: if neither or both name and job_id are provided, or if
+            poll_interval < 5, or if the job/task is not found.
+        TimeoutError: if the timeout is exceeded before the job finishes.
+    """
+    if name is not None and job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+    if name is None and job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Must specify either name or job_id.')
+    if poll_interval < 5:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'poll_interval must be at least 5 seconds, got '
+                             f'{poll_interval}.')
+
+    # Resolve name to job_id on the first call.
+    if name is not None:
+        records, _, _, _ = queue_v2_api(refresh=False, name_match=name)
+        matching = [r for r in records if r.job_name == name]
+        if not matching:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'No managed job found with name {name!r}.')
+        # If multiple jobs share the name, pick the latest (highest job_id).
+        matching.sort(key=lambda r: r.job_id or 0, reverse=True)
+        job_id = matching[0].job_id
+
+    assert job_id is not None
+    start_time = time.time()
+
+    while True:
+        records, _, _, _ = queue_v2_api(refresh=False, job_ids=[job_id])
+        if not records:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Managed job {job_id} not found.')
+
+        # Filter to the requested task if specified.
+        if task is not None:
+            if isinstance(task, int):
+                filtered = [r for r in records if r.task_id == task]
+            else:
+                filtered = [r for r in records if r.task_name == task]
+            if not filtered:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'No task matching {task!r} in job {job_id}.')
+            records = filtered
+
+        # Check if all relevant tasks are terminal.
+        statuses = [r.status for r in records]
+        if all(s is not None and s.is_terminal() for s in statuses):
+            # Return the worst exit code across tasks: any failure dominates.
+            worst = exceptions.JobExitCode.SUCCEEDED
+            for s in statuses:
+                code = exceptions.JobExitCode.from_managed_job_status(s)
+                if code > worst:
+                    worst = code
+            return worst
+
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                non_terminal = [
+                    s for s in statuses if s is None or not s.is_terminal()
+                ]
+                status_str = ', '.join(
+                    s.value if s else 'unknown' for s in non_terminal)
+                with ux_utils.print_exception_no_traceback():
+                    raise TimeoutError(
+                        f'Timed out waiting for managed job {job_id} after '
+                        f'{timeout} seconds. Non-terminal status(es): '
+                        f'{status_str}.')
+
+        time.sleep(poll_interval)
 
 
 @usage_lib.entrypoint

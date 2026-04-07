@@ -89,7 +89,7 @@ setup_commands:
     dpkg --configure -a;
     which patch > /dev/null || apt install -y patch;
     [ -f /etc/fuse.conf ] && sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-    mkdir -p ~/.ssh; touch ~/.ssh/config; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    mkdir -p ~/.ssh; touch ~/.ssh/config; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}

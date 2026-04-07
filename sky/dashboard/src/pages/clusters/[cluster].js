@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import {
   useClusterDetails,
   getClusterHistory,
+  streamClusterProvisionLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import {
@@ -24,6 +25,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
@@ -37,6 +39,14 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -670,6 +680,16 @@ function ActiveTab({
         </div>
       )}
 
+      {/* Provision Logs - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ProvisionLogs
+            clusterName={clusterData.cluster}
+            numNodes={clusterData.num_nodes}
+          />
+        </div>
+      )}
+
       {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
         clusterData.full_infra &&
@@ -696,6 +716,136 @@ function ActiveTab({
         wrapperClassName="mb-8"
       />
     </div>
+  );
+}
+
+function ProvisionLogs({ clusterName, numNodes }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+
+  const streamArgs = useMemo(
+    () => ({
+      clusterName,
+      worker: selectedWorker,
+    }),
+    [clusterName, selectedWorker]
+  );
+
+  const handleStreamError = useCallback((error) => {
+    console.error('Error streaming provision logs:', error);
+  }, []);
+
+  const { lines: displayLines, isLoading } = useLogStreamer({
+    streamFn: streamClusterProvisionLogs,
+    streamArgs,
+    enabled: isExpanded && Boolean(clusterName),
+    refreshTrigger: logsRefreshToken,
+    onError: handleStreamError,
+  });
+
+  const handleRefreshLogs = () => {
+    setLogsRefreshToken((t) => t + 1);
+  };
+
+  const handleWorkerChange = (val) => {
+    setSelectedWorker(val === 'head' ? null : Number(val));
+  };
+
+  // Build worker options: Head, Worker1 .. WorkerN-1
+  const workerOptions = useMemo(() => {
+    const opts = [{ label: 'Head', value: 'head' }];
+    if (numNodes > 1) {
+      for (let i = 1; i < numNodes; i++) {
+        opts.push({ label: `Worker${i}`, value: String(i) });
+      }
+    }
+    return opts;
+  }, [numNodes]);
+
+  return (
+    <Card>
+      <div
+        className={`flex items-center justify-between px-4 pt-4 ${!isExpanded ? 'pb-4' : ''}`}
+      >
+        <div className="flex items-center">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="w-4 h-4 mr-1" />
+            ) : (
+              <ChevronRightIcon className="w-4 h-4 mr-1" />
+            )}
+            <h2 className="text-lg font-semibold">Provision Logs</h2>
+          </button>
+          {isExpanded && (
+            <>
+              {numNodes > 1 && (
+                <Select
+                  value={
+                    selectedWorker === null ? 'head' : String(selectedWorker)
+                  }
+                  onValueChange={handleWorkerChange}
+                >
+                  <SelectTrigger
+                    aria-label="Node"
+                    className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[120px] text-sm ml-3"
+                  >
+                    <SelectValue placeholder="Head" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workerOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <span className="ml-2 text-xs text-gray-500">
+                (Logs are not streaming; click refresh to fetch the latest
+                logs.)
+              </span>
+            </>
+          )}
+        </div>
+        {isExpanded && (
+          <div className="flex items-center space-x-3">
+            <Tooltip content="Refresh logs" className="text-muted-foreground">
+              <button
+                onClick={handleRefreshLogs}
+                disabled={isLoading}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              >
+                <RotateCwIcon
+                  className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
+                />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+      {isExpanded && (
+        <div className="p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <CircularProgress size={20} className="mr-2" />
+              <span>Loading...</span>
+            </div>
+          ) : displayLines.length === 0 ? (
+            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+              <span>No provision logs available.</span>
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-y-auto">
+              <LogFilter logs={displayLines} />
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

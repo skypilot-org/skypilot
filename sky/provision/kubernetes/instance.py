@@ -1135,6 +1135,24 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'mountPath': ephemeral_volume.path,
             })
 
+    # Docker sidecar cache volume injection: if a SkyPilot volume was
+    # specified for the enable_docker cache, look up the PVC name. The actual
+    # volume + volumeMount are added per-pod inside _create_resource_thread (so
+    # that each pod can have its own subPath).
+    raw_docker_config = provider_config.get('docker_config')
+    docker_config: Optional[kubernetes_utils.DockerConfig] = None
+    if raw_docker_config:
+        docker_config = kubernetes_utils.DockerConfig.from_dict(
+            raw_docker_config)
+    docker_pvc_name: Optional[str] = None
+    if docker_config and docker_config.cache_volume:
+        cache_vol_name = docker_config.cache_volume
+        vol_record = global_user_state.get_volume_by_name(cache_vol_name)
+        if vol_record is None:
+            raise exceptions.VolumeNotFoundError(
+                f'Docker cache volume {cache_vol_name!r} not found.')
+        docker_pvc_name = vol_record['handle'].name_on_cloud
+
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
@@ -1208,7 +1226,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
     if nvidia_runtime_exists and needs_gpus_nvidia:
-        pod_spec['spec']['runtimeClassName'] = 'nvidia'
+        spec = pod_spec['spec']
+        if 'runtimeClassName' not in spec:
+            spec['runtimeClassName'] = 'nvidia'
+        elif not spec['runtimeClassName']:
+            del spec['runtimeClassName']
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
@@ -1238,6 +1260,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        # Inject cache volume + volumeMount for the Docker sidecar container.
+        if docker_config:
+            kubernetes_utils.inject_docker_cache_volume(
+                pod_spec=pod_spec_copy,
+                docker_config=docker_config,
+                pvc_name=docker_pvc_name,
+                context=context,
+                namespace=namespace,
+            )
 
         # We need to keep the following fields in the pod spec to be same for
         # head and worker pods.
@@ -1322,6 +1354,17 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 gpu_toleration
             ]
+
+        # Apply allowed_nodes scheduling constraints to restrict pods to
+        # nodes permitted by the user's config. This is required in addition
+        # to discovery filtering because the K8s scheduler doesn't know
+        # about our filter - it would schedule on any node matching the GPU
+        # label, including non-allowed nodes with the same GPU type.
+        allowed_nodes_config = kubernetes_utils.get_allowed_nodes_config(
+            context)
+        kubernetes_utils.inject_allowed_nodes_affinity(pod_spec_copy['spec'],
+                                                       allowed_nodes_config,
+                                                       context=context)
 
         if to_create_deployment:
             volume.create_persistent_volume_claim(namespace, context, pvc_spec)

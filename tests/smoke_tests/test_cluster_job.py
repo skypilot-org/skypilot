@@ -1284,18 +1284,19 @@ def test_add_pod_annotations_for_autodown_with_launch():
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             # Autodown is set.
             f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --infra kubernetes',
-            # Get names of the pods containing cluster name.
+            # Get names of the pods matching the cluster's
+            # skypilot-cluster-name annotation (excludes cloud-cmd pods
+            # whose annotation value is '{name}-cloud-cmd').
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 # Describe the first pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
-            # Get names of the pods containing cluster name.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 # Describe the second pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
@@ -1318,10 +1319,11 @@ def test_add_and_remove_pod_annotations_with_autostop():
             f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --infra kubernetes',
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
-            # Get names of the pods containing cluster name.
+            # Get names of the pods matching the cluster's
+            # skypilot-cluster-name annotation.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 # Describe the first pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
@@ -1329,7 +1331,7 @@ def test_add_and_remove_pod_annotations_with_autostop():
             # Describe the second pod and check for annotations.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
@@ -1338,14 +1340,14 @@ def test_add_and_remove_pod_annotations_with_autostop():
             # Describe the first pod and check if annotations are removed.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
             # Describe the second pod and check if annotations are removed.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
@@ -1440,6 +1442,63 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Enable Docker on Kubernetes ----------
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'yaml_file,volumes_needed,sidecar,cache_mount',
+    [
+        ('tests/test_yamls/test_enable_all_default.yaml', [], 'dind',
+         '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_all_dv.yaml',
+         ['docker-all-vol0', 'docker-all-vol1'], 'dind', '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_build_default.yaml', [], 'buildkitd',
+         '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_build_dv.yaml', [
+            'docker-build-vol0', 'docker-build-vol1'
+        ], 'buildkitd', '/home/user/.local/share/buildkit'),
+    ],
+)
+def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
+                                     cache_mount):
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    setup_cmds: List[str] = []
+    for vol in volumes_needed:
+        setup_cmds.append(
+            f'sky volumes apply -y -n {vol} --type k8s-pvc --size 2GB')
+
+    # kubectl exec into the sidecar to verify cache mount exists.
+    # For _dv cases the mount is a PVC; for default cases it is an emptyDir.
+    verify_mount_cmd = (
+        f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -a '
+        f'| grep {cache_mount}')
+
+    test_cmds: List[str] = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+        *setup_cmds,
+        f'sky launch -y -c {name} --infra kubernetes {yaml_file}',
+        f'sky logs {name} 1 --status',
+        smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
+    ]
+
+    teardown_parts = [
+        f'sky down -y {name}',
+        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+    ]
+    for vol in volumes_needed:
+        teardown_parts.append(f'sky volumes delete {vol} -y || true')
+    teardown = ' && '.join(teardown_parts)
+
+    test = smoke_tests_utils.Test(
+        'enable_docker_on_kubernetes',
+        test_cmds,
+        teardown,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_volume_env_mount_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1468,6 +1527,75 @@ def test_volume_env_mount_kubernetes():
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
                 '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
             ]),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- HostPath Volumes on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_hostpath_volume_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-hp'
+    host_path = '/tmp/skypilot-hostpath-test'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-hostpath
+        config:
+          host_path: {host_path}
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        name: min
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/hostpath: {volume_name}
+
+        run: |
+          set -e
+          echo "check hostpath volume"
+          touch /mnt/hostpath/test.txt
+          echo "hello from hostpath" > /mnt/hostpath/test.txt
+          cat /mnt/hostpath/test.txt | grep "hello from hostpath"
+          ls -lart /mnt/hostpath
+          echo "hostpath volume check passed"
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'hostpath_volume_on_kubernetes',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Apply the hostpath volume
+                f'sky volumes apply -y {vol_f.name}',
+                f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep {volume_name}',
+                # Launch with hostpath volume and verify the job succeeds
+                f'sky launch -y -c {name} --infra kubernetes {task_f.name}',
+                f'sky logs {name} 1 --status',
+                # Verify the pod spec contains the hostPath volume
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'pod=$(kubectl get pods -o '
+                    f'custom-columns=NAME:.metadata.name,'
+                    f'ANN:.metadata.annotations.skypilot-cluster-name '
+                    f'--no-headers | '
+                    f'awk -v n="{name}" \'$NF==n{{print $1}}\' | '
+                    f'head -1) && '
+                    f'echo "Found pod: $pod" && '
+                    f'spec=$(kubectl get pod $pod -o yaml) && '
+                    f'echo "$spec" | grep "hostPath" && '
+                    f'echo "$spec" | grep "path: {host_path}"',
+                ),
+            ],
+            f'sky down -y {name} && '
+            f'sky volumes delete {volume_name} -y || true && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -2630,12 +2758,13 @@ def test_gcp_network_tier_with_gpu():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --cloud gcp '
             f'--gpus H100:8 --network-tier best '
+            f'--region asia-southeast1 '
             f'echo "Testing network tier best with GPU"',
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=25 * 60,  # 25 mins for GPU provisioning
+        timeout=35 * 60,  # 35 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
 

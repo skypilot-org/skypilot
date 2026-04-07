@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node server.js",
-    "build": "next build",
+    "build": "next build && cp .next/routes-manifest.json out/routes-manifest.json",
     "start": "NODE_ENV=production node server.js",
     "lint": "next lint --max-warnings 0",
     "lint:fix": "next lint --fix",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
+    "@emotion/cache": "^11.13.0",
     "@emotion/react": "^11.13.0",
     "@emotion/styled": "^11.13.0",
     "@mui/material": "^5.16.7",

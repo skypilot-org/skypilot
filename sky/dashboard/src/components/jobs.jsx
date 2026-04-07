@@ -29,6 +29,7 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -147,6 +148,10 @@ export function getAggregatedStatus(tasks) {
 
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
+  {
+    label: 'ID',
+    value: 'id',
+  },
   {
     label: 'Name',
     value: 'name',
@@ -330,6 +335,7 @@ export function ManagedJobs() {
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
+    propertyMap.set('id', 'ID');
     propertyMap.set('status', 'Status');
     propertyMap.set('name', 'Name');
     propertyMap.set('user', 'User');
@@ -542,8 +548,10 @@ export function ManagedJobsTable({
         };
 
         // Build params for jobsCacheManager
+        const jobIdFilter = getFilterValue('id');
         const params = {
           allUsers: true,
+          jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),
@@ -815,6 +823,26 @@ export function ManagedJobsTable({
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
       labels: Array.from(labels).sort(),
+    });
+
+    // Fetch full users/workspaces from cache (preloaded by cache-preloader).
+    // dashboardCache.get() returns cached data if fresh, or re-fetches if
+    // expired. Updates only user/workspace to avoid blocking other fields.
+    Promise.all([
+      dashboardCache.get(getUsers, []),
+      dashboardCache.get(getWorkspaces, []),
+    ]).then(([usersData, workspacesData]) => {
+      setValueList((prev) => ({
+        ...prev,
+        user: usersData
+          ? [
+              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
+            ].sort()
+          : prev.user,
+        workspace: workspacesData
+          ? Object.keys(workspacesData).sort()
+          : prev.workspace,
+      }));
     });
   }, [data, poolsData, setValueList]);
 

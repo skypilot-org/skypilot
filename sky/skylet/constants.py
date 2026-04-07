@@ -409,6 +409,11 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_MAX_LENGTH = 40
 
+# Workspace names: lowercase letters, numbers, dashes, and underscores.
+# Must start with a lowercase letter, end with a lowercase letter or digit.
+WORKSPACE_NAME_VALID_REGEX = r'[a-z]([-_a-z0-9]*[a-z0-9])?'
+WORKSPACE_NAME_MAX_LENGTH = 63
+
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
@@ -492,6 +497,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
+    ('kubernetes', 'enable_docker'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
     ('gcp', 'managed_instance_group'),
@@ -695,3 +701,6 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 
 # Maximum number of node name entries to keep per node in the lineage.
 MAX_NODE_NAME_LINEAGE = 10
+
+# Clouds that provide storage only (no compute).
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']

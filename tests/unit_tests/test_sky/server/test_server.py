@@ -2,6 +2,9 @@
 
 import argparse
 import asyncio
+import json
+import os
+import pathlib
 import threading
 import time
 from unittest import mock
@@ -11,6 +14,8 @@ import pytest
 import uvicorn
 
 from sky import models
+from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
@@ -420,3 +425,333 @@ async def test_launch_endpoint_passes_auth_user():
         assert kwargs['auth_user'] == auth_user
         # request_id is passed as first positional argument
         assert args[0] == 'launch-request-id'
+
+
+# --- Tests for cleanup_unreferenced_file_mounts ---
+
+# A deterministic 64-char hex string used as a blob ID in tests.
+_BLOB_HEX = 'a' * 64
+
+
+def _make_blobs_dir(tmp_path: pathlib.Path,
+                    user: str = 'userA') -> pathlib.Path:
+    """Create the blobs directory structure under *tmp_path* and return it."""
+    blobs_dir = tmp_path / user / 'file_mounts' / 'blobs'
+    blobs_dir.mkdir(parents=True)
+    return blobs_dir
+
+
+def _create_blob(blobs_dir: pathlib.Path, blob_id: str,
+                 mtime: float) -> pathlib.Path:
+    """Create a blob extraction directory with the given *mtime*."""
+    extraction_dir = blobs_dir / blob_id
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+    (extraction_dir / 'placeholder.txt').write_text('test')
+    os.utime(extraction_dir, (mtime, mtime))
+    return extraction_dir
+
+
+def _mock_sleep_cancel():
+    """Return a side_effect for asyncio.sleep that cancels after one call.
+
+    The first call lets the ``while True`` body execute once, then raises
+    ``asyncio.CancelledError`` to break out of the loop.
+    """
+    call_count = 0
+
+    async def _side_effect(_delay):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call: the sleep *before* the first cleanup iteration.
+            # Return immediately so we proceed to _do_cleanup.
+            return
+        # Second call (next iteration) – break out.
+        raise asyncio.CancelledError
+
+    return _side_effect
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_no_blobs_dir(tmp_path):
+    """clients_dir exists but has no blobs subdirectory – should be a no-op."""
+    # Create a user directory without the blobs sub-tree.
+    user_dir = tmp_path / 'userA'
+    user_dir.mkdir()
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids') as mock_get, \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    # get_active_file_mounts_blob_ids is called unconditionally, but
+    # no blobs are deleted because there is no blobs directory.
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_active_blob_not_deleted(tmp_path):
+    """A blob referenced by an active request must NOT be deleted,
+    even if its mtime is older than the grace period."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value={_BLOB_HEX}), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), 'Active blob should not be deleted'
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_unreferenced_old_blob_deleted(tmp_path):
+    """An unreferenced blob older than the 1-hour grace period IS deleted."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    extraction_dir = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert not extraction_dir.exists(
+    ), 'Unreferenced old blob should be deleted'
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
+    """An unreferenced blob within the grace period (recent) is NOT deleted."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    recent_mtime = time.time() - 60  # 1 minute ago (well within grace)
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, recent_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), (
+        'Unreferenced but recent blob should not be deleted')
+
+
+# --- Tests for _resolve_dynamic_route ---
+
+# A minimal routes manifest matching the real Next.js dashboard build output.
+_TEST_ROUTES_MANIFEST = {
+    'dynamicRoutes': [
+        {
+            'page': '/clusters/[cluster]',
+            'regex': '^/clusters/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/clusters/[cluster]/[job]',
+            'regex': '^/clusters/([^/]+?)/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/infra/[context]',
+            'regex': '^/infra/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/pools/[pool]',
+            'regex': '^/jobs/pools/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/[job]',
+            'regex': '^/jobs/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/jobs/[job]/[task]',
+            'regex': '^/jobs/([^/]+?)/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/plugins/[...slug]',
+            'regex': '^/plugins/(.+?)(?:/)?$'
+        },
+        {
+            'page': '/recipes/[recipe]',
+            'regex': '^/recipes/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/volumes/[volume]',
+            'regex': '^/volumes/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/workspaces/[name]',
+            'regex': '^/workspaces/([^/]+?)(?:/)?$'
+        },
+        {
+            'page': '/[...path]',
+            'regex': '^/(.+?)(?:/)?$'
+        },
+    ]
+}
+
+
+def _build_dashboard_tree(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Create a directory tree mimicking the Next.js dashboard build output."""
+    d = tmp_path / 'dashboard'
+    d.mkdir()
+    # Write the routes manifest
+    (d / 'routes-manifest.json').write_text(json.dumps(_TEST_ROUTES_MANIFEST))
+    # Top-level files
+    (d / 'index.html').write_text('')
+    (d / '[...path].html').write_text('')
+    # clusters
+    (d / 'clusters').mkdir()
+    (d / 'clusters' / '[cluster].html').write_text('')
+    cluster_dynamic = d / 'clusters' / '[cluster]'
+    cluster_dynamic.mkdir()
+    (cluster_dynamic / '[job].html').write_text('')
+    # infra
+    (d / 'infra').mkdir()
+    (d / 'infra' / '[context].html').write_text('')
+    # jobs
+    (d / 'jobs').mkdir()
+    (d / 'jobs' / '[job].html').write_text('')
+    job_dynamic = d / 'jobs' / '[job]'
+    job_dynamic.mkdir()
+    (job_dynamic / '[task].html').write_text('')
+    pools = d / 'jobs' / 'pools'
+    pools.mkdir()
+    (pools / '[pool].html').write_text('')
+    # plugins (catch-all)
+    (d / 'plugins').mkdir()
+    (d / 'plugins' / '[...slug].html').write_text('')
+    # recipes
+    (d / 'recipes').mkdir()
+    (d / 'recipes' / '[recipe].html').write_text('')
+    # volumes
+    (d / 'volumes').mkdir()
+    (d / 'volumes' / '[volume].html').write_text('')
+    # workspaces
+    (d / 'workspaces').mkdir()
+    (d / 'workspaces' / '[name].html').write_text('')
+    return d
+
+
+class TestResolveDynamicRoute:
+    """Tests for _resolve_dynamic_route using the routes manifest."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_routes_cache(self):
+        """Reset the cached dynamic routes between tests."""
+        server._DYNAMIC_ROUTES = None
+        yield
+        server._DYNAMIC_ROUTES = None
+
+    def test_single_dynamic_segment(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d),
+                                                   'clusters/my-cluster')
+        assert result is not None
+        assert result.endswith('[cluster].html')
+
+    def test_nested_dynamic_segments(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'jobs/123/456')
+        assert result is not None
+        assert result.endswith('[task].html')
+
+    def test_literal_dir_over_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'jobs/pools/my-pool')
+        assert result is not None
+        assert result.endswith('[pool].html')
+        assert 'pools' in result
+
+    def test_catchall_route(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'plugins/foo/bar')
+        assert result is not None
+        assert result.endswith('[...slug].html')
+
+    def test_catchall_single_segment(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'plugins/foo')
+        assert result is not None
+        assert result.endswith('[...slug].html')
+
+    def test_root_catchall_for_unknown_path(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'unknown/deep/path')
+        assert result is not None
+        assert result.endswith('[...path].html')
+
+    def test_infra_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'infra/k8s')
+        assert result is not None
+        assert result.endswith('[context].html')
+
+    def test_volumes_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'volumes/my-vol')
+        assert result is not None
+        assert result.endswith('[volume].html')
+
+    def test_workspaces_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'workspaces/my-ws')
+        assert result is not None
+        assert result.endswith('[name].html')
+
+    def test_recipes_dynamic(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'recipes/my-recipe')
+        assert result is not None
+        assert result.endswith('[recipe].html')
+
+    def test_nested_cluster_job(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(
+                str(d), 'clusters/my-cluster/job-42')
+        assert result is not None
+        assert result.endswith('[job].html')
+
+    def test_no_match_returns_none(self, tmp_path):
+        d = tmp_path / 'empty'
+        d.mkdir()
+        # No manifest, no routes
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'anything')
+        assert result is None
+
+    def test_single_unknown_segment_uses_root_catchall(self, tmp_path):
+        d = _build_dashboard_tree(tmp_path)
+        with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+            result = server._resolve_dynamic_route(str(d), 'cron')
+        assert result is not None
+        assert result.endswith('[...path].html')

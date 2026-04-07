@@ -14,6 +14,7 @@ from http import cookiejar
 import json
 import logging
 import os
+import platform
 import subprocess
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
@@ -53,6 +54,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -68,7 +70,6 @@ if typing.TYPE_CHECKING:
     import pathlib
     import secrets
     import time
-    import webbrowser
 
     import psutil
     import requests
@@ -87,8 +88,6 @@ else:
     requests = adaptors_common.LazyImport('requests')
     secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
-    # only used in dashboard() and api_login()
-    webbrowser = adaptors_common.LazyImport('webbrowser')
     # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -469,15 +468,14 @@ def validate(
 
     # TODO(kevin): remove this in v0.13.0
     omit_user_specified_yaml = _omit(15)
-    # TODO (kyuds): remove this in v0.13.0
+    # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
-    if omit_local_disk:
-        logger.debug('`local_disk` is ignored because the server does '
-                     'not support it yet.')
-    if omit_mount_cached_config:
-        logger.debug('`mount_cached_config` is ignored because the server '
-                     'does not support it yet.')
+    omit_file_mount_type = _omit(40)
+    omit_priority_class = _omit(43)
+    omit_max_hourly_cost = _omit(44)
+    omit_mount_config = _omit(48)
+
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -489,9 +487,36 @@ def validate(
             for resource in task.resources:
                 # pylint: disable=protected-access
                 resource._set_local_disk(None)
+            logger.debug('`local_disk` is ignored because the server does '
+                         'not support it yet.')
         if omit_mount_cached_config:
             for storage in task.storage_mounts.values():
                 storage.mount_cached_config = None
+            logger.debug('`mount_cached_config` is ignored because the server '
+                         'does not support it yet.')
+        if omit_file_mount_type:
+            for storage in task.storage_mounts.values():
+                storage.file_mount_type = None
+            logger.debug('`type` is ignored because the server does not '
+                         'support it yet.')
+        if omit_mount_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_config = None
+            logger.debug('`mount_config` is ignored because the server '
+                         'does not support it yet.')
+        if omit_priority_class:
+            for resource in task.resources:
+                if resource.priority_class:
+                    # pylint: disable=protected-access
+                    resource._set_priority_class(None)
+            logger.debug('`priority_class` is ignored because the server '
+                         'does not support it yet.')
+        if omit_max_hourly_cost:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._max_hourly_cost = None
+            logger.debug('`max_hourly_cost` is ignored because the server '
+                         'does not support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -512,7 +537,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
-    webbrowser.open(url)
+    common_utils.open_browser(url)
 
 
 @usage_lib.entrypoint
@@ -789,7 +814,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -809,6 +834,7 @@ def _launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -881,7 +907,8 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
-    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+        dag, workdir_only=True)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
@@ -889,6 +916,7 @@ def exec(  # pylint: disable=redefined-builtin
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
 
     response = server_common.make_authenticated_request(
@@ -2639,7 +2667,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
 
         # Open browser to authorization page
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not webbrowser.open(auth_url):
+        if not common_utils.open_browser(auth_url):
             logger.debug('Failed to open browser.')
             return None
 
@@ -2690,7 +2718,7 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                                                    token_container, endpoint)
 
         token_url = f'{endpoint}/token?local_port={callback_port}'
-        if not webbrowser.open(token_url):
+        if not common_utils.open_browser(token_url):
             return None
 
         click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'
@@ -2838,6 +2866,10 @@ def api_login(endpoint: Optional[str] = None,
     # design as a user may expect this is only effective for the current
     # session. We should consider using env var for specifying endpoint.
 
+    # Save endpoint and clear any residual service account token before the
+    # first health check, so it uses cookie-based auth and the server can
+    # correctly return NEEDS_AUTH when SSO is required.
+    _save_config_updates(endpoint=endpoint)
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
@@ -2948,8 +2980,6 @@ def api_login(endpoint: Optional[str] = None,
         if api_server_info.user is not None:
             _set_user_hash(api_server_info.user.get('id'))
 
-    # Set the endpoint in the config file
-    _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
     # see https://github.com/python/mypy/issues/5107 on why
@@ -2959,6 +2989,13 @@ def api_login(endpoint: Optional[str] = None,
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(
         endpoint)
+    # Sync local user hash from the authenticated health check response.
+    # This is the final source of truth for the user's identity on this
+    # server, ensuring the local hash matches regardless of which auth
+    # method was used earlier in the flow.
+    if (final_api_server_info.user is not None and
+            final_api_server_info.user.get('id') is not None):
+        _set_user_hash(final_api_server_info.user.get('id'))
     _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
                             server_status)
 
@@ -3048,3 +3085,126 @@ def slurm_node_info(
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
+
+
+# =====================
+# = Debug Dump =
+# =====================
+
+
+def _build_client_info() -> Dict[str, Any]:
+    """Build client-side info for debug dumps."""
+    import sky  # pylint: disable=import-outside-toplevel
+
+    # Get configs
+    user_config: Dict[str, Any] = {}
+    merged_config: Dict[str, Any] = {}
+    try:
+        user_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.get_user_config()))
+        merged_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.to_dict()))
+    except Exception:  # pylint: disable=broad-except
+        pass  # Config may not be available
+
+    return {
+        'skypilot_version': sky.__version__,
+        'skypilot_commit': sky.__commit__,
+        'api_version': server_constants.API_VERSION,
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'user_hash': common_utils.get_user_hash(),
+        'environment': {
+            k: v
+            for k, v in sorted(os.environ.items())
+            if k.startswith(('SKYPILOT_', 'SKY_'))
+        },
+        'user_config': user_config,
+        'merged_config': merged_config,
+    }
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(46)
+@annotations.client_api
+def create_debug_dump(
+    request_ids: Optional[List[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    recent_minutes: Optional[float] = None,
+) -> server_common.RequestId[str]:
+    """Create a debug dump for troubleshooting.
+
+    At least one of ``request_ids``, ``cluster_names``, ``managed_job_ids``,
+    or ``recent_minutes`` must be provided.
+
+    Args:
+        request_ids: List of request IDs or prefixes to include in the
+            dump. Prefixes are resolved to all matching request IDs on
+            the server.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
+
+    Returns:
+        The request ID of the debug dump creation request.
+
+    Request Returns:
+        Path to the created zip file on the server.
+    """
+    body = payloads.CreateDebugDumpBody(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_minutes=recent_minutes,
+        client_info=_build_client_info(),
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/debug/dump_create',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(46)
+@annotations.client_api
+def download_debug_dump(dump_filename: str,
+                        local_path: Optional[str] = None) -> str:
+    """Download a debug dump from the server.
+
+    Args:
+        dump_filename: The filename of the dump to download.
+        local_path: Local path to save the dump. If None, saves to
+            current directory with the original filename.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/debug/dump_download/{dump_filename}',
+        stream=True,
+    )
+
+    with response:
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail', 'Unknown error')
+            except (json.JSONDecodeError, ValueError):
+                detail = response.text or f'HTTP {response.status_code}'
+            raise exceptions.ClientError(
+                f'Failed to download debug dump: {detail}')
+
+        if local_path is None:
+            local_path = dump_filename
+
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+    return local_path
