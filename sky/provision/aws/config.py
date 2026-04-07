@@ -742,7 +742,7 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
         return security_group
 
     try:
-        # create a new security group with skypilot tag for IAM scoping
+        # create a new security group with skypilot tag
         ec2.meta.client.create_security_group(
             Description='Auto-created security group for Ray workers',
             GroupName=expected_sg_name,
