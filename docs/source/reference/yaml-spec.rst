@@ -544,10 +544,6 @@ Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
 
-On **Kubernetes**, this sets the ``resources.requests.ephemeral-storage`` field in the pod spec.
-When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
-``resources.limits.ephemeral-storage`` using the multiplier defined there.
-
 Units supported (case-insensitive):
 
 - KB (kilobytes, 2^10 bytes)
@@ -556,9 +552,13 @@ Units supported (case-insensitive):
 - TB (terabytes, 2^40 bytes)
 - PB (petabytes, 2^50 bytes)
 
-.. warning::
+.. note::
 
-   For Kubernetes, the disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+   On **Kubernetes**, this sets the ``resources.requests.ephemeral-storage`` field in the pod spec.
+   When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+   ``resources.limits.ephemeral-storage`` using the multiplier defined there.
+  
+   With this, the disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
