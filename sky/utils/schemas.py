@@ -370,14 +370,6 @@ def _get_single_resources_schema():
                     'type': 'integer',
                 }],
             },
-            'ephemeral_storage': {
-                'anyOf': [{
-                    'type': 'string',
-                    'pattern': constants.MEMORY_SIZE_PATTERN,
-                }, {
-                    'type': 'integer',
-                }],
-            },
             'disk_tier': {
                 'type': 'string',
             },

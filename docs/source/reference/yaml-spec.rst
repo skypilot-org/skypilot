@@ -38,7 +38,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
-    :ref:`ephemeral_storage <yaml-spec-resources-ephemeral-storage>`: 50
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
     :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
@@ -545,6 +544,10 @@ Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
 
+On **Kubernetes**, this sets the ``resources.requests.ephemeral-storage`` field in the pod spec.
+When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+``resources.limits.ephemeral-storage`` using the multiplier defined there.
+
 Units supported (case-insensitive):
 
 - KB (kilobytes, 2^10 bytes)
@@ -568,51 +571,6 @@ OR
 
   resources:
     disk_size: 256GB
-
-
-
-.. _yaml-spec-resources-ephemeral-storage:
-
-``resources.ephemeral_storage``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
-
-This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
-When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
-``resources.limits.ephemeral-storage`` using the multiplier defined there.
-
-This field is **only effective on Kubernetes**. It is ignored on other clouds.
-
-Increase this if your tasks download large datasets or produce significant temporary files that
-could exhaust the node's ephemeral storage and trigger pod evictions.
-
-Units supported (case-insensitive):
-
-- KB (kilobytes, 2^10 bytes)
-- MB (megabytes, 2^20 bytes)
-- GB (gigabytes, 2^30 bytes)
-- TB (terabytes, 2^40 bytes)
-- PB (petabytes, 2^50 bytes)
-
-.. warning::
-
-   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50GB
-
 
 
 .. _yaml-spec-resources-disk-tier:

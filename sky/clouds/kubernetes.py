@@ -819,10 +819,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace': namespace,
         }
 
-        # Add ephemeral storage to deploy vars if specified.
-        ephemeral_storage = resources.ephemeral_storage
-        if ephemeral_storage is not None:
-            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+        # On Kubernetes, disk_size maps to ephemeral-storage requests.
+        disk_size = resources.disk_size
+        if disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
+            deploy_vars['k8s_ephemeral_storage'] = str(disk_size)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
@@ -847,9 +847,9 @@ class Kubernetes(clouds.Cloud):
             else:
                 deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
                 deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
-            if ephemeral_storage is not None:
+            if disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
-                    ephemeral_storage * mul, 3)
+                    disk_size * mul, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -898,12 +898,7 @@ class Kubernetes(clouds.Cloud):
         return deploy_vars
 
     @staticmethod
-    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
-        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
-            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
-                        'is not supported by Kubernetes. '
-                        'To add additional disk, use volumes.'
-                        f'{colorama.Style.RESET_ALL}')
+    def _warn_on_disk_tier(resources: 'resources_lib.Resources'):
         if resources.disk_tier is not None:
             logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
                         'is not supported by Kubernetes. '
@@ -915,7 +910,7 @@ class Kubernetes(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
-        self._warn_on_disk_size(resources)
+        self._warn_on_disk_tier(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
