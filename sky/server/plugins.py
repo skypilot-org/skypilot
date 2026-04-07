@@ -95,6 +95,42 @@ class ExtensionContext:
     def managed_secrets_provider(self,) -> Optional[ManagedSecretsProvider]:
         return self._managed_secrets_provider
 
+    def register_request_storage(
+        self,
+        backend: 'RequestStorageBackend',
+    ) -> None:
+        """Register a custom request storage backend.
+
+        This allows plugins to replace the default SQLite-based request
+        storage with an alternative implementation (e.g., PostgreSQL).
+        """
+        from sky.server.requests.storage import set_request_storage
+        set_request_storage(backend)
+
+    def register_queue_backend_factory(
+        self,
+        factory: 'QueueBackendFactory',
+    ) -> None:
+        """Register a custom queue backend factory.
+
+        This allows plugins to replace the default multiprocessing/local
+        queue with an alternative implementation (e.g., PostgreSQL SKIP LOCKED).
+        """
+        from sky.server.requests.queues.base import set_queue_backend_factory
+        set_queue_backend_factory(factory)
+
+    def register_replica_manager(
+        self,
+        manager: 'ReplicaManager',
+    ) -> None:
+        """Register a custom replica manager.
+
+        This allows plugins to provide multi-replica coordination for HA
+        deployments (heartbeat, failover, log proxy, remote cancellation).
+        """
+        from sky.server.replica_manager import set_replica_manager
+        set_replica_manager(manager)
+
     def register_rbac_rule(self,
                            path: str,
                            method: str,
