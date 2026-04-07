@@ -4173,6 +4173,16 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
+    # Try external pod info source first (e.g., node-info-service cache).
+    if plugin_extensions.PodInfoSource.is_registered():
+        if context is not None:
+            result = plugin_extensions.PodInfoSource.get(context)
+            if result is not None:
+                logger.debug(f'Got pod info from external provider for '
+                             f'{context}')
+                return result
+        # Fall through to direct Kubernetes API query if provider returns None
+
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
             label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
