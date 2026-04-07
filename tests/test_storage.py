@@ -322,6 +322,175 @@ class TestStorageFromYamlWithMountCachedConfig:
         assert storage_obj.mount_cached_config.transfers == 4
 
 
+class TestFileMountType:
+    """Tests for FileMountType and resolve_mount_cached_config."""
+
+    def test_model_checkpoint_ro_type_values(self):
+        """MODEL_CHECKPOINT_RO: read_only, chunk streams, chunk size."""
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
+        assert config.vfs_read_chunk_streams == 16
+        assert config.vfs_read_chunk_size == '32M'
+        assert config.read_only is True
+        assert config.transfers is None
+        assert config.buffer_size is None
+
+    def test_model_checkpoint_rw_type_values(self):
+        """MODEL_CHECKPOINT_RW: chunk streams, chunk size, transfers."""
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RW)
+        assert config.vfs_read_chunk_streams == 16
+        assert config.vfs_read_chunk_size == '32M'
+        assert config.transfers == 8
+        assert config.read_only is None
+
+    def test_type_with_overrides(self):
+        """Explicit config.mount_cached fields override type defaults."""
+        overrides = storage_lib.MountCachedConfig(transfers=16)
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RW, overrides=overrides)
+        assert config.transfers == 16
+        assert config.vfs_read_chunk_streams == 16
+        assert config.vfs_read_chunk_size == '32M'
+
+    def test_type_override_does_not_clear_type_fields(self):
+        """Overriding one field shouldn't clear other type fields."""
+        overrides = storage_lib.MountCachedConfig(buffer_size='128M')
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RO, overrides=overrides)
+        assert config.buffer_size == '128M'
+        assert config.vfs_read_chunk_streams == 16
+        assert config.vfs_read_chunk_size == '32M'
+        assert config.read_only is True
+
+    def test_type_enum_case_insensitive(self):
+        """FileMountType enum constructable from uppercase string."""
+        assert (storage_lib.FileMountType('MODEL_CHECKPOINT_RO') ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
+
+
+class TestStorageFromYamlWithFileMountType:
+    """Tests for Storage.from_yaml_config with type field."""
+
+    def test_type_only(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'MODEL_CHECKPOINT_RO',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
+        # No explicit overrides
+        assert storage_obj.mount_cached_config is None
+        # Resolution produces the type config
+        resolved = storage_obj.resolve_mount_cached_config()
+        assert resolved.vfs_read_chunk_streams == 16
+        assert resolved.vfs_read_chunk_size == '32M'
+        assert resolved.read_only is True
+
+    def test_type_with_config_override(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'MODEL_CHECKPOINT_RW',
+            'config': {
+                'mount_cached': {
+                    'transfers': 16,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RW)
+        # Explicit override stored separately
+        assert storage_obj.mount_cached_config.transfers == 16
+        # Resolution merges type + override
+        resolved = storage_obj.resolve_mount_cached_config()
+        assert resolved.transfers == 16
+        assert resolved.vfs_read_chunk_streams == 16
+
+    def test_type_case_insensitive(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'model_checkpoint_ro',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
+
+    def test_type_without_mount_cached_mode_fails(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'type': 'MODEL_CHECKPOINT_RO',
+        }
+        with pytest.raises(exceptions.StorageSpecError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_invalid_type_rejected_by_schema(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'INVALID_TYPE',
+        }
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_type_rw_to_rclone_flags(self):
+        """End-to-end: type -> resolve -> rclone flags."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'MODEL_CHECKPOINT_RW',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        resolved = storage_obj.resolve_mount_cached_config()
+        flags = resolved.to_rclone_flags()
+        assert '--transfers 8' in flags
+        assert '--vfs-read-chunk-streams 16' in flags
+        assert '--vfs-read-chunk-size 32M' in flags
+        assert '--read-only' not in flags
+
+    def test_type_round_trips_in_yaml(self):
+        """to_yaml_config() preserves the type name."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'MODEL_CHECKPOINT_RO',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        serialized = storage_obj.to_yaml_config()
+        assert serialized['type'] == 'MODEL_CHECKPOINT_RO'
+        # No config.mount_cached since there are no overrides
+        assert 'config' not in serialized
+
+    def test_type_with_overrides_round_trips(self):
+        """to_yaml_config() preserves both type and overrides."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'type': 'MODEL_CHECKPOINT_RW',
+            'config': {
+                'mount_cached': {
+                    'transfers': 16,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        serialized = storage_obj.to_yaml_config()
+        assert serialized['type'] == 'MODEL_CHECKPOINT_RW'
+        assert serialized['config']['mount_cached'] == {'transfers': 16}
+
+
 class TestMountCachedSchemaValidation:
     """Tests for schema pattern validation of mount_cached config fields."""
 
@@ -537,3 +706,208 @@ class TestGetMountCachedCmdWithConfig:
         assert 'rclone mount myprofile:my-bucket /mnt/data' in cmd
         assert '--daemon' in cmd
         assert '> /dev/null 2>&1' in cmd
+
+
+class TestVastDataStorage:
+    """Tests for VastData storage integration."""
+
+    def test_store_type_vastdata_exists(self):
+        """Verify VASTDATA is a valid StoreType."""
+        assert storage_lib.StoreType.VASTDATA.value == 'VASTDATA'
+
+    def test_store_prefix(self):
+        """Verify VastData store prefix is vastdata://."""
+        assert storage_lib.StoreType.VASTDATA.store_prefix() == 'vastdata://'
+
+    def test_split_vastdata_path(self):
+        """Test splitting VastData URIs."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path(
+            'vastdata://my-bucket/path/to/data')
+        assert bucket == 'my-bucket'
+        assert key == 'path/to/data'
+
+    def test_split_vastdata_path_no_key(self):
+        """Test splitting VastData URIs with no key."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path('vastdata://my-bucket/')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_split_vastdata_path_bucket_only(self):
+        """Test splitting VastData URIs with bucket only."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path('vastdata://my-bucket')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_from_yaml_config_vastdata_source(self):
+        """Test Storage.from_yaml_config with VastData source."""
+        yaml_config = {
+            'source': 'vastdata://my-bucket',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.source == 'vastdata://my-bucket'
+
+    def test_from_yaml_config_vastdata_store_type(self):
+        """Test Storage.from_yaml_config with store set to vastdata."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 'vastdata',
+            'mode': 'COPY',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.name == 'test-bucket'
+
+    def test_vastdata_mount_cmd(self):
+        """Test VastData mount command generation."""
+        cmd = mounting_utils.get_vastdata_mount_cmd(
+            vastdata_credentials_path='~/.vastdata/vastdata.credentials',
+            vastdata_profile_name='vastdata',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        assert 'test-bucket' in cmd
+        assert 'https://s3.example.com' in cmd
+        assert '/mnt/data' in cmd
+        assert 'AWS_SHARED_CREDENTIALS_FILE=' in cmd
+
+    def test_vastdata_in_store_enabled_clouds(self):
+        """Verify VastData is in STORE_ENABLED_CLOUDS."""
+        assert 'VastData' in storage_lib.STORE_ENABLED_CLOUDS
+
+
+class TestMountConfig:
+    """Tests for MountConfig dataclass."""
+
+    def test_read_only_true(self):
+        config = storage_lib.MountConfig(read_only=True)
+        assert config.read_only is True
+
+    def test_to_yaml_config_default(self):
+        config = storage_lib.MountConfig()
+        assert config.read_only is None
+        assert config.to_yaml_config() == {}
+        config = storage_lib.MountConfig.from_yaml_config({})
+        assert config == storage_lib.MountConfig()
+
+    def test_to_yaml_config_with_read_only(self):
+        config = storage_lib.MountConfig(read_only=True)
+        yaml_dict = config.to_yaml_config()
+        assert yaml_dict == {'read_only': True}
+        restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
+        assert restored.read_only is True
+
+    def test_round_trip_yaml_false(self):
+        config = storage_lib.MountConfig(read_only=False)
+        yaml_dict = config.to_yaml_config()
+        restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
+        assert restored.read_only is False
+
+
+class TestStorageFromYamlWithMountConfig:
+    """Tests for Storage.from_yaml_config with mount config."""
+
+    def test_mode_validation_accepts_mount(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config.read_only is True
+
+    def test_mode_validation_rejects_copy_mode(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'COPY',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        with pytest.raises(exceptions.StorageSpecError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_mode_validation_rejects_mount_cached(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        with pytest.raises(exceptions.StorageSpecError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_default_mode_accepts_mount_config(self):
+        """Default mode is MOUNT, so config.mount should be accepted."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config.read_only is True
+
+    def test_no_config_field(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is None
+
+    def test_empty_mount_config(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {},
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config == storage_lib.MountConfig()
+
+    def test_config_without_mount(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {},
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is None
+
+    def test_schema_rejects_invalid_field(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {
+                    'invalid_field': True,
+                },
+            },
+        }
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(yaml_config)

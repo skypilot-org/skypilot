@@ -66,6 +66,11 @@ GPU_NAME_MAP = {
     'RTXA5000': 'NVIDIA RTX A5000',
     'RTXA6000': 'NVIDIA RTX A6000',
 
+    # NVIDIA RTX PRO (Blackwell)
+    'RTXPRO4500': 'NVIDIA RTX PRO 4500 Blackwell',
+    'RTXPRO6000': 'NVIDIA RTX PRO 6000 Blackwell Server Edition',
+    'RTXPRO6000-WK': 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+
     # Tesla V100 variants
     'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
     'V100-16GB-SXM2': 'Tesla V100-SXM2-16GB',
@@ -194,6 +199,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
         info['status'] = instance['desiredStatus']
         info['name'] = instance['name']
+        info['vcpu_count'] = instance.get('vcpuCount')
         info['port2endpoint'] = {}
 
         # Sometimes when the cluster is in the process of being created,

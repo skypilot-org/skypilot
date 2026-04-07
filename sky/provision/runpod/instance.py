@@ -212,9 +212,24 @@ def get_cluster_info(
         if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
 
+    # Detect the vCPU count from the head instance to pass to Ray.
+    # This is needed because Ray does not correctly detect CPU count
+    # on RunPod nodes using cgroup v2, causing it to see all host CPUs
+    # instead of the container's allocation and spawning too many workers.
+
+    custom_ray_options: Optional[Dict[str, Any]] = None
+    if head_instance_id is not None:
+        head_info = running_instances.get(head_instance_id, {})
+        vcpu_count = head_info.get('vcpu_count')
+        if vcpu_count is not None:
+            custom_ray_options = {
+                'num-cpus': str(int(vcpu_count)),
+            }
+
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        custom_ray_options=custom_ray_options,
         provider_name='runpod',
         provider_config=provider_config,
     )

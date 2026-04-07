@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node server.js",
-    "build": "next build",
+    "build": "next build && cp .next/routes-manifest.json out/routes-manifest.json",
     "start": "NODE_ENV=production node server.js",
     "lint": "next lint --max-warnings 0",
     "lint:fix": "next lint --fix",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
+    "@emotion/cache": "^11.13.0",
     "@emotion/react": "^11.13.0",
     "@emotion/styled": "^11.13.0",
     "@mui/material": "^5.16.7",
@@ -63,6 +64,8 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.4",
     "eslint-config-prettier": "^10.1.1",
+    "eslint-import-resolver-alias": "^1.1.2",
+    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react": "^7.34.3",
     "globals": "^15.8.0",
     "jest": "^29.7.0",

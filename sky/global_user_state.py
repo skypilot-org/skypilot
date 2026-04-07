@@ -158,6 +158,7 @@ volume_table = sqlalchemy.Table(
     # JSON-encoded lists of pods/clusters using the volume
     sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('creation_yaml', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -1820,7 +1821,7 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
-    workspaces_filter: Optional[Dict[str, Any]] = None,
+    workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
     cluster_names: Optional[List[str]] = None,
     summary_response: bool = False,
@@ -1830,8 +1831,8 @@ def get_clusters(
     Args:
         exclude_managed_clusters: If True, exclude clusters that have
             is_managed field set to True.
-        workspaces_filter: If specified, only include clusters
-            that has workspace field set to one of the values.
+        workspaces_filter: If specified, only include clusters whose
+            workspace is in this set. Use workspace names.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
         cluster_names: If specified, only include clusters
@@ -1911,6 +1912,8 @@ def get_clusters(
         handle = pickle.loads(row.handle)
         priority = (handle.launched_resources.priority
                     if handle.launched_resources is not None else None)
+        priority_class = (handle.launched_resources.priority_class
+                          if handle.launched_resources is not None else None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -1919,6 +1922,7 @@ def get_clusters(
             'status': status_lib.ClusterStatus[row.status],
             'priority': priority
                         if priority is not None else constants.DEFAULT_PRIORITY,
+            'priority_class': priority_class,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -2091,6 +2095,8 @@ def get_clusters_from_history(
             'resources': launched_resources,
             'priority': launched_resources.priority
                         if launched_resources is not None else None,
+            'priority_class': launched_resources.priority_class
+                              if launched_resources is not None else None,
             'cluster_hash': row.cluster_hash,
             'usage_intervals': usage_intervals,
             'status': status,
@@ -2392,6 +2398,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'error_message': row.error_message,
             'usedby_pods': usedby_pods,
             'usedby_clusters': usedby_clusters,
+            'creation_yaml': row.creation_yaml,
         })
     return records
 
@@ -2418,6 +2425,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
             'error_message': row.error_message,
             'usedby_pods': usedby_pods,
             'usedby_clusters': usedby_clusters,
+            'creation_yaml': row.creation_yaml,
         }
     return None
 
@@ -2428,6 +2436,7 @@ def add_volume(
     config: models.VolumeConfig,
     status: status_lib.VolumeStatus,
     is_ephemeral: bool = False,
+    creation_yaml: Optional[str] = None,
 ) -> None:
     engine = _db_manager.get_engine()
     volume_launched_at = int(time.time())
@@ -2459,6 +2468,7 @@ def add_volume(
             last_use=last_use,
             status=status.value,
             is_ephemeral=int(is_ephemeral),
+            creation_yaml=creation_yaml,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)

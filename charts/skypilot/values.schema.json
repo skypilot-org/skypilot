@@ -128,6 +128,9 @@
                 "resources": {
                     "type": "object"
                 },
+                "serveServerLog": {
+                    "type": "boolean"
+                },
                 "sidecarContainers": {
                     "type": [
                         "array",

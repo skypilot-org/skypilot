@@ -1,8 +1,10 @@
 """Tests for schemas.py"""
 import unittest
+from unittest import mock
 
 import jsonschema
 
+from sky.server import plugins
 from sky.skylet import constants
 from sky.utils import schemas
 
@@ -172,8 +174,19 @@ class TestWorkspaceSchema(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so workspace tests check
+        # additionalProperties enforcement.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
         self.config_schema = schemas.get_config_schema()
         self.workspaces_schema = self.config_schema['properties']['workspaces']
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
 
     def test_valid_workspace_configs(self):
         """Test validation of valid workspace configurations."""
@@ -625,6 +638,343 @@ class TestSSHSchema(unittest.TestCase):
         for cloud in ['aws', 'gcp', 'azure']:
             default_identity = schemas.get_default_remote_identity(cloud)
             self.assertEqual(default_identity, 'LOCAL_CREDENTIALS')
+
+
+class TestAzureSchema(unittest.TestCase):
+    """Tests for the Azure config schema."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.azure_schema = self.config_schema['properties']['azure']
+
+    def test_azure_remote_identity_enum_values(self):
+        """Test that Azure accepts enum values for remote_identity."""
+        for value in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT', 'NO_UPLOAD']:
+            config = {'remote_identity': value}
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_custom_msi_name(self):
+        """Test that Azure accepts custom MSI name for remote_identity."""
+        config = {'remote_identity': 'my-managed-identity'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_cluster_pattern_list(self):
+        """Test that Azure accepts cluster-name pattern matching."""
+        config = {
+            'remote_identity': [
+                {
+                    'sky-serve-controller-*': 'controller-msi'
+                },
+                {
+                    'my-cluster-*': 'my-custom-msi'
+                },
+                {
+                    '*': 'default-msi'
+                },
+            ]
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_full_resource_id(self):
+        """Test that Azure accepts full resource ID for remote_identity."""
+        config = {
+            'remote_identity': '/subscriptions/sub-id/resourceGroups/rg/'
+                               'providers/Microsoft.ManagedIdentity/'
+                               'userAssignedIdentities/my-msi'
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_use_internal_ips(self):
+        """Test that Azure accepts use_internal_ips."""
+        config = {'use_internal_ips': True}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_ssh_proxy_command_string(self):
+        """Test that Azure accepts ssh_proxy_command as string."""
+        config = {'ssh_proxy_command': 'ssh -W %h:%p bastion'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_ssh_proxy_command_dict(self):
+        """Test that Azure accepts ssh_proxy_command as region dict."""
+        config = {
+            'ssh_proxy_command': {
+                'eastus': 'ssh -W %h:%p bastion-east',
+                'westus2': 'ssh -W %h:%p bastion-west',
+            }
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_vpc_name(self):
+        """Test that Azure accepts vpc_name."""
+        config = {'vpc_name': 'my-vnet'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_vpc_name_null(self):
+        """Test that Azure accepts null vpc_name."""
+        config = {'vpc_name': None}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_labels(self):
+        """Test that Azure accepts labels."""
+        config = {'labels': {'team': 'ml', 'env': 'prod'}}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_labels_rejects_non_string_values(self):
+        """Test that Azure rejects non-string label values."""
+        config = {'labels': {'team': 123}}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_combined_config(self):
+        """Test that Azure accepts all new options together."""
+        config = {
+            'storage_account': 'mystorage',
+            'resource_group_vm': 'my-rg',
+            'vpc_name': 'my-vnet',
+            'use_internal_ips': True,
+            'ssh_proxy_command': 'ssh -W %h:%p bastion',
+            'labels': {
+                'team': 'ml'
+            },
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_rejects_unknown_properties(self):
+        """Test that Azure rejects unknown properties."""
+        config = {'unknown_property': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
+
+class TestAWSConfigSchema(unittest.TestCase):
+    """Tests for the AWS config schema, focusing on subnet_names."""
+
+    @classmethod
+    def setUpClass(cls):
+        config_schema = schemas.get_config_schema()
+        cls.aws_schema = config_schema['properties']['aws']
+
+    def test_subnet_names_single_string(self):
+        """Test that AWS accepts a single string for subnet_names."""
+        config = {'subnet_names': 'my-subnet'}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_list(self):
+        """Test that AWS accepts a list of strings for subnet_names."""
+        config = {'subnet_names': ['subnet-a', 'subnet-b']}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_null(self):
+        """Test that AWS accepts null for subnet_names."""
+        config = {'subnet_names': None}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_rejects_integer(self):
+        """Test that AWS rejects non-string subnet_names."""
+        config = {'subnet_names': 123}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_rejects_list_of_integers(self):
+        """Test that AWS rejects list of non-strings for subnet_names."""
+        config = {'subnet_names': [123, 456]}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_with_vpc_name(self):
+        """Test that AWS accepts both subnet_names and vpc_name together."""
+        config = {
+            'vpc_name': 'my-vpc',
+            'subnet_names': ['subnet-a', 'subnet-b'],
+        }
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_empty_list(self):
+        """Test that AWS accepts an empty list for subnet_names."""
+        config = {'subnet_names': []}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+
+class TestRegisterKubernetesProperty(unittest.TestCase):
+    """Tests for register_kubernetes_property and schema validation."""
+
+    def setUp(self):
+        # Save original state so we can restore after each test.
+        self._saved_extra = schemas._extra_kubernetes_properties.copy()
+        self._saved_plugins_loaded = plugins._plugins_loaded
+
+    def tearDown(self):
+        schemas._extra_kubernetes_properties.clear()
+        schemas._extra_kubernetes_properties.update(self._saved_extra)
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    # -- helpers --
+
+    def _get_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['kubernetes']
+
+    def _get_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['kubernetes']['properties']
+                ['context_configs']['additionalProperties'])
+
+    def _get_workspace_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes'])
+
+    def _get_workspace_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes']['properties']['context_configs']
+                ['additionalProperties'])
+
+    # -- client side (env var not set) --
+
+    def test_client_allows_unknown_k8s_root_property(self):
+        """On the client, unknown kubernetes fields pass validation."""
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    def test_client_allows_unknown_k8s_context_config_property(self):
+        """On the client, unknown fields in context_configs pass."""
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    def test_client_allows_unknown_workspace_k8s_property(self):
+        """On the client, unknown workspace kubernetes fields pass."""
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    def test_client_allows_unknown_workspace_k8s_context_config_property(self):
+        """On the client, unknown fields in workspace context_configs pass."""
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    # -- server side with plugins loaded --
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_k8s_root(self):
+        """On the server, a registered property passes root validation."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        k8s_schema = self._get_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_context_config(self):
+        """On the server, a registered property passes context_config."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_workspace_k8s(self):
+        """On the server, a registered property passes workspace k8s."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_workspace_context_config(self):
+        """On the server, a registered property passes workspace ctx cfg."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_k8s_root(self):
+        """On the server, an unregistered property fails root validation."""
+        plugins._plugins_loaded = True
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_context_config(self):
+        """On the server, an unregistered property fails context_config."""
+        plugins._plugins_loaded = True
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_workspace_k8s(self):
+        """On the server, an unregistered property fails workspace k8s."""
+        plugins._plugins_loaded = True
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_workspace_ctx_cfg(self):
+        """On the server, unregistered property fails workspace ctx cfg."""
+        plugins._plugins_loaded = True
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    # -- server side before plugins loaded (should allow additional props) --
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_k8s_root(self):
+        """Before plugins load, server allows unknown properties."""
+        plugins._plugins_loaded = False
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_context_config(self):
+        """Before plugins load, server allows unknown context_config props."""
+        plugins._plugins_loaded = False
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_workspace_k8s(self):
+        """Before plugins load, server allows unknown workspace k8s props."""
+        plugins._plugins_loaded = False
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_workspace_ctx(self):
+        """Before plugins load, server allows unknown workspace ctx props."""
+        plugins._plugins_loaded = False
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
 if __name__ == "__main__":

@@ -10,19 +10,19 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 39  # add graceful flag for managed jobs
+API_VERSION = 48  # mount config read_only support
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
 # - This value is maintained by the CI pipeline, DO NOT EDIT this manually.
 # - Compatibility code for versions lower than this can be safely removed.
 # Refer to API_VERSION for more details.
-MIN_COMPATIBLE_API_VERSION = 11
+MIN_COMPATIBLE_API_VERSION = 24
 
 # The semantic version of the minimum compatible API version.
 # Refer to MIN_COMPATIBLE_API_VERSION for more details.
 # Note (dev): DO NOT EDIT this constant manually.
-MIN_COMPATIBLE_VERSION = '0.10.0'
+MIN_COMPATIBLE_VERSION = '0.11.0'
 
 # The HTTP header name for the API version of the sender.
 API_VERSION_HEADER = 'X-SkyPilot-API-Version'
@@ -32,6 +32,15 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 
 # Minimum client API version required to launch recipes.
 MIN_RECIPE_LAUNCH_API_VERSION = 33
+
+# Minimum API version that supports upload API v2.
+UPLOAD_API_V2_VERSION = 41
+
+# Minimum server API version required for api_server_access in managed jobs.
+MIN_API_ACCESS_API_VERSION = 42
+
+# Minimum API version that supports the SSH redirect first-frame protocol.
+MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -97,3 +106,21 @@ OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 # The env vars are read by websockets at import time.
 WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
 WEBSOCKETS_MAX_NUM_HEADERS = '256'
+
+# Request ID for the on-boot sky check request.
+ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
+
+# Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
+# performance issues in Kubernetes deployments where ~/sky_logs/ may be on
+# shared storage.
+REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+
+# Default maximum size of a daemon log file before rotation (bytes).
+# When a daemon log exceeds this threshold, it is backed up to .log.1 and
+# then truncated. One backup is kept per daemon.
+# Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
+DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
+
+# Interval for the server-side heartbeat daemon that sends plugin metrics
+# to Loki (e.g., GPU inventory from billing plugin).
+SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes

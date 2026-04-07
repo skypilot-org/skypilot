@@ -1,7 +1,7 @@
 """Workspace management core."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import filelock
 
@@ -67,6 +67,37 @@ class WorkspaceConfigComparison:
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     return workspaces_for_user(common_utils.get_current_user().id)
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _load_workspaces() -> Dict[str, Any]:
+    """Read workspaces from config once per request (cached).
+
+    Both workspace name filtering and full config lookup call this so they
+    always operate on the same config snapshot within a single request.
+    """
+    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
+        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    return workspaces
+
+
+def _accessible_workspace_names_for_user(user_id: str,
+                                         workspace_names: Set[str]) -> Set[str]:
+    """Return the subset of workspace_names the user can access."""
+    return permission.permission_service.get_accessible_workspace_names(
+        user_id, workspace_names)
+
+
+def get_accessible_workspace_names() -> Set[str]:
+    """Returns workspace names the current user can access (no config dict).
+
+    Use this when only workspace names are needed (e.g. filtering clusters/jobs)
+    to avoid building the full workspace config dict.
+    """
+    workspaces = _load_workspaces()
+    return _accessible_workspace_names_for_user(
+        common_utils.get_current_user().id, set(workspaces.keys()))
 
 
 def _update_workspaces_config(
@@ -401,6 +432,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace name
     if not workspace_name or not isinstance(workspace_name, str):
         raise ValueError('Workspace name must be a non-empty string.')
+    common_utils.check_workspace_name_is_valid(workspace_name)
 
     _validate_workspace_config(workspace_name, config)
 
@@ -536,6 +568,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
         if workspace_name not in current_workspaces:
+            # Validate names for newly added workspaces only (not existing
+            # ones, for backward compatibility with pre-validation names).
+            common_utils.check_workspace_name_is_valid(workspace_name)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
@@ -637,19 +672,16 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
 def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     """Returns the workspaces that the user has access to.
 
+    Uses a single batch permission check instead of N per-workspace checks,
+    so the API server stays fast with many workspaces.
+
     Args:
         user_id: The user id to check.
 
     Returns:
         A map from workspace name to workspace configuration.
     """
-    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
-        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    user_workspaces = {}
-
-    for workspace_name, workspace_config in workspaces.items():
-        if permission.permission_service.check_workspace_permission(
-                user_id, workspace_name):
-            user_workspaces[workspace_name] = workspace_config
-    return user_workspaces
+    workspaces = _load_workspaces()
+    accessible_names = _accessible_workspace_names_for_user(
+        user_id, set(workspaces.keys()))
+    return {name: workspaces[name] for name in accessible_names}

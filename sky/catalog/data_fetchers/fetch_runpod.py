@@ -186,6 +186,11 @@ DEFAULT_GPU_INFO: Dict[str, Dict[str, Union[int, float]]] = {
         'memory': 50.0,
         'max_count': 10
     },
+    'RTXPRO4500': {
+        'vcpus': 28.0,
+        'memory': 62.0,
+        'max_count': 3
+    },
     'RTXPRO6000': {
         'vcpus': 14.0,
         'memory': 125.0,

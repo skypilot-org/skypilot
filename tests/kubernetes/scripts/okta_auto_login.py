@@ -20,6 +20,7 @@ Example:
 
 import logging
 import sys
+import threading
 import time
 import webbrowser
 
@@ -159,40 +160,20 @@ class OktaAutoLogin:
                 self.driver.quit()
                 logger.info("✅ Chrome driver closed")
 
-    def perform_sky_api_login(self) -> bool:
+    def _selenium_authorize_flow(self, url: str) -> None:
+        """Run the Selenium authorize flow in a background thread.
+
+        For /auth/authorize URLs (polling-based PKCE flow):
+        1. Navigate to the authorize URL (redirects to Okta)
+        2. Fill Okta credentials
+        3. After Okta redirects back, click the Authorize button
+
+        For /token?local_port= URLs (legacy localhost callback flow):
+        1. Navigate to the token URL (redirects to Okta)
+        2. Fill Okta credentials
+        3. JavaScript on the page auto-posts token to localhost callback
         """
-        Perform login by calling SDK's api_login and intercepting the browser.
-
-        This method:
-        1. Patches webbrowser.open to intercept the token URL
-        2. Calls sdk.api_login() which triggers the OAuth flow
-        3. Intercepts the browser opening with Selenium
-        4. Automates Okta login in the Selenium browser
-        5. Lets the normal callback flow complete
-
-        Returns:
-            True if login successful, False otherwise
-        """
-        intercepted_url = [None
-                          ]  # Use list to allow modification in nested function
-
-        # Store original webbrowser.open
-        original_webbrowser_open = webbrowser.open
-
-        def intercept_webbrowser_open(url: str) -> bool:
-            """
-            Intercept all webbrowser.open() calls and open URL with Selenium instead.
-
-            Args:
-                url: The URL that would be opened in the browser
-
-            Returns:
-                True to indicate success (so SDK doesn't raise an error)
-            """
-            intercepted_url[0] = url
-            logger.info(f"✅ Intercepted URL: {url}")
-
-            # Open the URL in Selenium
+        try:
             if not self.driver:
                 self.driver = self.get_chrome_driver(headless=True)
                 logger.info("✅ Chrome driver initialized")
@@ -200,41 +181,105 @@ class OktaAutoLogin:
             logger.info(f"Navigating to URL in Selenium browser: {url}")
             self.driver.get(url)
 
-            # For token URLs, fill in Okta credentials
-            if '/token?local_port=' in url:
-                logger.info("Detected token URL, filling Okta credentials...")
-                # Fill in Okta credentials using reusable method
+            if '/auth/authorize' in url:
+                # Polling-based PKCE flow: the authorize page requires
+                # authentication. Navigating to it triggers an Okta redirect.
+                # After Okta login, we're redirected back to the authorize page
+                # where we need to click the "Authorize" button.
+                logger.info(
+                    "Detected authorize URL, filling Okta credentials...")
                 if not self.fill_okta_credentials(self.driver):
                     logger.error("❌ Failed to fill Okta credentials")
-                    return False
-                logger.info(
-                    "✅ Credentials filled, waiting for OAuth callback to complete..."
-                )
-            else:
-                logger.info(f"URL opened in Selenium browser (non-token URL)")
+                    return
 
+                # After Okta login, wait for redirect back to authorize page
+                # and click the Authorize button
+                logger.info("Waiting for Authorize button on authorize page...")
+                authorize_btn = WebDriverWait(self.driver, 60).until(
+                    EC.element_to_be_clickable((By.ID, "authorize-btn")))
+                logger.info("✅ Authorize button found, clicking...")
+                authorize_btn.click()
+
+                # Wait for the "Authorization Complete" page to confirm
+                # the authorize POST succeeded. The showMessage() JS function
+                # replaces document.body with an h2 containing this text.
+                WebDriverWait(self.driver, 30).until(
+                    lambda d: 'Authorization Complete' in d.page_source)
+                logger.info("✅ Authorization completed successfully")
+
+            elif '/token?local_port=' in url:
+                # Legacy localhost callback flow: the token page redirects to
+                # Okta, then JavaScript posts the token to localhost.
+                logger.info("Detected token URL, filling Okta credentials...")
+                if not self.fill_okta_credentials(self.driver):
+                    logger.error("❌ Failed to fill Okta credentials")
+                    return
+                logger.info("✅ Credentials filled, waiting for OAuth callback "
+                            "to complete...")
+            else:
+                logger.info(f"URL opened in Selenium browser (unknown URL)")
+
+        except TimeoutException as e:
+            logger.error(f"❌ Timeout during Selenium authorize flow: {str(e)}")
+        except Exception as e:
+            logger.error(f"❌ Error during Selenium authorize flow: {str(e)}")
+
+    def perform_sky_api_login(self) -> bool:
+        """
+        Perform login by calling SDK's api_login and intercepting the browser.
+
+        This method:
+        1. Patches webbrowser.open to intercept the authorize/token URL
+        2. Calls sdk.api_login() which triggers the OAuth flow
+        3. Runs the Selenium flow in a background thread (so SDK polling
+           can start concurrently for the PKCE flow)
+        4. Automates Okta login and clicks the Authorize button
+        5. The SDK's polling loop picks up the token
+
+        Returns:
+            True if login successful, False otherwise
+        """
+        intercepted_url = [None]
+        selenium_thread = [None]
+
+        # Store original webbrowser.open
+        original_webbrowser_open = webbrowser.open
+
+        def intercept_webbrowser_open(url: str) -> bool:
+            """Intercept webbrowser.open() and run Selenium flow in background.
+
+            The Selenium flow runs in a background thread so that
+            sdk.api_login() can start its polling loop concurrently. The
+            polling loop waits for the token that gets created when the
+            Authorize button is clicked.
+            """
+            intercepted_url[0] = url
+            logger.info(f"✅ Intercepted URL: {url}")
+
+            # Run Selenium flow in background thread so SDK polling can start
+            thread = threading.Thread(target=self._selenium_authorize_flow,
+                                      args=(url,),
+                                      daemon=True)
+            thread.start()
+            selenium_thread[0] = thread
             return True
 
         try:
-            # Patch webbrowser.open in the SDK module where it's imported
-            # Python modules are singletons, so patching the imported module affects all references
             sdk.webbrowser.open = intercept_webbrowser_open
 
             logger.info(
                 "Patched webbrowser.open to intercept all browser calls")
 
-            # Call SDK's api_login - this will trigger the OAuth flow
             logger.info(f"Calling sdk.api_login(endpoint='{self.endpoint}')...")
             try:
                 sdk.api_login(endpoint=self.endpoint, relogin=False)
                 logger.info("✅ SDK api_login completed successfully")
                 return True
             except Exception as e:
-                # Check if we intercepted a URL but login still failed
                 if intercepted_url[0]:
                     logger.error(
-                        f"❌ SDK api_login failed after intercepting URL: {str(e)}"
-                    )
+                        f"❌ SDK api_login failed after intercepting URL: "
+                        f"{str(e)}")
                 else:
                     logger.error(f"❌ SDK api_login failed: {str(e)}")
                 return False
@@ -243,13 +288,15 @@ class OktaAutoLogin:
             logger.error(f"❌ Error during sky api login: {str(e)}")
             return False
         finally:
-            # Restore original webbrowser.open in SDK module
             sdk.webbrowser.open = original_webbrowser_open
             logger.debug("Restored original webbrowser.open")
 
-            # Keep browser open a bit longer to ensure callback completes
+            # Wait for Selenium thread to finish
+            if selenium_thread[0]:
+                selenium_thread[0].join(timeout=10)
+
             if self.driver:
-                time.sleep(2)  # Give callback time to complete
+                time.sleep(2)
                 self.driver.quit()
                 logger.info("✅ Chrome driver closed")
 

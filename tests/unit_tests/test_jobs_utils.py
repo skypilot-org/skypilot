@@ -10,6 +10,11 @@ from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
 
+# String path for mock.patch — can't use the constant directly because
+# mock.patch needs the dotted path to the attribute being patched.
+_SIGNAL_FILE_CONST = (
+    'sky.jobs.constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE')
+
 
 @mock.patch('sky.core.down')
 @mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
@@ -134,41 +139,36 @@ async def test_get_job_status_returns_error_reason_on_failure(
     assert mock_logger.info.call_count == 1
 
 
+@mock.patch('sky.jobs.utils._validate_consolidation_mode_config')
 @mock.patch('sky.jobs.utils.logger')
 @mock.patch('sky.jobs.utils.skypilot_config')
-def test_consolidation_mode_warning_without_restart(mock_config, mock_logger):
+def test_consolidation_mode_warning_without_restart(mock_config, mock_logger,
+                                                    mock_validate):
     """Test that a warning is printed when consolidation mode is enabled
-    but the API server has not been restarted."""
+    in config but the signal file doesn't exist (server not restarted)."""
     # Clear the LRU cache to ensure fresh test
     utils.is_consolidation_mode.cache_clear()
 
     # Mock config to return True for consolidation mode
     mock_config.get_nested.return_value = True
 
-    # Create a temporary directory to use as the signal file location
     with tempfile.TemporaryDirectory() as tmpdir:
         signal_file = pathlib.Path(tmpdir) / 'consolidation_signal'
+        # Signal file does not exist — server hasn't been restarted
 
-        # Ensure signal file does not exist
-        if signal_file.exists():
-            signal_file.unlink()
-
-        # Mock the signal file path
-        with mock.patch(
-                'sky.jobs.utils._JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE',
-                str(signal_file)):
-            # Call is_consolidation_mode
+        with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)), \
+             mock.patch.dict('os.environ',
+                             {'IS_SKYPILOT_SERVER': '1'}):
             result = utils.is_consolidation_mode()
 
-            # Should return False because signal file doesn't exist
+            # Signal file is source of truth — returns False
             assert result is False
 
-            # Verify warning was logged
+            # Verify warning was logged about config mismatch
             assert mock_logger.warning.call_count == 1
-            warning_message = mock_logger.warning.call_args[0][0]
-            assert 'Consolidation mode for managed jobs is enabled' in warning_message
-            assert 'API server has not been restarted yet' in warning_message
-            assert 'Please restart the API server to enable it' in warning_message
+            warning_msg = mock_logger.warning.call_args[0][0]
+            assert 'enabled' in warning_msg
+            assert 'not been restarted' in warning_msg
 
 
 def test_job_recovery_skips_autostopping():
@@ -430,3 +430,358 @@ def test_graceful_job_cancel_multi_node(mock_flush_script, mock_run_parallel):
 
     _, kwargs = mock_run_parallel.call_args
     assert kwargs['num_threads'] == 3
+
+
+class TestPopulateJobRecordFromHandle:
+    """Tests for _populate_job_record_from_handle."""
+
+    def test_populate_job_record_sets_network_fields(self):
+        """Test that network fields are set in the job record."""
+        # Create a minimal mock handle with required attributes
+        mock_handle = mock.MagicMock()
+        mock_handle.stable_internal_external_ips = [('10.0.0.1', '35.1.2.3')]
+        mock_handle.cluster_name_on_cloud = 'test-cluster'
+        mock_handle.launched_nodes = 1
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.cloud = mock.MagicMock()
+        mock_handle.launched_resources.cloud.__str__ = lambda self: 'AWS'
+        mock_handle.launched_resources.region = 'us-east-1'
+        mock_handle.launched_resources.zone = 'us-east-1a'
+        mock_handle.launched_resources.accelerators = None
+        mock_handle.launched_resources.labels = {}
+        mock_handle.cached_cluster_info = None  # Non-K8s cluster
+
+        job = {}
+
+        # Mock the resources_utils function
+        with mock.patch(
+                'sky.jobs.utils.resources_utils.get_readable_resources_repr',
+                return_value=('1x[CPU:1]', '1x[CPU:1+]')):
+            utils._populate_job_record_from_handle(job=job,
+                                                   cluster_name='test-cluster',
+                                                   handle=mock_handle)
+
+        # Check network fields are set
+        assert 'internal_external_ips' in job
+        assert job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')]
+        assert 'internal_services' in job
+        assert job['internal_services'] is None  # Non-K8s cluster
+
+        # Check other fields are also set
+        assert job['cluster_resources'] == '1x[CPU:1]'
+        assert job['cloud'] == 'AWS'
+        assert job['region'] == 'us-east-1'
+
+    def test_populate_job_record_sets_internal_services(self):
+        """Test that K8s internal_svc entries are extracted."""
+        # Create a mock handle for a K8s cluster
+        mock_handle = mock.MagicMock()
+        mock_handle.stable_internal_external_ips = [('10.0.0.1', '10.0.0.1')]
+        mock_handle.cluster_name_on_cloud = 'test-cluster'
+        mock_handle.launched_nodes = 1
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.cloud = mock.MagicMock()
+        mock_handle.launched_resources.cloud.__str__ = lambda self: 'Kubernetes'
+        mock_handle.launched_resources.region = None
+        mock_handle.launched_resources.zone = None
+        mock_handle.launched_resources.accelerators = None
+        mock_handle.launched_resources.labels = {}
+
+        # Create mock cluster info with K8s internal_svc
+        mock_instance_info = mock.MagicMock()
+        mock_instance_info.internal_svc = 'pod-0.svc.cluster.local'
+        mock_handle.cached_cluster_info = mock.MagicMock()
+        mock_handle.cached_cluster_info.provider_name = 'kubernetes'
+        mock_handle.cached_cluster_info.instances = {
+            'pod-0': [mock_instance_info]
+        }
+
+        job = {}
+
+        # Mock the resources_utils function
+        with mock.patch(
+                'sky.jobs.utils.resources_utils.get_readable_resources_repr',
+                return_value=('1x[CPU:1]', '1x[CPU:1+]')):
+            utils._populate_job_record_from_handle(job=job,
+                                                   cluster_name='test-cluster',
+                                                   handle=mock_handle)
+
+        # Check K8s internal_svc is extracted
+        assert 'internal_services' in job
+        assert job['internal_services'] == {'pod-0': 'pod-0.svc.cluster.local'}
+
+
+class TestClusterHandleFields:
+    """Tests for _CLUSTER_HANDLE_FIELDS configuration."""
+
+    def test_network_fields_in_cluster_handle_fields(self):
+        """Test that network fields are in _CLUSTER_HANDLE_FIELDS."""
+        assert 'internal_external_ips' in utils._CLUSTER_HANDLE_FIELDS
+        assert 'internal_services' in utils._CLUSTER_HANDLE_FIELDS
+
+    def test_cluster_handle_not_required_excludes_network_fields(self):
+        """Test that _cluster_handle_not_required returns False when network fields are present."""
+        fields_with_ips = ['job_id', 'status', 'internal_external_ips']
+        assert not utils._cluster_handle_not_required(fields_with_ips)
+
+        fields_with_k8s = ['job_id', 'status', 'internal_services']
+        assert not utils._cluster_handle_not_required(fields_with_k8s)
+
+    def test_cluster_handle_not_required_without_handle_fields(self):
+        """Test that _cluster_handle_not_required returns True without handle fields."""
+        fields_without_handle = ['job_id', 'status', 'job_name']
+        assert utils._cluster_handle_not_required(fields_without_handle)
+
+
+# ======== Consolidation mode tests ========
+
+
+class TestIsConsolidationMode:
+    """Tests for is_consolidation_mode() with None sentinel."""
+
+    def setup_method(self):
+        utils.is_consolidation_mode.cache_clear()
+
+    def test_no_signal_returns_false(self):
+        """No signal file => False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                assert utils.is_consolidation_mode() is False
+
+    def test_signal_exists_returns_true(self):
+        """Signal file exists => True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            signal_file.touch()
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                assert utils.is_consolidation_mode() is True
+
+
+class TestSetupConsolidationModeOnStartup:
+    """Tests for setup_consolidation_mode_on_startup()."""
+
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_explicit_true_touches_signal(self, mock_config):
+        """Config explicitly True => signal file created."""
+        mock_config.get_nested.return_value = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=True)
+                assert signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_explicit_false_removes_signal(self, mock_config):
+        """Config explicitly False => signal file removed."""
+        mock_config.get_nested.return_value = False
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            signal_file.touch()
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=False)
+                assert not signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.global_user_state')
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_fresh_deploy_auto_enables(self, mock_config, mock_gus):
+        """Deploy mode, no controllers in DB, config None => signal created."""
+        mock_config.get_nested.return_value = None
+        mock_gus.get_cluster_names_start_with.return_value = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=True)
+                assert signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.global_user_state')
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_existing_controllers_no_auto_enable(self, mock_config, mock_gus):
+        """Deploy mode, controllers in DB, config None => signal NOT created."""
+        mock_config.get_nested.return_value = None
+        mock_gus.get_cluster_names_start_with.return_value = [
+            'sky-jobs-controller-abc12345'
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=True)
+                assert not signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_local_server_no_auto_enable(self, mock_config):
+        """Local server (deploy=False), config None => signal NOT created."""
+        mock_config.get_nested.return_value = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=False)
+                assert not signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.global_user_state')
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_cleans_signal_when_controllers_exist(self, mock_config, mock_gus):
+        """Previous signal + controllers exist => signal cleaned up."""
+        mock_config.get_nested.return_value = None
+        mock_gus.get_cluster_names_start_with.return_value = [
+            'sky-jobs-controller-abc12345'
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            signal_file.touch()  # Pre-existing signal
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=True)
+                assert not signal_file.exists()
+
+    @mock.patch('sky.jobs.utils.skypilot_config')
+    def test_local_server_cleans_stale_signal(self, mock_config):
+        """Local server with stale signal from previous deploy => cleaned."""
+        mock_config.get_nested.return_value = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            signal_file.touch()  # Stale signal from previous deploy
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)):
+                utils.setup_consolidation_mode_on_startup(deploy=False)
+                assert not signal_file.exists()
+
+
+class TestCollectDebugDumpManifestParallel:
+    """Test that collect_debug_dump_manifest works correctly with many jobs."""
+
+    NUM_JOBS = 200
+
+    def _mock_get_managed_job_tasks(self, job_id):
+        return [{'user_yaml': f'name: job-{job_id}', 'status': 'RUNNING'}]
+
+    def _mock_get_job_events(self, job_id, limit=None):  # pylint: disable=unused-argument
+        return [{
+            'spot_job_id': job_id,
+            'task_id': 0,
+            'new_status': 'RUNNING',
+            'code': None,
+            'reason': None,
+            'timestamp': '2026-01-01',
+        }]
+
+    def _mock_get_all_task_ids_names_statuses_logs(self, job_id):
+        return [(0, f'task-{job_id}', 'RUNNING', f'/tmp/log-{job_id}', None)]
+
+    def _mock_get_pool_submit_info(self, job_id):
+        # Every 10 jobs share a cluster to test dedup
+        cluster_idx = (job_id - 1) // 10
+        return f'cluster-{cluster_idx}', job_id
+
+    def _mock_get_cluster_from_name(self, cluster_name):
+        return {
+            'name': cluster_name,
+            'cluster_hash': f'hash-{cluster_name}',
+            'handle': None,
+        }
+
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
+    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_parallel_collection_correctness(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_get_cluster,
+        mock_serialize,
+        mock_cluster_events,
+    ):
+        """All jobs collected, cluster info deduplicated, no data lost."""
+        mock_redact.side_effect = lambda y: y
+        mock_get_tasks.side_effect = self._mock_get_managed_job_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        mock_get_task_ids.side_effect = (
+            self._mock_get_all_task_ids_names_statuses_logs)
+        mock_get_pool.side_effect = self._mock_get_pool_submit_info
+        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
+        mock_serialize.side_effect = lambda r: {'name': r['name']}
+        mock_cluster_events.return_value = []
+
+        job_ids = list(range(1, self.NUM_JOBS + 1))
+        result = utils.collect_debug_dump_manifest(job_ids)
+
+        # Every job should produce job_info + job_events = 2 inline items
+        job_inline = [
+            p for p in result['inline_data']
+            if '/clusters/' not in p['relative_path']
+        ]
+        assert len(job_inline) == self.NUM_JOBS * 2, (
+            f'Expected {self.NUM_JOBS * 2} job inline items, '
+            f'got {len(job_inline)}')
+
+        # Cluster info should be deduplicated: 200 jobs / 10 per cluster = 20
+        cluster_inline = [
+            p for p in result['inline_data']
+            if '/clusters/' in p['relative_path']
+        ]
+        expected_clusters = self.NUM_JOBS // 10
+        assert len(cluster_inline) == expected_clusters, (
+            f'Expected {expected_clusters} cluster info entries, '
+            f'got {len(cluster_inline)}')
+
+        # No errors
+        assert len(result['errors']) == 0
+
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
+    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_partial_failures_isolated(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_get_cluster,
+        mock_serialize,
+        mock_cluster_events,
+    ):
+        """A failing job doesn't break collection for other jobs."""
+        mock_redact.side_effect = lambda y: y
+
+        def flaky_get_tasks(job_id):
+            if job_id % 3 == 0:
+                raise RuntimeError(f'DB error for job {job_id}')
+            return self._mock_get_managed_job_tasks(job_id)
+
+        mock_get_tasks.side_effect = flaky_get_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        mock_get_task_ids.side_effect = (
+            self._mock_get_all_task_ids_names_statuses_logs)
+        mock_get_pool.side_effect = self._mock_get_pool_submit_info
+        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
+        mock_serialize.side_effect = lambda r: {'name': r['name']}
+        mock_cluster_events.return_value = []
+
+        job_ids = list(range(1, self.NUM_JOBS + 1))
+        result = utils.collect_debug_dump_manifest(job_ids)
+
+        # Failing jobs should produce errors, not crash
+        failing_jobs = [j for j in job_ids if j % 3 == 0]
+        assert len(result['errors']) == len(failing_jobs)
+
+        # Non-failing jobs should still have their data
+        ok_jobs = [j for j in job_ids if j % 3 != 0]
+        job_info_items = [
+            p for p in result['inline_data']
+            if p['relative_path'].endswith('/job_info.json')
+        ]
+        assert len(job_info_items) == len(ok_jobs)

@@ -292,6 +292,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -1711,6 +1712,11 @@ class RetryingVmProvisioner(object):
 
                 if dryrun:
                     cloud_user = None
+                elif isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # Region is guaranteed to be set by optimizer.
+                    assert to_provision.region is not None
+                    cloud_user = clouds.Kubernetes.get_identity_from_context_name(  # pylint: disable=line-too-long
+                        to_provision.region)
                 else:
                     cloud_user = to_provision.cloud.get_active_user_identity()
 
@@ -6016,12 +6022,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             store = list(storage_obj.stores.values())[0]
             assert store is not None, storage_obj
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
-                mount_cmd = store.mount_command(dst)
+                read_only = bool(storage_obj.mount_config and
+                                 storage_obj.mount_config.read_only)
+                mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
                 mount_cmd = store.mount_cached_command(
-                    dst, config=storage_obj.mount_cached_config)
+                    dst, config=storage_obj.resolve_mount_cached_config())
                 action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)

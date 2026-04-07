@@ -15,6 +15,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -57,6 +58,16 @@ class Slurm(clouds.Cloud):
             'the Pyxis plugin is not installed. Please ask your cluster '
             'administrator to install Pyxis '
             '(https://github.com/NVIDIA/pyxis).',
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            'Storage mounting is not supported on this Slurm cluster '
+            'because FUSE is not enabled (/dev/fuse not found). '
+            'Please ask your cluster administrator to enable FUSE.',
+    }
+    # Features that are checked dynamically per cluster (e.g., via SSH).
+    # Used for early exit in _unsupported_features_for_resources().
+    _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -95,12 +106,11 @@ class Slurm(clouds.Cloud):
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        # Docker image support requires the Pyxis SPANK plugin.
-        # When region is None, we check all clusters and mark Docker as
-        # supported if ANY cluster has Pyxis. This is intentionally
+        # When region is None, we check all clusters and mark a feature as
+        # supported if ANY cluster supports it. This is intentionally
         # permissive -- per-cluster filtering happens in
         # regions_with_offering(), which calls check_features_are_supported()
-        # with a specific region to filter out non-Pyxis clusters.
+        # with a specific region to filter out unsupported clusters.
         cluster = region if region is not None else resources.region
         if cluster is None:
             clusters = cls.existing_allowed_clusters()
@@ -108,13 +118,22 @@ class Slurm(clouds.Cloud):
             clusters = [cluster]
         for c in clusters:
             try:
+                # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
-                    break
+                # Storage mounting requires FUSE (/dev/fuse).
+                if slurm_utils.check_fuse_enabled(c):
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
+                        None)
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to check Pyxis on cluster {c}: '
+                logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
+            # Stop early if all dynamically checked features are resolved.
+            if not any(f in unsupported
+                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+                break
         return unsupported
 
     @classmethod
@@ -293,6 +312,44 @@ class Slurm(clouds.Cloud):
             partitions_to_check = [z.name for z in r.zones] if r.zones else []
             valid_zones = []
 
+            # Check if gpu_partition_map narrows the partition list for
+            # this GPU type.
+            try:
+                sit = slurm_utils.SlurmInstanceType.from_instance_type(
+                    instance_type)
+                if sit.accelerator_type is not None:
+                    mapped = slurm_utils.lookup_gpu_partition_map(
+                        cluster, sit.accelerator_type)
+                    if mapped is not None:
+                        available = set(partitions_to_check)
+                        partitions_to_check = [
+                            p for p in mapped if p in available
+                        ]
+                        if not partitions_to_check:
+                            if zone is not None:
+                                logger.warning(f'{colorama.Fore.YELLOW}'
+                                               f'gpu_partition_map maps '
+                                               f'{sit.accelerator_type!r} to '
+                                               f'partition(s) {mapped}, but '
+                                               f'the requested partition '
+                                               f'{zone!r} is not among them. '
+                                               f'Either add {zone!r} to '
+                                               f'gpu_partition_map or omit '
+                                               f'the partition from --infra.'
+                                               f'{colorama.Style.RESET_ALL}')
+                            else:
+                                logger.warning(f'{colorama.Fore.YELLOW}'
+                                               f'gpu_partition_map maps '
+                                               f'{sit.accelerator_type!r} to '
+                                               f'partition(s) {mapped}, but '
+                                               f'none exist on cluster '
+                                               f'{cluster!r}. Please '
+                                               f'double-check the partition '
+                                               f'names in gpu_partition_map.'
+                                               f'{colorama.Style.RESET_ALL}')
+            except ValueError:
+                pass
+
             # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
                 fits, reason = slurm_utils.check_instance_fits(
@@ -341,21 +398,26 @@ class Slurm(clouds.Cloud):
         return isinstance(other, Slurm)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
         """Returns the default instance type for Slurm."""
+        del max_hourly_cost  # Unused.
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
                                                  local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
+                                                 use_spot=use_spot,
                                                  clouds='slurm')
 
     @classmethod
@@ -419,10 +481,33 @@ class Slurm(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
-        # Resolve the actual GPU type as it appears in the cluster's GRES.
-        # Slurm GRES types are case-sensitive.
+
+        # Check gpu_partition_map: if the requested GPU type is mapped,
+        # use the mapped partition and generate GRES without GPU type
+        # (i.e., #SBATCH --gres=gpu:N instead of gpu:type:N).
+        if acc_type is not None:
+            mapped_partitions = slurm_utils.lookup_gpu_partition_map(
+                cluster, acc_type)
+            if mapped_partitions is not None:
+                logger.debug(
+                    f'gpu_partition_map: {acc_type!r} -> partitions '
+                    f'{mapped_partitions!r}. Using GRES without GPU type.')
+                acc_type = None  # GRES without GPU type
+
+        # Resolve the canonical GPU name to the raw GRES type on the cluster.
+        # Slurm GRES types are case-sensitive and may differ from user-facing
+        # canonical names (e.g. 'H100' -> 'NVIDIA_H100_80GB_HBM3').
         if acc_type:
-            acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
+            try:
+                acc_type = slurm_utils.resolve_gres_gpu_type(
+                    cluster, acc_type, acc_count, partition)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to determine the exact GPU GRES type from '
+                    f'the Slurm cluster {cluster!r}. Falling back to '
+                    f'{acc_type!r}. This may cause issues if it is not '
+                    f'the exact GRES name. '
+                    f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
 
@@ -443,6 +528,28 @@ class Slurm(clouds.Cloud):
                 # have seen Slurm taking minutes to schedule a job, when there
                 # are a lot of pending jobs to be processed.
                 provision_timeout = 2 * 60  # 2 minutes
+
+        # Read sbatch_options with three-level merge:
+        # global < cluster < partition.
+        sbatch_options: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'partition_configs',
+             partition, 'sbatch_options'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                sbatch_options.update(level_config)
+        # Merge task-level config overrides (from `config:` in task YAML).
+        task_sbatch = config_utils.get_cloud_config_value_from_dict(
+            dict_config=resources.cluster_config_overrides,
+            cloud='slurm',
+            region=cluster,
+            keys=('sbatch_options',))
+        if task_sbatch is not None:
+            sbatch_options.update(task_sbatch)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -470,6 +577,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster_name_env_var':
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
+            'sbatch_options': sbatch_options,
         }
 
         return deploy_vars
@@ -516,7 +624,9 @@ class Slurm(clouds.Cloud):
             disk_tier=resources.disk_tier,
             local_disk=resources.local_disk,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            use_spot=resources.use_spot,
+            max_hourly_cost=resources.max_hourly_cost)
         if default_instance_type is None:
             return resources_utils.FeasibleResources([], [], None)
 
@@ -534,10 +644,15 @@ class Slurm(clouds.Cloud):
             gpu_task_cpus = slurm_instance_type.cpus
             if resources.cpus is None:
                 gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
-            # Special handling to bump up memory multiplier for GPU instances
-            gpu_task_memory = (float(resources.memory.strip('+')) if
-                               resources.memory is not None else gpu_task_cpus *
-                               self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
+            if resources.memory is not None:
+                gpu_task_memory = float(resources.memory.strip('+'))
+            elif slurm_instance_type.memory == 0:
+                # The default instance type already determined that memory
+                # scheduling is disabled, so keep memory as 0.
+                gpu_task_memory = 0
+            else:
+                gpu_task_memory = (gpu_task_cpus *
+                                   self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
 
             chosen_instance_type = (
                 slurm_utils.SlurmInstanceType.from_resources(
@@ -552,10 +667,60 @@ class Slurm(clouds.Cloud):
             region=resources.region,
             zone=resources.zone)
         if not available_regions:
-            return resources_utils.FeasibleResources([], [], None)
+            hint = self._get_memory_hint(resources)
+            return resources_utils.FeasibleResources([], [], hint)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
+
+    @staticmethod
+    def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
+        """Return a hint when memory-related scheduling fails."""
+        for cluster in slurm_utils.get_all_slurm_cluster_names():
+            try:
+                mem_tracked = slurm_utils.is_memory_scheduling_enabled(cluster)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check memory scheduling for '
+                             f'{cluster}: {e}')
+                continue
+
+            if not mem_tracked and resources.memory is not None:
+                # Memory not tracked (CR_CPU/CR_Core/CR_Socket) but user
+                # explicitly requested it.
+                return (f'{colorama.Fore.YELLOW}'
+                        f'Cluster {cluster!r} does not track memory '
+                        f'as a consumable resource. Specifying '
+                        f'--memory may cause failures when '
+                        f'RealMemory is not set in slurm.conf. '
+                        f'Try omitting --memory.'
+                        f'{colorama.Style.RESET_ALL}')
+
+            if mem_tracked:
+                # Memory is tracked but nodes may report zero memory
+                # (RealMemory not set in slurm.conf).
+                try:
+                    nodes = slurm_utils.get_slurm_nodes_info(cluster)
+                    # RealMemory defaults to 1 MB when unset in slurm.conf,
+                    # and 0 MB when explicitly set to 0. Both convert to
+                    # near-zero GB (0.0 or ~0.001), so < 0.01 catches both.
+                    zero_nodes = sorted(
+                        set(n.node for n in nodes if n.memory_gb < 0.01))
+                    if zero_nodes:
+                        sample = zero_nodes[:5]
+                        node_str = ', '.join(sample)
+                        if len(zero_nodes) > 5:
+                            node_str += f' (and {len(zero_nodes) - 5} more)'
+                        return (f'{colorama.Fore.YELLOW}'
+                                f'{len(zero_nodes)} node(s) in cluster '
+                                f'{cluster!r} report zero memory: {node_str}. '
+                                f'Please ask your cluster administrator to set '
+                                f'RealMemory in slurm.conf.'
+                                f'{colorama.Style.RESET_ALL}')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to get node info for cluster '
+                                 f'{cluster!r}: '
+                                 f'{common_utils.format_exception(e)}')
+        return None
 
     @classmethod
     def _check_compute_credentials(
@@ -600,22 +765,56 @@ class Slurm(clouds.Cloud):
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                fs_type = client.check_homedir_shared_fs()
-                if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
+                # Check if the working directory is on a shared filesystem.
+                # If workdir is configured, check that path; otherwise
+                # fall back to checking the home directory.
+                workdir = skypilot_config.get_effective_region_config(
+                    cloud='slurm',
+                    region=cluster,
+                    keys=('workdir',),
+                    default_value=None)
+                # Resolve the check path to an absolute path so that
+                # stat (via shlex.quote) gets a literal path with no
+                # shell variables or ~.
+                remote_env = client.get_env()
+                if workdir is not None:
+                    check_path = slurm_utils.expand_path_vars(
+                        workdir, remote_env)
+                else:
+                    check_path = remote_env.get('HOME', '~')
+                fs_type = client.check_dir_shared_fs(check_path)
+                path_label = (f'workdir ({workdir})'
+                              if workdir is not None else 'Home directory (~)')
+                hint = (' Set slurm.cluster_configs.'
+                        f'{cluster}.workdir in '
+                        '~/.sky/config.yaml to a shared '
+                        'filesystem path.')
+                if fs_type is None:
                     ctx2text[cluster] = (
                         f'{colorama.Fore.GREEN}enabled.'
                         f'{colorama.Style.RESET_ALL} '
                         f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        'Warning: Home directory (~) filesystem '
+                        f'Warning: Could not determine filesystem '
+                        f'type for {path_label} ({check_path}). '
+                        'Ensure the working directory is on a shared '
+                        'filesystem (e.g., NFS) visible to all nodes.'
+                        f'{hint}'
+                        f'{colorama.Style.RESET_ALL}')
+                elif fs_type not in cls._SHARED_FS_TYPES:
+                    ctx2text[cluster] = (
+                        f'{colorama.Fore.GREEN}enabled.'
+                        f'{colorama.Style.RESET_ALL} '
+                        f'{colorama.Fore.LIGHTYELLOW_EX}'
+                        f'Warning: {path_label} filesystem '
                         f'type is {fs_type!r}, not a shared '
-                        'filesystem. SkyPilot requires ~ to be '
-                        'on a shared filesystem (e.g., NFS) '
-                        'visible to all nodes. Customizing the '
-                        'home directory will be supported in a '
-                        'future release.'
+                        'filesystem. SkyPilot requires the working '
+                        'directory to be on a shared filesystem '
+                        '(e.g., NFS) visible to all nodes.'
+                        f'{hint}'
                         f'{colorama.Style.RESET_ALL}')
                 else:
-                    ctx2text[cluster] = 'enabled'
+                    ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled'
+                                         f'{colorama.Style.RESET_ALL}')
                 success = True
             except KeyError as e:
                 key = e.args[0]

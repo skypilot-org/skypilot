@@ -62,39 +62,108 @@ Use high-performance networking
     .. tab-item:: AWS EFA
         :sync: aws-efa-tab
 
-        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia Infiniband that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
+        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia InfiniBand that enables high levels of inter-node communication at scale on AWS.
 
-        Example configuration:
+        Use ``resources.network_tier: best`` to automatically enable EFA for your clusters and jobs.
 
-        .. code-block:: yaml
-
-          config:
-            kubernetes:
-              pod_config:
-                spec:
-                  containers:
-                    - resources:
-                      limits:
-                        vpc.amazonaws.com/efa: 4
-                      requests:
-                        vpc.amazonaws.com/efa: 4
-
-        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
-
-    .. tab-item:: GCP GPUDirect-TCPX
-        :sync: gcp-gpu-direct-tcpx-tab
-
-        `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` VMs. You can enable it with the following additional setting in your SkyPilot YAML.
-
-        Example configuration:
+        On AWS EKS/HyperPod Kubernetes clusters:
 
         .. code-block:: yaml
+          :emphasize-lines: 4
 
-          config:
-            gcp:
-              enable_gpu_direct: true
+          resources:
+            infra: k8s
+            accelerators: A100:8
+            network_tier: best
 
-        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+          num_nodes: 2
+
+        On AWS VMs:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: aws
+            accelerators: A100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On AWS HyperPod Slurm clusters, EFA is available by default on EFA-enabled instances (p4d, p5, etc.). No ``network_tier`` setting is needed.
+
+        See `AWS EFA examples <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
+
+    .. tab-item:: GCP GPUDirect
+        :sync: gcp-gpu-direct-tab
+
+        `GPUDirect <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces. SkyPilot supports GPUDirect-TCPX (A3 High, A3 Edge), TCPXO (A3 Mega), and RDMA (A3 Ultra, A4) variants.
+
+        Use ``resources.network_tier: best`` to automatically enable GPUDirect for your clusters and jobs.
+
+        On GCP VMs:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: gcp
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On GKE Kubernetes clusters:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `GPUDirect examples <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+
+    .. tab-item:: CoreWeave InfiniBand
+        :sync: coreweave-infiniband-tab
+
+        CoreWeave CKS clusters support InfiniBand for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable InfiniBand on CoreWeave managed Kubernetes clusters.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H200:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `CoreWeave with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/coreweave_infiniband.html>`_ for more details.
+
+    .. tab-item:: Together AI InfiniBand
+        :sync: together-infiniband-tab
+
+        Together AI Kubernetes clusters support InfiniBand for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable InfiniBand on Together AI Kubernetes clusters.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `Together AI with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/together_infiniband.html>`_ for more details.
 
 
 Using Ray with SkyPilot

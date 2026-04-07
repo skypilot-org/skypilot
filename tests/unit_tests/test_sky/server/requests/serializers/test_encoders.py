@@ -100,3 +100,85 @@ class TestEncodeStatus:
         unpickled_handle = pickle.loads(decoded_bytes)
         assert unpickled_handle.cluster_name == "test-cluster"
         assert unpickled_handle.cluster_name_on_cloud == "test-cluster-123"
+
+
+class TestEncodeJobsQueue:
+    """Test the encode_jobs_queue and encode_jobs_queue_v2 functions."""
+
+    def test_encode_jobs_queue_with_network_fields(self):
+        """Test that encode_jobs_queue encodes jobs with network fields."""
+        from sky.jobs import state as managed_jobs
+
+        # Create a mock job with network fields
+        job = {
+            'job_id': 1,
+            'task_id': 0,
+            'job_name': 'test-job',
+            'task_name': 'test-task',
+            'status': managed_jobs.ManagedJobStatus.RUNNING,
+            'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
+            'internal_services': None,
+        }
+
+        result = encoders.encode_jobs_queue([job])
+
+        assert len(result) == 1
+        encoded_job = result[0]
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+
+        # Network fields should be preserved as-is (JSON serializable)
+        assert encoded_job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')
+                                                       ]
+        assert encoded_job['internal_services'] is None
+
+    def test_encode_jobs_queue_v2_with_network_fields(self):
+        """Test that encode_jobs_queue_v2 encodes jobs with network fields."""
+        from sky.jobs import state as managed_jobs
+
+        job = responses.ManagedJobRecord(
+            job_id=1,
+            task_id=0,
+            job_name='test-job',
+            task_name='test-task',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+            internal_external_ips=[('10.0.0.2', '35.1.2.4')],
+            internal_services={'pod-0': 'pod-0.svc.cluster.local'},
+        )
+
+        result = encoders.encode_jobs_queue_v2([job])
+
+        assert len(result) == 1
+        encoded_job = result[0]
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+
+        # Network fields should be preserved as-is (JSON serializable)
+        assert encoded_job['internal_external_ips'] == [('10.0.0.2', '35.1.2.4')
+                                                       ]
+        assert encoded_job['internal_services'] == {
+            'pod-0': 'pod-0.svc.cluster.local'
+        }
+
+    def test_encode_jobs_queue_v2_dict_format(self):
+        """Test encode_jobs_queue_v2 with dict return format."""
+        from sky.jobs import state as managed_jobs
+
+        job = responses.ManagedJobRecord(
+            job_id=1,
+            task_id=0,
+            job_name='test-job',
+            task_name='test-task',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+            internal_external_ips=[('10.0.0.1', '35.1.2.3')],
+            internal_services=None,
+        )
+
+        result = encoders.encode_jobs_queue_v2(([job], 1, {'RUNNING': 1}, 1))
+
+        assert isinstance(result, dict)
+        assert result['total'] == 1
+        assert result['status_counts'] == {'RUNNING': 1}
+        assert len(result['jobs']) == 1
+        assert result['jobs'][0]['internal_external_ips'] == [('10.0.0.1',
+                                                               '35.1.2.3')]

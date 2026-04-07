@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import concurrent.futures
 import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -36,12 +37,14 @@ from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import debug_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1477,6 +1480,32 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def enabled_clouds_batch(workspaces: List[str],
+                         expand: bool = False) -> Dict[str, List[str]]:
+    """Returns enabled clouds for multiple workspaces in a single call.
+
+    Args:
+        workspaces: List of workspace names to query.
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
+
+    Returns:
+        A dict mapping each workspace name to its list of enabled clouds/infras.
+        Workspaces the caller is not authorized to access are silently omitted.
+    """
+    accessible = set(
+        workspaces_core.workspaces_for_user(
+            common_utils.get_current_user().id).keys())
+    allowed = [ws for ws in workspaces if ws in accessible]
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {
+            ws: executor.submit(enabled_clouds, workspace=ws, expand=expand)
+            for ws in allowed
+        }
+        return {ws: future.result() for ws, future in futures.items()}
+
+
+@usage_lib.entrypoint
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
@@ -1715,3 +1744,40 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+def create_debug_dump(request_ids: Optional[List[str]] = None,
+                      cluster_names: Optional[List[str]] = None,
+                      managed_job_ids: Optional[List[int]] = None,
+                      recent_minutes: Optional[float] = None,
+                      client_info: Optional[Dict[str, Any]] = None) -> str:
+    """Create a debug dump for troubleshooting.
+
+    Args:
+        request_ids: List of request IDs or prefixes to include in the dump.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
+        client_info: Optional client-side info to include in the dump.
+
+    Returns:
+        Path to the created zip file on the server.
+
+    Raises:
+        ValueError: If no resources are specified.
+    """
+    if (not request_ids and not cluster_names and not managed_job_ids and
+            recent_minutes is None):
+        raise ValueError('At least one of request_ids, cluster_names, '
+                         'managed_job_ids, or recent_minutes must be provided.')
+
+    debug_dump_path = debug_utils.create_debug_dump(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_minutes=recent_minutes,
+        client_info=client_info)
+    logger.info('Debug dump created')
+    logger.debug(f'Debug dump path on API server: {debug_dump_path}')
+    return str(debug_dump_path)

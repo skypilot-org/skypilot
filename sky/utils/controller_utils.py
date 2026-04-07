@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import enum
 import os
+import pathlib
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
@@ -17,7 +18,6 @@ from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
@@ -27,12 +27,14 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import constants as server_constants
 from sky.server import plugin_utils
 from sky.server import plugins
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -298,12 +300,12 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
-    # add flask to the controller dependencies for dashboard
-    python_packages.add('flask')
-
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
-                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+    # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
+    # the outer && chain, preventing operator precedence issues.
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
+                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }} && '
+                    f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -352,14 +354,15 @@ def _get_cloud_dependencies_installation_commands(
                     '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
         elif isinstance(cloud, clouds.Nebius):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            # Wrap in braces to isolate the || from the outer && chain.
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
-                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
+                '{ curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
                 '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
                 'nebius profile create --profile sky '
                 '--endpoint api.nebius.cloud '
                 '--service-account-file $HOME/.nebius/credentials.json '
-                '&> /dev/null || echo "Unable to create Nebius profile."')
+                '&> /dev/null || echo "Unable to create Nebius profile."; }')
         elif (isinstance(cloud, clouds.Kubernetes) and
               not k8s_dependencies_installed):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
@@ -369,9 +372,9 @@ def _get_cloud_dependencies_installation_commands(
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
-                '! command -v netcat &> /dev/null; '
+                '! command -v nc &> /dev/null; '
                 'then apt update &> /dev/null && '
-                'apt install curl socat netcat -y &> /dev/null; '
+                'apt install curl socat netcat-openbsd -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 'ARCH=$(uname -m) && '
@@ -400,15 +403,19 @@ def _get_cloud_dependencies_installation_commands(
                 cloud_python_dependencies = []
         elif isinstance(cloud, clouds.Vast):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-            commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
-                            'pip list | grep vastai_sdk > /dev/null 2>&1 || '
-                            'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1')
+            # Wrap in braces to isolate the || from the outer && chain.
+            commands.append(
+                f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
+                '{ pip list | grep vastai_sdk > /dev/null 2>&1 || '
+                'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1; }')
 
         python_packages.update(cloud_python_dependencies)
 
-    if (cloudflare.NAME
-            in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
-        python_packages.update(dependencies.extras_require['cloudflare'])
+    storage_clouds = storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()  # pylint: disable=line-too-long
+
+    for sc in storage_clouds:
+        if sc.lower() in constants.STORAGE_ONLY_CLOUDS:
+            python_packages.update(dependencies.extras_require[sc.lower()])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
@@ -1306,6 +1313,14 @@ MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
 # hardcoded max limit.
 MAX_TOTAL_RUNNING_JOBS = 2000
 
+# In consolidation mode, cap the fraction of available memory (after
+# controller reservation) that server workers can consume. The remainder is
+# reserved for service/job controllers so that both workers and services
+# scale with system memory. Without this cap, short workers grow linearly
+# with memory and consume nearly all of it, leaving a roughly fixed number
+# of services regardless of system memory size.
+_CONSOLIDATION_WORKER_MEMORY_FRACTION = 0.7
+
 
 def compute_memory_reserved_for_controllers(
         reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
@@ -1324,8 +1339,20 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
                        controller_reserved)
     if not consolidation_mode:
         return total_memory_mb
+    # Cap the memory available for server workers so that both workers and
+    # services scale with system memory. Without this cap, short workers
+    # grow linearly with memory, consuming nearly all of it and leaving a
+    # roughly fixed amount for services regardless of system memory size.
+    # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
+    # service reservation so workers get all available memory; otherwise
+    # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
+    service_reserved = min(
+        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
+        max(0, total_memory_mb - min_avail_mb))
+    worker_reserved = controller_reserved + service_reserved
     config = server_config.compute_server_config(
-        deploy=True, quiet=True, reserved_memory_mb=controller_reserved)
+        deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *
@@ -1337,9 +1364,18 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
 
 
 def _is_consolidation_mode(pool: bool) -> bool:
+    # Note: `pool` here really means "jobs" - whether we fetch the jobs
+    # consolidation or the serve consolidation value.
+    # TODO(cooperc): rename the argument
+    if pool:
+        # For jobs, the signal file is the source of truth (managed by
+        # setup_consolidation_mode_on_startup at server start).
+        signal_file = pathlib.Path(
+            managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+        ).expanduser()
+        return signal_file.exists()
     return skypilot_config.get_nested(
-        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
-        default_value=False)
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
 
 
 @annotations.lru_cache(scope='request')
@@ -1397,6 +1433,11 @@ def get_resources_lock_path() -> str:
 
 
 def _get_number_of_services(pool: bool) -> int:
+    # TODO(cooperc): This should divide by POOL_JOBS_RESOURCES_RATIO, not
+    # multiply. The intent is to give pools R times more memory than jobs, but
+    # _get_parallelism already applies (1 + R) to the per-unit cost. Multiplying
+    # here applies the ratio twice (quadratically), so with R != 1 services
+    # would get far fewer slots than intended. Masked by R=1 today.
     return _get_parallelism(pool=pool,
                             raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB *
                             POOL_JOBS_RESOURCES_RATIO)
@@ -1426,6 +1467,38 @@ def can_provision(pool: bool) -> bool:
 
 def can_start_new_process(pool: bool) -> bool:
     return serve_state.get_num_services() < _get_number_of_services(pool)
+
+
+def get_max_services_error_message(pool: bool) -> str:
+    """Returns a detailed error message when max services is reached."""
+    current = serve_state.get_num_services()
+    maximum = _get_number_of_services(pool)
+    consolidation = _is_consolidation_mode(pool)
+    controller_type = 'jobs' if pool else 'serve'
+
+    msg = (f'{serve_constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR}: '
+           f'{current}/{maximum} services are running.')
+    msg += ' To spin up more services, please tear down some existing ones.'
+
+    docs_link = ('https://skypilot.readthedocs.io/en/latest/serving/'
+                 'sky-serve.html#sky-serve-max-services-calculation')
+    if consolidation:
+        msg += (f'\n\nThe {controller_type} controller is running in '
+                'consolidation mode, sharing memory with the API server. '
+                'The max number of concurrent services is calculated based '
+                'on the available memory after reserving resources for the '
+                'API server workers. To increase the limit, allocate more '
+                f'memory to the API server pod. For more information, see: '
+                f'{docs_link}')
+    else:
+        msg += (f'\n\nThe max number of concurrent services is calculated '
+                f'based on the controller VM memory. To increase the limit, '
+                f'use a controller with more memory by configuring '
+                f'`{controller_type}.controller.resources` in '
+                f'~/.sky/config.yaml. For more information, see: '
+                f'{docs_link}')
+
+    return msg
 
 
 def can_terminate(pool: bool) -> bool:

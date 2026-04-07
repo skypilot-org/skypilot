@@ -10,8 +10,12 @@ import {
 } from '@/hooks/useUpgradeDetection';
 import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  EVENT_NAVIGATION_READY,
+  EVENT_PLUGINS_LOADED,
+} from '@/data/connectors/constants';
 
-function DefaultNavbarLayout({ children, isUpgrading }) {
+function DefaultNavbarLayout({ children }) {
   return (
     <>
       {/* Fixed top bar with navigation */}
@@ -19,13 +23,10 @@ function DefaultNavbarLayout({ children, isUpgrading }) {
         <TopBar />
       </div>
 
-      {/* Upgrade banner */}
-      <UpgradeBanner />
-
       {/* Main content */}
       <div
         className="transition-all duration-200 ease-in-out min-h-screen"
-        style={{ paddingTop: isUpgrading ? '112px' : '56px' }}
+        style={{ paddingTop: '56px' }}
       >
         <main className="p-6">{children}</main>
       </div>
@@ -35,7 +36,7 @@ function DefaultNavbarLayout({ children, isUpgrading }) {
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
-  const { reportUpgrade, clearUpgrade, isUpgrading } = useUpgradeDetection();
+  const { reportUpgrade, clearUpgrade } = useUpgradeDetection();
   const [pluginsSettled, setPluginsSettled] = useState(false);
 
   // Install the fetch interceptor on mount
@@ -43,16 +44,24 @@ function LayoutContent({ children, highlighted }) {
     installUpgradeInterceptor(reportUpgrade, clearUpgrade);
   }, [reportUpgrade, clearUpgrade]);
 
-  // Wait briefly for navigation plugins to register before showing layout.
+  // Wait for navigation plugins to register before showing layout.
   // A navigation plugin (e.g. sidebar) dispatches 'skydashboard:navigation-ready'
-  // to cut the wait short. Otherwise we fall back after a timeout.
+  // to cut the wait short. Otherwise we wait until all plugin scripts have
+  // finished loading ('skydashboard:plugins-loaded') so the sidebar plugin has
+  // a chance to register before falling back to the default top bar.
+  // A safety timeout prevents blocking indefinitely if plugin loading hangs.
   useEffect(() => {
-    const timer = setTimeout(() => setPluginsSettled(true), 200);
-    const handler = () => setPluginsSettled(true);
-    window.addEventListener('skydashboard:navigation-ready', handler);
+    const timer = setTimeout(() => setPluginsSettled(true), 1000);
+    const handler = () => {
+      clearTimeout(timer);
+      setPluginsSettled(true);
+    };
+    window.addEventListener(EVENT_NAVIGATION_READY, handler, { once: true });
+    window.addEventListener(EVENT_PLUGINS_LOADED, handler, { once: true });
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('skydashboard:navigation-ready', handler);
+      window.removeEventListener(EVENT_NAVIGATION_READY, handler);
+      window.removeEventListener(EVENT_PLUGINS_LOADED, handler);
     };
   }, []);
 
@@ -62,14 +71,14 @@ function LayoutContent({ children, highlighted }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Upgrade banner - rendered outside PluginSlot so it shows
+          regardless of which navigation plugin is active */}
+      <UpgradeBanner />
+
       <PluginSlot
         name="layout.navigation"
-        context={{ children, isUpgrading, isMobile }}
-        fallback={
-          <DefaultNavbarLayout isUpgrading={isUpgrading}>
-            {children}
-          </DefaultNavbarLayout>
-        }
+        context={{ children, isMobile }}
+        fallback={<DefaultNavbarLayout>{children}</DefaultNavbarLayout>}
       />
 
       {/* Welcome notification for first-time visitors */}
