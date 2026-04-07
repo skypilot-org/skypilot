@@ -340,7 +340,6 @@ class Resources:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
-        self._disk_size_specified = disk_size is not None
         if disk_size is not None:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
@@ -666,10 +665,6 @@ class Resources:
     @property
     def disk_size(self) -> int:
         return self._disk_size
-
-    @property
-    def disk_size_specified(self) -> bool:
-        return self._disk_size_specified
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -1947,7 +1942,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            not self._disk_size_specified,
+            self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -2053,7 +2048,6 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
-        disk_size = self.disk_size if self._disk_size_specified else None
 
         current_override_configs = self._cluster_config_overrides
         if current_override_configs is None:
@@ -2087,7 +2081,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
-            disk_size=override.pop('disk_size', disk_size),
+            disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
@@ -2484,8 +2478,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
-        if self._disk_size_specified:
-            add_if_not_none('disk_size', self.disk_size)
+        add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
@@ -2702,12 +2695,9 @@ class Resources:
 
         if version < 31:
             self._max_hourly_cost = None
-
+        
         if version < 33:
             state.pop('_ephemeral_storage', None)
-            # This is, of course, best effort.
-            self._disk_size_specified = (state.get(
-                '_disk_size', DEFAULT_DISK_SIZE_GB) != DEFAULT_DISK_SIZE_GB)
 
         self.__dict__.update(state)
 

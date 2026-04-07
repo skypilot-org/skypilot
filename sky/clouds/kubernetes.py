@@ -5,7 +5,6 @@ import os
 import re
 import subprocess
 import tempfile
-import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -13,6 +12,7 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -33,9 +33,6 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -824,7 +821,7 @@ class Kubernetes(clouds.Cloud):
 
         # On Kubernetes, disk_size maps to ephemeral-storage requests.
         disk_size = resources.disk_size
-        if resources.disk_size_specified:
+        if disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
             deploy_vars['k8s_ephemeral_storage'] = str(disk_size)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
@@ -850,7 +847,7 @@ class Kubernetes(clouds.Cloud):
             else:
                 deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
                 deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
-            if resources.disk_size_specified:
+            if disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
                     disk_size * mul, 3)
 
