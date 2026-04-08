@@ -341,10 +341,10 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            self._disk_size = int(
+            self._disk_size: Optional[int] = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
-            self._disk_size = DEFAULT_DISK_SIZE_GB
+            self._disk_size = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -664,7 +664,13 @@ class Resources:
 
     @property
     def disk_size(self) -> int:
-        return self._disk_size
+        if self._disk_size is not None:
+            return self._disk_size
+        return DEFAULT_DISK_SIZE_GB
+
+    @property
+    def disk_size_specified(self) -> bool:
+        return self._disk_size is not None
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -2081,7 +2087,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
-            disk_size=override.pop('disk_size', self.disk_size),
+            disk_size=override.pop('disk_size', self._disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
@@ -2478,7 +2484,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
-        add_if_not_none('disk_size', self.disk_size)
+        add_if_not_none('disk_size', self._disk_size)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
