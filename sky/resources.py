@@ -2695,7 +2695,7 @@ class Resources:
 
         if version < 31:
             self._max_hourly_cost = None
-        
+
         if version < 33:
             state.pop('_ephemeral_storage', None)
 
