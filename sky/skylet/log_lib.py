@@ -229,14 +229,15 @@ def run_with_log(
                           stdin=stdin,
                           **kwargs) as proc:
         try:
-            if ctx is not None:
-                # When runs in coroutine, use kill_pg if available to avoid
-                # the overhead of refreshing the process tree in the daemon.
-                subprocess_utils.kill_process_daemon(proc.pid, use_kill_pg=True)
-            else:
-                # For backward compatibility, do not specify use_kill_pg by
-                # default.
-                subprocess_utils.kill_process_daemon(proc.pid)
+            # Prior to https://github.com/skypilot-org/skypilot/pull/8929 we
+            # would only set use_kill_pg if the ctx was not None. That logic was
+            # unnecessary, however, because by setting start_new_session to be
+            # True we can guarantee that `proc` is the leader of a new process
+            # group. So we always set it since that method uses way less CPU
+            # than relying on psutil which will scan the whole process tree.
+            # When there are a large number of daemons running the CPU usage
+            # is nontrivial.
+            subprocess_utils.kill_process_daemon(proc.pid, use_kill_pg=True)
 
             # Format streaming_prefix with subprocess PID if it contains {pid}
             formatted_streaming_prefix = streaming_prefix
