@@ -5,6 +5,7 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
+
 from sky import admin_policy
 from sky import backends
 from sky import catalog
