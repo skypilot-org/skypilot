@@ -948,7 +948,11 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
     from sky.server.blob_storage import get_blob_storage
-    return get_blob_storage().resolve_blob_to_dir(user_hash, blob_id)
+    storage = get_blob_storage()
+    # TODO(aylei): remove debug logging after HA blob storage is stable.
+    logger.info(f'resolve_blob_dir: storage={type(storage).__name__} '
+                f'blob_id={blob_id[:16]}... user={user_hash}')
+    return storage.resolve_blob_to_dir(user_hash, blob_id)
 
 
 def process_mounts_in_task_on_api_server(
