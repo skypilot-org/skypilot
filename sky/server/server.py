@@ -3150,6 +3150,12 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
     
+    # Always load plugin in main process, an edge case is that the main process
+    # will also run uvicorn server when num_worker=1 and then the plugins will
+    # be installed twice in main process (second time with the uvicorn app).
+    # This is okay since plugin install is considered idempotent.
+    plugins.load_plugins(plugins.ExtensionContext())
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -3220,12 +3226,6 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
-
-        # Load plugins in the main process so that plugin-provided backends
-        # (e.g. PgQueueFactory) are registered before executor.start()
-        # creates queues. Plugins will also be loaded in each uvicorn
-        # worker process (line 913), which is idempotent.
-        plugins.load_plugins(plugins.ExtensionContext())
 
         queue_server, workers = executor.start(config)
 
