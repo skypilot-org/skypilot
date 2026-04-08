@@ -123,6 +123,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                           created_instance_ids=[])
 
         secure_only = config.provider_config.get('secure_only', False)
+        post_launch_delay = config.provider_config.get('post_launch_delay', 1)
         for _ in range(to_start_count):
             node_type = 'head' if head_instance_id is None else 'worker'
             try:
@@ -139,6 +140,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     login=login_args,
                     create_instance_kwargs=create_instance_kwargs,
                     ssh_public_key=ssh_public_key,
+                    post_launch_delay=post_launch_delay,
                 )
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'run_instances error: {e}')
@@ -148,7 +150,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             if head_instance_id is None:
                 head_instance_id = instance_id
 
-    # Wait for instances to be ready.
+    # Wait for instances to be ready.  If any instance fails to become
+    # ready within the timeout, raise so the provisioner's except handler
+    # terminates the cluster and retries on a fresh set of offers.
+    launch_timeout = config.provider_config.get('launch_timeout', 600)
+    deadline = time.time() + launch_timeout
     while True:
         instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
         ready_instance_cnt = 0
@@ -159,6 +165,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
             break
+
+        if time.time() >= deadline:
+            raise RuntimeError(f'Timed out after {launch_timeout}s waiting for '
+                               f'{config.count} instance(s) to be ready '
+                               f'(only {ready_instance_cnt} ready).')
 
         time.sleep(POLL_INTERVAL)
 

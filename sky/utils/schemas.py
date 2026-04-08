@@ -1970,6 +1970,12 @@ def get_config_schema():
                 'create_instance_kwargs': {
                     'type': 'object',
                 },
+                'launch_timeout': {
+                    'type': 'number',
+                },
+                'post_launch_delay': {
+                    'type': 'number',
+                },
             }
         },
         'nebius': {
