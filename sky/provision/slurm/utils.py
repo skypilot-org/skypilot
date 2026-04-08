@@ -851,11 +851,10 @@ def lookup_cpu_partition(cluster: str) -> Optional[str]:
 
     Returns the partition name, or None if not configured.
     """
-    return skypilot_config.get_effective_region_config(
-        cloud='slurm',
-        keys=('cpu_partition',),
-        region=cluster,
-        default_value=None)
+    return skypilot_config.get_effective_region_config(cloud='slurm',
+                                                       keys=('cpu_partition',),
+                                                       region=cluster,
+                                                       default_value=None)
 
 
 def resolve_gres_gpu_type(
