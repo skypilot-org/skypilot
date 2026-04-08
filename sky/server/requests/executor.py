@@ -331,9 +331,17 @@ class RequestWorker:
 
 @annotations.lru_cache(scope='global', maxsize=None)
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
-    assert _queue_factory is not None, (
+    factory = _queue_factory
+    if factory is None:
+        # In deploy mode with multiple uvicorn workers, executor.start()
+        # only runs in the main process. Worker processes may have a
+        # plugin-registered factory (e.g., PgQueueFactory) that was set
+        # during plugin.install() but not yet copied to the executor
+        # module-level variable.
+        factory = queue_base.get_queue_backend_factory()
+    assert factory is not None, (
         'Queue factory not initialized. Call executor.start() first.')
-    return RequestQueue(_queue_factory.create_queue(schedule_type.value))
+    return RequestQueue(factory.create_queue(schedule_type.value))
 
 
 @contextlib.contextmanager
