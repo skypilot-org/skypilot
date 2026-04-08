@@ -340,11 +340,10 @@ class Resources:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
+        self._disk_size: Optional[int] = None
         if disk_size is not None:
-            self._disk_size: Optional[int] = int(
+            self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
-        else:
-            self._disk_size = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -1948,7 +1947,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == DEFAULT_DISK_SIZE_GB,
+            self._disk_size is None,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
