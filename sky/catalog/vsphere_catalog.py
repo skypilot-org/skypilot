@@ -4,15 +4,11 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.adaptors import common as adaptors_common
 from sky.catalog import common
+from sky.catalog import data_frame as pd
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
-
     from sky.clouds import cloud
-else:
-    pd = adaptors_common.LazyImport('pandas')
 
 _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 4

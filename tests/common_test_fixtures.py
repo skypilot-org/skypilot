@@ -11,7 +11,6 @@ import boto3
 import click.testing
 import fastapi
 from fastapi import testclient
-import pandas as pd
 import pytest
 import requests
 
@@ -20,6 +19,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+from sky.catalog import data_frame as pd
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config

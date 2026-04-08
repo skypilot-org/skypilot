@@ -2,11 +2,11 @@
 import collections
 import copy
 import json
+import math
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
-import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -454,7 +454,7 @@ class Optimizer:
             parent = topo_order[node_i - 1]
             # FIXME: Account for egress costs for multi-node clusters
             for resources, execution_cost in node_to_cost_map[node].items():
-                min_pred_cost_plus_egress = np.inf
+                min_pred_cost_plus_egress = math.inf
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(

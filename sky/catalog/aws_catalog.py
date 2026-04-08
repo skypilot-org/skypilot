@@ -12,10 +12,9 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 from sky.catalog import config
-from sky.catalog.data_fetchers import fetch_aws
+from sky.catalog import data_frame as pd
 from sky.clouds import aws
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -24,11 +23,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
-
     from sky.clouds import cloud
-else:
-    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -91,7 +86,7 @@ _quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
-def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
+def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
     filename = f'aws/az_mappings-{aws_user_hash}.csv'
     az_mapping_path = common.get_catalog_path(filename)
     az_mapping_md5_path = common.get_catalog_path(f'.meta/{filename}.md5')
@@ -99,6 +94,9 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
         az_mappings = None
         if aws_user_hash != 'default':
             # Fetch az mapping from AWS.
+            # Lazy import to avoid pulling in heavy fetch_aws deps at startup.
+            from sky.catalog.data_fetchers import (
+                fetch_aws)  # pylint: disable=import-outside-toplevel
             with rich_utils.safe_status(
                     ux_utils.spinner_message('AWS: Fetching availability '
                                              'zones mapping')):
@@ -118,7 +116,7 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
 
 
 @timeline.event
-def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
+def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
     The upper-level functions that use the availability zone information
@@ -185,7 +183,7 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     return df
 
 
-def _get_df() -> 'pd.DataFrame':
+def _get_df() -> pd.DataFrame:
     global _user_df
     with _apply_az_mapping_lock:
         if _user_df is None:

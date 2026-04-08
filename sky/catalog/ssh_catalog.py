@@ -3,22 +3,16 @@
 This catalog inherits from the Kubernetes catalog as SSH cloud is a wrapper
 around Kubernetes that uses SSH-specific contexts.
 """
-import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.catalog import CloudFilter
 from sky.catalog import common
+from sky.catalog import data_frame as pd
 from sky.catalog import kubernetes_catalog
 from sky.clouds import ssh
 
 logger = sky_logging.init_logger(__name__)
-
-if typing.TYPE_CHECKING:
-    import pandas as pd
-else:
-    from sky.adaptors import common as adaptors_common
-    pd = adaptors_common.LazyImport('pandas')
 
 _PULL_FREQUENCY_HOURS = 7
 

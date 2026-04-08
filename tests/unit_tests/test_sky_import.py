@@ -19,7 +19,7 @@ from sky.adaptors import common as adaptors_common
 FORBIDDEN_EAGER_IMPORTS = frozenset({
     # Data/ML libraries
     'pandas',
-    # TODO: Add 'numpy' after fixing sky/optimizer.py to use lazy import
+    'numpy',
     # Cloud provider SDKs (should only load when that cloud is used)
     'kubernetes',
     'boto3',

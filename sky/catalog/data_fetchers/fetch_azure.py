@@ -4,6 +4,7 @@ This script takes about 1 minute to finish.
 """
 import argparse
 import json
+import math
 from multiprocessing import pool as mp_pool
 import os
 import subprocess
@@ -11,7 +12,6 @@ import typing
 from typing import List, Optional, Set
 import urllib
 
-import numpy as np
 import requests
 
 from sky.adaptors import common as adaptors_common
@@ -240,9 +240,9 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     def get_capabilities(row):
         gpu_name = None
-        gpu_count = np.nan
-        vcpus = np.nan
-        memory = np.nan
+        gpu_count = float('nan')
+        vcpus = float('nan')
+        memory = float('nan')
         gen_version = None
         caps = row['capabilities']
         for item in caps:

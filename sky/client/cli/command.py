@@ -62,7 +62,6 @@ from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
-from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
@@ -106,7 +105,8 @@ if typing.TYPE_CHECKING:
 
     import prettytable
 
-pd = adaptors_common.LazyImport('pandas')
+from sky.catalog import data_frame as pd
+
 logger = sky_logging.init_logger(__name__)
 
 _CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])

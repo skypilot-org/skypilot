@@ -20,16 +20,11 @@ import typing
 from typing import List, Optional, Tuple
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
+from sky.catalog import data_frame as pd
 from sky.clouds.utils import oci_utils
 from sky.provision import constants
 from sky.utils import resources_utils
-
-if typing.TYPE_CHECKING:
-    import pandas as pd
-else:
-    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 

@@ -12,6 +12,7 @@ import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.catalog import data_frame as pd
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
 from sky.utils import annotations
@@ -22,10 +23,8 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
     import requests
 else:
-    pd = adaptors_common.LazyImport('pandas')
     requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
@@ -136,11 +135,11 @@ class LazyDataFrame:
 
     def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
-        self._df: Optional['pd.DataFrame'] = None
+        self._df: Optional[pd.DataFrame] = None
         self._update_if_stale_func = update_if_stale_func
 
     @annotations.lru_cache(scope='request')
-    def _load_df(self) -> 'pd.DataFrame':
+    def _load_df(self) -> pd.DataFrame:
         if self._update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
@@ -267,11 +266,11 @@ def read_catalog(filename: str,
 
 
 def _get_instance_type(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     instance_type: str,
     region: Optional[str],
     zone: Optional[str] = None,
-) -> 'pd.DataFrame':
+) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
         idx &= df['Region'].str.lower() == region.lower()
@@ -281,13 +280,13 @@ def _get_instance_type(
     return df[idx]
 
 
-def instance_type_exists_impl(df: 'pd.DataFrame', instance_type: str) -> bool:
+def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     """Returns True if the instance type is valid."""
     return instance_type in df['InstanceType'].unique()
 
 
 def validate_region_zone_impl(
-        cloud_name: str, df: 'pd.DataFrame', region: Optional[str],
+        cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog.
 
@@ -358,7 +357,7 @@ def validate_region_zone_impl(
 
 
 def get_hourly_cost_impl(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     instance_type: str,
     use_spot: bool,
     region: Optional[str],
@@ -407,7 +406,7 @@ def _get_value(value):
 
 
 def get_vcpus_mem_from_instance_type_impl(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     instance_type: str,
 ) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
@@ -428,8 +427,7 @@ def get_vcpus_mem_from_instance_type_impl(
     return _get_value(vcpus), _get_value(mem)
 
 
-def _filter_with_cpus(df: 'pd.DataFrame',
-                      cpus: Optional[str]) -> 'pd.DataFrame':
+def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
     if cpus is None:
         return df
 
@@ -452,8 +450,8 @@ def _filter_with_cpus(df: 'pd.DataFrame',
         return df[df['vCPUs'] == num_cpus]
 
 
-def _filter_with_mem(df: 'pd.DataFrame',
-                     memory_gb_or_ratio: Optional[str]) -> 'pd.DataFrame':
+def _filter_with_mem(df: pd.DataFrame,
+                     memory_gb_or_ratio: Optional[str]) -> pd.DataFrame:
     if memory_gb_or_ratio is None:
         return df
 
@@ -478,8 +476,8 @@ def _filter_with_mem(df: 'pd.DataFrame',
         return df[df['MemoryGiB'] == memory]
 
 
-def filter_with_local_disk(df: 'pd.DataFrame',
-                           local_disk: Optional[str]) -> 'pd.DataFrame':
+def filter_with_local_disk(df: pd.DataFrame,
+                           local_disk: Optional[str]) -> pd.DataFrame:
     if local_disk is None:
         return df
 
@@ -506,8 +504,8 @@ def filter_with_local_disk(df: 'pd.DataFrame',
     return df
 
 
-def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
-                        zone: Optional[str]) -> 'pd.DataFrame':
+def _filter_region_zone(df: pd.DataFrame, region: Optional[str],
+                        zone: Optional[str]) -> pd.DataFrame:
     if region is not None:
         df = df[df['Region'].str.lower() == region.lower()]
     if zone is not None:
@@ -516,7 +514,7 @@ def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
 
 
 def get_instance_type_for_cpus_mem_impl(
-        df: 'pd.DataFrame',
+        df: pd.DataFrame,
         cpus: Optional[str],
         memory_gb_or_ratio: Optional[str],
         region: Optional[str] = None,
@@ -570,7 +568,7 @@ def get_instance_type_for_cpus_mem_impl(
 
 
 def get_accelerators_from_instance_type_impl(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     instance_type: str,
 ) -> Optional[Dict[str, Union[int, float]]]:
     df = _get_instance_type(df, instance_type, None)
@@ -591,7 +589,7 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_arch_from_instance_type_impl(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     instance_type: str,
 ) -> Optional[str]:
     df = _get_instance_type(df, instance_type, None)
@@ -608,7 +606,7 @@ def get_arch_from_instance_type_impl(
     return arch
 
 
-def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
+def get_local_disk_from_instance_type_impl(df: pd.DataFrame,
                                            instance_type: str) -> Optional[str]:
     df = _get_instance_type(df, instance_type, None)
     if df.empty:
@@ -639,7 +637,7 @@ def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
 
 
 def get_instance_type_for_accelerator_impl(
-    df: 'pd.DataFrame',
+    df: pd.DataFrame,
     acc_name: str,
     acc_count: Union[int, float],
     cpus: Optional[str] = None,
@@ -696,7 +694,7 @@ def get_instance_type_for_accelerator_impl(
 
 def list_accelerators_impl(
         cloud: str,
-        df: 'pd.DataFrame',
+        df: pd.DataFrame,
         gpus_only: bool,
         name_filter: Optional[str],
         region_filter: Optional[str],
@@ -790,7 +788,7 @@ def list_accelerators_impl(
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones(df: 'pd.DataFrame',
+def get_region_zones(df: pd.DataFrame,
                      use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
@@ -810,7 +808,7 @@ def get_region_zones(df: 'pd.DataFrame',
 
 
 # Images
-def get_image_id_from_tag_impl(df: 'pd.DataFrame', tag: str,
+def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
                                region: Optional[str]) -> Optional[str]:
     """Returns the image ID for the given tag and region.
 
@@ -831,7 +829,7 @@ def get_image_id_from_tag_impl(df: 'pd.DataFrame', tag: str,
     return image_id
 
 
-def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
+def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]

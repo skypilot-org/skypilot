@@ -3,12 +3,11 @@ import tempfile
 import time
 from unittest import mock
 
-import numpy as np
 import orjson
-import pandas as pd
 import pytest
 
 from sky.catalog import common as catalog_common
+from sky.catalog import data_frame as pd
 from sky.utils import annotations
 
 
@@ -47,7 +46,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         with open(abs_catalog_path) as f:
             content_on_disk = f.read()
         assert content_on_disk == DUMMY_CSV
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        assert df._df._data == pd.read_csv(abs_catalog_path)._data
 
         # Modify the file's mtime to be 2 hours ago.
         new_time = time.time() - 60 * 60 * 2
@@ -61,7 +60,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         # should not be called, i.e. the file on disk and
         # DataFrame should not be updated.
         df.head()
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        assert df._df._data == pd.read_csv(abs_catalog_path)._data
 
         # Clear the cache.
         annotations.clear_request_level_cache()
@@ -72,7 +71,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         with open(abs_catalog_path) as f:
             content_on_disk = f.read()
         assert content_on_disk == NEW_DUMMY_CSV
-        pd.testing.assert_frame_equal(df._df, pd.read_csv(abs_catalog_path))
+        assert df._df._data == pd.read_csv(abs_catalog_path)._data
     finally:
         if os.path.exists(abs_catalog_path):
             os.remove(abs_catalog_path)
@@ -184,7 +183,7 @@ def test_get_instance_type_for_cpus_mem_impl_no_az(cpus, memory, region,
 
 
 def test_get_hourly_cost_returns_python_float():
-    """Test that get_hourly_cost_impl returns Python float, not numpy.float64.
+    """Test that get_hourly_cost_impl returns Python float.
 
     This is a regression test for GitHub issue #7969 where numpy.float64
     values couldn't be serialized by orjson in the API server.
@@ -192,8 +191,8 @@ def test_get_hourly_cost_returns_python_float():
     df = pd.DataFrame([
         {
             'InstanceType': 'test-instance',
-            'Price': np.float64(1.5),
-            'SpotPrice': np.float64(0.5),
+            'Price': 1.5,
+            'SpotPrice': 0.5,
             'Region': 'us-west1',
             'AvailabilityZone': 'us-west1-a'
         },
@@ -206,7 +205,6 @@ def test_get_hourly_cost_returns_python_float():
                                                region=None,
                                                zone=None)
     assert isinstance(cost, float)
-    assert not isinstance(cost, np.floating)
     assert type(cost) == float
 
     # Test spot pricing
@@ -216,7 +214,6 @@ def test_get_hourly_cost_returns_python_float():
                                                     region=None,
                                                     zone=None)
     assert isinstance(spot_cost, float)
-    assert not isinstance(spot_cost, np.floating)
     assert type(spot_cost) == float
 
 
@@ -229,8 +226,8 @@ def test_catalog_prices_are_json_serializable():
     df = pd.DataFrame([
         {
             'InstanceType': 'test-instance',
-            'Price': np.float64(2.5),
-            'SpotPrice': np.float64(1.0),
+            'Price': 2.5,
+            'SpotPrice': 1.0,
             'Region': 'us-west1',
         },
     ])

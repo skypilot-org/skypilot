@@ -7,9 +7,8 @@ query instance types and pricing information for Vast.ai.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import pandas as pd
-
 from sky.catalog import common
+from sky.catalog import data_frame as pd
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 

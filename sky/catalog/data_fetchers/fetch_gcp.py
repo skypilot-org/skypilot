@@ -6,6 +6,7 @@ VMs, GPUs, and TPUs. The script takes about 1-2 minutes to run.
 
 import argparse
 import io
+import math
 import multiprocessing
 import os
 import textwrap
@@ -15,7 +16,6 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import google.auth
 from googleapiclient import discovery
-import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
@@ -449,7 +449,7 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
             previous_request=gpus_request, previous_response=gpus_response)
     new_gpus = []
     for gpu in gpus:
-        for sup in range(0, int(np.log2(gpu['maximumCardsPerInstance']) + 1)):
+        for sup in range(0, int(math.log2(gpu['maximumCardsPerInstance']) + 1)):
             count = int(2**sup)
             gpu_name = gpu['name']
             gpu_name = gpu_name.replace('nvidia-', '')

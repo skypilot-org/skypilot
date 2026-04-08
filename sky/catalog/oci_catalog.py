@@ -18,13 +18,12 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import oci as oci_adaptor
 from sky.catalog import common
+from sky.catalog import data_frame as pd
 from sky.clouds import OCI
 from sky.clouds.utils import oci_utils
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
-
     from sky.clouds import cloud  # pylint: disable=ungrouped-imports
 
 logger = logging.getLogger(__name__)

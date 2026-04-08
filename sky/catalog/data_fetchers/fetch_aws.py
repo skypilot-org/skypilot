@@ -5,6 +5,7 @@ import argparse
 import collections
 import datetime
 import itertools
+import math
 from multiprocessing import pool as mp_pool
 import os
 import re
@@ -15,11 +16,10 @@ import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import numpy as np
-
 from sky import exceptions
 from sky.adaptors import aws
 from sky.adaptors import common as adaptors_common
+from sky.catalog import data_frame as lite_df
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -188,7 +188,7 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
             'AvailabilityZoneName': resp['ZoneName'],
             'AvailabilityZone': resp['ZoneId'],
         })
-    return pd.DataFrame(zones)
+    return lite_df.DataFrame(zones)
 
 
 def _get_pricing_table(region: str) -> 'pd.DataFrame':
@@ -267,7 +267,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 if isinstance(info, dict):
                     accelerator = info[info_key][0]
             if accelerator is None:
-                return None, np.nan
+                return None, float('nan')
             return accelerator['Name'], accelerator['Count']
 
         def get_arch(row) -> Optional[str]:
@@ -282,7 +282,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             return None
 
         def get_vcpus(row) -> float:
-            if not np.isnan(row['vCPU']):
+            if not math.isnan(row['vCPU']):
                 return float(row['vCPU'])
             try:
                 return float(row['VCpuInfo']['DefaultVCpus'])
@@ -386,7 +386,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
         if 'GpuInfo' not in df.columns:
-            df['GpuInfo'] = np.nan
+            df['GpuInfo'] = float('nan')
         if 'NeuronInfo' in df.columns:
             # The AWS Neuron API uses 'NeuronDevices' instead of 'Gpus'
             # in its dict; for consistency with GPU handling, rename key.
@@ -575,7 +575,7 @@ def fetch_availability_zone_mappings() -> 'pd.DataFrame':
         else:
             print('\rAWS: [WARNING] Missing availability zone mappings for the '
                   f'following enabled regions:\n{table}')
-    az_mappings = pd.concat(az_mappings)
+    az_mappings = lite_df.concat(az_mappings)
     return az_mappings
 
 

@@ -4,8 +4,8 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
+from sky.catalog import data_frame as pd
 from sky.catalog.common import get_catalog_path
 from sky.provision import common
 from sky.provision.vsphere import vsphere_utils
@@ -16,11 +16,6 @@ from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
 from sky.provision.vsphere.vsphere_utils import VsphereClient
 from sky.utils import status_lib
-
-if typing.TYPE_CHECKING:
-    import pandas as pd
-else:
-    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
