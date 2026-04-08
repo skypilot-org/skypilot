@@ -15,6 +15,8 @@ import {
   EditIcon,
   TrashIcon,
   PlayIcon,
+  CopyIcon,
+  CheckIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import {
@@ -185,6 +187,7 @@ export function InfrastructureSection({
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
+  const [copiedContext, setCopiedContext] = useState(null);
 
   // Only show "no data" message after data has been loaded and confirmed empty
   // Check this FIRST so that during refresh, we keep showing the message instead of a spinner
@@ -397,6 +400,42 @@ export function InfrastructureSection({
                                     </span>
                                   )}
                                 </span>
+                              </NonCapitalizedTooltip>
+                              <NonCapitalizedTooltip
+                                content={
+                                  copiedContext === context
+                                    ? 'Copied!'
+                                    : 'Copy name'
+                                }
+                                className="text-sm text-muted-foreground"
+                              >
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      await navigator.clipboard.writeText(
+                                        displayName
+                                      );
+                                      setCopiedContext(context);
+                                      setTimeout(
+                                        () => setCopiedContext(null),
+                                        2000
+                                      );
+                                    } catch (err) {
+                                      console.error(
+                                        'Failed to copy context name:',
+                                        err
+                                      );
+                                    }
+                                  }}
+                                  className="flex items-center text-gray-400 hover:text-gray-600 transition-colors duration-200 p-0.5"
+                                >
+                                  {copiedContext === context ? (
+                                    <CheckIcon className="w-3.5 h-3.5 text-green-600" />
+                                  ) : (
+                                    <CopyIcon className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
                               </NonCapitalizedTooltip>
                               {contextErrors[context] && (
                                 <NonCapitalizedTooltip
