@@ -8,6 +8,7 @@ import orjson
 import pandas as pd
 import pytest
 
+from sky.catalog import aws_catalog
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
 
@@ -677,3 +678,39 @@ def test_slurm_get_hourly_cost_end_to_end(mock_nested):
     # Accelerator-only pricing: partition A100=5.00, cpu/memory ignored
     expected = 4 * 5.00
     assert cost == pytest.approx(expected)
+
+
+def test_get_hourly_cost_with_duplicate_catalog_entries():
+    """Test that duplicate catalog entries for the same AZ don't crash.
+
+    This is a regression test for GitHub issue #8638 where stale local
+    catalogs had duplicate p4de.24xlarge rows with conflicting SpotPrice.
+    """
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'SpotPrice': 12.29,
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'SpotPrice': np.nan,
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+    ])
+
+    saved = aws_catalog._user_df
+    try:
+        aws_catalog._user_df = None
+        with mock.patch.object(aws_catalog,
+                               '_fetch_and_apply_az_mapping',
+                               return_value=df):
+            cost = aws_catalog.get_hourly_cost('p4de.24xlarge',
+                                               use_spot=True,
+                                               region='us-east-1',
+                                               zone='us-east-1c')
+        assert cost == 12.29
+    finally:
+        aws_catalog._user_df = saved
