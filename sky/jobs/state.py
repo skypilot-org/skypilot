@@ -1865,10 +1865,19 @@ async def get_pool_submit_info_async(
 def set_api_access_token_id(job_id: int, token_id: str) -> None:
     """Store the API access token ID for a managed job."""
     engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
     with orm.Session(engine) as session:
-        session.execute(
-            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
-                                                             token_id=token_id))
+        insert_stmt = insert_func(api_access_token_table).values(
+            job_id=job_id, token_id=token_id)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[api_access_token_table.c.job_id],
+            set_={api_access_token_table.c.token_id: token_id})
+        session.execute(upsert_stmt)
         session.commit()
 
 
