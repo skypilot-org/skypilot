@@ -1658,9 +1658,8 @@ class KubernetesCommandRunner(CommandRunner):
         """
 
         # Build command.
-        helper_path = shlex.quote(
-            os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                         'kubernetes', 'rsync_helper.sh'))
+        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                                   'kubernetes', 'rsync_helper.sh')
         namespace_context = f'{self.namespace}+{self.context}'
         # Avoid rsync interpreting :, /, and + in namespace_context as the
         # default delimiter for options and arguments.
@@ -1669,18 +1668,19 @@ class KubernetesCommandRunner(CommandRunner):
         encoded_namespace_context = (namespace_context.replace(
             '@', '%40').replace(':', '%3A').replace('/',
                                                     '%2F').replace('+', '%2B'))
+        container_env = ('' if self.container is None else
+                         f'SKYPILOT_K8S_EXEC_CONTAINER='
+                         f'{shlex.quote(self.container)} ')
         self._rsync(
             source,
             target,
             node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
-            rsh_option=helper_path,
+            rsh_option=f'bash {shlex.quote(helper_path)}',
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=(f'chmod +x {helper_path} && ' + (
-                '' if self.container is None else
-                f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} ')),
+            prefix_command=container_env,
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
