@@ -1331,8 +1331,7 @@ class Task:
         """Sets the override parameters for the resources."""
         new_resources_list = []
         for res in list(self.resources):
-            new_resources = res.copy(**override_params)
-            new_resources_list.append(new_resources)
+            new_resources_list.append(res.copy(**override_params))
 
         self.set_resources(type(self.resources)(new_resources_list))
         return self

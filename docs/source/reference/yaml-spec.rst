@@ -362,13 +362,29 @@ Accelerator name and count per node (optional).
 
 Use ``sky gpus list`` to view available accelerator configurations.
 
-The following three ways are valid for specifying accelerators for a cluster:
+The following ways are valid for specifying accelerators for a cluster:
 
 - To specify a single type of accelerator:
 
   Format: ``<name>:<count>`` (or simply ``<name>``, short for a count of 1).
 
   Example: ``H100:4``
+
+- To specify by GPU memory:
+
+  Format: ``<memory>:<count>`` or ``<memory>+:<count>``
+
+  This selects any GPU with the specified memory (or at least that memory with ``+``). The ``count`` is optional and defaults to 1.
+  Optionally, prefix with a manufacturer name to filter by manufacturer.
+
+  Examples:
+
+  - ``40GB`` - Any GPU with exactly 40GB memory
+  - ``40GB+`` - Any GPU with 40GB or more memory
+  - ``80GB:8`` - 8 GPUs with exactly 80GB memory each
+  - ``40GB+:4`` - 4 GPUs with 40GB or more memory each
+  - ``NVIDIA:40GB+`` - Any NVIDIA GPU with 40GB or more memory
+  - ``NVIDIA:80GB:8`` - 8 NVIDIA GPUs with exactly 80GB memory each
 
 - To specify an ordered list of accelerators (try the accelerators in the specified order):
 
@@ -386,6 +402,14 @@ The following three ways are valid for specifying accelerators for a cluster:
 
   resources:
     accelerators: V100:8
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    # Select any GPU with at least 40GB memory
+    accelerators: 40GB+
 
 OR
 
