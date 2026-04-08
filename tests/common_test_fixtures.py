@@ -5,6 +5,7 @@ import pickle
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock
 import uuid
 
 import boto3
@@ -24,6 +25,7 @@ from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.schemas.generated import managed_jobsv1_pb2
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
@@ -283,6 +285,67 @@ def mock_job_table_one_job(monkeypatch):
         return 0, message_utils.encode_payload([job_data]), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_job_table)
+
+
+@pytest.fixture
+def mock_jobs_no_job_grpc(monkeypatch):
+    """Mock jobs gRPC to return no jobs."""
+
+    # Mock the grpc channel to avoid actually opening SSH tunnels
+    def mock_get_grpc_channel(self):
+        return Mock()
+
+    def mock_get_managed_job_table(*_, **__):
+        return managed_jobsv1_pb2.GetJobTableResponse(jobs=[],
+                                                      total=0,
+                                                      total_no_filter=0,
+                                                      status_counts={})
+
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.CloudVmRayResourceHandle.get_grpc_channel',
+        mock_get_grpc_channel)
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.SkyletClient.get_managed_job_table',
+        mock_get_managed_job_table)
+
+
+@pytest.fixture
+def mock_jobs_one_job_grpc(monkeypatch):
+    """Mock jobs gRPC to return one job."""
+
+    # Mock the grpc channel to avoid actually opening SSH tunnels
+    def mock_get_grpc_channel(self):
+        return Mock()
+
+    def mock_get_managed_job_table(*_, **__):
+        current_time = time.time()
+        job = managed_jobsv1_pb2.ManagedJobInfo(
+            job_id=1,
+            task_id=0,
+            job_name='test_job',
+            task_name='test_task',
+            job_duration=20,
+            workspace='default',
+            status=managed_jobsv1_pb2.ManagedJobStatus.
+            MANAGED_JOB_STATUS_RUNNING,
+            resources='test',
+            recovery_count=0,
+            submitted_at=current_time,
+            start_at=current_time,
+            end_at=current_time,
+        )
+        return managed_jobsv1_pb2.GetJobTableResponse(
+            jobs=[job],
+            total=1,
+            total_no_filter=1,
+            status_counts={'RUNNING': 1})
+
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.CloudVmRayResourceHandle.get_grpc_channel',
+        mock_get_grpc_channel)
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.SkyletClient.get_managed_job_table',
+        mock_get_managed_job_table)
 
 
 @pytest.fixture
