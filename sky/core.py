@@ -5,7 +5,6 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
-
 from sky import admin_policy
 from sky import backends
 from sky import catalog
@@ -1043,9 +1042,7 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                    user_hash: Optional[str],
                    all_jobs: bool) -> List[Dict[str, Any]]:
     """Get the job queue from the cluster via gRPC or SSH fallback."""
-    use_legacy = not handle.is_grpc_enabled_with_flag
-
-    if not use_legacy:
+    if handle.is_grpc_enabled_with_flag:
         try:
             request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
                                                     all_jobs=all_jobs)
@@ -1074,22 +1071,19 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                 jobs.append(job_dict)
             return jobs
         except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
+            pass
 
-    if use_legacy:
-        code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
-        returncode, jobs_payload, stderr = backend.run_on_head(
-            handle, code, require_outputs=True, separate_stderr=True)
-        subprocess_utils.handle_returncode(
-            returncode,
-            command=code,
-            error_msg=f'Failed to get job queue on cluster '
-                      f'{handle.cluster_name}.',
-            stderr=f'{jobs_payload + stderr}',
-            stream_logs=True)
-        return job_lib.load_job_queue(jobs_payload)
-    # Should not reach here — use_legacy is set in the except clause.
-    assert False, 'unreachable'
+    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
+    returncode, jobs_payload, stderr = backend.run_on_head(
+        handle, code, require_outputs=True, separate_stderr=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        command=code,
+        error_msg=f'Failed to get job queue on cluster '
+                  f'{handle.cluster_name}.',
+        stderr=f'{jobs_payload + stderr}',
+        stream_logs=True)
+    return job_lib.load_job_queue(jobs_payload)
 
 
 @usage_lib.entrypoint
