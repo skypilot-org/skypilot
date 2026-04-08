@@ -1,26 +1,11 @@
 ---
 name: skypilot
-description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
+description: "Manages AI compute infrastructure using SkyPilot — launches clusters, runs jobs, and serves models across 25+ clouds, Kubernetes, and Slurm with automatic cost optimization and failover. Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute with failover between clouds and clusters, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
 ---
 
 # SkyPilot Skill
 
-SkyPilot is a unified framework to run AI workloads on any cloud, Slurm or Kubernetes. It provides a single interface to launch clusters, run jobs, and serve models across 25+ clouds (AWS, GCP, Azure, Coreweave, Nebius, Lambda, Together AI, RunPod, and more), Kubernetes clusters, and Slurm clusters.
-
-## When to Use SkyPilot
-
-**Use SkyPilot when you need to:**
-- Manage compute resources on any cloud, Slurm, or Kubernetes cluster
-- Launch CPU/GPU/TPU (GB300, GB200, B200, H200, H100, etc.) on any cloud, Kubernetes or Slurm
-- Run training, fine-tuning, or batch inference jobs
-- Serve models with autoscaling and multi-cloud replicas (SkyServe)
-- Run long-running jobs with automatic lifecycle management and recovery (managed jobs)
-- Find the cheapest or most available GPU across clouds
-
-**Don't use SkyPilot for:**
-- Local-only workloads (use Docker/conda directly)
-
-## Capabilities: When to Use What
+## Core Abstractions
 
 SkyPilot has three core abstractions. Use the right one for each stage of your workflow:
 
