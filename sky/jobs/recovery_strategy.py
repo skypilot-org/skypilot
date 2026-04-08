@@ -609,7 +609,7 @@ class StrategyExecutor:
                                     instance_links = (instance_links_utils.
                                                       generate_instance_links(
                                                           cluster_info,
-                                                          self.cluster_name))
+                                                          handle.cluster_name_on_cloud))
                                     if instance_links:
                                         # Store instance links directly in
                                         # database
