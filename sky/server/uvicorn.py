@@ -238,10 +238,6 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
-            # When workers > 1, uvicorn does not run server app in the main
-            # process. In this case, plugins are not loaded at this point, so
-            # load plugins here without uvicorn app.
-            plugins.load_plugins(plugins.ExtensionContext())
             sock = config.bind_socket()
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()
