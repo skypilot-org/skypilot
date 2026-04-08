@@ -86,6 +86,14 @@ class BlobStorage(abc.ABC):
         """Clean up stale staging directories for a user."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def list_users(self) -> List[str]:
+        """List user IDs that have blob directories.
+
+        Used by GC to discover which users need cleanup.
+        """
+        raise NotImplementedError
+
     # --- GC coordination ---
 
     @contextlib.contextmanager
@@ -208,6 +216,18 @@ class LocalFilesystemBlobStorage(BlobStorage):
                         shutil.rmtree(entry, ignore_errors=True)
                 except OSError:
                     pass
+
+    def list_users(self) -> List[str]:
+        from sky.server import common as server_common
+
+        clients_dir = server_common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        if not clients_dir.exists():
+            return []
+        users = []
+        for entry in clients_dir.iterdir():
+            if entry.is_dir() and (entry / 'file_mounts' / 'blobs').is_dir():
+                users.append(entry.name)
+        return users
 
 
 # ---------------------------------------------------------------------------
