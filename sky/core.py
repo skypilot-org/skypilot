@@ -1074,13 +1074,15 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
             pass
 
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
-    returncode, jobs_payload, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, separate_stderr=True)
+    returncode, jobs_payload, stderr = backend.run_on_head(handle,
+                                                           code,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
     subprocess_utils.handle_returncode(
         returncode,
         command=code,
         error_msg=f'Failed to get job queue on cluster '
-                  f'{handle.cluster_name}.',
+        f'{handle.cluster_name}.',
         stderr=f'{jobs_payload + stderr}',
         stream_logs=True)
     return job_lib.load_job_queue(jobs_payload)
