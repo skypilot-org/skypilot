@@ -453,19 +453,27 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'for i in $(seq 1 360); do\n'
                 f'  LINE=$(sky jobs queue 2>/dev/null '
                 f'| grep "{pool_name}" | head -1)\n'
-                # Check progress once the job is back to RUNNING or SUCCEEDED.
-                f'  if echo "$LINE" | grep -qE "RUNNING|SUCCEEDED"; then\n'
+                # Check progress once the job is back to RUNNING,
+                # WINDING_DOWN, or SUCCEEDED.
+                f'  if echo "$LINE" | grep -qE "RUNNING|WINDING_DOWN|SUCCEEDED"; then\n'
                 f'    if [ "$VERIFIED" -eq 0 ]; then\n'
                 f'      PROGRESS_AFTER=$(echo "$LINE" '
                 f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
                 f'      COMPLETED_AFTER=${{PROGRESS_AFTER%%/*}}\n'
                 f'      echo "Progress after recovery: $PROGRESS_AFTER"\n'
+                # When the job is in WINDING_DOWN, the progress column
+                # shows "Winding down" instead of "N/M", so
+                # COMPLETED_AFTER will be empty.  In that case all
+                # batches have been dispatched, so progress is
+                # preserved by definition.
+                f'      if [ -z "$COMPLETED_AFTER" ]; then\n'
+                f'        echo "Job is winding down, all batches dispatched"\n'
+                f'        VERIFIED=1\n'
                 # After resume the completed count must be >= what we
                 # recorded before the kill.  It can be slightly larger
                 # because batches may have finished between our last
                 # progress read and the actual kill.
-                f'      if [ -n "$COMPLETED_AFTER" ] && '
-                f'[ "$COMPLETED_AFTER" -ge "$COMPLETED_BEFORE" ]; then\n'
+                f'      elif [ "$COMPLETED_AFTER" -ge "$COMPLETED_BEFORE" ]; then\n'
                 f'        echo "Resume verified: progress preserved '
                 f'($COMPLETED_BEFORE -> $COMPLETED_AFTER)"\n'
                 f'        VERIFIED=1\n'
