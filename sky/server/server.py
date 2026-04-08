@@ -77,6 +77,7 @@ from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
 from sky.server.requests import executor
+from sky.server.requests import log_provider
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
@@ -661,10 +662,6 @@ async def schedule_on_boot_check_async():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
-    # Startup: Start replica manager (heartbeat, failover).
-    from sky.server import replica_manager as replica_mgr
-    rm = replica_mgr.get_replica_manager()
-    await rm.start()
 
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
@@ -695,8 +692,6 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         # event loop (process).
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
-    # Shutdown: Stop replica manager.
-    await rm.stop()
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -2257,28 +2252,6 @@ async def stream(
         # req.log_path is derived from request_id,
         # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
-        if not log_path_to_stream.exists():
-            # In multi-replica mode, the log file lives on the replica that
-            # owns the request.  The ReplicaManager may be able to proxy the
-            # stream to the correct replica.
-            from sky.server import replica_manager as replica_mgr
-            rm = replica_mgr.get_replica_manager()
-            try:
-                return fastapi.responses.StreamingResponse(
-                    content=rm.proxy_log_stream(request_id,
-                                                replica_id=''),
-                    headers={
-                        'Cache-Control': 'no-cache, no-transform',
-                        'X-Accel-Buffering': 'no',
-                        'Transfer-Encoding': 'chunked',
-                    })
-            except NotImplementedError:
-                pass  # Single-replica mode — fall through
-            # The log file might be deleted by the request GC daemon but the
-            # request task is still in the database.
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=f'Log of request {request_id!r} has been deleted')
         if request_task.schedule_type == requests_lib.ScheduleType.LONG:
             polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
         del request_task
@@ -2326,13 +2299,25 @@ async def stream(
             user_supplied_request_id
             if user_supplied_request_id else request_id)
 
+    if request_id is not None:
+        content = log_provider.get_log_provider().log_stream(
+            request_id=request_id,
+            log_path=log_path_to_stream,
+            plain_logs=format == 'plain',
+            tail=tail,
+            follow=follow,
+            polling_interval=polling_interval)
+    else:
+        content = stream_utils.log_streamer(
+            request_id=None,
+            log_path=log_path_to_stream,
+            plain_logs=format == 'plain',
+            tail=tail,
+            follow=follow,
+            polling_interval=polling_interval)
+
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(request_id,
-                                          log_path_to_stream,
-                                          plain_logs=format == 'plain',
-                                          tail=tail,
-                                          follow=follow,
-                                          polling_interval=polling_interval),
+        content=content,
         media_type='text/plain',
         headers=headers,
     )
@@ -3174,7 +3159,7 @@ if __name__ == '__main__':
     if not common_utils.is_port_available(cmd_args.port):
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
-
+    
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()

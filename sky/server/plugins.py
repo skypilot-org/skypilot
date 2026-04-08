@@ -119,17 +119,17 @@ class ExtensionContext:
         from sky.server.requests.queues.base import set_queue_backend_factory
         set_queue_backend_factory(factory)
 
-    def register_replica_manager(
+    def register_log_provider(
         self,
-        manager: 'ReplicaManager',
+        log_provider: 'LogProvider',
     ) -> None:
-        """Register a custom replica manager.
+        """Register a custom log provider.
 
-        This allows plugins to provide multi-replica coordination for HA
-        deployments (heartbeat, failover, log proxy, remote cancellation).
+        This allows plugins to replace the default local log streaming
+        with an implementation that can proxy to remote replicas.
         """
-        from sky.server.replica_manager import set_replica_manager
-        set_replica_manager(manager)
+        from sky.server.requests.log_provider import set_log_provider
+        set_log_provider(log_provider)
 
     def register_rbac_rule(self,
                            path: str,
