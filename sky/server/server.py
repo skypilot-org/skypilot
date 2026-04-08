@@ -582,16 +582,10 @@ async def cleanup_unreferenced_file_mounts():
                 logger.debug('Another replica is running blob GC, skipping')
                 return
 
-            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
             active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
-            if not clients_dir.exists():
-                return
             grace_cutoff = time.time() - 3600  # 1 hour grace
 
-            for user_dir in clients_dir.iterdir():
-                if not user_dir.is_dir():
-                    continue
-                user_id = user_dir.name
+            for user_id in storage.list_users():
                 try:
                     for blob_id, mtime in storage.list_blob_ids(user_id):
                         if (blob_id not in active_blob_ids and
