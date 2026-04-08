@@ -246,6 +246,8 @@ def get_blob_storage() -> BlobStorage:
     """
     global _blob_storage
     if _blob_storage is None:
+        logger.info('get_blob_storage: no backend registered, '
+                    'using LocalFilesystemBlobStorage (default)')
         _blob_storage = LocalFilesystemBlobStorage()
     return _blob_storage
 
