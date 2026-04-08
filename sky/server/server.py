@@ -574,41 +574,37 @@ async def cleanup_unreferenced_file_mounts():
     # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
     # blocking the event loop.
     def _do_cleanup():
-        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-        # Get all blob_id referenced by active requests.
-        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
-        if not clients_dir.exists():
-            return
-        for user_dir in clients_dir.iterdir():
-            if not user_dir.is_dir():
-                continue
-            try:
-                blobs_dir = user_dir / 'file_mounts' / 'blobs'
-                if not blobs_dir.exists():
+        from sky.server.blob_storage import get_blob_storage
+        storage = get_blob_storage()
+
+        with storage.gc_lock() as should_run:
+            if not should_run:
+                logger.debug('Another replica is running blob GC, skipping')
+                return
+
+            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+            active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+            if not clients_dir.exists():
+                return
+            grace_cutoff = time.time() - 3600  # 1 hour grace
+
+            for user_dir in clients_dir.iterdir():
+                if not user_dir.is_dir():
                     continue
-                # Delete unreferenced extraction dirs older than grace period.
-                grace_cutoff = time.time() - 3600  # 1 hour grace
-                for entry in blobs_dir.iterdir():
-                    if not entry.is_dir():
-                        continue
-                    if entry.name in ('.locks', '.staging'):
-                        continue
-                    blob_id = entry.name
-                    if (blob_id not in active_blob_ids and
-                            entry.stat().st_mtime < grace_cutoff):
-                        logger.info(f'GC: removing unreferenced blob '
-                                    f'{blob_id} for user {user_dir.name}')
-                        shutil.rmtree(entry, ignore_errors=True)
-                # Clean up stale staging directories from interrupted uploads.
-                staging_base = blobs_dir / '.staging'
-                if staging_base.exists():
-                    for staging in staging_base.iterdir():
-                        if staging.is_dir():
-                            if staging.stat().st_mtime < grace_cutoff:
-                                shutil.rmtree(staging, ignore_errors=True)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
-                             f'{common_utils.format_exception(e)}')
+                user_id = user_dir.name
+                try:
+                    for blob_id, mtime in storage.list_blob_ids(user_id):
+                        if (blob_id not in active_blob_ids and
+                                mtime < grace_cutoff):
+                            logger.info(
+                                f'GC: removing unreferenced blob '
+                                f'{blob_id} for user {user_id}')
+                            storage.delete_blob(user_id, blob_id)
+                    storage.release_stale_uploads(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(
+                        f'Error cleaning filemounts dir: {user_id}: '
+                        f'{common_utils.format_exception(e)}')
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -1486,13 +1482,9 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-                'file_mounts' / 'blobs' / blob_id)
-    if blob_dir.is_dir():
-        # Refresh mtime to claim a longer lifetime of the blob cache
-        os.utime(blob_dir)
-        return {'exists': True}
-    return {'exists': False}
+    from sky.server.blob_storage import get_blob_storage
+    exists = await get_blob_storage().blob_exists(user_id, blob_id)
+    return {'exists': exists}
 
 
 @app.post('/upload_v2')
@@ -1508,26 +1500,24 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if not re.match(r'^[0-9a-f]{64}$', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
-    # Here we still isolate the blobs between users, as the upload_id is
-    # provided by the client and we want to be careful about cross-user
-    # blob sharing.
-    mount_dir = await _prepare_client_mount_dir(user_hash, request)
-    blobs_dir = mount_dir / 'blobs'
-    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    target_dir = blobs_dir / upload_id
+
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+
+    from sky.server.blob_storage import get_blob_storage
+    storage = get_blob_storage()
+
+    # Ensure blobs directory exists.
+    await anyio.Path(storage.blobs_dir(user_id)).mkdir(parents=True,
+                                                       exist_ok=True)
+    target_dir = storage.get_target_dir(user_id, upload_id)
 
     if target_dir.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
-    # Per-blob filelock to prevent concurrent uploads of the same blob.
-    locks_dir = blobs_dir / '.locks'
-    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
-    lock = filelock.AsyncFileLock(
-        lock_file=str(locks_dir / f'{upload_id}.lock'),
-        executor=executor.get_request_thread_executor())
-
-    async with lock:
+    async with storage.acquire_upload_lock(user_id, upload_id):
         # Re-check after acquiring the lock: another upload may have
         # completed while we were waiting.
         if target_dir.exists():
@@ -1535,7 +1525,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
                 status=responses.UploadStatus.COMPLETED.value)
 
         # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = blobs_dir / '.staging' / upload_id
+        staging_dir = storage.get_staging_dir(user_id, upload_id)
         result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                     zip_name='staging',
                                                     request=request,
@@ -1545,7 +1535,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
             return result
         # Atomic rename of the extracted staging dir to the final
         # directory (same filesystem).
-        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)

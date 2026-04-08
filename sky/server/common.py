@@ -947,14 +947,8 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
-    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
-                  'file_mounts')
-    extraction_dir = client_dir / 'blobs' / blob_id
-    if not extraction_dir.is_dir():
-        raise FileNotFoundError(
-            f'Blob not found: {extraction_dir}. The file mounts blob may '
-            'have been garbage collected before execution started.')
-    return str(extraction_dir)
+    from sky.server.blob_storage import get_blob_storage
+    return get_blob_storage().resolve_blob_to_dir(user_hash, blob_id)
 
 
 def process_mounts_in_task_on_api_server(
