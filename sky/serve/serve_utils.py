@@ -1117,17 +1117,30 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
             nonterminal_job_ids = (
                 managed_job_state.get_nonterminal_job_ids_by_pool(service_name))
             if nonterminal_job_ids:
-                nonterminal_job_ids_str = ','.join(
-                    str(job_id) for job_id in nonterminal_job_ids)
-                num_nonterminal_jobs = len(nonterminal_job_ids)
-                messages.append(
-                    f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} has '
-                    f'{num_nonterminal_jobs} nonterminal jobs: '
-                    f'{nonterminal_job_ids_str}. To terminate the {noun}, '
-                    f'please run `sky jobs cancel --pool {service_name}` to '
-                    'cancel all jobs in the pool first.'
-                    f'{colorama.Style.RESET_ALL}')
-                continue
+                if not purge:
+                    nonterminal_job_ids_str = ','.join(
+                        str(job_id) for job_id in nonterminal_job_ids)
+                    num_nonterminal_jobs = len(nonterminal_job_ids)
+                    messages.append(
+                        f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} '
+                        f'has {num_nonterminal_jobs} nonterminal jobs: '
+                        f'{nonterminal_job_ids_str}. To terminate the '
+                        f'{noun}, please run `sky jobs cancel --pool '
+                        f'{service_name}` to cancel all jobs in the pool '
+                        f'first.{colorama.Style.RESET_ALL}')
+                    continue
+                # purge=True: force-mark stuck jobs as failed so the
+                # pool can be deleted.
+                for job_id in nonterminal_job_ids:
+                    managed_job_state.set_failed(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=(
+                            'Pool force-deleted with --purge while job '
+                            'was in non-terminal state.'),
+                    )
         # If the `services` and `version_specs` table are not aligned, it might
         # result in a None service status. In this case, the controller process
         # is not functioning as well and we should also use the
