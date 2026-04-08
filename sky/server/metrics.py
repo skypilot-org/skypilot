@@ -20,6 +20,7 @@ from sky import core
 from sky import global_user_state
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
+from sky.utils import annotations
 
 logger = sky_logging.init_logger(__name__)
 
@@ -199,6 +200,11 @@ _PER_CONTEXT_TIMEOUT_SECONDS = 8
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    # The metrics server runs as a daemon thread, not as a normal request
+    # handler, so request-scoped caches (e.g. kubernetes API clients,
+    # context names) are never cleared automatically. Clear them on each
+    # scrape so that newly uploaded kubeconfigs are discovered.
+    annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0

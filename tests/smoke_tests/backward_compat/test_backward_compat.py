@@ -157,6 +157,17 @@ class TestBackwardCompatibility:
             'uv pip install uvicorn==0.35.0 && '
             f'{pip_install_cmd}')
 
+        # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
+        # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
+        # in _get_availability_zones(), causing ThreadPool crashes when
+        # me-south-1 is unreachable. Remove once the minimum compatible
+        # version includes commit 6e5d73633.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-03 (which includes commit 6e5d73633).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_me_south_1.py"}')
+
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
