@@ -3221,6 +3221,12 @@ if __name__ == '__main__':
             background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
+        # Load plugins in the main process so that plugin-provided backends
+        # (e.g. PgQueueFactory) are registered before executor.start()
+        # creates queues. Plugins will also be loaded in each uvicorn
+        # worker process (line 913), which is idempotent.
+        plugins.load_plugins(plugins.ExtensionContext())
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
