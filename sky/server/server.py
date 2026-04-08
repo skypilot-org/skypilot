@@ -693,6 +693,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Shutdown: Add any cleanup code here if needed
 
 
+@middleware_utils.websocket_aware
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add security headers to all HTTP responses.
 
