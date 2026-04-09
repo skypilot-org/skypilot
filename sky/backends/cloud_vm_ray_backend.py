@@ -3414,7 +3414,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         backend_utils.invoke_skylet_with_retries(
                             lambda: SkyletClient(handle.get_grpc_channel()
                                                 ).update_status(request))
-                    except exceptions.SkyletMethodNotImplementedError:
+                    except (exceptions.SkyletMethodNotImplementedError,
+                            RuntimeError) as e:
+                        logger.debug(f'gRPC failed, falling back to SSH: {e}')
                         use_legacy = True
 
                 if use_legacy:
@@ -3438,7 +3440,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     backend_utils.invoke_skylet_with_retries(
                         lambda: SkyletClient(handle.get_grpc_channel(
                         )).fail_all_in_progress_jobs(fail_request))
-                except exceptions.SkyletMethodNotImplementedError:
+                except (exceptions.SkyletMethodNotImplementedError,
+                        RuntimeError) as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
@@ -3934,7 +3938,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).queue_job(queue_job_request))
-            except exceptions.SkyletMethodNotImplementedError:
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4007,7 +4013,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_id = response.job_id
                 log_dir = response.log_dir
                 return job_id, log_dir
-            except exceptions.SkyletMethodNotImplementedError:
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4095,7 +4103,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
-            except exceptions.SkyletMethodNotImplementedError:
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4327,8 +4337,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for job_id, proto_status in response.job_statuses.items()
                 }
                 return statuses
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -4361,7 +4372,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()).cancel_jobs(
                         request))
                 cancelled_ids = response.cancelled_job_ids
-            except exceptions.SkyletMethodNotImplementedError:
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4416,7 +4429,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 for job_id, log_dir in job_log_dirs.items():
                     # Convert to string for backwards compatibility
                     job_to_dir[str(job_id)] = log_dir
-            except exceptions.SkyletMethodNotImplementedError:
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4538,8 +4553,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         print(resp.log_line, end='', flush=True)
                     last_exit_code = resp.exit_code
                 return last_exit_code
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
+            except (exceptions.SkyletMethodNotImplementedError,
+                    RuntimeError) as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
             except grpc.RpcError as e:
                 if e.code() == grpc.StatusCode.CANCELLED:
                     return last_exit_code
@@ -4692,7 +4708,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         lambda: SkyletClient(handle.get_grpc_channel(
                         )).get_all_managed_job_ids_by_name(request))
                     job_ids = list(response.job_ids)
-                except exceptions.SkyletMethodNotImplementedError:
+                except (exceptions.SkyletMethodNotImplementedError,
+                        RuntimeError) as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
@@ -4750,7 +4768,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_timestamps = {}
                     for jid, log_dir in job_log_dirs.items():
                         run_timestamps[int(jid)] = log_dir
-                except exceptions.SkyletMethodNotImplementedError:
+                except (exceptions.SkyletMethodNotImplementedError,
+                        RuntimeError) as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
