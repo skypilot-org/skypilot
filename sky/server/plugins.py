@@ -97,15 +97,15 @@ class ExtensionContext:
 
     def register_request_storage(
         self,
-        backend: 'RequestStorageBackend',
+        backend: 'RequestBackend',
     ) -> None:
-        """Register a custom request storage backend.
+        """Register a custom request backend.
 
         This allows plugins to replace the default SQLite-based request
-        storage with an alternative implementation (e.g., PostgreSQL).
+        backend with an alternative implementation (e.g., PostgreSQL).
         """
-        from sky.server.requests.storage import set_request_storage
-        set_request_storage(backend)
+        from sky.server.requests.storage import set_request_backend
+        set_request_backend(backend)
 
     def register_queue_backend_factory(
         self,

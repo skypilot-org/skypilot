@@ -16,8 +16,8 @@ if TYPE_CHECKING:
                                               RequestTaskFilter, StatusWithMsg)
 
 
-class RequestStorageBackend(abc.ABC):
-    """Abstract interface for request persistence."""
+class RequestBackend(abc.ABC):
+    """Abstract interface for request persistence and lifecycle."""
 
     # --- Core CRUD ---
 
@@ -99,13 +99,27 @@ class RequestStorageBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def kill_request_async(self, request_id: str) -> bool:
-        """Kill a request and set its status to cancelled.
+    def kill_requests(self,
+                      request_ids: Optional[List[str]] = None,
+                      user_id: Optional[str] = None) -> List[str]:
+        """Kill requests and set their status to CANCELLED.
 
-        For the default (SQLite) implementation, this sends SIGTERM to the
-        request process. Alternative implementations may use different
-        mechanisms (e.g., setting a flag in the database for cross-replica
-        cancellation).
+        If request_ids is None, kills all PENDING/RUNNING requests for
+        the given user_id (or all users if user_id is also None).
+
+        For the default (SQLite) implementation, this sends SIGTERM to
+        local request processes. Alternative implementations may handle
+        cross-replica cancellation (e.g., setting status in DB for the
+        owning replica's heartbeat to detect and kill).
+
+        Returns:
+            A list of request IDs that were cancelled.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def kill_request_async(self, request_id: str) -> bool:
+        """Kill a single request and set its status to cancelled.
 
         Returns:
             True if the request was killed, False otherwise.
@@ -165,28 +179,39 @@ class RequestStorageBackend(abc.ABC):
         """
 
 
-_storage_backend: Optional[RequestStorageBackend] = None
+# Backward-compat alias
+RequestStorageBackend = RequestBackend
+
+_storage_backend: Optional[RequestBackend] = None
 
 
-def get_request_storage() -> RequestStorageBackend:
-    """Get the registered request storage backend.
+def get_request_backend() -> RequestBackend:
+    """Get the registered request backend.
 
     Returns the plugin-provided backend if one has been registered,
-    otherwise lazily creates and returns the default SqliteRequestStorage.
+    otherwise lazily creates and returns the default SqliteRequestBackend.
     """
     global _storage_backend
     if _storage_backend is None:
         # Lazy import to avoid circular dependency: storage.py is imported
-        # by requests.py, and SqliteRequestStorage is defined in requests.py.
-        from sky.server.requests.requests import SqliteRequestStorage
-        _storage_backend = SqliteRequestStorage()
+        # by requests.py, and SqliteRequestBackend is defined in requests.py.
+        from sky.server.requests.requests import SqliteRequestBackend
+        _storage_backend = SqliteRequestBackend()
     return _storage_backend
 
 
-def set_request_storage(backend: RequestStorageBackend) -> None:
-    """Set the request storage backend.
+# Backward-compat alias
+get_request_storage = get_request_backend
+
+
+def set_request_backend(backend: RequestBackend) -> None:
+    """Set the request backend.
 
     Called by plugins via ExtensionContext.register_request_storage().
     """
     global _storage_backend
     _storage_backend = backend
+
+
+# Backward-compat alias
+set_request_storage = set_request_backend
