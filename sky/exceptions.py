@@ -711,6 +711,14 @@ class SkyletUnavailableError(Exception):
     pass
 
 
+# Exception types that indicate gRPC failed and the caller should fall
+# back to the legacy SSH code path.
+SKYLET_GRPC_FALLBACK_ERRORS = (
+    SkyletMethodNotImplementedError,
+    SkyletUnavailableError,
+)
+
+
 class ClientError(Exception):
     """Raised when a there is a client error occurs.
 

@@ -4170,13 +4170,6 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
 
 T = TypeVar('T')
 
-# Exception types that indicate gRPC failed and the caller should fall
-# back to the legacy SSH code path.
-SKYLET_GRPC_FALLBACK_ERRORS = (
-    exceptions.SkyletMethodNotImplementedError,
-    exceptions.SkyletUnavailableError,
-)
-
 
 def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     """Generic helper for making Skylet gRPC requests.
