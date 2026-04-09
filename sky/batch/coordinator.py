@@ -309,7 +309,7 @@ class BatchCoordinator:
         ready = []
         for info in replica_infos:
             replica_status = str(info.get('status', ''))
-            if 'READY' in replica_status:
+            if replica_status == 'READY':
                 name = info.get('name')
                 if name:
                     ready.append(name)
