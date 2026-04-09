@@ -706,6 +706,11 @@ class SkyletMethodNotImplementedError(Exception):
     pass
 
 
+class SkyletUnavailableError(Exception):
+    """Raised when the Skylet gRPC server is unreachable."""
+    pass
+
+
 class ClientError(Exception):
     """Raised when a there is a client error occurs.
 
