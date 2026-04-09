@@ -1,4 +1,4 @@
-"""SDK functions for cluster/job management."""
+"""SDK functions for cluster and job management."""
 import concurrent.futures
 import shlex
 import typing
