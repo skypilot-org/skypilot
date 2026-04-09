@@ -1887,6 +1887,9 @@ def get_config_schema():
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                'cpu_partition': {
+                    'type': 'string',
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1905,6 +1908,9 @@ def get_config_schema():
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                            'cpu_partition': {
+                                'type': 'string',
+                            },
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
