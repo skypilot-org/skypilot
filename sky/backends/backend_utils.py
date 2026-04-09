@@ -4220,6 +4220,11 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        details = e.details() or ''
+        if 'Connection refused' in details:
+            # Skylet is not running — retrying won't help.
+            raise RuntimeError(
+                f'Skylet is not running (connection refused): {details}') from e
         time.sleep(current_backoff)
     elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
     ) == grpc.StatusCode.UNKNOWN:
