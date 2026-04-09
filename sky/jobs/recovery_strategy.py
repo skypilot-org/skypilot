@@ -606,10 +606,13 @@ class StrategyExecutor:
                                         handle, 'cached_cluster_info') and
                                         handle.cached_cluster_info is not None):
                                     cluster_info = handle.cached_cluster_info
-                                    instance_links = (instance_links_utils.
-                                                      generate_instance_links(
-                                                          cluster_info,
-                                                          self.cluster_name))
+                                    instance_links = (
+                                        instance_links_utils.
+                                        generate_instance_links(
+                                            cluster_info, self.cluster_name,
+                                            getattr(handle,
+                                                    'cluster_name_on_cloud',
+                                                    None)))
                                     if instance_links:
                                         # Store instance links directly in
                                         # database
