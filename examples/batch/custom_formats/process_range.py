@@ -69,6 +69,9 @@ class TextOutput(io_formats.OutputWriter):
     def reduce_results(self, job_id: str) -> None:
         pass
 
+    def cleanup(self, job_id: str) -> None:
+        pass
+
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='yaml')
 @dataclass
@@ -100,6 +103,10 @@ class YamlOutput(io_formats.OutputWriter):
             all_items.extend(utils.load_jsonl_from_cloud(batch_path))
         yaml_bytes = yaml.dump(all_items, default_flow_style=False).encode()
         utils.upload_bytes_to_cloud(yaml_bytes, self.path)
+
+    def cleanup(self, job_id: str) -> None:
+        utils.delete_batch_files(self.path, job_id)
+        utils.delete_input_batch_files(self.path, job_id)
 
 
 # ---- Mapper function ---------------------------------------------------------

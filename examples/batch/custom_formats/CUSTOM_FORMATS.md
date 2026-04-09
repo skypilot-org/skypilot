@@ -32,12 +32,14 @@ For each batch, on a worker:
   │    → processes it and calls sky.batch.save_results(results)
   │
   └─ OutputWriter.upload_batch(results, start_idx, end_idx, job_id)
-       → uploads the results to cloud storage
+  │    → uploads the results to cloud storage
   │
   ▼
-After ALL batches finish:
+After ALL batches finish (on the jobs controller):
   OutputWriter.reduce_results(job_id)
     → optional: merge per-batch files into a single output
+  OutputWriter.cleanup(job_id)
+    → optional: delete temporary batch files from cloud storage
 ```
 
 ---
@@ -164,7 +166,7 @@ class JsonInput(io_formats.InputReader):
 
 An OutputWriter tells Sky Batch how to save your results. Subclass
 `io_formats.OutputWriter` with `@dataclass`, register it, and implement
-two methods:
+three methods:
 
 ```python
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='my_writer')
@@ -174,6 +176,7 @@ class MyWriter(io_formats.OutputWriter):
 
     def upload_batch(self, results, start_idx, end_idx, job_id) -> str: ...
     def reduce_results(self, job_id) -> None: ...
+    def cleanup(self, job_id) -> None: ...
 ```
 
 ### `upload_batch(results, start_idx, end_idx, job_id) -> str`
@@ -204,20 +207,32 @@ Called **once** after all batches are complete. Use this to merge
 per-batch files into a single final output, or do nothing if your
 `upload_batch` already writes to the final location.
 
-**Important:** `reduce_results` runs on the **jobs controller**, not on
-a worker with GPUs. The controller is typically a small CPU VM with
-limited memory. Avoid loading all results into memory at once if your
-dataset is large. Instead, consider streaming through batch files one at
-a time (read one, append to output, discard, read next). If your output
-format requires all data in memory (e.g. sorting), be aware of the
-memory limit and keep datasets at a reasonable size.
+**Important:** Both `reduce_results` and `cleanup` run on the **jobs
+controller**, not on a worker with GPUs. The controller is typically a
+small CPU VM with limited memory. Avoid loading all results into memory
+at once if your dataset is large. Instead, consider streaming through
+batch files one at a time (read one, append to output, discard, read
+next). If your output format requires all data in memory (e.g. sorting),
+be aware of the memory limit and keep datasets at a reasonable size.
+
+### `cleanup(self, job_id) -> None`
+
+Called by the coordinator after `reduce_results` finishes. Delete any
+temporary files your writer created during `upload_batch`.
+
+If your writer uses the batch + merge pattern with
+`utils.get_batch_path()`, call `utils.delete_batch_files()` and
+`utils.delete_input_batch_files()` here. If your writer writes directly
+to the final location (per-item pattern), just `pass`.
+
+### Common patterns for `reduce_results` and `cleanup`
 
 Two common patterns:
 
-| Pattern | `upload_batch` | `reduce_results` |
-|---------|---------------|-----------------|
-| **Per-item files** | Write one file per result to the final location. | No-op (`pass`). |
-| **Batch + merge** | Write batch results to a temp file. | Merge all temp files into the final output. |
+| Pattern | `upload_batch` | `reduce_results` | `cleanup` |
+|---------|---------------|-----------------|-----------|
+| **Per-item files** | Write one file per result to the final location. | No-op (`pass`). | No-op (`pass`). |
+| **Batch + merge** | Write batch results to a temp file. | Merge all temp files into the final output. | Delete temp files. |
 
 ### Utility functions for cloud storage
 
@@ -239,8 +254,9 @@ and `gs://` paths.
 **Managing temporary batch files (for the batch + merge pattern):**
 
 When using the batch + merge pattern, you need a place to store
-per-batch results before merging. These helpers manage temp file paths
-under a `.sky_batch_tmp/{job_id}/` directory next to your output path,
+per-batch results before merging. The common practice is to store them
+next to your output path under a `.sky_batch_tmp/{job_id}/` directory.
+We provide utility functions that manage these temp file paths for you,
 so multiple concurrent jobs don't interfere with each other:
 
 - `utils.get_batch_path(output_path, start_idx, end_idx, job_id)` --
@@ -255,14 +271,24 @@ so multiple concurrent jobs don't interfere with each other:
   Download and parse a JSONL file from cloud storage, returning a
   `List[Dict]`.
 - `utils.concatenate_batches_to_output(output_path, job_id)` --
-  A one-liner that lists all batch files, concatenates them in order
-  into the final output JSONL file, and cleans up the temp files.
-  This is what the built-in `JsonOutput` uses in its `reduce_results`.
+  A one-liner that lists all batch files and concatenates them in order
+  into the final output JSONL file. This is what the built-in
+  `JsonOutput` uses in its `reduce_results`. Temp file cleanup is
+  handled separately by `cleanup()`.
+
+**Cleaning up temporary files (for `cleanup`):**
+
+- `utils.delete_batch_files(output_path, job_id)` --
+  Delete all result batch files under `.sky_batch_tmp/{job_id}/` for
+  the given output path.
+- `utils.delete_input_batch_files(output_path, job_id)` --
+  Delete all input batch files under `.sky_batch_tmp/{job_id}/` for
+  the given output path.
 
 ### Example: per-item text files (no reduce needed)
 
 Each result item becomes its own `.txt` file. Since files go directly
-to their final location, `reduce_results` is a no-op.
+to their final location, `reduce_results` and `cleanup` are no-ops.
 
 ```python
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='text')
@@ -281,6 +307,9 @@ class TextOutput(io_formats.OutputWriter):
 
     def reduce_results(self, job_id):
         pass  # Files are already in the final location.
+
+    def cleanup(self, job_id):
+        pass  # No temp files to clean up.
 ```
 
 ### Example: single merged YAML file (batch + reduce)
@@ -288,7 +317,7 @@ class TextOutput(io_formats.OutputWriter):
 Each batch writes its results to a temporary file using
 `utils.get_batch_path()`. After all batches finish, `reduce_results`
 reads all temp files with `utils.list_batch_files()` and merges them
-into one YAML file.
+into one YAML file, and `cleanup` then deletes the temp files.
 
 ```python
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='yaml')
@@ -310,7 +339,52 @@ class YamlOutput(io_formats.OutputWriter):
             all_items.extend(utils.load_jsonl_from_cloud(batch_path))
         yaml_bytes = yaml.dump(all_items, default_flow_style=False).encode()
         utils.upload_bytes_to_cloud(yaml_bytes, self.path)
+
+    def cleanup(self, job_id):
+        utils.delete_batch_files(self.path, job_id)
+        utils.delete_input_batch_files(self.path, job_id)
 ```
+
+---
+
+## Recovering partial results on failure
+
+Normally, `reduce_results` and `cleanup` run on the **jobs controller**
+after all batches complete. If the job fails partway through (e.g. a
+worker crashes or gets preempted), those steps never run -- but the
+per-batch results that workers already uploaded are still sitting in
+cloud storage.
+
+Because all intermediate results live in a shared cloud bucket (not on
+any single machine), you can still retrieve data from a partially
+finished run. Just run `reduce_results` and `cleanup` yourself from
+anywhere -- your local laptop, a notebook, etc. This does the same
+work the controller would have done, just manually. The output will
+contain results from all batches that completed before the failure.
+You can also run only `reduce_results` without `cleanup` to keep the
+temp files around for inspection or debugging.
+
+```python
+import sky.batch
+
+# Use the same output writer you passed to ds.map(), then call
+# reduce_results + cleanup with the managed job ID (printed in the
+# failure message).
+writer = sky.batch.JsonOutput(path='s3://bucket/output.jsonl')
+writer.reduce_results(job_id='42')
+# Optionally, clean up the temp files.
+writer.cleanup(job_id='42')
+```
+
+The managed job ID and the exact code snippet are printed when a batch
+job fails, so you can copy-paste directly.
+
+For custom output writers that use the batch + merge pattern,
+`reduce_results` will merge all per-batch temporary files that were
+uploaded before the failure, and `cleanup` will remove them. Writers
+using the per-item pattern (where `reduce_results` is a no-op) already
+have their completed items in the final location -- `cleanup` will be
+a no-op too since there are no temp files to delete.
 
 ---
 

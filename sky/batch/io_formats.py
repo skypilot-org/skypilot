@@ -197,6 +197,10 @@ class OutputWriter(ABC):
     def reduce_results(self, job_id: str) -> None:
         """Reduce all result batches into final output."""
 
+    @abstractmethod
+    def cleanup(self, job_id: str) -> None:
+        """Delete temporary batch files after reduce_results completes."""
+
 
 # ---- Concrete input readers --------------------------------------------------
 
@@ -293,6 +297,10 @@ class JsonOutput(OutputWriter):
     def reduce_results(self, job_id: str) -> None:
         utils.concatenate_batches_to_output(self.path, job_id)
 
+    def cleanup(self, job_id: str) -> None:
+        utils.delete_batch_files(self.path, job_id)
+        utils.delete_input_batch_files(self.path, job_id)
+
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='image')
 @dataclass
@@ -350,4 +358,6 @@ class ImageOutput(OutputWriter):
 
     def reduce_results(self, job_id: str) -> None:
         """No-op -- images are already in their final location."""
-        logger.info('Images already in final location: %s', self.path)
+
+    def cleanup(self, job_id: str) -> None:
+        """No-op -- no temp files to clean up."""

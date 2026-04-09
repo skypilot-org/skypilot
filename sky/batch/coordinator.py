@@ -34,7 +34,6 @@ from typing import Any, Deque, Dict, List, Optional
 import sky
 from sky.batch import constants
 from sky.batch import io_formats
-from sky.batch import utils
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
 from sky.serve import serve_utils
@@ -127,16 +126,16 @@ class BatchCoordinator:
                 # Crash happened after all batches done but before merge.
                 logger.info('All batches already completed, skipping '
                             'to merge.')
-                self._reduce_results()
+                self._reduce_results_and_cleanup()
                 return
 
             self._discover_workers()
             self._shutdown_stale_workers()
             self._dispatch_all()
-            self._reduce_results()
+            self._reduce_results_and_cleanup()
             logger.info('Batch job completed successfully.')
         except Exception:
-            self._cleanup_on_failure()
+            self._print_partial_results_instructions()
             raise
 
     # ------------------------------------------------------------------
@@ -683,26 +682,41 @@ class BatchCoordinator:
     # Result merging
     # ------------------------------------------------------------------
 
-    def _reduce_results(self) -> None:
-        """Reduce per-batch results into the final output."""
+    def _reduce_results_and_cleanup(self) -> None:
+        """Reduce per-batch results into the final output and clean up."""
         job_id = str(self._managed_job_id)
         logger.info('Reducing results...')
         for fmt in self._output_formats:
+            logger.info(f'Handling output format: {type(fmt).__name__}')
             fmt.reduce_results(job_id)
             logger.info(f'Results written to {fmt.path}')
+            fmt.cleanup(job_id)
+            logger.info(f'Cleaned up temp files for {fmt.path}')
 
     # ------------------------------------------------------------------
-    # Failure cleanup
+    # Partial results recovery
     # ------------------------------------------------------------------
 
-    def _cleanup_on_failure(self) -> None:
-        """Clean up temporary files on failure."""
+    def _print_partial_results_instructions(self) -> None:
+        """Print instructions for recovering partial results on failure."""
+        output_formats = getattr(self, '_output_formats', [])
+        if not output_formats:
+            return
         job_id = str(self._managed_job_id)
-        for fmt in getattr(self, '_output_formats', []):
-            try:
-                logger.info('Cleaning up temporary files for %s...', fmt.path)
-                utils.delete_batch_files(fmt.path, job_id=job_id)
-                logger.info('Temporary files cleaned up for %s', fmt.path)
-            except Exception as cleanup_error:  # pylint: disable=broad-except
-                logger.warning(f'Failed to clean up temporary files: '
-                               f'{cleanup_error}')
+        logger.info(
+            '\n'
+            '============================================================\n'
+            'Partial results are preserved. To merge completed batches\n'
+            'into the final output, run:\n'
+            '\n'
+            '    import sky.batch\n'
+            '\n')
+        for fmt in output_formats:
+            fmt_name = type(fmt).__name__
+            fields = ', '.join(f'{k}={v!r}' for k, v in fmt.to_dict().items()
+                               if k not in ('format', '_class_source'))
+            logger.info(f'    writer = sky.batch.{fmt_name}({fields})\n'
+                        f'    writer.reduce_results({job_id!r})\n'
+                        f'    writer.cleanup({job_id!r})\n')
+        logger.info(
+            '============================================================')

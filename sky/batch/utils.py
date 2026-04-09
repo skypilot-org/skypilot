@@ -607,14 +607,14 @@ def _delete_gcs_object(bucket: str, key: str) -> None:
 
 def concatenate_batches_to_output(output_path: str,
                                   job_id: Optional[str] = None) -> None:
-    """Concatenate all batch files into the final output file and clean up.
+    """Concatenate all batch files into the final output file.
 
     IMPORTANT: Always provide job_id to ensure only this job's temp files are
-    processed and cleaned up when multiple batch jobs share the same bucket.
+    processed when multiple batch jobs share the same bucket.
 
     Batches are processed in order based on their starting indices to maintain
-    the original data order. After concatenation, temporary batch files are
-    automatically deleted from the job-specific directory.
+    the original data order. Temp file cleanup is handled separately by
+    ``OutputWriter.cleanup()``.
 
     Args:
         output_path: Final output path.
@@ -642,7 +642,3 @@ def concatenate_batches_to_output(output_path: str,
 
     # Upload the concatenated result
     save_jsonl_to_cloud(all_data, output_path)
-
-    # Clean up job-specific temp files only (safe for multi-job environments)
-    delete_batch_files(output_path, job_id)
-    delete_input_batch_files(output_path, job_id)
