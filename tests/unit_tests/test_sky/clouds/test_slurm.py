@@ -143,6 +143,27 @@ class TestLookupGpuPartitionMap:
                                                    merge_dicts=True)
 
 
+class TestLookupCpuPartition:
+    """Test slurm_utils.lookup_cpu_partition()."""
+
+    @pytest.mark.parametrize('config_value,expected', [
+        (None, None),
+        ('cpu-partition', 'cpu-partition'),
+        ('batch', 'batch'),
+    ])
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config')
+    def test_lookup_cpu_partition(self, mock_get_effective, config_value,
+                                  expected):
+        mock_get_effective.return_value = config_value
+        result = slurm_utils.lookup_cpu_partition('my-cluster')
+        assert result == expected
+        mock_get_effective.assert_called_once_with(cloud='slurm',
+                                                   keys=('cpu_partition',),
+                                                   region='my-cluster',
+                                                   default_value=None)
+
+
 class TestCheckInstanceFitsWithGpuPartitionMap:
     """Test check_instance_fits with gpu_partition_map configured."""
 
