@@ -45,6 +45,7 @@ ALLOWED_TERMS = {
     'Llama2',
     'Pods',
     'Samsung',
+    'Windows',
     'Google',
     'Amazon',
     'Okta',
