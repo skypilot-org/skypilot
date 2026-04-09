@@ -19,6 +19,7 @@ FROM python:3.10.19-slim AS process-source
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
 ARG NEXT_BASE_PATH=/dashboard
+WORKDIR /skypilot
 
 # Run NPM and node install in a separate step for caching.
 RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
@@ -26,24 +27,35 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         apt-get update -y && \
         apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs && \
-        npm install -g npm@latest; \
+        apt-get install -y nodejs; \
 fi
+
+COPY sky/dashboard/package.json sky/dashboard/package-lock.json \
+    /skypilot/sky/dashboard/
+
+RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Installing dashboard dependencies in Stage 2" && \
+        npm --prefix sky/dashboard ci --no-audit --fund=false; \
+    fi
+
+COPY sky/dashboard /skypilot/sky/dashboard
+
+RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Building dashboard in Stage 2" && \
+        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
+        echo "Cleaning up dashboard build-time dependencies" && \
+        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
+        apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 COPY . /skypilot
 
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \
-        # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
+        # Retain an /skypilot/dist dir to keep compatibility in stage 3.
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
-        echo "Building dashboard in Stage 2" && \
-        npm --prefix sky/dashboard install && \
-        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
-        echo "Cleaning up dashboard build-time dependencies" && \
-        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* && \
         echo "Keeping source code and record commit sha (editable installation)" && \
         python -c "import setup; setup.replace_commit_hash()" && \
         # Remove .git dir to reduce the final image size
