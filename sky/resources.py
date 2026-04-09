@@ -2457,6 +2457,11 @@ class Resources:
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
 
+        # Deprecated fields that may still appear in configs written by
+        # older SkyPilot versions. Pop them so the assertion below doesn't
+        # fire. ephemeral_storage was removed in favor of disk_size.
+        config.pop('ephemeral_storage', None)
+
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
@@ -2530,6 +2535,19 @@ class Resources:
         if self._requires_fuse is not None:
             config['_requires_fuse'] = self._requires_fuse
         return config
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Persist whether disk_size was explicitly specified, and ensure
+        # _disk_size is always serialized as int so that older SkyPilot
+        # versions (which expect int) can unpickle safely.
+        state['_disk_size_specified'] = state.get('_disk_size') is not None
+        if state['_disk_size'] is None:
+            state['_disk_size'] = DEFAULT_DISK_SIZE_GB
+        # Forward compat: older versions expect _ephemeral_storage to exist
+        # (it was removed in this version in favor of disk_size).
+        state.setdefault('_ephemeral_storage', None)
+        return state
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
@@ -2703,6 +2721,16 @@ class Resources:
 
         if version < 33:
             state.pop('_ephemeral_storage', None)
+
+        # Restore _disk_size = None when it was not explicitly specified.
+        # __getstate__ stores _disk_size as int (for forward compat with
+        # older versions) plus a _disk_size_specified flag. Old pickles
+        # won't have the flag, so default to keeping the stored int.
+        if '_disk_size_specified' not in state:
+            if isinstance(state.get('_cloud', None), clouds.Kubernetes):
+                state['_disk_size'] = None
+        elif not state.pop('_disk_size_specified'):
+            state['_disk_size'] = None
 
         self.__dict__.update(state)
 
