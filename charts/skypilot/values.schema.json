@@ -80,6 +80,12 @@
                         "null"
                     ]
                 },
+                "imageRegistry": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "initialBasicAuthCredentials": {
                     "type": "string"
                 },
@@ -230,6 +236,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "imageRegistry": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "oidc-issuer-url": {
                             "type": [
                                 "string",
@@ -237,6 +249,12 @@
                             ]
                         },
                         "redis-image": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-imageRegistry": {
                             "type": [
                                 "string",
                                 "null"
@@ -350,6 +368,12 @@
                         "null"
                     ]
                 },
+                "imageRegistry": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "projectId": {
                     "type": [
                         "string",
@@ -458,6 +482,12 @@
                         "image": {
                             "type": "string"
                         },
+                        "imageRegistry": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "oidc-issuer-url": {
                             "type": [
                                 "string",
@@ -465,6 +495,12 @@
                             ]
                         },
                         "redis-image": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "redis-imageRegistry": {
                             "type": [
                                 "string",
                                 "null"
