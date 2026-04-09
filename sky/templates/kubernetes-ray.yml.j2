@@ -1229,6 +1229,7 @@ available_node_types:
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
+          - containerPort: 46590  # Used by Skylet gRPC
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to
