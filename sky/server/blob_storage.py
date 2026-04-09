@@ -19,6 +19,7 @@ from typing import Generator, List, Optional, Tuple
 
 import filelock
 from sky import sky_logging
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -105,12 +106,22 @@ class BlobStorage(abc.ABC):
         """
         yield True
 
-    # --- Path helpers (concrete) ---
+    # --- Path helpers ---
 
     @abc.abstractmethod
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         """Return the base blobs directory for a user."""
         raise NotImplementedError
+
+    def file_mounts_tmp_dir(self) -> str:
+        """Return a base directory for temporary file-mount hard-link staging.
+
+        The directory **must** be on the same filesystem / block device as
+        the blob directories so that ``os.link()`` works without falling
+        back to a full copy.  The default returns ``~/.sky/tmp/`` which is
+        on the same device as the default blob location under ``~/.sky/``.
+        """
+        return os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
 
     def get_staging_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the staging directory path for an in-progress upload."""
@@ -119,11 +130,6 @@ class BlobStorage(abc.ABC):
     def get_target_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the final blob directory path."""
         return self.blobs_dir(user_id) / blob_id
-
-
-# ---------------------------------------------------------------------------
-# Default implementation: local filesystem with filelocks
-# ---------------------------------------------------------------------------
 
 
 class LocalFilesystemBlobStorage(BlobStorage):
@@ -229,10 +235,6 @@ class LocalFilesystemBlobStorage(BlobStorage):
                 users.append(entry.name)
         return users
 
-
-# ---------------------------------------------------------------------------
-# Singleton management
-# ---------------------------------------------------------------------------
 
 _blob_storage: Optional[BlobStorage] = None
 
