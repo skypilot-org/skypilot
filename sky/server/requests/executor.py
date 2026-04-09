@@ -477,8 +477,6 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
-    # Event to signal the executor watch thread to stop.
-    watch_stop = threading.Event()
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -495,16 +493,6 @@ def _request_execution_wrapper(request_id: str,
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
-
-        # Start a background watch thread that detects
-        # cancellation
-        if not daemons.is_daemon_request_id(request_id):
-            heartbeat_thread = threading.Thread(
-                target=_executor_watch,
-                args=(request_id, pid, watch_stop),
-                daemon=True,
-                name=f'executor-hb-{request_id[:8]}')
-            heartbeat_thread.start()
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -577,7 +565,6 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
-        watch_stop.set()
         _restore_output()
         try:
             # Capture the peak RSS before GC.
@@ -592,31 +579,6 @@ def _request_execution_wrapper(request_id: str,
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
-
-
-# How often the executor heartbeat checks for remote cancellation (seconds).
-_EXECUTOR_HEARTBEAT_INTERVAL = 10
-
-
-def _executor_watch(request_id: str, pid: int,
-                        stop_event: threading.Event) -> None:
-    """Background thread that detects cancellation."""
-    while not stop_event.wait(timeout=_EXECUTOR_HEARTBEAT_INTERVAL):
-        try:
-            request = api_requests.get_request(request_id, fields=['status'])
-            if request is None:
-                break
-            if request.status == api_requests.RequestStatus.CANCELLED:
-                logger.info(f'Request {request_id} cancelled remotely — '
-                            f'sending SIGTERM to pid {pid}')
-                os.kill(pid, signal.SIGTERM)
-                break
-            if request.status > api_requests.RequestStatus.RUNNING:
-                # Already finished via another path.
-                break
-        except Exception:  # pylint: disable=broad-except
-            # Never crash the executor on heartbeat failure.
-            pass
 
 
 _first_request = True
