@@ -112,6 +112,12 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
 
 def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
     """Deserialize the exception."""
+    if serialized is None:
+        return RuntimeError('Unknown server error (no detail in response)')
+    if isinstance(serialized, str):
+        return RuntimeError(serialized)
+    if not isinstance(serialized, dict) or 'type' not in serialized:
+        return RuntimeError(f'Server error: {serialized}')
     exception_type = serialized['type']
     if hasattr(builtins, exception_type):
         exception_class = getattr(builtins, exception_type)
