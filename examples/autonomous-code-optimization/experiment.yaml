@@ -1,0 +1,124 @@
+# SkyPilot task template for autonomous code optimization experiments.
+#
+# Each experiment:
+#   1. Installs dependencies (setup, runs once per VM)
+#   2. Builds the project
+#   3. Runs the benchmark (autoresearch.sh)
+#   4. Runs correctness checks (autoresearch.checks.sh)
+#   5. Reports METRIC lines and check results
+#
+# Usage:
+#   sky launch -c vm-01 experiment.yaml \
+#     --env EXPERIMENT_ID=exp-01 \
+#     --env EXPERIMENT_DESC="add SIMD to hash lookup" \
+#     -d -y
+#
+# The workdir is snapshotted at submission time, so parallel experiments
+# with different code edits use --workdir to point at separate copies.
+
+resources:
+  cpus: 4+
+  memory: 8+
+  # No GPU needed -- this is for CPU-bound code optimization.
+  # Override with --gpus if your target needs GPU benchmarking.
+
+workdir: .
+
+envs:
+  EXPERIMENT_ID: baseline
+  EXPERIMENT_DESC: "baseline measurement"
+  # Override these per-project via --env:
+  BUILD_CMD: "make -j$(nproc)"
+  BENCH_TIMEOUT: 300
+  CHECK_TIMEOUT: 300
+
+setup: |
+  # Install project-specific dependencies.
+  # Runs once when the VM is first provisioned.
+  cd ~/sky_workdir
+  if [ -f setup_deps.sh ]; then
+    echo ">>> Running setup_deps.sh..."
+    bash setup_deps.sh
+  else
+    echo ">>> No setup_deps.sh found, running BUILD_CMD: ${BUILD_CMD}"
+    bash -c "${BUILD_CMD}"
+  fi
+
+run: |
+  cd ~/sky_workdir
+  echo "========================================="
+  echo "EXPERIMENT: ${EXPERIMENT_ID}"
+  echo "DESC: ${EXPERIMENT_DESC}"
+  echo "========================================="
+
+  # --- Build ---
+  echo ">>> Building..."
+  set -o pipefail
+  if ! bash -c "${BUILD_CMD}" 2>&1 | tail -30; then
+    echo "EXPERIMENT_STATUS: crash"
+    echo "EXPERIMENT_ERROR: build failed"
+    exit 0  # exit 0 so SkyPilot marks the job as SUCCEEDED for log retrieval
+  fi
+
+  # --- Benchmark ---
+  if [ ! -f autoresearch.sh ]; then
+    echo "EXPERIMENT_STATUS: crash"
+    echo "EXPERIMENT_ERROR: autoresearch.sh not found"
+    exit 0
+  fi
+
+  echo ">>> Running benchmark (timeout: ${BENCH_TIMEOUT}s)..."
+  BENCH_OUTPUT=$(timeout "${BENCH_TIMEOUT}" bash autoresearch.sh 2>&1) || {
+    EXIT_CODE=$?
+    echo "$BENCH_OUTPUT"
+    if [ $EXIT_CODE -eq 124 ]; then
+      echo "EXPERIMENT_STATUS: crash"
+      echo "EXPERIMENT_ERROR: benchmark timed out after ${BENCH_TIMEOUT}s"
+    else
+      echo "EXPERIMENT_STATUS: crash"
+      echo "EXPERIMENT_ERROR: benchmark failed (exit $EXIT_CODE)"
+    fi
+    exit 0
+  }
+  echo "$BENCH_OUTPUT"
+
+  # Extract METRIC lines
+  METRICS=$(echo "$BENCH_OUTPUT" | grep -E '^METRIC\s+\S+=\S+' || true)
+  if [ -z "$METRICS" ]; then
+    echo "EXPERIMENT_STATUS: crash"
+    echo "EXPERIMENT_ERROR: no METRIC lines found in benchmark output"
+    exit 0
+  fi
+
+  # --- Correctness checks ---
+  CHECKS_PASSED=true
+  if [ -f autoresearch.checks.sh ]; then
+    echo ">>> Running correctness checks (timeout: ${CHECK_TIMEOUT}s)..."
+    CHECK_OUTPUT=$(timeout "${CHECK_TIMEOUT}" bash autoresearch.checks.sh 2>&1) || {
+      EXIT_CODE=$?
+      echo "$CHECK_OUTPUT"
+      if [ $EXIT_CODE -eq 124 ]; then
+        echo "CHECKS_STATUS: timeout"
+      else
+        echo "CHECKS_STATUS: failed (exit $EXIT_CODE)"
+      fi
+      CHECKS_PASSED=false
+    }
+    if [ "$CHECKS_PASSED" = true ]; then
+      echo "CHECKS_STATUS: passed"
+    fi
+  else
+    echo "CHECKS_STATUS: skipped (no autoresearch.checks.sh)"
+  fi
+
+  # --- Report ---
+  echo "========================================="
+  echo "EXPERIMENT_ID: ${EXPERIMENT_ID}"
+  echo "EXPERIMENT_DESC: ${EXPERIMENT_DESC}"
+  echo "$METRICS"
+  if [ "$CHECKS_PASSED" = true ]; then
+    echo "EXPERIMENT_STATUS: done"
+  else
+    echo "EXPERIMENT_STATUS: checks_failed"
+  fi
+  echo "========================================="

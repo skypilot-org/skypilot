@@ -142,6 +142,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         V100: 2.50     # $/accelerator/hr
     :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
       H100: h100-partition
+    :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
@@ -150,6 +151,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           cpu: 0.06
         gpu_partition_map:
           H100: h100-custom
+        cpu_partition: cpu-only
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -2133,6 +2135,32 @@ Example:
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Per-cluster
 values override global values for the same GPU type.
 
+.. _config-yaml-slurm-cpu-partition:
+
+``slurm.cpu_partition``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Slurm partition to use for CPU-only tasks (optional).
+
+When ``--gpus`` is not provided (i.e., no accelerators are requested),
+SkyPilot will use this partition instead of the cluster's default partition.
+This is useful when your Slurm cluster has separate partitions for CPU-only
+and GPU workloads.
+
+Default: not set (uses the cluster's default partition).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    cpu_partition: cpu-batch
+
+``cpu_partition`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, or per-task
+using the ``config:`` block in a task YAML. Per-cluster values override
+global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2161,6 +2189,10 @@ Supported fields:
   :ref:`GPU partition map <config-yaml-slurm-gpu-partition-map>` overrides at
   the cluster level. Per-cluster values override global values for the same
   GPU type.
+
+- ``cpu_partition``:
+  :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
+  cluster level. Per-cluster values override the global value.
 
 Example:
 
