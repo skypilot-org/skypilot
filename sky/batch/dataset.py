@@ -128,7 +128,8 @@ class Dataset:
             batch_size: int,
             output: Union[io_formats.OutputWriter,
                           List[io_formats.OutputWriter]],
-            activate_env: Optional[str] = None) -> int:
+            activate_env: Optional[str] = None,
+            stream: bool = True) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
         The mapper function should be decorated with @sky.batch.remote_function
@@ -142,13 +143,16 @@ class Dataset:
             output: An ``OutputWriter`` descriptor or a list of descriptors.
                     Examples:
                       - ``JsonOutput('s3://bucket/out.jsonl')``
-                      - ``[ImageOutput('s3://…/', column='image'),
-                         JsonOutput('s3://…/manifest.jsonl',
+                      - ``[ImageOutput('s3://.../', column='image'),
+                         JsonOutput('s3://.../manifest.jsonl',
                                     column=['name', 'prompt'])]``
             activate_env: Optional shell command to activate the Python
                           environment before running the mapper function.
                           Example: ``'source .venv/bin/activate'``
-
+            stream: Whether to stream the managed job completion.
+                    If True, the function will block until the managed job
+                    is completed and print the progress. Otherwise, the
+                    function will return immediately.
         Returns:
             The managed job ID.
 
@@ -219,9 +223,11 @@ class Dataset:
         if not job_ids:
             raise RuntimeError('Failed to launch batch managed job')
         managed_job_id = job_ids[0]
-
         logger.info(f'Batch job submitted as managed job {managed_job_id}')
-        _wait_for_managed_job_completion(managed_job_id)
+
+        if stream:
+            _wait_for_managed_job_completion(managed_job_id)
+
         return managed_job_id
 
     def __repr__(self) -> str:

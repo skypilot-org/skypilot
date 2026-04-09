@@ -1,33 +1,18 @@
-# Sky Batch: Distributed Batch Inference
+# Sky Batch: Distributed Batch Processing
 
-Sky Batch enables scalable batch inference across cloud GPU clusters. Process millions of prompts efficiently by distributing workloads across a pool of workers.
-
-This guide shows how to run batch inference using vLLM for LLM generation.
+Sky Batch enables scalable batch processing across cloud GPU/CPU clusters. Process large datasets efficiently by distributing workloads across a pool of workers managed by SkyPilot.
 
 ## How It Works
 
-1. **Dataset** - Your input data in cloud storage (JSONL format)
-2. **Pool** - Define cluster resources and setup
-3. **Map** - Define inference logic and process batches
+1. **Dataset** - Define your input data with a typed `InputReader`
+2. **Pool** - Define cluster resources and setup via a YAML file
+3. **Map** - Define processing logic and distribute across workers
 
 ---
 
-## Step 1: Prepare Your Dataset
+## Step 1: Create a Dataset
 
-Create a JSONL file where each line is a valid JSON object following the same schema:
-
-```jsonl
-{"prompt": "Summarize the theory of relativity"}
-{"prompt": "Write a haiku about mountains"}
-```
-
-Upload to cloud storage:
-
-```bash
-aws s3 cp prompts.jsonl s3://my-bucket/prompts.jsonl
-```
-
-Reference the dataset in Python:
+Create a dataset by wrapping an `InputReader`. Built-in readers include `JsonInput` for JSONL files in cloud storage:
 
 ```python
 import sky
@@ -35,14 +20,35 @@ import sky
 ds = sky.batch.Dataset(sky.batch.JsonInput("s3://my-bucket/prompts.jsonl"))
 ```
 
-Supported storage backends:
-- `s3://bucket/path/file.jsonl` - AWS S3
+The JSONL file should have one JSON object per line, all following the same schema:
 
-More storage backends coming soon.
+```jsonl
+{"prompt": "Summarize the theory of relativity"}
+{"prompt": "Write a haiku about mountains"}
+```
 
-**Supported formats:**
+Supported cloud storage backends: S3 (`s3://`) and GCS (`gs://`).
 
-JSONL is the first supported format. Support for images and other data types (e.g., one file per image) is coming soon. Multi-file datasets for larger workloads will also be supported in the future.
+### Custom Input Readers
+
+You can define custom input formats by subclassing `InputReader` and registering with the format registry:
+
+```python
+from dataclasses import dataclass
+from sky.batch.io_formats import InputReader
+from sky.utils.registry import INPUT_READER_REGISTRY
+
+@INPUT_READER_REGISTRY.type_register(name='range')
+@dataclass
+class RangeInput(InputReader):
+    count: int
+
+    def __len__(self) -> int:
+        return self.count
+
+    def download_batch(self, start_idx, end_idx, cache_dir):
+        return [{'index': i} for i in range(start_idx, end_idx + 1)]
+```
 
 ---
 
@@ -69,26 +75,16 @@ setup: uv pip install vllm
 Start the worker pool:
 
 ```python
-import sky
-
-pool_name = sky.jobs.pool_apply("pool.yaml")
+sky.jobs.pool_apply("pool.yaml", pool_name="my_pool")
 ```
 
 ---
 
 ## Step 3: Define Mapper and Process Dataset
 
-This is the key to interacting with Sky Batch. Define a mapper function that contains your inference logic, then pass it to `map_batches()`.
-
-The dataset will be split into batches based on `batch_size`. Each worker processes one batch at a time, and batches are distributed across all workers in the pool.
+Define a mapper function decorated with `@sky.batch.remote_function`, then call `ds.map()` to distribute processing across the pool.
 
 ```python
-import sky
-
-
-# This decorator defines a remote function that runs on the worker pool.
-# All dependencies must be imported inside the function.
-# The pool's setup command must install all required packages.
 @sky.batch.remote_function
 def llm_inference():
     import vllm
@@ -98,81 +94,105 @@ def llm_inference():
 
     # Process batches continuously
     for batch in sky.batch.load():
-        # batch is a list of dicts from your JSONL
+        # batch is a list of dicts from your input
         # e.g., [{"prompt": "hello"}, {"prompt": "world"}]
-        # length of batch is specified by batch_size below
-
         outputs = llm.generate([b["prompt"] for b in batch])
 
-        # Save results (order must match input)
-        # Be careful for concurrent write! Maybe write to small files and then merge them.
+        # Save results (order must match input batch)
         sky.batch.save_results([{"output": o.outputs[0].text} for o in outputs])
 
-# Process all batches
+
 ds.map(
-    llm_inference,  # Mapper function
+    llm_inference,
     pool_name=pool_name,
-    batch_size=32,  # Items per batch sent to each worker
-    output_path="s3://my-bucket/output.jsonl",  # Order matches input
+    batch_size=32,
+    output=sky.batch.JsonOutput("s3://my-bucket/output.jsonl"),
 )
 ```
 
-### Mapper Function
+### Mapper Function Rules
 
-The mapper function defines your inference logic. Inside the function:
-- Use `sky.batch.load()` to receive batches continuously. It will pause when there is no data to process and resume when new batches are available.
-- Process each batch with your model
-- Use `sky.batch.save_results()` to save results in the same order as the input batch
+The mapper function runs on remote workers. Key constraints enforced by `@remote_function`:
 
-| Function | Description |
-|----------|-------------|
-| `sky.batch.load()` | Generator yielding batches. Each batch is a list of dicts from input JSONL. |
-| `sky.batch.save_results(results)` | Save a list of results corresponding to the order of the current batch. |
+- **No closures**: Cannot capture variables from enclosing scope
+- **No global references**: Cannot reference module-level variables
+- **All imports inside**: All dependencies must be imported inside the function
+- **Use `sky.batch.load()`**: Generator that yields batches; blocks when no data is available
+- **Use `sky.batch.save_results()`**: Must be called once per batch, with results in the same order as input
+
+### Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `JsonOutput(path, column=None)` | JSONL output. Optional `column` filters which keys to include. |
+| `ImageOutput(path, column='image')` | Saves PIL Images as individual PNGs to a directory. |
+
+**Multi-output** is supported by passing a list:
+
+```python
+ds.map(
+    mapper_fn,
+    pool_name=pool_name,
+    batch_size=32,
+    output=[
+        sky.batch.ImageOutput("s3://bucket/images/", column='image'),
+        sky.batch.JsonOutput("s3://bucket/manifest.jsonl", column=['prompt']),
+    ],
+)
+```
 
 ### `ds.map()` Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| `mapper_fn` | Function containing inference logic |
+| `mapper_fn` | Function decorated with `@sky.batch.remote_function` |
 | `pool_name` | Name of the worker pool |
 | `batch_size` | Number of items per batch |
-| `output_path` | S3 path for output results (order matches input) |
+| `output` | `OutputWriter` or list of `OutputWriter` instances |
+| `activate_env` | (Optional) Environment activation command (e.g., `conda activate myenv`) |
+| `stream` | (Optional) Whether to stream the managed job progress. Default is True. |
+
+If `stream` is True, `ds.map()` blocks until all batches are processed, displaying a tqdm progress bar.
 
 ---
 
-## Comparison: Ray Data
+## Features
 
-For reference, here's how you would achieve similar LLM batch inference using Ray Data:
+### Progress Tracking
 
-```python
-import ray
-from ray.data import read_json
-from vllm import LLM
+- `ds.map()` displays a tqdm progress bar with batch-level granularity
+- Progress is also visible in `sky jobs queue` via `batch_completed_batches / batch_total_batches`
 
-# Initialize Ray cluster
-ray.init()
+### HA Recovery
 
-# Read dataset
-ds = read_json("s3://my-bucket/prompts.jsonl")
+- Batch states are persisted to a database (PENDING, DISPATCHED, COMPLETED, FAILED)
+- If the controller crashes, dispatched batches are reset to PENDING and retried
+- Retry counts survive across restarts so batches cannot retry indefinitely
 
-# Define inference class
-class LLMPredictor:
-    def __init__(self):
-        self.llm = LLM(model="Qwen/Qwen3-4B-Instruct-2507")
+### Dynamic Worker Scaling
 
-    def __call__(self, batch):
-        outputs = self.llm.generate(batch["prompt"])
-        batch["output"] = [o.outputs[0].text for o in outputs]
-        return batch
+- The coordinator periodically re-discovers workers in the pool
+- Newly scaled-up replicas are picked up automatically
+- Individual worker failures are tolerated; other workers process remaining batches
 
-# Process dataset
-ds = ds.map_batches(
-    LLMPredictor,
-    concurrency=3,  # Number of workers
-    batch_size=32,
-    num_gpus=1,
-)
+### Cancellation
 
-# Write results
-ds.write_json("s3://my-bucket/output")
+- `sky jobs cancel` gracefully stops the coordinator and shuts down worker services (the HTTP process on each worker)
+- The pool clusters themselves remain running — they are a shared resource managed separately via `sky jobs pool` and can be reused for other jobs.
+
+---
+
+## Examples
+
+| Example | Description | Location |
+|---------|-------------|----------|
+| Simple | Text doubling with CPU workers | `examples/batch/simple/` |
+| Diffusion | Image generation with GPU workers, multi-output | `examples/batch/diffusion/` |
+| Custom Formats | Custom InputReader/OutputWriter classes | `examples/batch/custom_formats/` |
+
+Run an example:
+
+```bash
+bash examples/batch/simple/run.sh
 ```
+

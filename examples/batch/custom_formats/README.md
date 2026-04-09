@@ -42,6 +42,8 @@ After ALL batches finish (on the jobs controller):
     → optional: delete temporary batch files from cloud storage
 ```
 
+See `process_range.py` in this directory for the full runnable example.
+
 ---
 
 ## InputReader
@@ -349,7 +351,7 @@ class YamlOutput(io_formats.OutputWriter):
 
 ## Recovering partial results on failure
 
-Normally, `reduce_results` and `cleanup` run on the **jobs controller**
+Normally, `reduce_results` and `cleanup` run on the **SkyPilot API Server**
 after all batches complete. If the job fails partway through (e.g. a
 worker crashes or gets preempted), those steps never run -- but the
 per-batch results that workers already uploaded are still sitting in
@@ -421,5 +423,3 @@ def my_mapper_fn():
         # results is passed to upload_batch() for each OutputWriter
         sky.batch.save_results(results)
 ```
-
-See `process_range.py` in this directory for the full runnable example.

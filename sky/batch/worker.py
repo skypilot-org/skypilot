@@ -313,7 +313,7 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str) -> None:
 
     1. Launch a localhost HTTP server in a daemon thread.
     2. Deserialize and invoke the mapper function.  The mapper runs
-       ``for batch in sky.batch.load(): …`` which blocks on the internal
+       ``for batch in sky.batch.load(): ...`` which blocks on the internal
        queue until batches arrive or shutdown is signaled.
     """
     global _output_path, _job_id, _dataset_format, _output_formats
