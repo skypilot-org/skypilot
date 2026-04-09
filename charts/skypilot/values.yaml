@@ -197,7 +197,10 @@ apiService:
   # @schema type: [string, null]
   imagePullPolicy: Always
 
-  # Add scheduling constraints to the API server pod
+  # Add scheduling constraints to the API server pod. The same values are applied to
+  # oauth2-proxy and the bundled oauth2-proxy-redis Deployment when OAuth is enabled,
+  # so auth stays on the same node pool as the API. See
+  # https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html
   nodeSelector: {}
   tolerations: []
   affinity: {}
