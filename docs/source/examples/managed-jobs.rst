@@ -578,8 +578,8 @@ With a :ref:`remote SkyPilot API server <sky-api-server-remote>`, the API server
 
 .. _jobs-controller-remote:
 
-Using a remote jobs controller
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[Legacy] Using a remote jobs controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Alternatively, SkyPilot can launch a dedicated **jobs controller** -- a small on-demand CPU VM or Kubernetes pod -- to manage all jobs. This is used automatically when running with a local API server (no remote server deployed), or can be explicitly enabled.
 
