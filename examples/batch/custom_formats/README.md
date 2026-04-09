@@ -5,8 +5,8 @@ smaller groups, sends each group to a worker, and collects the results.
 To do this, it needs to know how to **read** your input data and how to
 **write** your output data. That is what InputReader and OutputWriter do.
 
-SkyPilot ships with built-in formats (`JsonInput`, `JsonOutput`,
-`ImageOutput`), but you can define your own without modifying SkyPilot
+SkyPilot ships with built-in formats (`JsonReader`, `JsonWriter`,
+`ImageWriter`), but you can define your own without modifying SkyPilot
 source code.
 
 ## How Sky Batch processes data
@@ -104,7 +104,7 @@ an empty string.
 ```python
 @registry.INPUT_READER_REGISTRY.type_register(name='range')
 @dataclass
-class RangeInput(io_formats.InputReader):
+class RangeReader(io_formats.InputReader):
     count: int
 
     def __len__(self):
@@ -114,16 +114,16 @@ class RangeInput(io_formats.InputReader):
         return [{'index': i} for i in range(start_idx, end_idx + 1)]
 ```
 
-With `RangeInput(path='', count=20)` and `batch_size=5`, Sky Batch
+With `RangeReader(path='', count=20)` and `batch_size=5`, Sky Batch
 creates 4 batches. The first batch calls
 `download_batch(0, 4, '/tmp/...')` and gets
 `[{'index': 0}, {'index': 1}, ..., {'index': 4}]`.
 
-### Example: JSONL file with caching (built-in `JsonInput`)
+### Example: JSONL file with caching (built-in `JsonReader`)
 
-This is how the built-in `JsonInput` reader works. Cloud storage APIs
+This is how the built-in `JsonReader` reader works. Cloud storage APIs
 (S3, GCS) only support downloading entire objects -- there is no way to
-fetch just lines 10-19 from a single JSONL file. So `JsonInput`
+fetch just lines 10-19 from a single JSONL file. So `JsonReader`
 downloads the full file on the first batch, caches it locally on the
 worker, and reads from the cache for subsequent batches. If your dataset
 is very large and you want each worker to only download the portion it
@@ -133,7 +133,7 @@ that downloads only the relevant file(s) per batch.
 ```python
 @registry.INPUT_READER_REGISTRY.type_register(name='json')
 @dataclass
-class JsonInput(io_formats.InputReader):
+class JsonReader(io_formats.InputReader):
 
     def __len__(self):
         return len(utils.load_jsonl_from_cloud(self.path))
@@ -275,7 +275,7 @@ so multiple concurrent jobs don't interfere with each other:
 - `utils.concatenate_batches_to_output(output_path, job_id)` --
   A one-liner that lists all batch files and concatenates them in order
   into the final output JSONL file. This is what the built-in
-  `JsonOutput` uses in its `reduce_results`. Temp file cleanup is
+  `JsonWriter` uses in its `reduce_results`. Temp file cleanup is
   handled separately by `cleanup()`.
 
 **Cleaning up temporary files (for `cleanup`):**
@@ -295,7 +295,7 @@ to their final location, `reduce_results` and `cleanup` are no-ops.
 ```python
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='text')
 @dataclass
-class TextOutput(io_formats.OutputWriter):
+class TextWriter(io_formats.OutputWriter):
     column: str
 
     def upload_batch(self, results, start_idx, end_idx, job_id):
@@ -324,7 +324,7 @@ into one YAML file, and `cleanup` then deletes the temp files.
 ```python
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='yaml')
 @dataclass
-class YamlOutput(io_formats.OutputWriter):
+class YamlWriter(io_formats.OutputWriter):
     column: str
 
     def upload_batch(self, results, start_idx, end_idx, job_id):
@@ -372,7 +372,7 @@ import sky.batch
 # Use the same output writer you passed to ds.map(), then call
 # reduce_results + cleanup with the managed job ID (printed in the
 # failure message).
-writer = sky.batch.JsonOutput(path='s3://bucket/output.jsonl')
+writer = sky.batch.JsonWriter(path='s3://bucket/output.jsonl')
 writer.reduce_results(job_id='42')
 # Optionally, clean up the temp files.
 writer.cleanup(job_id='42')
@@ -396,14 +396,14 @@ a no-op too since there are no temp files to delete.
 import sky.batch
 
 # Define your custom formats (see examples above), then:
-ds = sky.batch.Dataset(RangeInput(path='', count=20))
+ds = sky.batch.Dataset(RangeReader(path='', count=20))
 ds.map(
     my_mapper_fn,
     pool_name='my-pool',
     batch_size=5,
     output=[
-        TextOutput('s3://bucket/texts/', column='text'),
-        YamlOutput('s3://bucket/metadata.yaml', column='metadata'),
+        TextWriter('s3://bucket/texts/', column='text'),
+        YamlWriter('s3://bucket/metadata.yaml', column='metadata'),
     ],
 )
 ```

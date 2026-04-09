@@ -6,7 +6,7 @@ across a pool of workers.
 
 Main components:
 - Dataset(): Create a Dataset from a typed InputReader
-- JsonInput / JsonOutput / ImageOutput: Typed format descriptors
+- JsonReader / JsonWriter / ImageWriter: Typed format descriptors
 - remote_function: Decorator for functions that run on workers
 - load(): Generator that yields batches on workers
 - save_results(): Save results for the current batch
@@ -15,7 +15,7 @@ Example usage:
     import sky
 
     # Create dataset from cloud storage
-    ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
+    ds = sky.batch.Dataset(sky.batch.JsonReader("s3://bucket/data.jsonl"))
 
     # Define mapper function
     @sky.batch.remote_function
@@ -27,13 +27,13 @@ Example usage:
     # Apply pool and run
     pool_name = sky.jobs.pool_apply("pool.yaml")
     ds.map(process, pool_name=pool_name, batch_size=32,
-           output=sky.batch.JsonOutput("s3://bucket/output.jsonl"))
+           output=sky.batch.JsonWriter("s3://bucket/output.jsonl"))
 """
 from sky.batch.dataset import Dataset
-from sky.batch.io_formats import ImageOutput
+from sky.batch.io_formats import ImageWriter
 from sky.batch.io_formats import InputReader
-from sky.batch.io_formats import JsonInput
-from sky.batch.io_formats import JsonOutput
+from sky.batch.io_formats import JsonReader
+from sky.batch.io_formats import JsonWriter
 from sky.batch.io_formats import OutputWriter
 from sky.batch.remote import remote_function
 from sky.batch.worker import load
@@ -46,7 +46,7 @@ __all__ = [
     'save_results',
     'InputReader',
     'OutputWriter',
-    'JsonInput',
-    'JsonOutput',
-    'ImageOutput',
+    'JsonReader',
+    'JsonWriter',
+    'ImageWriter',
 ]

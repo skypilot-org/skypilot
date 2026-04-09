@@ -124,7 +124,7 @@ Key points:
 ### The main function
 
 ```python
-ds = sky.batch.Dataset(sky.batch.JsonInput(input_path))
+ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))
 ds.map(double_text, pool_name=pool_name, batch_size=5, output_path=output_path)
 ```
 

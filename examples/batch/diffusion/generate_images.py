@@ -100,13 +100,13 @@ def main():
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     # Create dataset from cloud storage
-    ds = sky.batch.Dataset(sky.batch.JsonInput(input_path))
+    ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))
 
     # Ensure the pool exists (creates it if needed)
     ensure_pool(pool_name, pool_yaml)
 
     # Process the dataset.
-    # Multi-output: ImageOutput saves PIL Images as PNGs, JsonOutput saves
+    # Multi-output: ImageWriter saves PIL Images as PNGs, JsonWriter saves
     # selected metadata columns as a manifest JSONL.
     print(f'Generating images from {input_path}...')
     ds.map(
@@ -114,8 +114,8 @@ def main():
         pool_name=pool_name,
         batch_size=3,
         output=[
-            sky.batch.ImageOutput(output_path, column='image'),
-            sky.batch.JsonOutput(manifest_path, column=['prompt']),
+            sky.batch.ImageWriter(output_path, column='image'),
+            sky.batch.JsonWriter(manifest_path, column=['prompt']),
         ],
         # Must match the venv created in pool.yaml setup.
         activate_env='source .venv/bin/activate',

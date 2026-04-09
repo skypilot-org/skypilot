@@ -3,9 +3,9 @@
 Demonstrates defining custom input/output formats *outside* of SkyPilot
 source code.  Custom formats are defined inline below:
 
-- ``RangeInput``   -- generates ``{'index': i}`` items (no file I/O)
-- ``TextOutput``   -- writes a ``.txt`` file per item (per-item pattern)
-- ``YamlOutput``   -- writes a single merged ``.yaml`` file (batch+merge)
+- ``RangeReader``   -- generates ``{'index': i}`` items (no file I/O)
+- ``TextWriter``   -- writes a ``.txt`` file per item (per-item pattern)
+- ``YamlWriter``   -- writes a single merged ``.yaml`` file (batch+merge)
 
 Usage (from project root):
     bash examples/batch/custom_formats/run.sh
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 @registry.INPUT_READER_REGISTRY.type_register(name='range')
 @dataclass
-class RangeInput(io_formats.InputReader):
+class RangeReader(io_formats.InputReader):
     """Generate items from a Python ``range`` -- no file I/O needed."""
 
     count: int
@@ -43,18 +43,18 @@ class RangeInput(io_formats.InputReader):
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='text')
 @dataclass
-class TextOutput(io_formats.OutputWriter):
+class TextWriter(io_formats.OutputWriter):
     """Per-item ``.txt`` file output."""
 
     column: str
 
     def __post_init__(self) -> None:
         if not self.path:
-            raise ValueError('TextOutput path cannot be empty')
+            raise ValueError('TextWriter path cannot be empty')
         if not self.path.startswith(('s3://', 'gs://')):
             raise ValueError(f'Unsupported storage path: {self.path}')
         if not self.path.endswith('/'):
-            raise ValueError(f'TextOutput path must end with /: {self.path}')
+            raise ValueError(f'TextWriter path must end with /: {self.path}')
 
     def upload_batch(self, results: List[Dict[str, Any]], start_idx: int,
                      end_idx: int, job_id: str) -> str:
@@ -75,19 +75,19 @@ class TextOutput(io_formats.OutputWriter):
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='yaml')
 @dataclass
-class YamlOutput(io_formats.OutputWriter):
+class YamlWriter(io_formats.OutputWriter):
     """Single merged YAML file output (batch + merge pattern)."""
 
     column: str
 
     def __post_init__(self) -> None:
         if not self.path:
-            raise ValueError('YamlOutput path cannot be empty')
+            raise ValueError('YamlWriter path cannot be empty')
         if not self.path.startswith(('s3://', 'gs://')):
             raise ValueError(f'Unsupported storage path: {self.path}')
         if not self.path.endswith('.yaml'):
             raise ValueError(
-                f'YamlOutput path must end with .yaml: {self.path}')
+                f'YamlWriter path must end with .yaml: {self.path}')
 
     def upload_batch(self, results: List[Dict[str, Any]], start_idx: int,
                      end_idx: int, job_id: str) -> str:
@@ -171,7 +171,7 @@ def main():
     text_output_path = f's3://{bucket}/output/texts/'
     meta_output_path = f's3://{bucket}/output/metadata.yaml'
 
-    ds = sky.batch.Dataset(RangeInput(path='', count=20))
+    ds = sky.batch.Dataset(RangeReader(path='', count=20))
 
     ensure_pool(pool_name, pool_yaml)
 
@@ -181,8 +181,8 @@ def main():
         pool_name=pool_name,
         batch_size=5,
         output=[
-            TextOutput(text_output_path, column='text'),
-            YamlOutput(meta_output_path, column='metadata'),
+            TextWriter(text_output_path, column='text'),
+            YamlWriter(meta_output_path, column='metadata'),
         ],
     )
 

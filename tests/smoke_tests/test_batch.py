@@ -217,7 +217,7 @@ def test_batch_custom_formats(generic_cloud: str):
             (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
              f'--recursive 2>/dev/null || true'),
 
-            # --- Run batch job (RangeInput, TextOutput, YamlOutput) ---
+            # --- Run batch job (RangeReader, TextWriter, YamlWriter) ---
             f'python examples/batch/custom_formats/process_range.py',
 
             # --- Verify final job status ---

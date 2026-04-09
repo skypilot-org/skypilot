@@ -2,7 +2,7 @@
 
 Provides a simple interface for distributing batch processing workloads
 across a pool of workers via managed jobs.  The Dataset is created from
-a typed ``InputReader`` (e.g. ``JsonInput``) and dispatched with ``map()``.
+a typed ``InputReader`` (e.g. ``JsonReader``) and dispatched with ``map()``.
 """
 import logging
 import time
@@ -117,7 +117,7 @@ class Dataset:
 
         Args:
             input_format: An ``InputReader`` descriptor (e.g.
-                          ``JsonInput('s3://bucket/data.jsonl')``).
+                          ``JsonReader('s3://bucket/data.jsonl')``).
         """
         self.input_format = input_format
         self.path = input_format.path
@@ -142,9 +142,9 @@ class Dataset:
             batch_size: Number of items per batch sent to each worker.
             output: An ``OutputWriter`` descriptor or a list of descriptors.
                     Examples:
-                      - ``JsonOutput('s3://bucket/out.jsonl')``
-                      - ``[ImageOutput('s3://.../', column='image'),
-                         JsonOutput('s3://.../manifest.jsonl',
+                      - ``JsonWriter('s3://bucket/out.jsonl')``
+                      - ``[ImageWriter('s3://.../', column='image'),
+                         JsonWriter('s3://.../manifest.jsonl',
                                     column=['name', 'prompt'])]``
             activate_env: Optional shell command to activate the Python
                           environment before running the mapper function.

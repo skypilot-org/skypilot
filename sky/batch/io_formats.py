@@ -2,9 +2,9 @@
 
 Provides format classes aligned with Ray Data's API naming:
 
-- ``JsonInput``  -> ``read_json``
-- ``JsonOutput`` -> ``write_json``
-- ``ImageOutput`` -> ``write_images(column=...)``
+- ``JsonReader``  -> ``read_json``
+- ``JsonWriter`` -> ``write_json``
+- ``ImageWriter`` -> ``write_images(column=...)``
 
 Each class is both a descriptor (path, to_dict/from_dict) and a handler
 (__len__, download_batch, upload_batch, reduce_results).
@@ -207,7 +207,7 @@ class OutputWriter(ABC):
 
 @registry.INPUT_READER_REGISTRY.type_register(name='json')
 @dataclass
-class JsonInput(InputReader):
+class JsonReader(InputReader):
     """JSONL input reader.
 
     Corresponds to Ray Data's ``read_json``.
@@ -219,7 +219,7 @@ class JsonInput(InputReader):
 
     def __post_init__(self) -> None:
         if not self.path:
-            raise ValueError('JsonInput path cannot be empty')
+            raise ValueError('JsonReader path cannot be empty')
         supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
@@ -227,7 +227,7 @@ class JsonInput(InputReader):
                 f'Supported prefixes: {", ".join(supported_prefixes)}')
         if not self.path.endswith('.jsonl'):
             raise ValueError(
-                f'JsonInput path must end with .jsonl: {self.path}')
+                f'JsonReader path must end with .jsonl: {self.path}')
 
     def __len__(self) -> int:
         return len(utils.load_jsonl_from_cloud(self.path))
@@ -256,7 +256,7 @@ class JsonInput(InputReader):
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='json')
 @dataclass
-class JsonOutput(OutputWriter):
+class JsonWriter(OutputWriter):
     """JSONL output writer.
 
     Corresponds to Ray Data's ``write_json``.
@@ -275,7 +275,7 @@ class JsonOutput(OutputWriter):
         if isinstance(self.column, str):
             self.column = [self.column]
         if not self.path:
-            raise ValueError('JsonOutput path cannot be empty')
+            raise ValueError('JsonWriter path cannot be empty')
         supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
@@ -283,7 +283,7 @@ class JsonOutput(OutputWriter):
                 f'Supported prefixes: {", ".join(supported_prefixes)}')
         if not self.path.endswith('.jsonl'):
             raise ValueError(
-                f'JsonOutput path must end with .jsonl: {self.path}')
+                f'JsonWriter path must end with .jsonl: {self.path}')
 
     def upload_batch(self, results: List[Dict[str, Any]], start_idx: int,
                      end_idx: int, job_id: str) -> str:
@@ -304,7 +304,7 @@ class JsonOutput(OutputWriter):
 
 @registry.OUTPUT_WRITER_REGISTRY.type_register(name='image')
 @dataclass
-class ImageOutput(OutputWriter):
+class ImageWriter(OutputWriter):
     """Image directory output writer.
 
     Corresponds to Ray Data's ``write_images(column=...)``.
@@ -321,14 +321,14 @@ class ImageOutput(OutputWriter):
 
     def __post_init__(self) -> None:
         if not self.path:
-            raise ValueError('ImageOutput path cannot be empty')
+            raise ValueError('ImageWriter path cannot be empty')
         supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
                 f'Unsupported storage path: {self.path}. '
                 f'Supported prefixes: {", ".join(supported_prefixes)}')
         if not self.path.endswith('/'):
-            raise ValueError(f'ImageOutput path must end with /: {self.path}')
+            raise ValueError(f'ImageWriter path must end with /: {self.path}')
 
     def upload_batch(self, results: List[Dict[str, Any]], start_idx: int,
                      end_idx: int, job_id: str) -> str:

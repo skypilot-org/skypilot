@@ -12,12 +12,12 @@ Sky Batch enables scalable batch processing across cloud GPU/CPU clusters. Proce
 
 ## Step 1: Create a Dataset
 
-Create a dataset by wrapping an `InputReader`. Built-in readers include `JsonInput` for JSONL files in cloud storage:
+Create a dataset by wrapping an `InputReader`. Built-in readers include `JsonReader` for JSONL files in cloud storage:
 
 ```python
 import sky
 
-ds = sky.batch.Dataset(sky.batch.JsonInput("s3://my-bucket/prompts.jsonl"))
+ds = sky.batch.Dataset(sky.batch.JsonReader("s3://my-bucket/prompts.jsonl"))
 ```
 
 The JSONL file should have one JSON object per line, all following the same schema:
@@ -40,7 +40,7 @@ from sky.utils.registry import INPUT_READER_REGISTRY
 
 @INPUT_READER_REGISTRY.type_register(name='range')
 @dataclass
-class RangeInput(InputReader):
+class RangeReader(InputReader):
     count: int
 
     def __len__(self) -> int:
@@ -106,7 +106,7 @@ ds.map(
     llm_inference,
     pool_name=pool_name,
     batch_size=32,
-    output=sky.batch.JsonOutput("s3://my-bucket/output.jsonl"),
+    output=sky.batch.JsonWriter("s3://my-bucket/output.jsonl"),
 )
 ```
 
@@ -124,8 +124,8 @@ The mapper function runs on remote workers. Key constraints enforced by `@remote
 
 | Format | Description |
 |--------|-------------|
-| `JsonOutput(path, column=None)` | JSONL output. Optional `column` filters which keys to include. |
-| `ImageOutput(path, column='image')` | Saves PIL Images as individual PNGs to a directory. |
+| `JsonWriter(path, column=None)` | JSONL output. Optional `column` filters which keys to include. |
+| `ImageWriter(path, column='image')` | Saves PIL Images as individual PNGs to a directory. |
 
 **Multi-output** is supported by passing a list:
 
@@ -135,8 +135,8 @@ ds.map(
     pool_name=pool_name,
     batch_size=32,
     output=[
-        sky.batch.ImageOutput("s3://bucket/images/", column='image'),
-        sky.batch.JsonOutput("s3://bucket/manifest.jsonl", column=['prompt']),
+        sky.batch.ImageWriter("s3://bucket/images/", column='image'),
+        sky.batch.JsonWriter("s3://bucket/manifest.jsonl", column=['prompt']),
     ],
 )
 ```
