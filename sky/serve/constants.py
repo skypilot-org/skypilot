@@ -64,13 +64,13 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # When max_workers is set but queue_length_threshold is not specified,
 # this default threshold will be used.
 AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD = 1
-# The default controller resources. We need 200 GB disk space to enable using
-# Azure as controller, since its default image size is 150 GB.
+# The default controller resources. We use default 257 GB disk space to
+# enable using Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
 # Set default minimal memory to 8GB to allow at least one service to run.
-CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+', 'disk_size': 200}
+CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+'}
 # Autostop config for the jobs controller. These are the default values for
 # serve.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP = {
