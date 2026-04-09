@@ -638,6 +638,24 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def check_workspace_permission(user: models.User, workspace: str) -> None:
+    """Checks that a user has permission to access the given workspace.
+
+    Args:
+        user: The user making the request.
+        workspace: The workspace name to check.
+
+    Raises:
+        PermissionDeniedError: If the user does not have permission to access
+            the workspace.
+    """
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have '
+            f'permission to access workspace {workspace!r}')
+
+
 def reject_request_for_unauthorized_workspace(user: models.User) -> None:
     """Rejects a request that has no permission to access active workspace.
 
@@ -648,12 +666,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
         PermissionDeniedError: If the user does not have permission to access
             the active workspace.
     """
-    active_workspace = skypilot_config.get_active_workspace()
-    if not permission.permission_service.check_workspace_permission(
-            user.id, active_workspace):
-        raise exceptions.PermissionDeniedError(
-            f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {active_workspace!r}')
+    check_workspace_permission(user, skypilot_config.get_active_workspace())
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
