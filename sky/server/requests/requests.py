@@ -875,9 +875,15 @@ class RequestTaskFilter:
                 repr(name) for name in self.exclude_request_names)
             filters.append(f'name NOT IN ({exclude_request_names_str})')
         if self.cluster_names is not None:
-            cluster_names_str = ','.join(
-                repr(name) for name in self.cluster_names)
-            filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+            if len(self.cluster_names) == 0:
+                # Empty IN () is invalid SQL in PostgreSQL.
+                # An empty list means "match nothing".
+                filters.append('1=0')
+            else:
+                cluster_names_str = ','.join(
+                    repr(name) for name in self.cluster_names)
+                filters.append(
+                    f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
