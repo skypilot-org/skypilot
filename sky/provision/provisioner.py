@@ -50,12 +50,6 @@ logger = sky_logging.init_logger('sky.provisioner')
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
-# Clouds whose provisioner starts Ray asynchronously inside the provisioned
-# pod (via kubernetes-ray.yml.j2) and uses kubectl rather than SSH to run
-# commands on the pod. SSH node pools run on k3s under the hood, so they
-# share the same provisioning flow as the kubernetes cloud.
-_K8S_BASED_CLOUDS = ['kubernetes', 'ssh']
-
 
 def _bulk_provision(
     cloud: clouds.Cloud,
@@ -500,7 +494,8 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        is_k8s_cloud = cloud_name.lower() in _K8S_BASED_CLOUDS
+        is_k8s_cloud = cloud_name.lower(
+        ) in provision_constants.K8S_BASED_CLOUDS
         is_slurm_cloud = cloud_name.lower() == 'slurm'
         if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
@@ -657,7 +652,7 @@ def _post_provision_setup(
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
              head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
-        elif cloud_name.lower() in _K8S_BASED_CLOUDS:
+        elif cloud_name.lower() in provision_constants.K8S_BASED_CLOUDS:
             timeout = 90  # 1.5-min maximum timeout
             start = time.time()
             while True:
