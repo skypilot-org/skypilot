@@ -2149,6 +2149,10 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
     # Validate request_id prefix matches a single request.
     request_id = await get_expanded_request_id(request_id)
 
+    # Exponential backoff: start fast (10ms) for short requests like
+    # status/queue, then back off to 100ms for long requests like
+    # launch/exec.
+    poll_interval = 0.01
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -2161,9 +2165,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             break
         if req_status.status > requests_lib.RequestStatus.RUNNING:
             break
-        # yield control to allow other coroutines to run, sleep shortly
-        # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(poll_interval)
+        # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
+        poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
     # TODO(aylei): refine this, /api/get will not be retried and this is
     # meaningless to retry. It is the original request that should be retried.

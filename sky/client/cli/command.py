@@ -154,6 +154,18 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
 T = TypeVar('T')
 
 
+def _get_ws_proxy_command() -> str:
+    """Returns the ws-proxy command string.
+
+    Defaults to the Python websocket_proxy.py script. Plugins can
+    replace this function to prefer a native binary.
+    """
+    escaped_executable_path = shlex.quote(sys.executable)
+    escaped_websocket_proxy_path = shlex.quote(
+        f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+    return f'{escaped_executable_path} {escaped_websocket_proxy_path}'
+
+
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -179,6 +191,8 @@ def _get_cluster_records_and_set_ssh_config(
                             _include_credentials=True,
                             _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
+    # Cache the ws-proxy command (constant across clusters).
+    ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -206,9 +220,6 @@ def _get_cluster_records_and_set_ssh_config(
             escaped_key_path = shlex.quote(
                 (cluster_utils.SSHConfigHelper.generate_local_key_file(
                     handle.cluster_name, credentials)))
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -223,8 +234,7 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\"{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
+                f'\"{ws_proxy_cmd} '
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name} '
                 f'kubernetes-pod-ssh-proxy\"')
@@ -232,13 +242,9 @@ def _get_cluster_records_and_set_ssh_config(
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # %w is a placeholder for the node index, substituted per-node
             # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (f'{escaped_executable_path} '
-                             f'{escaped_websocket_proxy_path} '
+            proxy_command = (f'{ws_proxy_cmd} '
                              f'{server_common.get_server_url()} '
                              f'{handle.cluster_name} '
                              f'slurm-job-ssh-proxy %w')

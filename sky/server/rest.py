@@ -5,6 +5,7 @@ import contextlib
 import contextvars
 import functools
 import html
+import os
 import re
 import time
 import typing
@@ -58,6 +59,12 @@ _session.mount('https://', adapter)
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = (
     versions.get_local_readable_version())
+
+# Allow the client type to be set via environment variable.
+# Used by enterprise CLI distributions to identify themselves.
+_client_type = os.environ.get('SKYPILOT_CLIENT_TYPE')
+if _client_type:
+    _session.headers['X-SkyPilot-Client-Type'] = _client_type
 
 # Enumerate error types that might be transient and can be addressed by
 # retrying.

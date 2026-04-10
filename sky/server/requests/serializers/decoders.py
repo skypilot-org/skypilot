@@ -26,6 +26,29 @@ def decode_and_unpickle(obj: str) -> Any:
     return pickle.loads(base64.b64decode(obj.encode('utf-8')))
 
 
+def decode_handle(data: Any) -> Any:
+    """Decode a ResourceHandle from either a dict or pickle string."""
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        # pylint: disable=import-outside-toplevel
+        from sky.backends import cloud_vm_ray_backend
+        return cloud_vm_ray_backend.CloudVmRayResourceHandle.from_dict(data)
+    return decode_and_unpickle(data)
+
+
+def decode_resources(data: Any) -> Any:
+    """Decode a Resources object from either a dict or pickle string."""
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        # pylint: disable=import-outside-toplevel
+        from sky import resources as resources_lib
+        return resources_lib.Resources._from_yaml_config_single(  # pylint: disable=protected-access
+            data.copy())
+    return decode_and_unpickle(data)
+
+
 def register_decoders(*names: str):
     """Decorator to register a decoder."""
 
@@ -58,7 +81,7 @@ def decode_status(
     for cluster in clusters:
         # handle may not always be present in the response.
         if 'handle' in cluster and cluster['handle'] is not None:
-            cluster['handle'] = decode_and_unpickle(cluster['handle'])
+            cluster['handle'] = decode_handle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
         if 'is_managed' not in cluster:
             cluster['is_managed'] = False
@@ -93,12 +116,12 @@ def decode_status_kubernetes(
 def decode_launch(
     return_value: Dict[str, Any]
 ) -> Tuple[str, 'backends.CloudVmRayResourceHandle']:
-    return return_value['job_id'], decode_and_unpickle(return_value['handle'])
+    return return_value['job_id'], decode_handle(return_value['handle'])
 
 
 @register_decoders('start')
 def decode_start(return_value: str) -> 'backends.CloudVmRayResourceHandle':
-    return decode_and_unpickle(return_value)
+    return decode_handle(return_value)
 
 
 @register_decoders('queue')
@@ -155,7 +178,7 @@ def _decode_serve_status(
         for replica_info in service_status.get('replica_info', []):
             replica_info['status'] = serve_state.ReplicaStatus(
                 replica_info['status'])
-            replica_info['handle'] = decode_and_unpickle(replica_info['handle'])
+            replica_info['handle'] = decode_handle(replica_info['handle'])
     return service_statuses
 
 
@@ -176,7 +199,7 @@ def decode_cost_report(
         if cluster_report['status'] is not None:
             cluster_report['status'] = status_lib.ClusterStatus(
                 cluster_report['status'])
-        cluster_report['resources'] = decode_and_unpickle(
+        cluster_report['resources'] = decode_resources(
             cluster_report['resources'])
     return return_value
 
