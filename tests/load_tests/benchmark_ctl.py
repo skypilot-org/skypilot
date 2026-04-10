@@ -207,8 +207,7 @@ def collect_results(names: List[str], output_dir: str) -> List[Dict[str, Any]]:
         local_dir = os.path.join(output_dir, f'worker_{i}')
         os.makedirs(local_dir, exist_ok=True)
         try:
-            # Use markers to reliably extract JSON from sky exec output,
-            # since every line is prefixed with "(sky-cmd, pid=XXXX) ".
+            # Use markers to reliably extract JSON from sky exec output.
             marker = f'BENCH_RESULT_{i}'
             cat_cmd = (f"sky exec -c {name} "
                        f"'echo {marker}_START && "
@@ -219,13 +218,20 @@ def collect_results(names: List[str], output_dir: str) -> List[Dict[str, Any]]:
                 print(f'  {name}: failed to read results', flush=True)
                 continue
 
-            # Strip "(sky-cmd, pid=...) " prefix and extract between markers
-            prefix_re = re.compile(r'^\(sky-cmd, pid=\d+\)\s?')
-            lines = result.stdout.splitlines()
+            # Search both stdout and stderr — sky exec may stream to
+            # either depending on the backend (SSH vs gRPC).
+            raw_output = (result.stdout or '') + (result.stderr or '')
+
+            # Strip ANSI escape codes and any "(prefix, pid=...) " from
+            # sky exec output, then extract JSON between markers.
+            ansi_re = re.compile(r'\x1b\[[0-9;]*m')
+            prefix_re = re.compile(r'^\([^)]*\)\s?')
+            lines = raw_output.splitlines()
             collecting = False
             json_lines = []
             for line in lines:
-                stripped = prefix_re.sub('', line)
+                stripped = ansi_re.sub('', line)
+                stripped = prefix_re.sub('', stripped)
                 if f'{marker}_START' in stripped:
                     collecting = True
                     continue
@@ -235,7 +241,13 @@ def collect_results(names: List[str], output_dir: str) -> List[Dict[str, Any]]:
                     json_lines.append(stripped)
 
             if not json_lines:
-                print(f'  {name}: no results found', flush=True)
+                print(f'  {name}: no results found between markers', flush=True)
+                # Dump first/last lines for debugging
+                if lines:
+                    print(
+                        f'    (output has {len(lines)} lines, '
+                        f'first: {lines[0][:120]!r})',
+                        flush=True)
                 continue
 
             json_str = '\n'.join(json_lines)
