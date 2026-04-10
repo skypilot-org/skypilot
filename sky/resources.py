@@ -2448,6 +2448,7 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
+            # TODO (kyuds): remove after v0.14.0
             disk_size_val = int(
                 resources_utils.parse_memory_resource(
                     str(resources_fields['disk_size']), 'disk_size'))
