@@ -37,7 +37,7 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
     async def acquire_upload_lock(self, user_id: str, blob_id: str):
 
         locks_dir = self.blobs_dir(user_id) / '.locks'
-        locks_dir.mkdir(parents=True, exist_ok=True)
+        await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
         lock = filelock.AsyncFileLock(
             lock_file=str(locks_dir / f'{blob_id}.lock'),
             executor=executor.get_request_thread_executor(),
