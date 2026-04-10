@@ -28,6 +28,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
@@ -199,6 +200,7 @@ class StrategyExecutor:
         executor.set_strategy_config(strategy_config)
         return executor
 
+    @context.contextual_async
     async def launch(self) -> float:
         """Launch the cluster for the first time.
 
