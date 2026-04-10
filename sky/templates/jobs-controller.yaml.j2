@@ -23,6 +23,10 @@ file_mounts:
   {%- endif %}
   {%- endif %}
 
+# The remote jobs controller needs to be able to communicate to the local API server it starts.
+# It should not use the remote API server.
+api_server_access: false
+
 # NOTE(dev): This needs to be a subset of sky/templates/sky-serve-controller.yaml.j2.
 # It is because we use the --fast flag to submit jobs and no --fast flag to launch pools.
 # So when we launch a new pool, it will install the required dependencies.
