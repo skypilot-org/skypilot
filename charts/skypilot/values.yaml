@@ -202,6 +202,14 @@ apiService:
   tolerations: []
   affinity: {}
 
+  # Spread API server pods across topology domains (e.g., zones).
+  # When set, a topologySpreadConstraints entry is rendered with
+  # maxSkew=1, whenUnsatisfiable=DoNotSchedule, and a labelSelector
+  # that matches the API server pods automatically.
+  # Example: "topology.kubernetes.io/zone"
+  # @schema type: [string, null]
+  topologySpreadTopologyKey: null
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
