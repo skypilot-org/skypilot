@@ -615,46 +615,14 @@ def _should_kill_request(request_id: str,
 
 def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
-    """Kill a SkyPilot API request and set its status to cancelled.
+    """Kill SkyPilot API requests and set their status to cancelled.
 
-    Args:
-        request_ids: The request IDs to kill. If None, all requests for the
-            user are killed.
-        user_id: The user ID to kill requests for. If None, all users are
-            killed.
-
-    Returns:
-        A list of request IDs that were cancelled.
+    Delegates to the registered request backend, which handles local
+    process killing and (for multi-replica backends) cross-replica
+    cancellation.
     """
-    storage = request_storage.get_request_storage()
-    if request_ids is None:
-        request_ids = [
-            request_task.request_id
-            for request_task in storage.query_requests(
-                req_filter=RequestTaskFilter(
-                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-                    # Avoid cancelling the cancel request itself.
-                    exclude_request_names=['sky.api_cancel'],
-                    user_id=user_id,
-                    fields=['request_id']))
-        ]
-    cancelled_request_ids = []
-    for request_id in request_ids:
-        with storage.update_request(request_id) as request_record:
-            if not _should_kill_request(request_id, request_record):
-                continue
-            if request_record.pid is not None:
-                logger.debug(f'Killing request process {request_record.pid}')
-                # Use SIGTERM instead of SIGKILL:
-                # - The executor can handle SIGTERM gracefully
-                # - After SIGTERM, the executor can reuse the request process
-                #   for other requests, avoiding the overhead of forking a new
-                #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
-            request_record.status = RequestStatus.CANCELLED
-            request_record.finished_at = time.time()
-            cancelled_request_ids.append(request_id)
-    return cancelled_request_ids
+    return request_storage.get_request_backend().kill_requests(
+        request_ids=request_ids, user_id=user_id)
 
 
 @asyncio_utils.shield
@@ -1172,8 +1140,8 @@ def _cleanup():
 atexit.register(_cleanup)
 
 
-class SqliteRequestStorage(request_storage.RequestStorageBackend):
-    """SQLite-based request storage."""
+class SqliteRequestBackend(request_storage.RequestBackend):
+    """SQLite-based request backend."""
 
     @init_db
     def get_request(self,
@@ -1300,6 +1268,33 @@ class SqliteRequestStorage(request_storage.RequestStorageBackend):
             if request is not None:
                 request.status_msg = status_msg
                 await _add_or_update_request_no_lock_async(request)
+
+    @init_db
+    def kill_requests(self,
+                      request_ids: Optional[List[str]] = None,
+                      user_id: Optional[str] = None) -> List[str]:
+        if request_ids is None:
+            request_ids = [
+                r.request_id for r in self.query_requests(
+                    req_filter=RequestTaskFilter(
+                        status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                        exclude_request_names=['sky.api_cancel'],
+                        user_id=user_id,
+                        fields=['request_id']))
+            ]
+        cancelled = []
+        for request_id in request_ids:
+            with self.update_request(request_id) as request_record:
+                if not _should_kill_request(request_id, request_record):
+                    continue
+                if request_record.pid is not None:
+                    logger.debug(
+                        f'Killing request process {request_record.pid}')
+                    os.kill(request_record.pid, signal.SIGTERM)
+                request_record.status = RequestStatus.CANCELLED
+                request_record.finished_at = time.time()
+                cancelled.append(request_id)
+        return cancelled
 
     @init_db_async
     @asyncio_utils.shield
@@ -1445,3 +1440,7 @@ class SqliteRequestStorage(request_storage.RequestStorageBackend):
                 raise RuntimeError(
                     f'SQLite version {version_str} is not supported. '
                     'Please upgrade to SQLite 3.35.0 or later.')
+
+
+# Backward-compat alias
+SqliteRequestStorage = SqliteRequestBackend
