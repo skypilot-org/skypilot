@@ -333,11 +333,6 @@ class RequestWorker:
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
     factory = _queue_factory
     if factory is None:
-        # In deploy mode with multiple uvicorn workers, executor.start()
-        # only runs in the main process. Worker processes may have a
-        # plugin-registered factory (e.g., PgQueueFactory) that was set
-        # during plugin.install() but not yet copied to the executor
-        # module-level variable.
         factory = queue_base.get_queue_backend_factory()
     assert factory is not None, (
         'Queue factory not initialized. Call executor.start() first.')
@@ -878,12 +873,10 @@ def start(
         threads.
     """
     global _queue_factory
-
-    # Use plugin-provided factory if registered, otherwise create based on
-    # server config.
-    plugin_factory = queue_base.get_queue_backend_factory()
-    if plugin_factory is not None:
-        _queue_factory = plugin_factory
+    factory = queue_base.get_queue_backend_factory()
+    # Use specified factory if any, and fallback to default impl
+    if factory is not None:
+        _queue_factory = factory
     elif config.queue_backend == server_config.QueueBackend.MULTIPROCESSING:
         _queue_factory = queue_base.MultiprocessingQueueFactory()
     elif config.queue_backend == server_config.QueueBackend.LOCAL:
@@ -891,7 +884,6 @@ def start(
     else:
         raise RuntimeError(f'Invalid queue backend: {config.queue_backend}')
 
-    logger.info('Creating shared request queues')
     queue_server = _queue_factory.start()
     logger.info('Request queues created')
 

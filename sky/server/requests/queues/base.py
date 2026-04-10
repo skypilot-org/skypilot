@@ -1,24 +1,21 @@
-"""Abstract interfaces for request queue backends.
+"""Abstract interfaces for request queue backends."""
 
-The default implementations wrap the existing local_queue and mp_queue
-modules. Plugins may provide alternative implementations (e.g., PostgreSQL
-SKIP LOCKED queues) via ExtensionContext.register_queue_backend_factory().
-"""
 import abc
 import multiprocessing
 import queue as queue_lib
 from typing import List, Optional, Tuple
 
 from sky import sky_logging
+from sky.utils import common_utils
+from sky.server.requests import requests as api_requests
+from sky.server.requests.queues import local_queue
+from sky.server.requests.queues import mp_queue
 
 logger = sky_logging.init_logger(__name__)
 
 
 class QueueBackend(abc.ABC):
-    """Abstract queue that the RequestWorker polls.
-
-    Queue items are tuples of (request_id, ignore_return_value, retryable).
-    """
+    """Abstract queue backend."""
 
     @abc.abstractmethod
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -37,11 +34,7 @@ class QueueBackend(abc.ABC):
 
 
 class QueueBackendFactory(abc.ABC):
-    """Creates queue instances and manages queue infrastructure.
-
-    The factory is responsible for any required infrastructure (e.g., starting
-    a queue manager process for multiprocessing queues).
-    """
+    """Creates queue instances and manages queue infrastructure."""
 
     @abc.abstractmethod
     def create_queue(self, schedule_type: str) -> QueueBackend:
@@ -67,16 +60,10 @@ class QueueBackendFactory(abc.ABC):
             process.kill()
 
 
-# ---------------------------------------------------------------------------
-# Default implementations wrapping existing local_queue / mp_queue
-# ---------------------------------------------------------------------------
-
-
 class LocalQueueBackend(QueueBackend):
     """Process-local queue (thread-safe, no IPC)."""
 
     def __init__(self, queue_name: str):
-        from sky.server.requests.queues import local_queue
         self._queue = local_queue.get_queue(queue_name)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -96,7 +83,6 @@ class MultiprocessingQueueBackend(QueueBackend):
     """Queue backed by a multiprocessing.Queue via a manager."""
 
     def __init__(self, queue_name: str, port: int):
-        from sky.server.requests.queues import mp_queue
         self._queue = mp_queue.get_queue(queue_name, port)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -123,7 +109,6 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
     """Factory for multiprocessing queues with a shared manager."""
 
     def __init__(self, port: Optional[int] = None):
-        from sky.server.requests.queues import mp_queue
         self._port = (port if port is not None else
                       mp_queue.DEFAULT_QUEUE_MANAGER_PORT)
 
@@ -131,8 +116,6 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
         return MultiprocessingQueueBackend(schedule_type, self._port)
 
     def start(self) -> Optional[multiprocessing.Process]:
-        from sky.server.requests.queues import mp_queue
-        from sky.utils import common_utils
 
         if not common_utils.is_port_available(self._port):
             raise RuntimeError(
@@ -151,7 +134,6 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
 
     @staticmethod
     def _get_queue_names() -> List[str]:
-        from sky.server.requests import requests as api_requests
         return [st.value for st in api_requests.ScheduleType]
 
 
@@ -159,18 +141,11 @@ _queue_backend_factory: Optional[QueueBackendFactory] = None
 
 
 def get_queue_backend_factory() -> QueueBackendFactory:
-    """Get the registered queue backend factory.
-
-    Returns the plugin-provided factory if one has been registered,
-    otherwise returns None (caller should create based on server config).
-    """
+    """Get the registered queue backend factory."""
     return _queue_backend_factory
 
 
 def set_queue_backend_factory(factory: QueueBackendFactory) -> None:
-    """Set the queue backend factory.
-
-    Called by plugins via ExtensionContext.register_queue_backend_factory().
-    """
+    """Set the queue backend factory."""
     global _queue_backend_factory
     _queue_backend_factory = factory

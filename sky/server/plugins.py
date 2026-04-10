@@ -99,11 +99,7 @@ class ExtensionContext:
         self,
         backend: 'RequestBackend',
     ) -> None:
-        """Register a custom request backend.
-
-        This allows plugins to replace the default SQLite-based request
-        backend with an alternative implementation (e.g., PostgreSQL).
-        """
+        """Register a custom request backend."""
         from sky.server.requests.storage import set_request_backend
         set_request_backend(backend)
 
@@ -128,11 +124,7 @@ class ExtensionContext:
         self,
         log_provider: 'LogProvider',
     ) -> None:
-        """Register a custom log provider.
-
-        This allows plugins to replace the default local log streaming
-        with an implementation that can proxy to remote replicas.
-        """
+        """Register a custom log provider."""
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
 

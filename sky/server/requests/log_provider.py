@@ -10,12 +10,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 class LogProvider(abc.ABC):
-    """Abstract interface for streaming request logs.
-
-    The default implementation reads logs from the local filesystem.
-    Plugins can replace this with an implementation that proxies to
-    remote replicas when the request's log file is not local.
-    """
+    """Abstract interface for backing request logs."""
 
     @abc.abstractmethod
     async def log_stream(
@@ -45,7 +40,7 @@ class LogProvider(abc.ABC):
 
 
 class LocalLogProvider(LogProvider):
-    """Default log provider that reads from local files."""
+    """Default log provider."""
 
     async def log_stream(
         self,
@@ -71,7 +66,7 @@ _log_provider: Optional[LogProvider] = None
 
 
 def get_log_provider() -> LogProvider:
-    """Return the current log provider, defaulting to LocalLogProvider."""
+    """Return the current log provider."""
     global _log_provider
     if _log_provider is None:
         _log_provider = LocalLogProvider()
@@ -79,6 +74,6 @@ def get_log_provider() -> LogProvider:
 
 
 def set_log_provider(lp: LogProvider) -> None:
-    """Replace the log provider (called by plugins at install time)."""
+    """Replace the log provider."""
     global _log_provider
     _log_provider = lp

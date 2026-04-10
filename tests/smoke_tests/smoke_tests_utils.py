@@ -1281,12 +1281,7 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = (f'{prefix} sky check 2>&1 | '
-                   # Strip ANSI escape codes so awk field positions are
-                   # stable regardless of terminal settings.
-                   r"sed 's/\x1b\[[0-9;]*m//g' | "
-                   'grep enabled | grep storage | '
-                   'awk "{{print \\$1}}"')
+        command = f'{prefix} sky check | grep enabled | grep storage | awk "{{print \\$2}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,

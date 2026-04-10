@@ -1,9 +1,4 @@
-"""Abstract interface for request persistence.
-
-The default implementation uses SQLite with file-based locking.
-Plugins may provide alternative implementations (e.g., PostgreSQL)
-via ExtensionContext.register_request_storage().
-"""
+"""Abstract interface for request persistence."""
 from __future__ import annotations
 
 import abc
@@ -18,8 +13,6 @@ if TYPE_CHECKING:
 
 class RequestBackend(abc.ABC):
     """Abstract interface for request persistence and lifecycle."""
-
-    # --- Core CRUD ---
 
     @abc.abstractmethod
     def get_request(self,
@@ -84,8 +77,6 @@ class RequestBackend(abc.ABC):
         """Delete requests by their IDs."""
         raise NotImplementedError
 
-    # --- Status updates ---
-
     @abc.abstractmethod
     async def update_status_async(self, request_id: str,
                                   status: RequestStatus) -> None:
@@ -104,14 +95,6 @@ class RequestBackend(abc.ABC):
                       user_id: Optional[str] = None) -> List[str]:
         """Kill requests and set their status to CANCELLED.
 
-        If request_ids is None, kills all PENDING/RUNNING requests for
-        the given user_id (or all users if user_id is also None).
-
-        For the default (SQLite) implementation, this sends SIGTERM to
-        local request processes. Alternative implementations may handle
-        cross-replica cancellation (e.g., setting status in DB for the
-        owning replica's heartbeat to detect and kill).
-
         Returns:
             A list of request IDs that were cancelled.
         """
@@ -125,8 +108,6 @@ class RequestBackend(abc.ABC):
             True if the request was killed, False otherwise.
         """
         raise NotImplementedError
-
-    # --- Specialized queries ---
 
     @abc.abstractmethod
     async def get_latest_request_id_async(self) -> Optional[str]:
@@ -168,8 +149,6 @@ class RequestBackend(abc.ABC):
         """Get blob IDs referenced by active (PENDING/RUNNING) requests."""
         raise NotImplementedError
 
-    # --- Lifecycle ---
-
     def reset_on_startup(self) -> None:
         """Called on server startup for backend-specific initialization.
 
@@ -179,39 +158,20 @@ class RequestBackend(abc.ABC):
         """
 
 
-# Backward-compat alias
-RequestStorageBackend = RequestBackend
-
 _storage_backend: Optional[RequestBackend] = None
 
 
 def get_request_backend() -> RequestBackend:
-    """Get the registered request backend.
-
-    Returns the plugin-provided backend if one has been registered,
-    otherwise lazily creates and returns the default SqliteRequestBackend.
-    """
+    """Get the registered request backend."""
     global _storage_backend
     if _storage_backend is None:
-        # Lazy import to avoid circular dependency: storage.py is imported
-        # by requests.py, and SqliteRequestBackend is defined in requests.py.
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.requests import SqliteRequestBackend
         _storage_backend = SqliteRequestBackend()
     return _storage_backend
 
 
-# Backward-compat alias
-get_request_storage = get_request_backend
-
-
 def set_request_backend(backend: RequestBackend) -> None:
-    """Set the request backend.
-
-    Called by plugins via ExtensionContext.register_request_storage().
-    """
+    """Set the request backend."""
     global _storage_backend
     _storage_backend = backend
-
-
-# Backward-compat alias
-set_request_storage = set_request_backend

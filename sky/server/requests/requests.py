@@ -1440,7 +1440,3 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 raise RuntimeError(
                     f'SQLite version {version_str} is not supported. '
                     'Please upgrade to SQLite 3.35.0 or later.')
-
-
-# Backward-compat alias
-SqliteRequestStorage = SqliteRequestBackend
