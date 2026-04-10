@@ -2448,9 +2448,19 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            # although it will end up being an int, we don't know at this point
-            # if it has units or not, so we store it as a string
-            resources_fields['disk_size'] = str(resources_fields['disk_size'])
+            disk_size_val = int(
+                resources_utils.parse_memory_resource(
+                    str(resources_fields['disk_size']), 'disk_size'))
+            if disk_size_val == DEFAULT_DISK_SIZE_GB:
+                # Treat the default value as unspecified so that older
+                # configs that always emitted disk_size: 256 don't
+                # trigger ephemeral-storage requests on Kubernetes.
+                resources_fields['disk_size'] = None
+            else:
+                # although it will end up being an int, we don't know at
+                # this point if it has units or not, so we store as string
+                resources_fields['disk_size'] = str(
+                    resources_fields['disk_size'])
         if resources_fields['local_disk'] is not None:
             # may be integer by only specifying exact size.
             resources_fields['local_disk'] = str(resources_fields['local_disk'])
