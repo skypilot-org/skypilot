@@ -88,6 +88,32 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
+// Resource utilization badge with green/amber/red coloring
+// green < 70%, amber 70-89%, red >= 90%
+const ResourceUtilBadge = ({ pct, label }) => {
+  if (pct == null || isNaN(pct)) return null;
+  const rounded = Math.round(pct);
+  let colorClass;
+  if (rounded >= 90) {
+    colorClass =
+      'bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20';
+  } else if (rounded >= 70) {
+    colorClass =
+      'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20';
+  } else {
+    colorClass =
+      'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20';
+  }
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ml-1.5 ${colorClass}`}
+      title={label ? `${label}: ${rounded}% utilized` : `${rounded}% utilized`}
+    >
+      {rounded}%
+    </span>
+  );
+};
+
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
   gpu,
@@ -782,6 +808,7 @@ export function ContextDetails({
                   {nodesInContext.map((node, index) => {
                     // Format CPU display: "X of Y free" or just "Y" if free is unknown
                     let cpuDisplay = '-';
+                    let cpuUtilPct = null;
                     if (
                       node.cpu_count !== null &&
                       node.cpu_count !== undefined
@@ -793,6 +820,12 @@ export function ContextDetails({
                       ) {
                         const cpuFree = formatCpu(node.cpu_free);
                         cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                        cpuUtilPct =
+                          node.cpu_count > 0
+                            ? ((node.cpu_count - node.cpu_free) /
+                                node.cpu_count) *
+                              100
+                            : null;
                       } else {
                         cpuDisplay = cpuTotal;
                       }
@@ -801,6 +834,7 @@ export function ContextDetails({
                     // Format memory display: "X of Y free" or just "Y" if free is unknown
                     // (GB is in column header, so don't include it in values)
                     let memoryDisplay = '-';
+                    let memUtilPct = null;
                     if (
                       node.memory_gb !== null &&
                       node.memory_gb !== undefined
@@ -812,6 +846,12 @@ export function ContextDetails({
                       ) {
                         const memoryFree = node.memory_free_gb.toFixed(1);
                         memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                        memUtilPct =
+                          node.memory_gb > 0
+                            ? ((node.memory_gb - node.memory_free_gb) /
+                                node.memory_gb) *
+                              100
+                            : null;
                       } else {
                         memoryDisplay = memoryTotal;
                       }
@@ -876,9 +916,17 @@ export function ContextDetails({
                             </td>
                             <td className="p-3 whitespace-nowrap text-gray-700">
                               {cpuDisplay}
+                              <ResourceUtilBadge
+                                pct={cpuUtilPct}
+                                label="CPU"
+                              />
                             </td>
                             <td className="p-3 whitespace-nowrap text-gray-700">
                               {memoryDisplay}
+                              <ResourceUtilBadge
+                                pct={memUtilPct}
+                                label="Mem"
+                              />
                             </td>
                           </>
                         )}
