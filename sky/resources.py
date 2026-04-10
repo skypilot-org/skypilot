@@ -2553,6 +2553,8 @@ class Resources:
         # _disk_size is always serialized as int so that older SkyPilot
         # versions (which expect int) can unpickle safely.
         state['_disk_size_specified'] = state.get('_disk_size') is not None
+        # TODO (kyuds): remove the always serialized to int and forward compat
+        # in v0.14.0
         if state['_disk_size'] is None:
             state['_disk_size'] = DEFAULT_DISK_SIZE_GB
         # Forward compat: older versions expect _ephemeral_storage to exist
