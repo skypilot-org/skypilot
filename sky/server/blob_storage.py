@@ -18,6 +18,7 @@ import time
 from typing import Generator, List, Optional, Tuple
 
 import filelock
+
 from sky import sky_logging
 from sky.skylet import constants
 
@@ -46,12 +47,11 @@ class BlobStorage(abc.ABC):
         For SharedFS: wraps a PG advisory lock.
         """
         raise NotImplementedError
-        yield  # make this an async generator for type checking
+        yield  # pylint: disable=unreachable
 
     @abc.abstractmethod
-    async def store_blob(
-        self, user_id: str, blob_id: str, staging_dir: pathlib.Path
-    ) -> None:
+    async def store_blob(self, user_id: str, blob_id: str,
+                         staging_dir: pathlib.Path) -> None:
         """Atomically move a staging directory to the final blob location.
 
         Called inside ``acquire_upload_lock``.  The *staging_dir* already
@@ -140,14 +140,11 @@ class LocalFilesystemBlobStorage(BlobStorage):
     """
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
+        # pylint: disable=import-outside-toplevel
         from sky.server import common as server_common
 
-        return (
-            server_common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-            / user_id
-            / 'file_mounts'
-            / 'blobs'
-        )
+        return (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                user_id / 'file_mounts' / 'blobs')
 
     # --- Async ---
 
@@ -160,6 +157,7 @@ class LocalFilesystemBlobStorage(BlobStorage):
 
     @contextlib.asynccontextmanager
     async def acquire_upload_lock(self, user_id: str, blob_id: str):
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests import executor
 
         locks_dir = self.blobs_dir(user_id) / '.locks'
@@ -171,10 +169,9 @@ class LocalFilesystemBlobStorage(BlobStorage):
         async with lock:
             yield
 
-    async def store_blob(
-        self, user_id: str, blob_id: str, staging_dir: pathlib.Path
-    ) -> None:
-        import asyncio
+    async def store_blob(self, user_id: str, blob_id: str,
+                         staging_dir: pathlib.Path) -> None:
+        import asyncio  # pylint: disable=import-outside-toplevel
 
         target = self.get_target_dir(user_id, blob_id)
         await asyncio.to_thread(os.rename, str(staging_dir), str(target))
@@ -186,8 +183,7 @@ class LocalFilesystemBlobStorage(BlobStorage):
         if not target.is_dir():
             raise FileNotFoundError(
                 f'Blob not found: {target}. The file mounts blob may '
-                'have been garbage collected before execution started.'
-            )
+                'have been garbage collected before execution started.')
         return str(target)
 
     def delete_blob(self, user_id: str, blob_id: str) -> None:
@@ -224,6 +220,7 @@ class LocalFilesystemBlobStorage(BlobStorage):
                     pass
 
     def list_users(self) -> List[str]:
+        # pylint: disable=import-outside-toplevel
         from sky.server import common as server_common
 
         clients_dir = server_common.API_SERVER_CLIENT_DIR.expanduser().resolve()

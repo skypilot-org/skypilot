@@ -1109,7 +1109,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Hard link the files in src to a temporary directory, and upload folder.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    from sky.server import blob_storage  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from sky.server import blob_storage
     base_tmp_dir = blob_storage.get_blob_storage().file_mounts_tmp_dir()
     os.makedirs(base_tmp_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:

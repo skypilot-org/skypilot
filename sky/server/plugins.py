@@ -111,8 +111,8 @@ class ExtensionContext:
         This allows plugins to replace the default SQLite-based request
         backend with an alternative implementation (e.g., PostgreSQL).
         """
-        from sky.server.requests.storage import (
-            set_request_backend)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.storage import set_request_backend
         set_request_backend(backend)
 
     def register_queue_backend_factory(
@@ -124,8 +124,8 @@ class ExtensionContext:
         This allows plugins to replace the default multiprocessing/local
         queue with an alternative implementation (e.g., PostgreSQL SKIP LOCKED).
         """
-        from sky.server.requests.queues.base import (
-            set_queue_backend_factory)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.queues.base import set_queue_backend_factory
         set_queue_backend_factory(factory)
 
     def register_blob_storage(
@@ -137,8 +137,8 @@ class ExtensionContext:
         This allows plugins to replace the default local filesystem blob
         storage with an alternative (e.g., shared FS with PG locks).
         """
-        from sky.server.blob_storage import (
-            set_blob_storage)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.server.blob_storage import set_blob_storage
         set_blob_storage(backend)
 
     def register_log_provider(
@@ -150,8 +150,8 @@ class ExtensionContext:
         This allows plugins to replace the default local log streaming
         with an implementation that can proxy to remote replicas.
         """
-        from sky.server.requests.log_provider import (
-            set_log_provider)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.log_provider import set_log_provider
         set_log_provider(log_provider)
 
     def register_rbac_rule(self,

@@ -42,7 +42,7 @@ class LogProvider(abc.ABC):
             Log content strings.
         """
         raise NotImplementedError
-        yield  # Make this an async generator for type checking
+        yield  # pylint: disable=unreachable
 
 
 class LocalLogProvider(LogProvider):

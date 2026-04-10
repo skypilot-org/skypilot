@@ -76,6 +76,8 @@ class LocalQueueBackend(QueueBackend):
     """Process-local queue (thread-safe, no IPC)."""
 
     def __init__(self, queue_name: str):
+        super().__init__()
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.queues import local_queue
         self._queue = local_queue.get_queue(queue_name)
 
@@ -96,6 +98,8 @@ class MultiprocessingQueueBackend(QueueBackend):
     """Queue backed by a multiprocessing.Queue via a manager."""
 
     def __init__(self, queue_name: str, port: int):
+        super().__init__()
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.queues import mp_queue
         self._queue = mp_queue.get_queue(queue_name, port)
 
@@ -123,6 +127,8 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
     """Factory for multiprocessing queues with a shared manager."""
 
     def __init__(self, port: Optional[int] = None):
+        super().__init__()
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.queues import mp_queue
         self._port = (port if port is not None else
                       mp_queue.DEFAULT_QUEUE_MANAGER_PORT)
@@ -131,6 +137,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
         return MultiprocessingQueueBackend(schedule_type, self._port)
 
     def start(self) -> Optional[multiprocessing.Process]:
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.queues import mp_queue
         from sky.utils import common_utils
 
@@ -150,6 +157,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
 
     @staticmethod
     def _get_queue_names() -> List[str]:
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests import requests as api_requests
         return [st.value for st in api_requests.ScheduleType]
 

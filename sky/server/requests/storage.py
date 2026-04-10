@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import abc
 import contextlib
-from typing import (TYPE_CHECKING, AsyncGenerator, Generator, List, Optional,
-                    Set)
+from typing import AsyncGenerator, Generator, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sky.server.requests.requests import (Request, RequestStatus,
-                                              RequestTaskFilter, StatusWithMsg)
+    from sky.server.requests.requests import Request
+    from sky.server.requests.requests import RequestStatus
+    from sky.server.requests.requests import RequestTaskFilter
+    from sky.server.requests.requests import StatusWithMsg
 
 
 class RequestBackend(abc.ABC):
@@ -39,8 +40,7 @@ class RequestBackend(abc.ABC):
     @abc.abstractmethod
     @contextlib.contextmanager
     def update_request(
-            self,
-            request_id: str) -> Generator[Optional[Request], None, None]:
+            self, request_id: str) -> Generator[Optional[Request], None, None]:
         """Atomic read-modify-write with appropriate locking.
 
         Yields the request object. Caller modifies it in-place. On context
@@ -52,11 +52,10 @@ class RequestBackend(abc.ABC):
     @abc.abstractmethod
     @contextlib.asynccontextmanager
     async def update_request_async(
-            self,
-            request_id: str) -> AsyncGenerator[Optional[Request], None]:
+            self, request_id: str) -> AsyncGenerator[Optional[Request], None]:
         """Async version of update_request."""
         raise NotImplementedError
-        yield  # Make this an async generator for type checking
+        yield  # pylint: disable=unreachable
 
     @abc.abstractmethod
     async def create_if_not_exists_async(self, request: Request) -> bool:
@@ -68,8 +67,7 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def query_requests(self,
-                       req_filter: RequestTaskFilter) -> List[Request]:
+    def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
         """Query requests matching the filter."""
         raise NotImplementedError
 
@@ -158,8 +156,8 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def get_api_request_ids_start_with(
-            self, incomplete: str) -> List[str]:
+    async def get_api_request_ids_start_with(self,
+                                             incomplete: str) -> List[str]:
         """Get request IDs for shell completion."""
         raise NotImplementedError
 
@@ -195,6 +193,7 @@ def get_request_backend() -> RequestBackend:
     if _storage_backend is None:
         # Lazy import to avoid circular dependency: storage.py is imported
         # by requests.py, and SqliteRequestBackend is defined in requests.py.
+        # pylint: disable-next=import-outside-toplevel
         from sky.server.requests.requests import SqliteRequestBackend
         _storage_backend = SqliteRequestBackend()
     return _storage_backend

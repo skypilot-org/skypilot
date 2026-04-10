@@ -573,6 +573,7 @@ async def cleanup_unreferenced_file_mounts():
     # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
     # blocking the event loop.
     def _do_cleanup():
+        # pylint: disable=import-outside-toplevel
         from sky.server.blob_storage import get_blob_storage
         storage = get_blob_storage()
 
@@ -1473,6 +1474,7 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
+    # pylint: disable=import-outside-toplevel
     from sky.server.blob_storage import get_blob_storage
     exists = await get_blob_storage().blob_exists(user_id, blob_id)
     return {'exists': exists}
@@ -1496,6 +1498,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
 
+    # pylint: disable=import-outside-toplevel
     from sky.server.blob_storage import get_blob_storage
     storage = get_blob_storage()
 

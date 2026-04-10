@@ -947,6 +947,7 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
+    # pylint: disable=import-outside-toplevel
     from sky.server.blob_storage import get_blob_storage
     storage = get_blob_storage()
     # TODO(aylei): remove debug logging after HA blob storage is stable.
