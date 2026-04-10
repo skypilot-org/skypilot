@@ -47,8 +47,8 @@ class RequestBackend(abc.ABC):
     async def update_request_async(
             self, request_id: str) -> AsyncGenerator[Optional[Request], None]:
         """Async version of update_request."""
-        raise NotImplementedError
-        yield  # Make this an async generator for type checking
+        del request_id
+        yield None
 
     @abc.abstractmethod
     async def create_if_not_exists_async(self, request: Request) -> bool:

@@ -33,7 +33,8 @@ class BlobStorage(abc.ABC):
         For LocalFilesystem: wraps ``filelock.AsyncFileLock``.
         For SharedFS: wraps a PG advisory lock.
         """
-        yield
+        del user_id, blob_id
+        yield None
 
     @abc.abstractmethod
     async def store_blob(self, user_id: str, blob_id: str,

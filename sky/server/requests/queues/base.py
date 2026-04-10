@@ -64,6 +64,7 @@ class LocalQueueBackend(QueueBackend):
     """Process-local queue (thread-safe, no IPC)."""
 
     def __init__(self, queue_name: str):
+        super().__init__()
         self._queue = local_queue.get_queue(queue_name)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -83,6 +84,7 @@ class MultiprocessingQueueBackend(QueueBackend):
     """Queue backed by a multiprocessing.Queue via a manager."""
 
     def __init__(self, queue_name: str, port: int):
+        super().__init__()
         self._queue = mp_queue.get_queue(queue_name, port)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -109,6 +111,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
     """Factory for multiprocessing queues with a shared manager."""
 
     def __init__(self, port: Optional[int] = None):
+        super().__init__()
         self._port = (port if port is not None else
                       mp_queue.DEFAULT_QUEUE_MANAGER_PORT)
 

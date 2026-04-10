@@ -8,6 +8,7 @@ import shutil
 import time
 from typing import List, Tuple
 
+import anyio
 import filelock
 
 from sky.server import common as server_common

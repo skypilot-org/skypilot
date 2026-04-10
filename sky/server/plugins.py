@@ -107,15 +107,16 @@ class ExtensionContext:
         backend: 'storage_mod.RequestBackend',
     ) -> None:
         """Register a custom request backend."""
-        from sky.server.requests.storage import (
-            set_request_backend)  # pylint: disable=import-outside-toplevel
-        set_request_backend(backend)
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import storage as rs
+        rs.set_request_backend(backend)
 
     def register_queue_backend_factory(
         self,
         factory: 'queue_base_mod.QueueBackendFactory',
     ) -> None:
         """Register a custom queue backend factory."""
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests.queues import base as qb
         qb.set_queue_backend_factory(factory)
 
@@ -124,6 +125,7 @@ class ExtensionContext:
         backend: 'blob_storage_mod.BlobStorage',
     ) -> None:
         """Register a custom blob storage backend."""
+        # pylint: disable=import-outside-toplevel
         from sky.server.blob import blob_storage as bs
         bs.set_blob_storage(backend)
 
@@ -132,6 +134,7 @@ class ExtensionContext:
         log_provider: 'log_provider_mod.LogProvider',
     ) -> None:
         """Register a custom log provider."""
+        # pylint: disable=import-outside-toplevel
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
 
