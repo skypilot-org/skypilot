@@ -143,22 +143,35 @@ def test_deserialize_non_dict_input():
 
 
 def test_deserialize_partial_dict():
-    """Test that dicts missing required keys return RuntimeError."""
-    # Dict with only 'type'
+    """Test that dicts with 'type' but missing other keys still work."""
+    # Dict with only 'type' - should construct with no args
     e = exceptions.deserialize_exception({'type': 'ValueError'})
-    assert isinstance(e, RuntimeError)
-    assert 'Server error' in str(e)
+    assert isinstance(e, ValueError)
 
     # Dict with 'type' and 'message' but missing others
     e = exceptions.deserialize_exception({
         'type': 'ValueError',
         'message': 'test'
     })
-    assert isinstance(e, RuntimeError)
+    assert isinstance(e, ValueError)
 
-    # Empty dict
+    # Empty dict - no 'type' key, falls through to RuntimeError
     e = exceptions.deserialize_exception({})
     assert isinstance(e, RuntimeError)
+
+    # Unknown type with message uses message in fallback
+    e = exceptions.deserialize_exception({
+        'type': 'NonExistent',
+        'message': 'details'
+    })
+    assert isinstance(e, Exception)
+    assert 'NonExistent' in str(e)
+    assert 'details' in str(e)
+
+    # Unknown type without message still works
+    e = exceptions.deserialize_exception({'type': 'NonExistent'})
+    assert isinstance(e, Exception)
+    assert 'NonExistent' in str(e)
 
 
 def test_wrap_unsafe_exceptions():

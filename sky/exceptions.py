@@ -120,9 +120,7 @@ def deserialize_exception(serialized: Any) -> Exception:
         return RuntimeError('Unknown server error (no detail in response)')
     if isinstance(serialized, str):
         return RuntimeError(serialized)
-    required_keys = {'type', 'message', 'args', 'attributes', 'stacktrace'}
-    if not isinstance(serialized,
-                      dict) or not required_keys.issubset(serialized):
+    if not isinstance(serialized, dict) or 'type' not in serialized:
         return RuntimeError(f'Server error: {serialized}')
     exception_type = serialized['type']
     if hasattr(builtins, exception_type):
@@ -131,10 +129,13 @@ def deserialize_exception(serialized: Any) -> Exception:
         exception_class = globals().get(exception_type, None)
     if exception_class is None:
         # Unknown exception type.
-        return Exception(f'{exception_type}: {serialized["message"]}')
-    e = exception_class(*serialized['args'], **serialized['attributes'])
-    if serialized['stacktrace'] is not None:
-        setattr(e, 'stacktrace', serialized['stacktrace'])
+        return Exception(
+            f'{exception_type}: {serialized.get("message", serialized)}')
+    e = exception_class(*serialized.get('args', ()),
+                        **serialized.get('attributes', {}))
+    stacktrace = serialized.get('stacktrace')
+    if stacktrace is not None:
+        setattr(e, 'stacktrace', stacktrace)
     return e
 
 
