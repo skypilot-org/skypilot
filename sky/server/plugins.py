@@ -3,6 +3,7 @@ import abc
 import dataclasses
 import importlib
 import os
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.server.blob import blob_storage as blob_storage_mod
+    from sky.server.requests import log_provider as log_provider_mod
+    from sky.server.requests import storage as storage_mod
+    from sky.server.requests.queues import base as queue_base_mod
 
 logger = sky_logging.init_logger(__name__)
 
@@ -97,24 +104,24 @@ class ExtensionContext:
 
     def register_request_storage(
         self,
-        backend: 'RequestBackend',
+        backend: 'storage_mod.RequestBackend',
     ) -> None:
         """Register a custom request backend."""
-        from sky.server.requests.storage import set_request_backend
+        from sky.server.requests.storage import (
+            set_request_backend)  # pylint: disable=import-outside-toplevel
         set_request_backend(backend)
 
     def register_queue_backend_factory(
         self,
-        factory: 'QueueBackendFactory',
+        factory: 'queue_base_mod.QueueBackendFactory',
     ) -> None:
         """Register a custom queue backend factory."""
-        #
         from sky.server.requests.queues import base as qb
         qb.set_queue_backend_factory(factory)
 
     def register_blob_storage(
         self,
-        backend: 'BlobStorage',
+        backend: 'blob_storage_mod.BlobStorage',
     ) -> None:
         """Register a custom blob storage backend."""
         from sky.server.blob import blob_storage as bs
@@ -122,7 +129,7 @@ class ExtensionContext:
 
     def register_log_provider(
         self,
-        log_provider: 'LogProvider',
+        log_provider: 'log_provider_mod.LogProvider',
     ) -> None:
         """Register a custom log provider."""
         from sky.server.requests import log_provider as lp

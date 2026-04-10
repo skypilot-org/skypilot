@@ -1281,6 +1281,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             with self.update_request(request_id) as request_record:
                 if not _should_kill_request(request_id, request_record):
                     continue
+                assert request_record is not None
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')

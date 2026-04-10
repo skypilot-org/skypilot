@@ -36,7 +36,8 @@ class LogProvider(abc.ABC):
         Yields:
             Log content strings.
         """
-        ...
+        raise NotImplementedError
+        yield  # Make this an async generator for type checking
 
 
 class LocalLogProvider(LogProvider):

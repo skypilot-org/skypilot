@@ -20,7 +20,6 @@ from uvicorn.supervisors import multiprocess
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
-from sky.server import plugins
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants

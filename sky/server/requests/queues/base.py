@@ -139,7 +139,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
 _queue_backend_factory: Optional[QueueBackendFactory] = None
 
 
-def get_queue_backend_factory() -> QueueBackendFactory:
+def get_queue_backend_factory() -> Optional[QueueBackendFactory]:
     """Get the registered queue backend factory."""
     return _queue_backend_factory
 
