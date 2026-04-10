@@ -652,6 +652,22 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
+      {clusterData &&
+        clusterData.full_infra &&
+        clusterData.full_infra.toLowerCase().includes('kubernetes') &&
+        !clusterData.full_infra.toLowerCase().includes('ssh') &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <GPUMetricsSection
+              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              displayName={clusterData?.cluster}
+              refreshTrigger={gpuMetricsRefreshTrigger}
+              storageKey="skypilot-gpu-metrics-expanded"
+            />
+          </div>
+        )}
+
       {/* Plugin Slot: Cluster Infra Nodes */}
       <PluginSlot
         name="clusters.detail.nodes"
@@ -680,6 +696,15 @@ function ActiveTab({
         </div>
       )}
 
+      {/* Plugin Slot: Cluster Detail Events */}
+      <PluginSlot
+        name="clusters.detail.events"
+        context={{
+          clusterHash: clusterData.cluster_hash,
+        }}
+        wrapperClassName="mb-8"
+      />
+
       {/* Provision Logs - Only show for active clusters */}
       {!isHistoricalCluster && (
         <div className="mb-8">
@@ -689,32 +714,6 @@ function ActiveTab({
           />
         </div>
       )}
-
-      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
-      {clusterData &&
-        clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
-          <div className="mb-6">
-            <GPUMetricsSection
-              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
-              displayName={clusterData?.cluster}
-              refreshTrigger={gpuMetricsRefreshTrigger}
-              storageKey="skypilot-gpu-metrics-expanded"
-            />
-          </div>
-        )}
-
-      {/* Plugin Slot: Cluster Detail Events */}
-      <PluginSlot
-        name="clusters.detail.events"
-        context={{
-          clusterHash: clusterData.cluster_hash,
-        }}
-        wrapperClassName="mb-8"
-      />
     </div>
   );
 }
@@ -771,12 +770,12 @@ function ProvisionLogs({ clusterName, numNodes }) {
         <div className="flex items-center">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
           >
             {isExpanded ? (
-              <ChevronDownIcon className="w-4 h-4 mr-1" />
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
             ) : (
-              <ChevronRightIcon className="w-4 h-4 mr-1" />
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
             )}
             <h2 className="text-lg font-semibold">Provision Logs</h2>
           </button>
