@@ -655,9 +655,8 @@ function ActiveTab({
       {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
         clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
+        clusterData.full_infra.toLowerCase().includes('kubernetes') &&
+        !clusterData.full_infra.toLowerCase().includes('ssh') &&
         isGrafanaAvailable && (
           <div className="mb-6">
             <GPUMetricsSection
