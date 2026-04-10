@@ -627,8 +627,7 @@ async def cleanup_download_tmp():
                     if entry.is_dir():
                         try:
                             if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path,
-                                              ignore_errors=True)
+                                shutil.rmtree(entry.path, ignore_errors=True)
                         except OSError:
                             pass
         except Exception as e:  # pylint: disable=broad-except
@@ -1902,11 +1901,13 @@ async def download(download_body: payloads.DownloadBody,
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
-    # Create a temporary zip file
+    # Create a temporary zip file under the download tmp dir so it is
+    # always writable (the old api_server_user_logs_dir may have been
+    # wiped by reset_db_and_logs on startup).
     log_id = str(uuid.uuid4().hex)
     zip_filename = f'folder_{log_id}.zip'
-    zip_path = pathlib.Path(
-        logs_dir_on_api_server).expanduser().resolve() / zip_filename
+    zip_dir = pathlib.Path(bs.get_blob_storage().download_tmp_dir())
+    zip_path = zip_dir / zip_filename
 
     try:
 
@@ -3247,8 +3248,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(
-            background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
