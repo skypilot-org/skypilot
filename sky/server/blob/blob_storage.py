@@ -102,6 +102,17 @@ class BlobStorage(abc.ABC):
         """
         return os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
 
+    def download_tmp_dir(self) -> str:
+        """Return a base directory for temporary log downloads.
+
+        In multi-replica mode this must be on shared storage so that
+        any replica can serve the ``/download`` request after another
+        replica synced the logs from the cluster.
+        """
+        d = os.path.expanduser('~/.sky/api_server/download_tmp')
+        os.makedirs(d, exist_ok=True)
+        return d
+
     def get_staging_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the staging directory path for an in-progress upload."""
         return self.blobs_dir(user_id) / '.staging' / blob_id

@@ -157,9 +157,11 @@ async def download_logs(
         request: fastapi.Request,
         jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
     user_hash = jobs_download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = server_common.api_server_user_logs_dir_prefix(
-        user_hash)
-    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
+    # pylint: disable=import-outside-toplevel
+    from sky.server.blob import blob_storage as bs
+    logs_dir_on_api_server = pathlib.Path(
+        bs.get_blob_storage().download_tmp_dir()) / user_hash
+    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
@@ -253,8 +255,10 @@ async def pool_download_logs(
 ) -> None:
     user_hash = download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
     timestamp = sky_logging.get_run_timestamp()
+    # pylint: disable=import-outside-toplevel
+    from sky.server.blob import blob_storage as bs
     logs_dir_on_api_server = (
-        pathlib.Path(server_common.api_server_user_logs_dir_prefix(user_hash)) /
+        pathlib.Path(bs.get_blob_storage().download_tmp_dir()) / user_hash /
         'pool' / f'{download_logs_body.pool_name}_{timestamp}')
     logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as

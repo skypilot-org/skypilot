@@ -606,6 +606,36 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
+async def cleanup_download_tmp():
+    """Delete expired download tmp directories.
+
+    Downloaded logs are transient — synced from the cluster for the client
+    to download, then no longer needed.  Clean up anything older than the
+    blob GC grace period (1 hour by default).
+    """
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            tmp_dir = bs.get_blob_storage().download_tmp_dir()
+            if not os.path.exists(tmp_dir):
+                continue
+            cutoff = time.time() - bs.GC_GRACE_SECONDS
+            for user_entry in os.scandir(tmp_dir):
+                if not user_entry.is_dir():
+                    continue
+                for entry in os.scandir(user_entry.path):
+                    if entry.is_dir():
+                        try:
+                            if entry.stat().st_mtime < cutoff:
+                                shutil.rmtree(entry.path,
+                                              ignore_errors=True)
+                        except OSError:
+                            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_download_tmp: '
+                         f'{common_utils.format_exception(e)}')
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -1832,8 +1862,9 @@ async def download_logs(
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
-    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
+    logs_dir_on_api_server = pathlib.Path(
+        bs.get_blob_storage().download_tmp_dir()) / user_hash
+    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
@@ -1857,8 +1888,11 @@ async def download(download_body: payloads.DownloadBody,
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
+    download_tmp = bs.get_blob_storage().download_tmp_dir()
     for folder_path in folder_paths:
-        if not str(folder_path).startswith(str(logs_dir_on_api_server)):
+        folder_str = str(folder_path)
+        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
+                folder_str.startswith(download_tmp)):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
@@ -3213,6 +3247,8 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
+        global_tasks.append(
+            background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
