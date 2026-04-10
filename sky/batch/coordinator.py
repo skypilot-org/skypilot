@@ -308,7 +308,11 @@ class BatchCoordinator:
         replica_infos = status.get('replica_info', [])
         ready = []
         for info in replica_infos:
-            replica_status = str(info.get('status', ''))
+            raw_status = info.get('status', '')
+            # status may be a ReplicaStatus enum or a string; normalise.
+            replica_status = (raw_status.value
+                              if hasattr(raw_status, 'value') else
+                              str(raw_status))
             if replica_status == 'READY':
                 name = info.get('name')
                 if name:
