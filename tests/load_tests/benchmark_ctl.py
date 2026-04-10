@@ -25,6 +25,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,7 @@ from typing import Any, Dict, List, Optional
 
 
 WORKER_PREFIX = 'bench-worker'
-REMOTE_BENCH_DIR = '~/benchmark'
+REMOTE_BENCH_DIR = '~/sky_workdir'
 # Files to upload to workers
 LOAD_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,6 +71,7 @@ def launch_workers(n: int, cloud: str, cpus: int, image: Optional[str],
         name = _worker_name(wid)
         cmd = (f'sky launch -y -c {name} --infra {cloud} '
                f'--cpus {cpus}+ --memory 16+ '
+               f'--workdir {LOAD_TESTS_DIR} '
                f"'{setup}'")
         if image:
             cmd += f' --image {image}'
@@ -96,14 +98,20 @@ def launch_workers(n: int, cloud: str, cpus: int, image: Optional[str],
 
 
 def setup_workers(names: List[str], target_endpoint: str,
-                  auth_credentials: Optional[str]) -> None:
+                  auth_credentials: Optional[str],
+                  reupload: bool = False) -> None:
     """Upload benchmark files and configure workers to point at the target."""
     print(f'\n=== Setting up {len(names)} workers ===', flush=True)
 
     def _setup_one(name: str) -> None:
-        # Upload benchmark code
-        _run(f'sky rsync-up {name} {LOAD_TESTS_DIR} {REMOTE_BENCH_DIR}',
-             timeout=120)
+        if reupload:
+            # Re-upload benchmark code via sky exec with a temp task YAML
+            _upload_via_exec(name)
+        # Ensure sky CLI is installed on the worker
+        _run(f"sky exec -c {name} "
+             f"'pip install \"skypilot-nightly[aws,kubernetes]\" "
+             f"> /dev/null 2>&1'",
+             timeout=300)
         # Login to target API server
         login_cmd = f'sky api login -e {target_endpoint}'
         if auth_credentials:
@@ -120,6 +128,25 @@ def setup_workers(names: List[str], target_endpoint: str,
             except Exception as e:
                 print(f'  {name} setup FAILED: {e}',
                       file=sys.stderr, flush=True)
+
+
+def _upload_via_exec(name: str) -> None:
+    """Upload benchmark files to a worker via sky exec + file_mounts."""
+    yaml_content = (
+        f'file_mounts:\n'
+        f'  {REMOTE_BENCH_DIR}:\n'
+        f'    - {LOAD_TESTS_DIR}\n'
+        f'\n'
+        f'run: echo "benchmark files uploaded"\n'
+    )
+    with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_content)
+        yaml_path = f.name
+    try:
+        _run(f'sky exec -c {name} {yaml_path}', timeout=300)
+    finally:
+        os.unlink(yaml_path)
 
 
 # ── Phase 2: Run benchmark ───────────────────────────────────────────
@@ -160,7 +187,7 @@ def run_benchmark(names: List[str], threads: int, repeats: int,
 
 def collect_results(names: List[str],
                     output_dir: str) -> List[Dict[str, Any]]:
-    """Download JSON results from all workers."""
+    """Download JSON results from all workers via sky exec."""
     print(f'\n=== Collecting results ===', flush=True)
     os.makedirs(output_dir, exist_ok=True)
     all_results: List[Dict[str, Any]] = []
@@ -169,17 +196,46 @@ def collect_results(names: List[str],
         local_dir = os.path.join(output_dir, f'worker_{i}')
         os.makedirs(local_dir, exist_ok=True)
         try:
-            _run(f'sky rsync-down {name} ~/benchmark_results/ {local_dir}/',
-                 timeout=120, check=False)
-            # Find and load JSON results
-            for f in os.listdir(local_dir):
-                if f.startswith('results_') and f.endswith('.json'):
-                    path = os.path.join(local_dir, f)
-                    with open(path) as fh:
-                        data = json.load(fh)
-                    if isinstance(data, list):
-                        all_results.extend(data)
-                    print(f'  {name}: loaded {len(data)} results', flush=True)
+            # Use markers to reliably extract JSON from sky exec output,
+            # since every line is prefixed with "(sky-cmd, pid=XXXX) ".
+            marker = f'BENCH_RESULT_{i}'
+            cat_cmd = (
+                f"sky exec -c {name} "
+                f"'echo {marker}_START && "
+                f"cat ~/benchmark_results/results_w{i}.json && "
+                f"echo {marker}_END'")
+            result = _run(cat_cmd, timeout=60, capture=True, check=False)
+            if result.returncode != 0:
+                print(f'  {name}: failed to read results', flush=True)
+                continue
+
+            # Strip "(sky-cmd, pid=...) " prefix and extract between markers
+            prefix_re = re.compile(r'^\(sky-cmd, pid=\d+\)\s?')
+            lines = result.stdout.splitlines()
+            collecting = False
+            json_lines = []
+            for line in lines:
+                stripped = prefix_re.sub('', line)
+                if f'{marker}_START' in stripped:
+                    collecting = True
+                    continue
+                if f'{marker}_END' in stripped:
+                    break
+                if collecting:
+                    json_lines.append(stripped)
+
+            if not json_lines:
+                print(f'  {name}: no results found', flush=True)
+                continue
+
+            json_str = '\n'.join(json_lines)
+            data = json.loads(json_str)
+            local_path = os.path.join(local_dir, f'results_w{i}.json')
+            with open(local_path, 'w') as fh:
+                json.dump(data, fh, indent=2)
+            if isinstance(data, list):
+                all_results.extend(data)
+            print(f'  {name}: loaded {len(data)} results', flush=True)
         except Exception as e:
             print(f'  {name}: failed to collect: {e}',
                   file=sys.stderr, flush=True)
@@ -311,7 +367,8 @@ def main():
                           args.worker_cpus, args.worker_image,
                           args.auth_credentials)
 
-        setup_workers(names, args.target_endpoint, args.auth_credentials)
+        setup_workers(names, args.target_endpoint, args.auth_credentials,
+                     reupload=args.reuse)
 
         run_benchmark(names, args.threads_per_worker, args.repeats,
                      args.workload, args.cloud, args.timeout)
