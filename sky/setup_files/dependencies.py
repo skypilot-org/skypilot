@@ -37,6 +37,7 @@ install_requires = [
     'python-dotenv',
     'rich',
     'tabulate',
+    'tqdm',
     # Light weight requirement, can be removed after we deprecate Python 3.9.
     # ParamSpec is available in typing module starting from Python 3.10, so
     # we can replace "from typing_extensions import ParamSpec" with

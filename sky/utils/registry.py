@@ -7,6 +7,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend
+    from sky.batch import io_formats
     from sky.clouds import cloud
     from sky.jobs import recovery_strategy
 
@@ -125,5 +126,11 @@ JOBS_RECOVERY_STRATEGY_REGISTRY: _Registry = (
         registry_name='jobs recovery strategy',
         exclude=None,
         type_register=True))
+
+INPUT_READER_REGISTRY: _Registry = _Registry['io_formats.InputReader'](
+    registry_name='input reader', exclude=None, type_register=True)
+
+OUTPUT_WRITER_REGISTRY: _Registry = _Registry['io_formats.OutputWriter'](
+    registry_name='output writer', exclude=None, type_register=True)
 
 # TODO(tian): Add a registry for spot placer.

@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.batch import coordinator as batch_coordinator
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
@@ -237,6 +238,7 @@ class JobController:
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
+            task_envs[constants.MANAGED_JOB_ID_ENV_VAR] = str(self._job_id)
             # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
             if self._rank is not None:
@@ -400,6 +402,12 @@ class JobController:
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
 
+        if task.metadata.get('batch_coordinator'):
+            return await self._run_batch_coordinator_task(task_id,
+                                                          task,
+                                                          callback_func,
+                                                          is_resume=is_resume)
+
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
                         'run commands being empty.')
@@ -561,6 +569,93 @@ class JobController:
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
         )
+
+    async def _run_batch_coordinator_task(
+        self,
+        task_id: int,
+        task: 'sky.Task',
+        callback_func: typing.Callable,
+        is_resume: bool = False,
+    ) -> bool:
+        """Run the BatchCoordinator inline on the controller.
+
+        The coordinator is lightweight orchestration (count items, split
+        batches, dispatch via ``sdk.exec()``).  Running it here avoids
+        provisioning a separate CPU cluster.
+
+        When ``is_resume=True``, the coordinator reloads persisted batch
+        state from the DB and resumes dispatch from where it left off.
+        """
+        if is_resume:
+            # Check if the previous run already reached a terminal status.
+            _, prev_status = (await
+                              managed_job_state.get_latest_task_id_status_async(
+                                  self._job_id))
+            if (prev_status is not None and prev_status.is_terminal()):
+                logger.info(f'Batch task {task_id} already in terminal status '
+                            f'{prev_status.value}, skipping.')
+                return prev_status == (
+                    managed_job_state.ManagedJobStatus.SUCCEEDED)
+            if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
+                raise asyncio.CancelledError(
+                    'Batch coordinator resuming into CANCELLING state')
+
+        metadata = task.metadata
+
+        coordinator = batch_coordinator.BatchCoordinator(
+            dataset_path=metadata['batch_dataset_path'],
+            output_path=metadata['batch_output_path'],
+            batch_size=metadata['batch_size'],
+            pool_name=metadata['batch_pool_name'],
+            serialized_fn=metadata['batch_serialized_fn'],
+            activate_env=metadata.get('batch_activate_env', ''),
+            job_id=self._job_id,
+            is_resume=is_resume,
+            input_format_dict=metadata['batch_input_format'],
+            output_formats_dict=metadata['batch_output_formats'],
+        )
+
+        if not is_resume:
+            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                self._backend.run_timestamp) if task_id == 0 else time.time()
+
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str='-',
+                specs={
+                    'max_restarts_on_errors': 0,
+                    'recover_on_exit_codes': []
+                },
+                callback_func=callback_func)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=time.time(),
+                callback_func=callback_func)
+
+        try:
+            await asyncio.to_thread(coordinator.run)
+            await managed_job_state.set_succeeded_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=time.time(),
+                callback_func=callback_func)
+            return True
+        except asyncio.CancelledError:
+            coordinator.cancel()
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Batch coordinator failed: {e}', exc_info=True)
+            await managed_job_state.set_failed_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                failure_type=managed_job_state.ManagedJobStatus.FAILED,
+                failure_reason=str(e),
+                callback_func=callback_func)
+            return False
 
     async def _monitor_one_task(
         self,
@@ -1712,7 +1807,13 @@ class ControllerManager:
             error = None
 
             try:
-                if pool is None:
+                if task.metadata.get('batch_coordinator'):
+                    # Batch coordinator tasks run inline on the controller
+                    # — no separate cluster was provisioned, so skip
+                    # cluster termination.
+                    logger.info('Batch coordinator task — skipping cluster '
+                                'termination.')
+                elif pool is None:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))

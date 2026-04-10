@@ -205,8 +205,8 @@ class RequestTimestamp(RequestsAggregator):
 
 
 def get_service_filelock_path(pool: str) -> str:
-    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
-            'pool.lock').expanduser().absolute()
+    path = pathlib.Path(generate_remote_service_dir_name(pool)) / 'pool.lock'
+    path = path.expanduser().absolute()
     path.parents[0].mkdir(parents=True, exist_ok=True)
     return str(path)
 
@@ -456,6 +456,12 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
     return os.path.join(dir_name, 'load_balancer.log')
+
+
+def generate_remote_batch_controller_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'batch_controller.log')
 
 
 def generate_replica_launch_log_file_name(service_name: str,
@@ -719,9 +725,18 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
         if pool:
+            # Get pool-level jobs (e.g. batch coordinators) that use
+            # all workers — they have pool set but no cluster_name.
+            pool_level_job_ids = (
+                managed_job_state.get_nonterminal_job_ids_by_pool(
+                    service_name, cluster_name=None))
             for replica_info in record['replica_info']:
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
+                # Show pool-level jobs on READY workers only.
+                if (replica_info.get('status') ==
+                        serve_state.ReplicaStatus.READY):
+                    job_ids = list(dict.fromkeys(pool_level_job_ids + job_ids))
                 replica_info['used_by'] = job_ids
     return record
 

@@ -293,6 +293,9 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # single jobs
         execution_mode = (dag.execution.value
                           if dag.execution else DEFAULT_EXECUTION.value)
+        # Detect batch coordinator jobs (ds.map()) via task metadata.
+        is_batch = any(
+            t.metadata.get('batch_coordinator', False) for t in dag.tasks)
         assert dag.name is not None, 'dag must have a name'
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
@@ -303,7 +306,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool=pool,
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
-                execution=execution_mode))
+                execution=execution_mode,
+                is_batch=is_batch))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -444,6 +448,9 @@ def _submit_remotely(controller: controller_utils.Controllers,
     assert dag.name is not None, 'dag name is not set'
     execution_mode = (dag.execution.value
                       if dag.execution else DEFAULT_EXECUTION.value)
+    # Detect batch coordinator jobs (ds.map()) via task metadata.
+    is_batch = any(
+        t.metadata.get('batch_coordinator', False) for t in dag.tasks)
     job_ids = backend.set_job_info_without_job_id(
         handle=local_handle,
         name=dag.name,
@@ -458,7 +465,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
         metadata_jsons=metadata_jsons,
         num_jobs=num_jobs,
         execution=execution_mode,
-        is_primary_in_job_groups=(is_primary_in_job_groups))
+        is_primary_in_job_groups=(is_primary_in_job_groups),
+        is_batch=is_batch)
     return job_ids
 
 

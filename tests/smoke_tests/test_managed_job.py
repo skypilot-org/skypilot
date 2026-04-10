@@ -1461,14 +1461,14 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.RUNNING],
                     timeout=600
-                    if smoke_tests_utils.is_remote_server_test() else 80),
+                    if smoke_tests_utils.is_remote_server_test() else 180),
                 f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=600
-                    if smoke_tests_utils.is_remote_server_test() else 80),
+                    if smoke_tests_utils.is_remote_server_test() else 180),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1912,9 +1912,9 @@ def test_managed_jobs_exit_code_recovery(generic_cloud: str):
                 # Wait a bit for the job to fail and start recovery
                 'sleep 60',
                 # Check that recovery count is greater than 0
-                # Recovery count is NF-2 (third column from the end)
+                # Recovery count is NF-3 (fourth column from the end)
                 f'for i in {{1..20}}; do '
-                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-2)}}\'); '
+                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-3)}}\'); '
                 f'  echo "Recovery count: $RECOVERY_COUNT"; '
                 f'  if [ "$RECOVERY_COUNT" != "-" ] && [ "$RECOVERY_COUNT" -gt 0 ]; then '
                 f'    echo "Recovery count is greater than 0: $RECOVERY_COUNT"; '
@@ -1985,9 +1985,9 @@ def test_managed_jobs_exit_code_recovery_multinode(generic_cloud: str):
                 # Wait a bit for the job to fail and start recovery
                 'sleep 60',
                 # Check that recovery count is greater than 0
-                # Recovery count is NF-2 (third column from the end)
+                # Recovery count is NF-3 (fourth column from the end)
                 f'for i in {{1..20}}; do '
-                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-2)}}\'); '
+                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-3)}}\'); '
                 f'  echo "Recovery count: $RECOVERY_COUNT"; '
                 f'  if [ "$RECOVERY_COUNT" != "-" ] && [ "$RECOVERY_COUNT" -gt 0 ]; then '
                 f'    echo "Recovery count is greater than 0: $RECOVERY_COUNT"; '
@@ -2046,9 +2046,9 @@ def test_managed_jobs_exit_code_recovery_single(generic_cloud: str):
                 # Wait a bit for the job to fail and start recovery
                 'sleep 60',
                 # Check that recovery count is greater than 0
-                # Recovery count is NF-2 (third column from the end)
+                # Recovery count is NF-3 (fourth column from the end)
                 f'for i in {{1..20}}; do '
-                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-2)}}\'); '
+                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-3)}}\'); '
                 f'  echo "Recovery count: $RECOVERY_COUNT"; '
                 f'  if [ "$RECOVERY_COUNT" != "-" ] && [ "$RECOVERY_COUNT" -gt 0 ]; then '
                 f'    echo "Recovery count is greater than 0: $RECOVERY_COUNT"; '

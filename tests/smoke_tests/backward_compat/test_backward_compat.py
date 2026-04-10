@@ -641,7 +641,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve down {cluster_name}-0 -y',
         ]
 
-        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y; sky serve down {cluster_name}* -y || true'
 
         if generic_cloud == 'kubernetes':
             commands.extend([

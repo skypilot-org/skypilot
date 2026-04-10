@@ -1,0 +1,12 @@
+# Pool configuration for simple batch processing example
+# This example uses CPU-only workers for text doubling
+
+pool:
+  workers: 2  # Number of parallel workers
+
+resources:
+  cpus: 1+  # CPU count per worker
+
+setup: echo "Setup complete!"
+
+run: echo "setup done"
