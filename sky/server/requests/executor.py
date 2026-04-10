@@ -332,8 +332,7 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
     factory = _queue_factory
     if factory is None:
         factory = queue_base.get_queue_backend_factory()
-    assert factory is not None, (
-        'Queue factory not initialized. Call executor.start() first.')
+    assert factory is not None
     return RequestQueue(factory.create_queue(schedule_type.value))
 
 

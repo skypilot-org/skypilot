@@ -83,7 +83,9 @@ class LocalQueueBackend(QueueBackend):
 class MultiprocessingQueueBackend(QueueBackend):
     """Queue backed by a multiprocessing.Queue via a manager."""
 
-    def __init__(self, queue_name: str, port: int):
+    def __init__(self,
+                 queue_name: str,
+                 port: int = mp_queue.DEFAULT_QUEUE_MANAGER_PORT):
         super().__init__()
         self._queue = mp_queue.get_queue(queue_name, port)
 
@@ -144,7 +146,9 @@ _queue_backend_factory: Optional[QueueBackendFactory] = None
 
 def get_queue_backend_factory() -> Optional[QueueBackendFactory]:
     """Get the registered queue backend factory."""
-    return _queue_backend_factory
+    if _queue_backend_factory is not None:
+        return _queue_backend_factory
+    return MultiprocessingQueueFactory()
 
 
 def set_queue_backend_factory(factory: QueueBackendFactory) -> None:
