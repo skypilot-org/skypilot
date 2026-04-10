@@ -108,7 +108,7 @@ class ExtensionContext:
         factory: 'QueueBackendFactory',
     ) -> None:
         """Register a custom queue backend factory."""
-        # 
+        #
         from sky.server.requests.queues import base as qb
         qb.set_queue_backend_factory(factory)
 

@@ -1,30 +1,27 @@
 """Local-file-system blob storage"""
 
 import asyncio
-import time
-import filelock
-import shutil
 import contextlib
 import os
 import pathlib
-
+import shutil
+import time
 from typing import List, Tuple
+
+import filelock
 
 from sky.server import common as server_common
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
+
 
 class LocalFilesystemBlobStorage(bs.BlobStorage):
     """Local-filesystem blob storage"""
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
 
-        return (
-            server_common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-            / user_id
-            / 'file_mounts'
-            / 'blobs'
-        )
+        return (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                user_id / 'file_mounts' / 'blobs')
 
     async def blob_exists(self, user_id: str, blob_id: str) -> bool:
         target = self.get_target_dir(user_id, blob_id)
@@ -45,9 +42,8 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         async with lock:
             yield
 
-    async def store_blob(
-        self, user_id: str, blob_id: str, staging_dir: pathlib.Path
-    ) -> None:
+    async def store_blob(self, user_id: str, blob_id: str,
+                         staging_dir: pathlib.Path) -> None:
 
         target = self.get_target_dir(user_id, blob_id)
         await asyncio.to_thread(os.rename, str(staging_dir), str(target))

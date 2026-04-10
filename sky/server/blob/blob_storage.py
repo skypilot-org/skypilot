@@ -36,16 +36,14 @@ class BlobStorage(abc.ABC):
         yield
 
     @abc.abstractmethod
-    async def store_blob(
-        self, user_id: str, blob_id: str, staging_dir: pathlib.Path
-    ) -> None:
+    async def store_blob(self, user_id: str, blob_id: str,
+                         staging_dir: pathlib.Path) -> None:
         """Atomically move a staging directory to the final blob location.
 
         Called inside ``acquire_upload_lock``.  The *staging_dir* already
         contains the extracted contents.
         """
         raise NotImplementedError
-
 
     @abc.abstractmethod
     def resolve_blob_to_dir(self, user_id: str, blob_id: str) -> str:
@@ -80,7 +78,6 @@ class BlobStorage(abc.ABC):
         Used by GC to discover which users need cleanup.
         """
         raise NotImplementedError
-
 
     @contextlib.contextmanager
     def gc_lock(self) -> Generator[bool, None, None]:
@@ -121,7 +118,7 @@ def get_blob_storage() -> BlobStorage:
     global _blob_storage
     if _blob_storage is None:
         logger.debug('get_blob_storage: no backend registered, '
-                    'using LocalFilesystemBlobStorage')
+                     'using LocalFilesystemBlobStorage')
         # Avoid circular deps
         # pylint: disable=import-outside-toplevel
         from sky.server.blob import local_blob_storage as lbs

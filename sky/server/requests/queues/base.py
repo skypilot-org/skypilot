@@ -6,10 +6,10 @@ import queue as queue_lib
 from typing import List, Optional, Tuple
 
 from sky import sky_logging
-from sky.utils import common_utils
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -123,9 +123,8 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
                 'is already in use by another process.')
 
         queue_names = self._get_queue_names()
-        process = multiprocessing.Process(
-            target=mp_queue.start_queue_manager,
-            args=(queue_names, self._port))
+        process = multiprocessing.Process(target=mp_queue.start_queue_manager,
+                                          args=(queue_names, self._port))
         process.start()
         mp_queue.wait_for_queues_to_be_ready(queue_names,
                                              process,

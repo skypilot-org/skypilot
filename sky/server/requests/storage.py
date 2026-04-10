@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import abc
 import contextlib
-from typing import (TYPE_CHECKING, AsyncGenerator, Generator, List, Optional,
-                    Set)
+from typing import AsyncGenerator, Generator, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sky.server.requests.requests import (Request, RequestStatus,
-                                              RequestTaskFilter, StatusWithMsg)
+    from sky.server.requests.requests import Request
+    from sky.server.requests.requests import RequestStatus
+    from sky.server.requests.requests import RequestTaskFilter
+    from sky.server.requests.requests import StatusWithMsg
 
 
 class RequestBackend(abc.ABC):
@@ -32,8 +33,7 @@ class RequestBackend(abc.ABC):
     @abc.abstractmethod
     @contextlib.contextmanager
     def update_request(
-            self,
-            request_id: str) -> Generator[Optional[Request], None, None]:
+            self, request_id: str) -> Generator[Optional[Request], None, None]:
         """Atomic read-modify-write with appropriate locking.
 
         Yields the request object. Caller modifies it in-place. On context
@@ -45,8 +45,7 @@ class RequestBackend(abc.ABC):
     @abc.abstractmethod
     @contextlib.asynccontextmanager
     async def update_request_async(
-            self,
-            request_id: str) -> AsyncGenerator[Optional[Request], None]:
+            self, request_id: str) -> AsyncGenerator[Optional[Request], None]:
         """Async version of update_request."""
         raise NotImplementedError
         yield  # Make this an async generator for type checking
@@ -61,8 +60,7 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def query_requests(self,
-                       req_filter: RequestTaskFilter) -> List[Request]:
+    def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
         """Query requests matching the filter."""
         raise NotImplementedError
 
@@ -139,8 +137,8 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def get_api_request_ids_start_with(
-            self, incomplete: str) -> List[str]:
+    async def get_api_request_ids_start_with(self,
+                                             incomplete: str) -> List[str]:
         """Get request IDs for shell completion."""
         raise NotImplementedError
 
