@@ -1071,8 +1071,8 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                 job_dict['username'] = user.name if user is not None else None
                 jobs.append(job_dict)
             return jobs
-        except exceptions.SkyletMethodNotImplementedError:
-            pass
+        except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+            logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
     returncode, jobs_payload, stderr = backend.run_on_head(handle,

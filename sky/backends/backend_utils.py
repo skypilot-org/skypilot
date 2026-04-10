@@ -4189,7 +4189,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
     ) from last_exception
 
@@ -4210,7 +4210,7 @@ def invoke_skylet_streaming_with_retries(
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to stream Skylet response after {max_attempts} attempts'
     ) from last_exception
 
@@ -4220,6 +4220,11 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        details = e.details() or ''
+        if 'Connection refused' in details:
+            # Skylet is not running — retrying won't help.
+            raise exceptions.SkyletUnavailableError(
+                f'Skylet is not running (connection refused): {details}') from e
         time.sleep(current_backoff)
     elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
     ) == grpc.StatusCode.UNKNOWN:
