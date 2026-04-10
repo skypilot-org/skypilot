@@ -6,7 +6,6 @@ import fastapi
 
 from sky import sky_logging
 from sky.serve.server import core
-from sky.server import common as server_common
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads

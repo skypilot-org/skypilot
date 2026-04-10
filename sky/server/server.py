@@ -627,8 +627,7 @@ async def cleanup_download_tmp():
                     if entry.is_dir():
                         try:
                             if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path,
-                                              ignore_errors=True)
+                                shutil.rmtree(entry.path, ignore_errors=True)
                         except OSError:
                             pass
         except Exception as e:  # pylint: disable=broad-except
@@ -3247,8 +3246,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(
-            background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
