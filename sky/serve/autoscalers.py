@@ -673,7 +673,8 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
                 # for upscaling, max_target_qps is the standard qps
                 max_target_qps = max(target_qps_dict.values())
                 over_request_num = num_requests_per_second - total_qps
-                current_num_replicas = len(replica_infos)
+                current_num_replicas = sum(
+                    1 for info in replica_infos if not info.is_terminal)
                 raw_target_num = current_num_replicas + math.ceil(
                     over_request_num / max_target_qps)
                 target_num_replicas = self._clip_target_num_replicas(
