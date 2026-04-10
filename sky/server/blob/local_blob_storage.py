@@ -26,7 +26,7 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
     async def blob_exists(self, user_id: str, blob_id: str) -> bool:
         target = self.get_target_dir(user_id, blob_id)
         if target.is_dir():
-            os.utime(target)
+            await asyncio.to_thread(os.utime, target)
             return True
         return False
 
@@ -34,7 +34,7 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
     async def acquire_upload_lock(self, user_id: str, blob_id: str):
 
         locks_dir = self.blobs_dir(user_id) / '.locks'
-        locks_dir.mkdir(parents=True, exist_ok=True)
+        await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
         lock = filelock.AsyncFileLock(
             lock_file=str(locks_dir / f'{blob_id}.lock'),
             executor=executor.get_request_thread_executor(),

@@ -582,7 +582,7 @@ async def cleanup_unreferenced_file_mounts():
                 return
 
             active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
-            grace_cutoff = time.time() - 3600  # 1 hour grace
+            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
 
             for user_id in storage.list_users():
                 try:
