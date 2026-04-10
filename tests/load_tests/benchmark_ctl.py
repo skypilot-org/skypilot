@@ -28,7 +28,6 @@ from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -163,7 +162,7 @@ def _upload_via_exec(name: str) -> None:
 
 
 def run_benchmark(names: List[str], threads: int, repeats: int, workload: str,
-                  cloud: str, timeout: int) -> None:
+                  cloud: str, timeout: int, phases: str) -> None:
     """Run the benchmark on all workers in parallel via sky exec."""
     print(
         f'\n=== Running benchmark ({len(names)} workers × '
@@ -178,6 +177,7 @@ def run_benchmark(names: List[str], threads: int, repeats: int, workload: str,
                f'-c {cloud} '
                f'-w {wid} '
                f'--timeout {timeout} '
+               f'--phases {phases} '
                f'-o ~/benchmark_results')
         _run(f"sky exec -c {name} '{cmd}'",
              timeout=timeout * threads * repeats + 300,
@@ -198,7 +198,7 @@ def run_benchmark(names: List[str], threads: int, repeats: int, workload: str,
 
 
 def collect_results(names: List[str], output_dir: str) -> List[Dict[str, Any]]:
-    """Download JSON results from all workers via sky exec."""
+    """Download JSON results from all workers via rsync-down."""
     print(f'\n=== Collecting results ===', flush=True)
     os.makedirs(output_dir, exist_ok=True)
     all_results: List[Dict[str, Any]] = []
@@ -206,55 +206,24 @@ def collect_results(names: List[str], output_dir: str) -> List[Dict[str, Any]]:
     for i, name in enumerate(names):
         local_dir = os.path.join(output_dir, f'worker_{i}')
         os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, f'results_w{i}.json')
         try:
-            # Use markers to reliably extract JSON from sky exec output.
-            marker = f'BENCH_RESULT_{i}'
-            cat_cmd = (f"sky exec -c {name} "
-                       f"'echo {marker}_START && "
-                       f"cat ~/benchmark_results/results_w{i}.json && "
-                       f"echo {marker}_END'")
-            result = _run(cat_cmd, timeout=60, capture=True, check=False)
+            result = _run(
+                f'sky rsync-down {name} '
+                f'~/benchmark_results/results_w{i}.json {local_path}',
+                timeout=120,
+                capture=True,
+                check=False)
             if result.returncode != 0:
-                print(f'  {name}: failed to read results', flush=True)
+                stderr = (result.stderr or '').strip()
+                print(
+                    f'  {name}: rsync-down failed'
+                    f'{": " + stderr if stderr else ""}',
+                    flush=True)
                 continue
 
-            # Search both stdout and stderr — sky exec may stream to
-            # either depending on the backend (SSH vs gRPC).
-            raw_output = (result.stdout or '') + (result.stderr or '')
-
-            # Strip ANSI escape codes and any "(prefix, pid=...) " from
-            # sky exec output, then extract JSON between markers.
-            ansi_re = re.compile(r'\x1b\[[0-9;]*m')
-            prefix_re = re.compile(r'^\([^)]*\)\s?')
-            lines = raw_output.splitlines()
-            collecting = False
-            json_lines = []
-            for line in lines:
-                stripped = ansi_re.sub('', line)
-                stripped = prefix_re.sub('', stripped)
-                if f'{marker}_START' in stripped:
-                    collecting = True
-                    continue
-                if f'{marker}_END' in stripped:
-                    break
-                if collecting:
-                    json_lines.append(stripped)
-
-            if not json_lines:
-                print(f'  {name}: no results found between markers', flush=True)
-                # Dump first/last lines for debugging
-                if lines:
-                    print(
-                        f'    (output has {len(lines)} lines, '
-                        f'first: {lines[0][:120]!r})',
-                        flush=True)
-                continue
-
-            json_str = '\n'.join(json_lines)
-            data = json.loads(json_str)
-            local_path = os.path.join(local_dir, f'results_w{i}.json')
-            with open(local_path, 'w') as fh:
-                json.dump(data, fh, indent=2)
+            with open(local_path) as fh:
+                data = json.load(fh)
             if isinstance(data, list):
                 all_results.extend(data)
             print(f'  {name}: loaded {len(data)} results', flush=True)
@@ -400,6 +369,11 @@ def main():
     parser.add_argument('--no-cleanup',
                         action='store_true',
                         help='Do not tear down workers after benchmark')
+    parser.add_argument('--phases',
+                        type=str,
+                        default='cluster,jobs',
+                        help='Comma-separated workload phases to shuffle '
+                        '(default: cluster,jobs)')
     parser.add_argument('--collect-only',
                         action='store_true',
                         help='Only collect results from existing workers')
@@ -424,7 +398,7 @@ def main():
                       reupload=args.reuse)
 
         run_benchmark(names, args.threads_per_worker, args.repeats,
-                      args.workload, args.cloud, args.timeout)
+                      args.workload, args.cloud, args.timeout, args.phases)
 
         results = collect_results(names, args.output_dir)
         print_report(results, args.target_endpoint, args.workers,

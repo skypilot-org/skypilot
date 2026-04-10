@@ -15,6 +15,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import random
 import re
 import signal
 import sys
@@ -120,14 +121,23 @@ def _run_workload(script: str, env: Dict[str, str], log_path: str,
 
 class BenchmarkWorker:
 
-    def __init__(self, threads: int, repeats: int, script: str, cloud: str,
-                 output_dir: str, worker_id: int, timeout: int):
+    def __init__(self,
+                 threads: int,
+                 repeats: int,
+                 script: str,
+                 cloud: str,
+                 output_dir: str,
+                 worker_id: int,
+                 timeout: int,
+                 phases: Optional[List[str]] = None):
         self.threads = threads
         self.repeats = repeats
         self.cloud = cloud
         self.output_dir = output_dir
         self.worker_id = worker_id
         self.timeout = timeout
+        # Phases that the workload script supports (shuffled per thread).
+        self.phases = phases or ['cluster', 'jobs']
 
         # Resolve script path relative to this file's directory
         base = os.path.dirname(os.path.abspath(__file__))
@@ -143,6 +153,10 @@ class BenchmarkWorker:
 
     def _make_env(self, thread_id: int, repeat_id: int,
                   unique_id: str) -> Dict[str, str]:
+        # Shuffle phase order per thread so concurrent workers hit
+        # different API endpoints at the same time.
+        phases = list(self.phases)
+        random.shuffle(phases)
         env = os.environ.copy()
         env.update({
             'BENCHMARK_UNIQUE_ID': unique_id,
@@ -150,6 +164,7 @@ class BenchmarkWorker:
             'BENCHMARK_THREAD_ID': str(thread_id),
             'BENCHMARK_REPEAT_ID': str(repeat_id),
             'BENCHMARK_WORKER_ID': str(self.worker_id),
+            'BENCHMARK_PHASE_ORDER': ','.join(phases),
         })
         return env
 
@@ -162,9 +177,11 @@ class BenchmarkWorker:
                 f'w{self.worker_id}_t{thread_id}_r{repeat_id}.log')
             env = self._make_env(thread_id, repeat_id, uid)
 
+            phase_order = env.get('BENCHMARK_PHASE_ORDER', '')
             print(
                 f'[worker {self.worker_id}] thread {thread_id} '
-                f'repeat {repeat_id} starting (id={uid})',
+                f'repeat {repeat_id} starting (id={uid}, '
+                f'phases={phase_order})',
                 flush=True)
 
             result = _run_workload(self.script, env, log_path, self.timeout)
@@ -269,6 +286,11 @@ def main():
                         type=int,
                         default=3600,
                         help='Per-workload timeout in seconds (default: 3600)')
+    parser.add_argument('--phases',
+                        type=str,
+                        default='cluster,jobs',
+                        help='Comma-separated phases to shuffle '
+                        '(default: cluster,jobs)')
     parser.add_argument('--check',
                         action='store_true',
                         help='Exit non-zero on any failure')
@@ -282,6 +304,7 @@ def main():
         output_dir=args.output_dir,
         worker_id=args.worker_id,
         timeout=args.timeout,
+        phases=[p.strip() for p in args.phases.split(',')],
     )
     results = worker.run()
     print_summary(results)
