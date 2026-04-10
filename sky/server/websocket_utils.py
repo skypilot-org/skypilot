@@ -36,6 +36,29 @@ def register_ssh_redirect_hook(
     ssh_redirect_hook = hook
 
 
+# Hook for plugins to inject REST API redirect logic (e.g., queue, job_status).
+# When set, it is called before scheduling async work for supported endpoints.
+api_redirect_hook: Optional[Callable[[str, fastapi.Request],
+                                     Awaitable[Optional[dict]]]] = None
+
+
+def register_api_redirect_hook(
+    hook: Callable[[str, fastapi.Request], Awaitable[Optional[dict]]],) -> None:
+    """Register a hook that checks whether an API call should redirect.
+
+    The hook is called with (cluster_name, request) before the request is
+    scheduled for async execution. Return a dict with redirect info
+    (agent_url, token, pod_name, namespace, ttl) to redirect, or None to
+    fall through to the normal async flow.
+    """
+    global api_redirect_hook
+    if api_redirect_hook is not None:
+        raise ValueError(
+            'API redirect hook already registered by '
+            f'{api_redirect_hook.__module__}.{api_redirect_hook.__qualname__}')
+    api_redirect_hook = hook
+
+
 class SSHMessageType(IntEnum):
     REGULAR_DATA = 0
     PINGPONG = 1

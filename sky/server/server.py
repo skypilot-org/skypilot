@@ -1770,10 +1770,38 @@ async def autostop(request: fastapi.Request,
     )
 
 
+def _client_supports_api_redirect(request: fastapi.Request) -> bool:
+    """Check if the client supports API redirect to agents."""
+    version_str = request.headers.get(server_constants.API_VERSION_HEADER)
+    if version_str is None:
+        return False
+    try:
+        return int(version_str) >= server_constants.MIN_API_REDIRECT_VERSION
+    except ValueError:
+        return False
+
+
 @app.post('/queue')
 async def queue(request: fastapi.Request,
                 queue_body: payloads.QueueBody) -> None:
     """Gets the job queue of a cluster."""
+    # Check API redirect hook before scheduling async work.
+    if (websocket_utils.api_redirect_hook is not None and
+            _client_supports_api_redirect(request)):
+        try:
+            redirect_info = await websocket_utils.api_redirect_hook(
+                queue_body.cluster_name, request)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('API redirect hook failed for %s: %s',
+                           queue_body.cluster_name, e)
+            redirect_info = None
+        if redirect_info is not None:
+            return fastapi.responses.JSONResponse(
+                content=redirect_info,
+                headers={
+                    server_constants.API_REDIRECT_HEADER: 'true',
+                })
+
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_QUEUE,
