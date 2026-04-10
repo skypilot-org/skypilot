@@ -134,6 +134,11 @@ class CloudError(Exception):
         self.cloud_provider = cloud_provider
         self.error_type = error_type
 
+    def __reduce__(self):
+        message = self.args[0] if self.args else ''
+        return (self.__class__, (message, self.cloud_provider,
+                                 self.error_type), self.__dict__)
+
     def __str__(self):
         return (f'{self.cloud_provider} error ({self.error_type}): '
                 f'{super().__str__()}')
