@@ -23,6 +23,7 @@ def get_console():
         # return False when unset, explicitly disabling terminal detection.
         force_color = os.environ.get('FORCE_COLOR')
         force_terminal = True if force_color else None
+
         _console = rich_console.Console(soft_wrap=True,
                                         force_terminal=force_terminal)
     return _console

@@ -37,6 +37,7 @@ def encode_handle(handle: Any) -> Any:
 
     Plugin extension point — do not inline into callers.
     """
+
     return pickle_and_encode(handle)
 
 
@@ -45,6 +46,7 @@ def encode_resources(resources: Any) -> Any:
 
     Plugin extension point — do not inline into callers.
     """
+
     return pickle_and_encode(resources)
 
 
