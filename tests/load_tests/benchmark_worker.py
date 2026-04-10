@@ -120,9 +120,8 @@ def _run_workload(script: str, env: Dict[str, str], log_path: str,
 
 class BenchmarkWorker:
 
-    def __init__(self, threads: int, repeats: int, script: str,
-                 cloud: str, output_dir: str, worker_id: int,
-                 timeout: int):
+    def __init__(self, threads: int, repeats: int, script: str, cloud: str,
+                 output_dir: str, worker_id: int, timeout: int):
         self.threads = threads
         self.repeats = repeats
         self.cloud = cloud
@@ -163,9 +162,10 @@ class BenchmarkWorker:
                 f'w{self.worker_id}_t{thread_id}_r{repeat_id}.log')
             env = self._make_env(thread_id, repeat_id, uid)
 
-            print(f'[worker {self.worker_id}] thread {thread_id} '
-                  f'repeat {repeat_id} starting (id={uid})',
-                  flush=True)
+            print(
+                f'[worker {self.worker_id}] thread {thread_id} '
+                f'repeat {repeat_id} starting (id={uid})',
+                flush=True)
 
             result = _run_workload(self.script, env, log_path, self.timeout)
             result.update({
@@ -179,10 +179,11 @@ class BenchmarkWorker:
 
             status = 'OK' if result['success'] else 'FAIL'
             ops = len(result['operations'])
-            print(f'[worker {self.worker_id}] thread {thread_id} '
-                  f'repeat {repeat_id} {status} '
-                  f'({result["duration_s"]:.1f}s, {ops} ops)',
-                  flush=True)
+            print(
+                f'[worker {self.worker_id}] thread {thread_id} '
+                f'repeat {repeat_id} {status} '
+                f'({result["duration_s"]:.1f}s, {ops} ops)',
+                flush=True)
         return results
 
     def run(self) -> List[Dict[str, Any]]:
@@ -202,8 +203,11 @@ class BenchmarkWorker:
                     with lock:
                         all_results.extend(thread_results)
                 except Exception as e:
-                    print(f'[worker {self.worker_id}] thread {tid} '
-                          f'crashed: {e}', file=sys.stderr, flush=True)
+                    print(
+                        f'[worker {self.worker_id}] thread {tid} '
+                        f'crashed: {e}',
+                        file=sys.stderr,
+                        flush=True)
 
         # Write JSON results
         results_path = os.path.join(self.output_dir,
@@ -251,15 +255,22 @@ def main():
         description='Benchmark worker: run workload scripts and record timing')
     parser.add_argument('-t', '--threads', type=int, default=4)
     parser.add_argument('-r', '--repeats', type=int, default=1)
-    parser.add_argument('-s', '--script', type=str,
+    parser.add_argument('-s',
+                        '--script',
+                        type=str,
                         default='workloads/basic.sh')
     parser.add_argument('-c', '--cloud', type=str, default='aws')
-    parser.add_argument('-o', '--output-dir', type=str,
+    parser.add_argument('-o',
+                        '--output-dir',
+                        type=str,
                         default='benchmark_results')
     parser.add_argument('-w', '--worker-id', type=int, default=0)
-    parser.add_argument('--timeout', type=int, default=3600,
+    parser.add_argument('--timeout',
+                        type=int,
+                        default=3600,
                         help='Per-workload timeout in seconds (default: 3600)')
-    parser.add_argument('--check', action='store_true',
+    parser.add_argument('--check',
+                        action='store_true',
                         help='Exit non-zero on any failure')
     args = parser.parse_args()
 
