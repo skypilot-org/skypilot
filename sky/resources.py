@@ -2731,15 +2731,9 @@ class Resources:
 
         if version < 33:
             state.pop('_ephemeral_storage', None)
-
-        # Restore _disk_size = None when it was not explicitly specified.
-        # __getstate__ stores _disk_size as int (for forward compat with
-        # older versions) plus a _disk_size_specified flag. Old pickles
-        # won't have the flag, so default to keeping the stored int.
-        if '_disk_size_specified' not in state:
             if isinstance(state.get('_cloud', None), clouds.Kubernetes):
                 state['_disk_size'] = None
-        elif not state.pop('_disk_size_specified'):
+        elif not state['_disk_size_specified']:
             state['_disk_size'] = None
 
         self.__dict__.update(state)
