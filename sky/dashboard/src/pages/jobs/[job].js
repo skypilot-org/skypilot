@@ -899,7 +899,16 @@ function JobDetailsContent({
   const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);
-  const isPreStart = PRE_START_STATUSES.includes(jobData.status);
+  // After priority-based scheduling (#5682), a job can be PENDING while its
+  // controller is already running. Show controller logs when schedule_state
+  // indicates the controller has been claimed (anything other than
+  // INACTIVE/WAITING/null).
+  const isControllerRunning =
+    jobData.schedule_state != null &&
+    jobData.schedule_state !== 'INACTIVE' &&
+    jobData.schedule_state !== 'WAITING';
+  const isPreStart =
+    PRE_START_STATUSES.includes(jobData.status) && !isControllerRunning;
   const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
   // Compute job group status based on primary tasks
@@ -1552,6 +1561,7 @@ JobDetailsContent.propTypes = {
     id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     name: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     status: PropTypes.string,
+    schedule_state: PropTypes.string,
     user: PropTypes.string,
     user_hash: PropTypes.string,
     workspace: PropTypes.string,
