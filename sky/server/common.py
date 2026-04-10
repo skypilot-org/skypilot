@@ -37,6 +37,7 @@ from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
+from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -947,8 +948,7 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
-    from sky.server.blob_storage import get_blob_storage
-    storage = get_blob_storage()
+    storage = bs.get_blob_storage()
     # TODO(aylei): remove debug logging after HA blob storage is stable.
     logger.info(f'resolve_blob_dir: storage={type(storage).__name__} '
                 f'blob_id={blob_id[:16]}... user={user_hash}')

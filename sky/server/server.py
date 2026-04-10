@@ -33,7 +33,6 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
-import filelock
 import jwt as pyjwt
 import starlette.background
 import starlette.middleware.base
@@ -82,6 +81,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
@@ -574,8 +574,7 @@ async def cleanup_unreferenced_file_mounts():
     # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
     # blocking the event loop.
     def _do_cleanup():
-        from sky.server.blob_storage import get_blob_storage
-        storage = get_blob_storage()
+        storage = bs.get_blob_storage()
 
         with storage.gc_lock() as should_run:
             if not should_run:
@@ -1476,8 +1475,7 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-    from sky.server.blob_storage import get_blob_storage
-    exists = await get_blob_storage().blob_exists(user_id, blob_id)
+    exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
     return {'exists': exists}
 
 
@@ -1499,8 +1497,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
 
-    from sky.server.blob_storage import get_blob_storage
-    storage = get_blob_storage()
+    storage = bs.get_blob_storage()
 
     # Ensure blobs directory exists.
     await anyio.Path(storage.blobs_dir(user_id)).mkdir(parents=True,

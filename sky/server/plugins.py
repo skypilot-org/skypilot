@@ -111,25 +111,18 @@ class ExtensionContext:
         self,
         factory: 'QueueBackendFactory',
     ) -> None:
-        """Register a custom queue backend factory.
-
-        This allows plugins to replace the default multiprocessing/local
-        queue with an alternative implementation (e.g., PostgreSQL SKIP LOCKED).
-        """
-        from sky.server.requests.queues.base import set_queue_backend_factory
-        set_queue_backend_factory(factory)
+        """Register a custom queue backend factory."""
+        # 
+        from sky.server.requests.queues import base as qb
+        qb.set_queue_backend_factory(factory)
 
     def register_blob_storage(
         self,
         backend: 'BlobStorage',
     ) -> None:
-        """Register a custom blob storage backend.
-
-        This allows plugins to replace the default local filesystem blob
-        storage with an alternative (e.g., shared FS with PG locks).
-        """
-        from sky.server.blob_storage import set_blob_storage
-        set_blob_storage(backend)
+        """Register a custom blob storage backend."""
+        from sky.server.blob import blob_storage as bs
+        bs.set_blob_storage(backend)
 
     def register_log_provider(
         self,
@@ -140,8 +133,8 @@ class ExtensionContext:
         This allows plugins to replace the default local log streaming
         with an implementation that can proxy to remote replicas.
         """
-        from sky.server.requests.log_provider import set_log_provider
-        set_log_provider(log_provider)
+        from sky.server.requests import log_provider as lp
+        lp.set_log_provider(log_provider)
 
     def register_rbac_rule(self,
                            path: str,

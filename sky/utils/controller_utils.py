@@ -30,6 +30,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import plugin_utils
 from sky.server import plugins
+from sky.server.blob import blob_storage as bs
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -1109,8 +1110,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Hard link the files in src to a temporary directory, and upload folder.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    from sky.server import blob_storage  # pylint: disable=import-outside-toplevel
-    base_tmp_dir = blob_storage.get_blob_storage().file_mounts_tmp_dir()
+    base_tmp_dir = bs.get_blob_storage().file_mounts_tmp_dir()
     os.makedirs(base_tmp_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
         local_fm_path = os.path.join(
