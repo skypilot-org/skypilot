@@ -140,9 +140,8 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
                 'is already in use by another process.')
 
         queue_names = self._get_queue_names()
-        process = multiprocessing.Process(
-            target=mp_queue.start_queue_manager,
-            args=(queue_names, self._port))
+        process = multiprocessing.Process(target=mp_queue.start_queue_manager,
+                                          args=(queue_names, self._port))
         process.start()
         mp_queue.wait_for_queues_to_be_ready(queue_names,
                                              process,
@@ -158,7 +157,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
 _queue_backend_factory: Optional[QueueBackendFactory] = None
 
 
-def get_queue_backend_factory() -> QueueBackendFactory:
+def get_queue_backend_factory() -> Optional[QueueBackendFactory]:
     """Get the registered queue backend factory.
 
     Returns the plugin-provided factory if one has been registered,

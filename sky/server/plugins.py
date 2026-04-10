@@ -3,6 +3,7 @@ import abc
 import dataclasses
 import importlib
 import os
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.server import blob_storage as blob_storage_mod
+    from sky.server.requests import log_provider as log_provider_mod
+    from sky.server.requests import storage as storage_mod
+    from sky.server.requests.queues import base as queue_base_mod
 
 logger = sky_logging.init_logger(__name__)
 
@@ -97,50 +104,54 @@ class ExtensionContext:
 
     def register_request_storage(
         self,
-        backend: 'RequestBackend',
+        backend: 'storage_mod.RequestBackend',
     ) -> None:
         """Register a custom request backend.
 
         This allows plugins to replace the default SQLite-based request
         backend with an alternative implementation (e.g., PostgreSQL).
         """
-        from sky.server.requests.storage import set_request_backend
+        from sky.server.requests.storage import (
+            set_request_backend)  # pylint: disable=import-outside-toplevel
         set_request_backend(backend)
 
     def register_queue_backend_factory(
         self,
-        factory: 'QueueBackendFactory',
+        factory: 'queue_base_mod.QueueBackendFactory',
     ) -> None:
         """Register a custom queue backend factory.
 
         This allows plugins to replace the default multiprocessing/local
         queue with an alternative implementation (e.g., PostgreSQL SKIP LOCKED).
         """
-        from sky.server.requests.queues.base import set_queue_backend_factory
+        from sky.server.requests.queues.base import (
+            set_queue_backend_factory)  # pylint: disable=import-outside-toplevel
         set_queue_backend_factory(factory)
 
     def register_blob_storage(
         self,
-        backend: 'BlobStorage',
+        backend: 'blob_storage_mod.BlobStorage',
     ) -> None:
         """Register a custom blob storage backend.
 
         This allows plugins to replace the default local filesystem blob
         storage with an alternative (e.g., shared FS with PG locks).
         """
-        from sky.server.blob_storage import set_blob_storage
+        from sky.server.blob_storage import (
+            set_blob_storage)  # pylint: disable=import-outside-toplevel
         set_blob_storage(backend)
 
     def register_log_provider(
         self,
-        log_provider: 'LogProvider',
+        log_provider: 'log_provider_mod.LogProvider',
     ) -> None:
         """Register a custom log provider.
 
         This allows plugins to replace the default local log streaming
         with an implementation that can proxy to remote replicas.
         """
-        from sky.server.requests.log_provider import set_log_provider
+        from sky.server.requests.log_provider import (
+            set_log_provider)  # pylint: disable=import-outside-toplevel
         set_log_provider(log_provider)
 
     def register_rbac_rule(self,

@@ -564,12 +564,11 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     storage = request_storage.get_request_storage()
     request_ids = [
         request_task.request_id
-        for request_task in storage.query_requests(
-            req_filter=RequestTaskFilter(
-                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-                exclude_request_names=[exclude_request_name],
-                cluster_names=[cluster_name],
-                fields=['request_id']))
+        for request_task in storage.query_requests(req_filter=RequestTaskFilter(
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            exclude_request_names=[exclude_request_name],
+            cluster_names=[cluster_name],
+            fields=['request_id']))
     ]
     _kill_requests(request_ids)
 
@@ -711,8 +710,7 @@ async def get_latest_request_id_async() -> Optional[str]:
 def get_request(request_id: str,
                 fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    return request_storage.get_request_storage().get_request(
-        request_id, fields)
+    return request_storage.get_request_storage().get_request(request_id, fields)
 
 
 @metrics_lib.time_me_async
@@ -764,8 +762,8 @@ async def get_request_status_async(
         The status of the request. If the request is not found, returns
         None.
     """
-    return await request_storage.get_request_storage(
-    ).get_request_status_async(request_id, include_msg)
+    return await request_storage.get_request_storage().get_request_status_async(
+        request_id, include_msg)
 
 
 @metrics_lib.time_me_async
@@ -850,8 +848,7 @@ class RequestTaskFilter:
             else:
                 cluster_names_str = ','.join(
                     repr(name) for name in self.cluster_names)
-                filters.append(
-                    f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+                filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
@@ -1161,8 +1158,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
 
     @contextlib.contextmanager
     def update_request(
-            self,
-            request_id: str) -> Generator[Optional[Request], None, None]:
+            self, request_id: str) -> Generator[Optional[Request], None, None]:
         _ensure_db_initialized()
         with filelock.FileLock(request_lock_path(request_id)):
             request = _get_request_no_lock(request_id)
@@ -1185,11 +1181,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         assert _DB is not None
         request_columns = ', '.join(REQUEST_COLUMNS)
         values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
-        sql_statement = (
-            f'INSERT INTO {REQUEST_TABLE} '
-            f'({request_columns}) VALUES '
-            f'({values_str}) ON CONFLICT(request_id) DO NOTHING '
-            f'RETURNING ROWID')
+        sql_statement = (f'INSERT INTO {REQUEST_TABLE} '
+                         f'({request_columns}) VALUES '
+                         f'({values_str}) ON CONFLICT(request_id) DO NOTHING '
+                         f'RETURNING ROWID')
         request_row = request.to_row()
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Start creating request {request.request_id}')
@@ -1202,8 +1197,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return True if row else False
 
     @init_db
-    def query_requests(self,
-                       req_filter: RequestTaskFilter) -> List[Request]:
+    def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
         assert _DB is not None
         with _DB.conn:
             cursor = _DB.conn.cursor()
@@ -1275,18 +1269,19 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                       user_id: Optional[str] = None) -> List[str]:
         if request_ids is None:
             request_ids = [
-                r.request_id for r in self.query_requests(
-                    req_filter=RequestTaskFilter(
-                        status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-                        exclude_request_names=['sky.api_cancel'],
-                        user_id=user_id,
-                        fields=['request_id']))
+                r.request_id
+                for r in self.query_requests(req_filter=RequestTaskFilter(
+                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                    exclude_request_names=['sky.api_cancel'],
+                    user_id=user_id,
+                    fields=['request_id']))
             ]
         cancelled = []
         for request_id in request_ids:
             with self.update_request(request_id) as request_record:
                 if not _should_kill_request(request_id, request_record):
                     continue
+                assert request_record is not None
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')
@@ -1334,16 +1329,14 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(REQUEST_COLUMNS)
         with _DB.conn:
             cursor = _DB.conn.cursor()
-            cursor.execute(
-                (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                 'WHERE request_id LIKE ?'), (request_id_prefix + '%',))
+            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                            'WHERE request_id LIKE ?'),
+                           (request_id_prefix + '%',))
             rows = cursor.fetchall()
             if not rows:
                 return None
             if fields:
-                rows = [
-                    _update_request_row_fields(row, fields) for row in rows
-                ]
+                rows = [_update_request_row_fields(row, fields) for row in rows]
             return [Request.from_row(row) for row in rows]
 
     @init_db_async
@@ -1359,14 +1352,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(REQUEST_COLUMNS)
         async with _DB.execute_fetchall_async(
             (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-             'WHERE request_id LIKE ?'),
-                (request_id_prefix + '%',)) as rows:
+             'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
             if not rows:
                 return None
             if fields:
-                rows = [
-                    _update_request_row_fields(row, fields) for row in rows
-                ]
+                rows = [_update_request_row_fields(row, fields) for row in rows]
             return [Request.from_row(row) for row in rows]
 
     @init_db_async
@@ -1380,8 +1370,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns += ', status_msg'
         sql = (f'SELECT {columns} FROM {REQUEST_TABLE} '
                f'WHERE request_id LIKE ?')
-        async with _DB.execute_fetchall_async(
-                sql, (request_id + '%',)) as rows:
+        async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
             if rows is None or len(rows) == 0:
                 return None
             status = RequestStatus(rows[0][0])
@@ -1389,11 +1378,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             return StatusWithMsg(status, status_msg)
 
     @init_db_async
-    async def get_api_request_ids_start_with(
-            self, incomplete: str) -> List[str]:
+    async def get_api_request_ids_start_with(self,
+                                             incomplete: str) -> List[str]:
         assert _DB is not None
         async with _DB.execute_fetchall_async(
-            f"""SELECT request_id FROM {REQUEST_TABLE}
+                f"""SELECT request_id FROM {REQUEST_TABLE}
                     WHERE request_id LIKE ?
                     ORDER BY
                         CASE

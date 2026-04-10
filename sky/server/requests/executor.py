@@ -23,7 +23,6 @@ import concurrent.futures
 import contextlib
 import multiprocessing
 import os
-import queue as queue_lib
 import signal
 import sys
 import threading
@@ -54,7 +53,6 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
 from sky.server.requests.queues import base as queue_base
-from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils

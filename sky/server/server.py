@@ -33,7 +33,6 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
-import filelock
 import jwt as pyjwt
 import starlette.background
 import starlette.middleware.base
@@ -590,15 +589,13 @@ async def cleanup_unreferenced_file_mounts():
                     for blob_id, mtime in storage.list_blob_ids(user_id):
                         if (blob_id not in active_blob_ids and
                                 mtime < grace_cutoff):
-                            logger.info(
-                                f'GC: removing unreferenced blob '
-                                f'{blob_id} for user {user_id}')
+                            logger.info(f'GC: removing unreferenced blob '
+                                        f'{blob_id} for user {user_id}')
                             storage.delete_blob(user_id, blob_id)
                     storage.release_stale_uploads(user_id)
                 except Exception as e:  # pylint: disable=broad-except
-                    logger.error(
-                        f'Error cleaning filemounts dir: {user_id}: '
-                        f'{common_utils.format_exception(e)}')
+                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                                 f'{common_utils.format_exception(e)}')
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -2292,13 +2289,12 @@ async def stream(
             follow=follow,
             polling_interval=polling_interval)
     else:
-        content = stream_utils.log_streamer(
-            request_id=None,
-            log_path=log_path_to_stream,
-            plain_logs=format == 'plain',
-            tail=tail,
-            follow=follow,
-            polling_interval=polling_interval)
+        content = stream_utils.log_streamer(request_id=None,
+                                            log_path=log_path_to_stream,
+                                            plain_logs=format == 'plain',
+                                            tail=tail,
+                                            follow=follow,
+                                            polling_interval=polling_interval)
 
     return fastapi.responses.StreamingResponse(
         content=content,
@@ -3143,7 +3139,7 @@ if __name__ == '__main__':
     if not common_utils.is_port_available(cmd_args.port):
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
-    
+
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
     # be installed twice in main process (second time with the uvicorn app).
