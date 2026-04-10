@@ -29,7 +29,7 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
     async def blob_exists(self, user_id: str, blob_id: str) -> bool:
         target = self.get_target_dir(user_id, blob_id)
         if target.is_dir():
-            os.utime(target)
+            await asyncio.to_thread(os.utime, target)
             return True
         return False
 
