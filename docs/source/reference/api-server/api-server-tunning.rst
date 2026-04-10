@@ -10,7 +10,9 @@ This page describes performance best practices for remote SkyPilot API server in
 Tuning API server resources
 ---------------------------
 
-The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it. Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
+The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it.
+
+Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
 
 * ``Long-running requests``: requests that take longer time and more resources to run, including ``launch``, ``exec``, ``jobs.launch``, etc.
 * ``Short-running requests``: requests that take shorter time or less resources to run, including ``status``, ``logs``, etc.
@@ -88,6 +90,40 @@ The following table shows the maximum concurrency for different resource configu
    * - 128
      - 256Gi
      - 256 Long requests, 505 Short requests
+
+.. _consolidation-mode-resource-planning:
+
+Resource planning for managed jobs
+-----------------------------------
+
+The API server's total memory also controls how many managed jobs can run concurrently. A job counts as **launching** while it is provisioning instances or recovering from a failure, and as **running** once it is executing on a cluster.
+
+.. list-table::
+   :widths: 1 1 1
+   :header-rows: 1
+
+   * - Memory
+     - Max launching jobs
+     - Max running jobs
+   * - 8Gi
+     - 16
+     - 400
+   * - 32Gi
+     - 104
+     - 2000
+   * - 64Gi
+     - 200
+     - 2000
+   * - 128Gi
+     - 400
+     - 2000
+   * - 256Gi
+     - 512
+     - 2000
+
+.. note::
+
+    This applies when the API server manages jobs directly (the default for remote API servers). If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, the API server resources only affect request handling and the table above does not apply.
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------
