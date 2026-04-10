@@ -651,7 +651,7 @@ def _post_provision_setup(
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
              head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
-        elif cloud_name.lower() == 'kubernetes':
+        elif cloud_name.lower() in ['kubernetes', 'ssh']:
             timeout = 90  # 1.5-min maximum timeout
             start = time.time()
             while True:
