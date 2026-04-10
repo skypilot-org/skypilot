@@ -138,6 +138,11 @@ class CloudError(Exception):
         return (f'{self.cloud_provider} error ({self.error_type}): '
                 f'{super().__str__()}')
 
+    def __reduce__(self):
+        message = self.args[0] if self.args else ''
+        return (self.__class__, (message, self.cloud_provider,
+                                 self.error_type), self.__dict__)
+
 
 class InvalidSkyPilotConfigError(ValueError):
     """Raised when the SkyPilot config is invalid."""
@@ -191,6 +196,10 @@ class KubernetesValidationError(Exception):
         super().__init__(message)
         self.path = path
 
+    def __reduce__(self):
+        message = self.args[0] if self.args else ''
+        return (self.__class__, (self.path, message), self.__dict__)
+
 
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
@@ -224,6 +233,9 @@ class ProvisionPrechecksError(Exception):
     def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
         self.reasons = reasons
+
+    def __reduce__(self):
+        return (self.__class__, (self.reasons,), self.__dict__)
 
 
 class ManagedJobReachedMaxRetriesError(Exception):
@@ -290,6 +302,11 @@ class CommandError(SkyPilotExcludeArgsBaseException):
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}\n{detailed_reason}')
         super().__init__(message)
+
+    def __reduce__(self):
+        return (self.__class__, (self.returncode, self.command,
+                                 self.error_msg, self.detailed_reason),
+                self.__dict__)
 
 
 class ClusterNotUpError(Exception):
@@ -491,6 +508,9 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
 
         super().__init__(reason.message)
 
+    def __reduce__(self):
+        return (self.__class__, (self.region, self.reason), self.__dict__)
+
 
 class ServeUserTerminatedError(Exception):
     """Raised by serve controller when a user tear down the service."""
@@ -520,10 +540,14 @@ class ApiServerConnectionError(RuntimeError):
     """Raised when the API server cannot be connected."""
 
     def __init__(self, server_url: str):
+        self.server_url = server_url
         super().__init__(
             f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
+
+    def __reduce__(self):
+        return (self.__class__, (self.server_url,), self.__dict__)
 
 
 class ApiServerAuthenticationError(RuntimeError):
