@@ -115,6 +115,52 @@ def test_aws_az_fetching_error():
     assert deserialized.stacktrace == 'test_stacktrace'
 
 
+def test_deserialize_none_input():
+    """Test that None input returns RuntimeError instead of crashing."""
+    e = exceptions.deserialize_exception(None)
+    assert isinstance(e, RuntimeError)
+    assert 'Unknown server error' in str(e)
+
+
+def test_deserialize_string_input():
+    """Test that string input is wrapped in RuntimeError."""
+    e = exceptions.deserialize_exception('Something went wrong')
+    assert isinstance(e, RuntimeError)
+    assert str(e) == 'Something went wrong'
+
+    # Empty string
+    e = exceptions.deserialize_exception('')
+    assert isinstance(e, RuntimeError)
+    assert str(e) == ''
+
+
+def test_deserialize_non_dict_input():
+    """Test that non-dict inputs (list, int, bool) return RuntimeError."""
+    for bad_input in [42, True, [{'loc': ['body'], 'msg': 'invalid'}]]:
+        e = exceptions.deserialize_exception(bad_input)
+        assert isinstance(e, RuntimeError)
+        assert 'Server error' in str(e)
+
+
+def test_deserialize_partial_dict():
+    """Test that dicts missing required keys return RuntimeError."""
+    # Dict with only 'type'
+    e = exceptions.deserialize_exception({'type': 'ValueError'})
+    assert isinstance(e, RuntimeError)
+    assert 'Server error' in str(e)
+
+    # Dict with 'type' and 'message' but missing others
+    e = exceptions.deserialize_exception({
+        'type': 'ValueError',
+        'message': 'test'
+    })
+    assert isinstance(e, RuntimeError)
+
+    # Empty dict
+    e = exceptions.deserialize_exception({})
+    assert isinstance(e, RuntimeError)
+
+
 def test_wrap_unsafe_exceptions():
     """Test that non-safe exceptions are wrapped properly."""
 
