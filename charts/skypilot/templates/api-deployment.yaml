@@ -805,3 +805,12 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- include "skypilot.apiPodScheduling" . }}
+      {{- if .Values.apiService.topologySpreadTopologyKey }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: {{ .Values.apiService.topologySpreadTopologyKey }}
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: {{ $fullName }}-api
+      {{- end }}
