@@ -241,7 +241,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 'user_hash') else None
             job_ids = []
             execution = request.execution
-            for i in range(request.num_jobs):
+            for _ in range(request.num_jobs):
                 job_id = managed_job_state.set_job_info_without_job_id(
                     name=request.name,
                     workspace=request.workspace,
