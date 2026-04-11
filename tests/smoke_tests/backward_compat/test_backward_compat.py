@@ -501,8 +501,18 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
             ]
 
+        # Test sync-down with a job that succeeded in the old version.
+        # managed_job_name-old-1 ran 'echo hi' and SUCCEEDED before the
+        # version switch, so sync-down should work with new server + new client.
+        sync_down_commands = [
+            f's=$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down '
+            f'-n {managed_job_name}-old-1 2>&1) && echo "$s" && '
+            f'echo "$s" | grep -E "Job .* logs: "',
+        ]
+
         # Combine all commands
-        current_commands = common_initial_commands + version_specific_commands
+        current_commands = (common_initial_commands + sync_down_commands +
+                            version_specific_commands)
 
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278

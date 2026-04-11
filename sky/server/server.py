@@ -616,7 +616,11 @@ async def cleanup_download_tmp():
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_dir()
+            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+            if tmp_dir is None:
+                # Backend shares the persistent log dir; no separate
+                # cleanup needed.
+                continue
             if not os.path.exists(tmp_dir):
                 continue
             cutoff = time.time() - bs.GC_GRACE_SECONDS
@@ -1862,8 +1866,8 @@ async def download_logs(
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = pathlib.Path(
-        bs.get_blob_storage().download_tmp_dir()) / user_hash
-    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+        bs.get_blob_storage().download_tmp_dir(user_hash))
+    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
@@ -1887,11 +1891,13 @@ async def download(download_body: payloads.DownloadBody,
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
-    download_tmp = bs.get_blob_storage().download_tmp_dir()
+    download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
         folder_str = str(folder_path)
+        expanded_str = str(folder_path.expanduser())
         if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp)):
+                folder_str.startswith(download_tmp) or
+                expanded_str.startswith(os.path.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=

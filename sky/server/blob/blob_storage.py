@@ -102,14 +102,26 @@ class BlobStorage(abc.ABC):
         """
         return os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
 
-    def download_tmp_dir(self) -> str:
-        """Return a base directory for temporary log downloads.
+    def download_tmp_dir(self, user_hash: str) -> str:
+        """Return a staging directory for log downloads for a user.
+
+        The returned path is set as `local_dir` for log sync-down
+        requests, so the server stores downloaded logs there and returns
+        paths under it to the client.
 
         In multi-replica mode this must be on shared storage so that
         any replica can serve the ``/download`` request after another
         replica synced the logs from the cluster.
         """
-        return os.path.expanduser('~/.sky/api_server/download_tmp')
+        raise NotImplementedError
+
+    def download_tmp_base_dir(self) -> Optional[str]:
+        """Return the base directory for download tmp cleanup.
+
+        Returns None if downloads share the persistent log directory
+        (no separate cleanup needed).
+        """
+        return None
 
     def get_staging_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the staging directory path for an in-progress upload."""
@@ -133,7 +145,6 @@ def get_blob_storage() -> BlobStorage:
         # pylint: disable=import-outside-toplevel
         from sky.server.blob import local_blob_storage as lbs
         _blob_storage = lbs.LocalFilesystemBlobStorage()
-        os.makedirs(_blob_storage.download_tmp_dir(), exist_ok=True)
     return _blob_storage
 
 

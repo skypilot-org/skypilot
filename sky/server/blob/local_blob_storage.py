@@ -19,6 +19,15 @@ from sky.server.requests import executor
 class LocalFilesystemBlobStorage(bs.BlobStorage):
     """Local-filesystem blob storage"""
 
+    def download_tmp_dir(self, user_hash: str) -> str:
+        path = server_common.api_server_user_logs_dir_prefix(user_hash)
+        path.expanduser().mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    def download_tmp_base_dir(self):
+        # Downloads share the persistent log directory; no separate cleanup.
+        return None
+
     def blobs_dir(self, user_id: str) -> pathlib.Path:
 
         return (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
