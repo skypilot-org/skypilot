@@ -23,6 +23,7 @@ import concurrent.futures
 import contextlib
 import multiprocessing
 import os
+import queue as queue_lib
 import signal
 import sys
 import threading
@@ -52,7 +53,8 @@ from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
-from sky.server.requests.queues import base as queue_base
+from sky.server.requests.queues import local_queue
+from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -111,22 +113,30 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
 
 
 class RequestQueue:
-    """The queue for the requests.
+    """The queue for the requests, either redis or multiprocessing.
 
-    Wraps a QueueBackend instance. The elements in the queue are tuples of
-    (request_id, ignore_return_value, retryable).
+    The elements in the queue are tuples of (request_id, ignore_return_value).
     """
 
-    def __init__(self, queue_backend_impl: queue_base.QueueBackend) -> None:
-        self._backend = queue_backend_impl
+    def __init__(self,
+                 schedule_type: api_requests.ScheduleType,
+                 backend: Optional[server_config.QueueBackend] = None) -> None:
+        self.name = schedule_type.value
+        self.backend = backend
+        if backend == server_config.QueueBackend.MULTIPROCESSING:
+            self.queue = mp_queue.get_queue(self.name)
+        elif backend == server_config.QueueBackend.LOCAL:
+            self.queue = local_queue.get_queue(self.name)
+        else:
+            raise RuntimeError(f'Invalid queue backend: {backend}')
 
     def put(self, request: Tuple[str, bool, bool]) -> None:
-        """Put a request to the queue.
+        """Put and request to the queue.
 
         Args:
             request: A tuple of request_id, ignore_return_value, and retryable.
         """
-        self._backend.put(request)
+        self.queue.put(request)  # type: ignore
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
@@ -136,15 +146,17 @@ class RequestQueue:
         Returns:
             A tuple of request_id, ignore_return_value, and retryable.
         """
-        return self._backend.get()
+        try:
+            return self.queue.get(block=False)
+        except queue_lib.Empty:
+            return None
 
     def __len__(self) -> int:
         """Get the length of the queue."""
-        return self._backend.qsize()
+        return self.queue.qsize()
 
 
-# The active queue factory, set during start().
-_queue_factory: Optional[queue_base.QueueBackendFactory] = None
+queue_backend = server_config.QueueBackend.MULTIPROCESSING
 
 
 def executor_initializer(proc_group: str):
@@ -329,11 +341,7 @@ class RequestWorker:
 
 @annotations.lru_cache(scope='global', maxsize=None)
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
-    factory = _queue_factory
-    if factory is None:
-        factory = queue_base.get_queue_backend_factory()
-    assert factory is not None
-    return RequestQueue(factory.create_queue(schedule_type.value))
+    return RequestQueue(schedule_type, backend=queue_backend)
 
 
 @contextlib.contextmanager
@@ -869,19 +877,35 @@ def start(
         A tuple of the queue server process and the list of request worker
         threads.
     """
-    global _queue_factory
-    factory = queue_base.get_queue_backend_factory()
-    # Use specified factory if any, and fallback to default impl
-    if factory is not None:
-        _queue_factory = factory
-    elif config.queue_backend == server_config.QueueBackend.MULTIPROCESSING:
-        _queue_factory = queue_base.MultiprocessingQueueFactory()
-    elif config.queue_backend == server_config.QueueBackend.LOCAL:
-        _queue_factory = queue_base.LocalQueueFactory()
+    global queue_backend
+    queue_backend = config.queue_backend
+    queue_server = None
+    # Setup the queues.
+    if queue_backend == server_config.QueueBackend.MULTIPROCESSING:
+        logger.info('Creating shared request queues')
+        queue_names = [
+            schedule_type.value for schedule_type in api_requests.ScheduleType
+        ]
+        # TODO(aylei): make queue manager port configurable or pick an available
+        # port automatically.
+        port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
+        if not common_utils.is_port_available(port):
+            raise RuntimeError(
+                f'SkyPilot API server fails to start as port {port!r} is '
+                'already in use by another process.')
+        queue_server = multiprocessing.Process(
+            target=mp_queue.start_queue_manager, args=(queue_names, port))
+        queue_server.start()
+        mp_queue.wait_for_queues_to_be_ready(queue_names,
+                                             queue_server,
+                                             port=port)
+    elif queue_backend == server_config.QueueBackend.LOCAL:
+        # No setup is needed for local queue backend.
+        pass
     else:
-        raise RuntimeError(f'Invalid queue backend: {config.queue_backend}')
+        # Should be checked earlier, but just in case.
+        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
 
-    queue_server = _queue_factory.start()
     logger.info('Request queues created')
 
     workers = []
