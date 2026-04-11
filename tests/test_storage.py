@@ -775,3 +775,139 @@ class TestVastDataStorage:
     def test_vastdata_in_store_enabled_clouds(self):
         """Verify VastData is in STORE_ENABLED_CLOUDS."""
         assert 'VastData' in storage_lib.STORE_ENABLED_CLOUDS
+
+
+class TestMountConfig:
+    """Tests for MountConfig dataclass."""
+
+    def test_read_only_true(self):
+        config = storage_lib.MountConfig(read_only=True)
+        assert config.read_only is True
+
+    def test_to_yaml_config_default(self):
+        config = storage_lib.MountConfig()
+        assert config.read_only is None
+        assert config.to_yaml_config() == {}
+        config = storage_lib.MountConfig.from_yaml_config({})
+        assert config == storage_lib.MountConfig()
+
+    def test_to_yaml_config_with_read_only(self):
+        config = storage_lib.MountConfig(read_only=True)
+        yaml_dict = config.to_yaml_config()
+        assert yaml_dict == {'read_only': True}
+        restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
+        assert restored.read_only is True
+
+    def test_round_trip_yaml_false(self):
+        config = storage_lib.MountConfig(read_only=False)
+        yaml_dict = config.to_yaml_config()
+        restored = storage_lib.MountConfig.from_yaml_config(yaml_dict)
+        assert restored.read_only is False
+
+
+class TestStorageFromYamlWithMountConfig:
+    """Tests for Storage.from_yaml_config with mount config."""
+
+    def test_mode_validation_accepts_mount(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config.read_only is True
+
+    def test_mode_validation_rejects_copy_mode(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'COPY',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        with pytest.raises(exceptions.StorageSpecError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_mode_validation_rejects_mount_cached(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        with pytest.raises(exceptions.StorageSpecError):
+            storage_lib.Storage.from_yaml_config(yaml_config)
+
+    def test_default_mode_accepts_mount_config(self):
+        """Default mode is MOUNT, so config.mount should be accepted."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'config': {
+                'mount': {
+                    'read_only': True,
+                },
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config.read_only is True
+
+    def test_no_config_field(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is None
+
+    def test_empty_mount_config(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {},
+            },
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is not None
+        assert storage_obj.mount_config == storage_lib.MountConfig()
+
+    def test_config_without_mount(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {},
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.mount_config is None
+
+    def test_schema_rejects_invalid_field(self):
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT',
+            'config': {
+                'mount': {
+                    'invalid_field': True,
+                },
+            },
+        }
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(yaml_config)

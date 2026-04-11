@@ -37,6 +37,7 @@ from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
+from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -947,14 +948,8 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
-    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
-                  'file_mounts')
-    extraction_dir = client_dir / 'blobs' / blob_id
-    if not extraction_dir.is_dir():
-        raise FileNotFoundError(
-            f'Blob not found: {extraction_dir}. The file mounts blob may '
-            'have been garbage collected before execution started.')
-    return str(extraction_dir)
+    storage = bs.get_blob_storage()
+    return storage.resolve_blob_to_dir(user_hash, blob_id)
 
 
 def process_mounts_in_task_on_api_server(

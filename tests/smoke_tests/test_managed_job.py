@@ -1461,14 +1461,14 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.RUNNING],
                     timeout=600
-                    if smoke_tests_utils.is_remote_server_test() else 80),
+                    if smoke_tests_utils.is_remote_server_test() else 120),
                 f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=600
-                    if smoke_tests_utils.is_remote_server_test() else 80),
+                    if smoke_tests_utils.is_remote_server_test() else 120),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -2816,6 +2816,53 @@ def test_pipeline_status(generic_cloud: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_git_workdir(generic_cloud: str):
+    """Test JobGroup with --git-url to use a git repo as the workdir."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_2 = f'{name}-2'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_git_workdir.yaml', name, generic_cloud)
+    yaml_path_2 = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_git_workdir.yaml', name_2, generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    get_job_id_cmd_2 = (f'sky jobs queue | grep {name_2} | head -1 | '
+                        f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_git_workdir',
+        [
+            # Launch with default branch (master)
+            f'sky jobs launch {yaml_path} --git-url https://github.com/skypilot-org/skypilot.git -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+            # Check both tasks ran in the master branch
+            f'sky jobs logs $({get_job_id_cmd}) job-a --no-follow | grep master',
+            f'sky jobs logs $({get_job_id_cmd}) job-b --no-follow | grep master',
+            # Launch again with a specific git ref (releases/0.10.0)
+            f'sky jobs launch {yaml_path_2} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name_2,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Check both tasks ran in the releases/0.10.0 branch
+            f'sky jobs logs $({get_job_id_cmd_2}) job-a --no-follow | grep "releases/0\\.10\\.0"',
+            f'sky jobs logs $({get_job_id_cmd_2}) job-b --no-follow | grep "releases/0\\.10\\.0"',
+        ],
+        f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n {name_2}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

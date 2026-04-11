@@ -474,6 +474,7 @@ def validate(
     omit_file_mount_type = _omit(40)
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
+    omit_mount_config = _omit(48)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -498,6 +499,11 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
+        if omit_mount_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_config = None
+            logger.debug('`mount_config` is ignored because the server '
+                         'does not support it yet.')
         if omit_priority_class:
             for resource in task.resources:
                 if resource.priority_class:
@@ -2860,6 +2866,10 @@ def api_login(endpoint: Optional[str] = None,
     # design as a user may expect this is only effective for the current
     # session. We should consider using env var for specifying endpoint.
 
+    # Save endpoint and clear any residual service account token before the
+    # first health check, so it uses cookie-based auth and the server can
+    # correctly return NEEDS_AUTH when SSO is required.
+    _save_config_updates(endpoint=endpoint)
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
@@ -2970,8 +2980,6 @@ def api_login(endpoint: Optional[str] = None,
         if api_server_info.user is not None:
             _set_user_hash(api_server_info.user.get('id'))
 
-    # Set the endpoint in the config file
-    _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
     # see https://github.com/python/mypy/issues/5107 on why
@@ -2981,6 +2989,13 @@ def api_login(endpoint: Optional[str] = None,
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(
         endpoint)
+    # Sync local user hash from the authenticated health check response.
+    # This is the final source of truth for the user's identity on this
+    # server, ensuring the local hash matches regardless of which auth
+    # method was used earlier in the flow.
+    if (final_api_server_info.user is not None and
+            final_api_server_info.user.get('id') is not None):
+        _set_user_hash(final_api_server_info.user.get('id'))
     _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
                             server_status)
 

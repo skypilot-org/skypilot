@@ -1279,3 +1279,137 @@ def test_kubernetes_kueue_configs(monkeypatch, tmp_path) -> None:
     assert len(contexts) == 2
     assert contexts[0] == 'contextA'
     assert contexts[1] == 'contextB'
+
+
+def _make_config(d: dict) -> config_utils.Config:
+    """Helper to build a Config from a plain dict."""
+    cfg = config_utils.Config()
+    cfg.update(d)
+    return cfg
+
+
+class TestRemoveQueueNameFromConfig:
+    """Tests for remove_queue_name_from_config."""
+
+    def test_removes_queue_names(self):
+        """Queue names are removed from all locations."""
+        cfg = _make_config({
+            'kubernetes': {
+                'kueue': {
+                    'local_queue_name': 'root-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx1-q'
+                        }
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kueue': {
+                            'local_queue_name': 'ws1-q'
+                        },
+                        'context_configs': {
+                            'ctx2': {
+                                'kueue': {
+                                    'local_queue_name': 'ws1-ctx2-q'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                for keys in [
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kueue',
+                     'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kueue',
+                     'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'kueue', 'local_queue_name'),
+                ]:
+                    assert current.get_nested(
+                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+
+    def test_noop_when_no_queue_name_set(self):
+        """No error when queue name keys are absent."""
+        cfg = _make_config({'kubernetes': {'allowed_contexts': ['ctx1']}})
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # The config should be unchanged (no crash, no new keys).
+                assert current.get_nested(
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    'NOT_SET') == 'NOT_SET'
+
+    def test_patched_queue_name_keys(self):
+        """Additional keys in _QUEUE_NAME_KEYS are also removed."""
+        extra_key = ('custom', 'queue')
+        cfg = _make_config({
+            'kubernetes': {
+                'kueue': {
+                    'local_queue_name': 'orig-q'
+                },
+                'custom': {
+                    'queue': 'custom-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx-orig-q'
+                        },
+                        'custom': {
+                            'queue': 'ctx-custom-q'
+                        }
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kueue': {
+                            'local_queue_name': 'ws-orig-q'
+                        },
+                        'custom': {
+                            'queue': 'ws-custom-q'
+                        },
+                        'context_configs': {
+                            'ctx2': {
+                                'custom': {
+                                    'queue': 'ws-ctx-custom-q'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        patched_keys = [('kueue', 'local_queue_name'), extra_key]
+        with mock.patch.object(skypilot_config, '_QUEUE_NAME_KEYS',
+                               patched_keys), \
+             mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # Both the original and extra key should be None everywhere.
+                for keys in [
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    ('kubernetes', 'custom', 'queue'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kueue',
+                     'local_queue_name'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'custom',
+                     'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kueue',
+                     'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'custom', 'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'custom', 'queue'),
+                ]:
+                    assert current.get_nested(
+                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')

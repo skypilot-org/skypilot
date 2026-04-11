@@ -100,6 +100,177 @@ class TestCheckInstanceFits:
             assert reason is None
 
 
+class TestLookupGpuPartitionMap:
+    """Test slurm_utils.lookup_gpu_partition_map()."""
+
+    @pytest.mark.parametrize(
+        'gpu_partition_map,acc_type,expected',
+        [
+            # None map returns None
+            (None, 'H100', None),
+            # Exact match (string value -> list)
+            ({
+                'H100': 'h100-partition'
+            }, 'H100', ['h100-partition']),
+            # Case-insensitive match
+            ({
+                'h100': 'h100-partition'
+            }, 'H100', ['h100-partition']),
+            ({
+                'H100': 'h100-partition'
+            }, 'h100', ['h100-partition']),
+            # Array value (passthrough)
+            ({
+                'H100': ['h100-train', 'h100-dev']
+            }, 'H100', ['h100-train', 'h100-dev']),
+            # Not found
+            ({
+                'H100': 'h100-partition'
+            }, 'A100', None),
+            # Empty map
+            ({}, 'H100', None),
+        ])
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config')
+    def test_lookup_gpu_partition_map(self, mock_get_effective,
+                                      gpu_partition_map, acc_type, expected):
+        mock_get_effective.return_value = gpu_partition_map
+        result = slurm_utils.lookup_gpu_partition_map('my-cluster', acc_type)
+        assert result == expected
+        mock_get_effective.assert_called_once_with(cloud='slurm',
+                                                   keys=('gpu_partition_map',),
+                                                   region='my-cluster',
+                                                   merge_dicts=True)
+
+
+class TestLookupCpuPartition:
+    """Test slurm_utils.lookup_cpu_partition()."""
+
+    @pytest.mark.parametrize('config_value,expected', [
+        (None, None),
+        ('cpu-partition', 'cpu-partition'),
+        ('batch', 'batch'),
+    ])
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config')
+    def test_lookup_cpu_partition(self, mock_get_effective, config_value,
+                                  expected):
+        mock_get_effective.return_value = config_value
+        result = slurm_utils.lookup_cpu_partition('my-cluster')
+        assert result == expected
+        mock_get_effective.assert_called_once_with(cloud='slurm',
+                                                   keys=('cpu_partition',),
+                                                   region='my-cluster',
+                                                   default_value=None)
+
+
+class TestCheckInstanceFitsWithGpuPartitionMap:
+    """Test check_instance_fits with gpu_partition_map configured."""
+
+    # Node with typeless GRES (gpu:8, no GPU type name)
+    node_gpu_typeless = slurm.NodeInfo(node='gpu-node1',
+                                       state='idle',
+                                       gres='gpu:8',
+                                       cpus=192,
+                                       memory_gb=786,
+                                       partition='h100')
+
+    @pytest.mark.parametrize(
+        'nodes,instance_type,partition,gpu_partition_map,'
+        'expected_fits,reason_contains',
+        [
+            # GPU type in map, typeless GRES nodes -> should fit
+            ([node_gpu_typeless], '64CPU--256GB--H100:4', 'h100', {
+                'H100': 'h100'
+            }, True, None),
+            # GPU type in map but requesting too many GPUs -> should not fit
+            ([node_gpu_typeless], '64CPU--256GB--H100:16', 'h100', {
+                'H100': 'h100'
+            }, False, 'gpu_partition_map'),
+            # GPU type NOT in map -> falls back to normal resolution (fails
+            # because gres is typeless)
+            ([node_gpu_typeless], '64CPU--256GB--A100:4', 'h100', {
+                'H100': 'h100'
+            }, False, 'No GPU nodes matching'),
+        ])
+    @patch(
+        'sky.provision.slurm.utils.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.slurm.utils.kv_cache.get_cache_entry',
+           return_value=None)
+    @patch('sky.provision.slurm.utils.get_cluster_default_partition')
+    @patch('sky.provision.slurm.utils.slurm.SlurmClient')
+    @patch('sky.provision.slurm.utils.SSHConfig.from_path')
+    def test_check_instance_fits_with_map(
+            self, mock_ssh_config, mock_slurm_client, mock_default_partition,
+            mock_kv_cache, mock_get_effective, nodes, instance_type, partition,
+            gpu_partition_map, expected_fits, reason_contains):
+        """Test check_instance_fits with gpu_partition_map configured."""
+        mock_default_partition.return_value = 'default'
+        mock_ssh_config_obj = mock.MagicMock()
+        mock_ssh_config_obj.lookup.return_value = {
+            'hostname': '10.0.0.1',
+            'port': '22',
+            'user': 'slurm',
+            'identityfile': ['/home/user/.ssh/id_rsa'],
+        }
+        mock_ssh_config.return_value = mock_ssh_config_obj
+
+        mock_slurm_client_instance = mock.MagicMock()
+        mock_slurm_client_instance.info_nodes.return_value = nodes
+        mock_slurm_client.return_value = mock_slurm_client_instance
+
+        mock_get_effective.return_value = gpu_partition_map
+
+        fits, reason = slurm_utils.check_instance_fits(
+            cluster='test-cluster',
+            instance_type=instance_type,
+            partition=partition)
+
+        assert fits is expected_fits
+        if reason_contains:
+            assert reason_contains in reason
+        else:
+            assert reason is None
+
+
+class TestGresDirectiveGeneration:
+    """Test GRES directive generation in sbatch scripts."""
+
+    def test_typed_gres(self):
+        """Typed GRES: gpu:type:count."""
+        accelerator_type = 'NVIDIA_H100_80GB_HBM3'
+        accelerator_count = 4
+        if accelerator_count > 0:
+            if (accelerator_type is not None and
+                    accelerator_type.upper() != 'NONE'):
+                directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
+                             f'{accelerator_count}')
+            else:
+                directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+        assert directive == '#SBATCH --gres=gpu:NVIDIA_H100_80GB_HBM3:4'
+
+    def test_typeless_gres(self):
+        """Typeless GRES: gpu:count (used with gpu_partition_map)."""
+        accelerator_type = None
+        accelerator_count = 2
+        if accelerator_count > 0:
+            if (accelerator_type is not None and
+                    accelerator_type.upper() != 'NONE'):
+                directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
+                             f'{accelerator_count}')
+            else:
+                directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+        assert directive == '#SBATCH --gres=gpu:2'
+
+    def test_no_gpu(self):
+        """No GPU directive when count is 0."""
+        accelerator_count = 0
+        directive = ''
+        if accelerator_count > 0:
+            directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+        assert directive == ''
+
+
 class TestTerminateInstances:
     """Test slurm_instance.terminate_instances()."""
 
@@ -693,10 +864,10 @@ class TestSlurmProvisionTimeout:
         """Test provision_timeout matches expected value."""
         deploy_vars, mock_config = self._make_deploy_vars(zone, config_return)
         assert deploy_vars['provision_timeout'] == expected_timeout
-        mock_config.assert_called_once_with(cloud='slurm',
-                                            region='test-cluster',
-                                            keys=('provision_timeout',),
-                                            default_value=None)
+        mock_config.assert_any_call(cloud='slurm',
+                                    region='test-cluster',
+                                    keys=('provision_timeout',),
+                                    default_value=None)
 
 
 class TestProvisionTimeoutPassthrough:

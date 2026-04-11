@@ -1889,10 +1889,22 @@ async def get_pool_submit_info_async(
 def set_api_access_token_id(job_id: int, token_id: str) -> None:
     """Store the API access token ID for a managed job."""
     engine = _db_manager.get_engine()
+    dialect_map = {
+        db_utils.SQLAlchemyDialect.SQLITE.value: sqlite.insert,
+        db_utils.SQLAlchemyDialect.POSTGRESQL.value: postgresql.insert,
+    }
+    insert_func = dialect_map.get(engine.dialect.name)
+    if insert_func is None:
+        raise ValueError(f'Unsupported database dialect: {engine.dialect.name}')
     with orm.Session(engine) as session:
-        session.execute(
-            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
-                                                             token_id=token_id))
+        insert_stmt = insert_func(api_access_token_table).values(
+            job_id=job_id, token_id=token_id)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[api_access_token_table.c.job_id],
+            set_={
+                api_access_token_table.c.token_id: insert_stmt.excluded.token_id
+            })
+        session.execute(upsert_stmt)
         session.commit()
 
 
@@ -2359,17 +2371,16 @@ async def set_recovering_async(
     cluster_event_reason: Optional[str] = None,
 ):
     """Set the task to recovering state, and update the job duration."""
-    # Build code and reason from external failures for the event log
+    # Build code and reason from external failures for the event log.
+    # Prefer external_failures over cluster_event_reason to avoid
+    # duplicating the same message when a plugin writes the same reason
+    # to both cluster events and cluster failures.
     code = None
-    reason_parts = []
-    if cluster_event_reason:
-        reason_parts.append(cluster_event_reason)
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
-        external_failure_reason = '; '.join(f.reason for f in external_failures)
-        reason_parts.append(external_failure_reason)
-    if reason_parts:
-        reason = ': '.join(reason_parts)
+        reason = '; '.join(f.reason for f in external_failures)
+    elif cluster_event_reason:
+        reason = cluster_event_reason
     else:
         assert code is None, 'Code should be None if there are no reasons.'
         reason = 'Cluster preempted or failed, recovering'

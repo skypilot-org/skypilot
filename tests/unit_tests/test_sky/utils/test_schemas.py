@@ -1,8 +1,10 @@
 """Tests for schemas.py"""
 import unittest
+from unittest import mock
 
 import jsonschema
 
+from sky.server import plugins
 from sky.skylet import constants
 from sky.utils import schemas
 
@@ -172,8 +174,19 @@ class TestWorkspaceSchema(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so workspace tests check
+        # additionalProperties enforcement.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
         self.config_schema = schemas.get_config_schema()
         self.workspaces_schema = self.config_schema['properties']['workspaces']
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
 
     def test_valid_workspace_configs(self):
         """Test validation of valid workspace configurations."""
@@ -780,6 +793,188 @@ class TestAWSConfigSchema(unittest.TestCase):
         """Test that AWS accepts an empty list for subnet_names."""
         config = {'subnet_names': []}
         jsonschema.validate(instance=config, schema=self.aws_schema)
+
+
+class TestRegisterKubernetesProperty(unittest.TestCase):
+    """Tests for register_kubernetes_property and schema validation."""
+
+    def setUp(self):
+        # Save original state so we can restore after each test.
+        self._saved_extra = schemas._extra_kubernetes_properties.copy()
+        self._saved_plugins_loaded = plugins._plugins_loaded
+
+    def tearDown(self):
+        schemas._extra_kubernetes_properties.clear()
+        schemas._extra_kubernetes_properties.update(self._saved_extra)
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    # -- helpers --
+
+    def _get_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return schema['properties']['kubernetes']
+
+    def _get_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['kubernetes']['properties']
+                ['context_configs']['additionalProperties'])
+
+    def _get_workspace_k8s_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes'])
+
+    def _get_workspace_k8s_context_config_item_schema(self):
+        schema = schemas.get_config_schema()
+        return (schema['properties']['workspaces']['additionalProperties']
+                ['properties']['kubernetes']['properties']['context_configs']
+                ['additionalProperties'])
+
+    # -- client side (env var not set) --
+
+    def test_client_allows_unknown_k8s_root_property(self):
+        """On the client, unknown kubernetes fields pass validation."""
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    def test_client_allows_unknown_k8s_context_config_property(self):
+        """On the client, unknown fields in context_configs pass."""
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    def test_client_allows_unknown_workspace_k8s_property(self):
+        """On the client, unknown workspace kubernetes fields pass."""
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    def test_client_allows_unknown_workspace_k8s_context_config_property(self):
+        """On the client, unknown fields in workspace context_configs pass."""
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    # -- server side with plugins loaded --
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_k8s_root(self):
+        """On the server, a registered property passes root validation."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        k8s_schema = self._get_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_context_config(self):
+        """On the server, a registered property passes context_config."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_workspace_k8s(self):
+        """On the server, a registered property passes workspace k8s."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_registered_property_passes_workspace_context_config(self):
+        """On the server, a registered property passes workspace ctx cfg."""
+        plugins._plugins_loaded = True
+        schemas.register_kubernetes_property('my_plugin', {'type': 'string'})
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'my_plugin': 'hello'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_k8s_root(self):
+        """On the server, an unregistered property fails root validation."""
+        plugins._plugins_loaded = True
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_context_config(self):
+        """On the server, an unregistered property fails context_config."""
+        plugins._plugins_loaded = True
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_workspace_k8s(self):
+        """On the server, an unregistered property fails workspace k8s."""
+        plugins._plugins_loaded = True
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_unregistered_property_rejected_workspace_ctx_cfg(self):
+        """On the server, unregistered property fails workspace ctx cfg."""
+        plugins._plugins_loaded = True
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=ws_ctx_schema)
+
+    # -- server side before plugins loaded (should allow additional props) --
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_k8s_root(self):
+        """Before plugins load, server allows unknown properties."""
+        plugins._plugins_loaded = False
+        k8s_schema = self._get_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_context_config(self):
+        """Before plugins load, server allows unknown context_config props."""
+        plugins._plugins_loaded = False
+        ctx_schema = self._get_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ctx_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_workspace_k8s(self):
+        """Before plugins load, server allows unknown workspace k8s props."""
+        plugins._plugins_loaded = False
+        ws_k8s_schema = self._get_workspace_k8s_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_k8s_schema)
+
+    @mock.patch.dict('os.environ',
+                     {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+    def test_server_before_plugins_loaded_allows_unknown_workspace_ctx(self):
+        """Before plugins load, server allows unknown workspace ctx props."""
+        plugins._plugins_loaded = False
+        ws_ctx_schema = self._get_workspace_k8s_context_config_item_schema()
+        config = {'unknown_plugin_field': 'value'}
+        jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
 if __name__ == "__main__":

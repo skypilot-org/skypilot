@@ -463,6 +463,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
 
         AUTH_FAILURE = 'AUTH_FAILURE'
         AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
+        ENDPOINT_CONNECTION_ERROR = 'ENDPOINT_CONNECTION_ERROR'
 
         @property
         def message(self) -> str:
@@ -476,6 +477,10 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'action is enabled for your AWS account in IAM. '
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
                 )
+            elif self == self.ENDPOINT_CONNECTION_ERROR:
+                return ('Failed to connect to the AWS EC2 endpoint. '
+                        'This may be due to network issues or the region being '
+                        'unreachable from the current network environment.')
             else:
                 raise ValueError(f'Unknown reason {self}')
 
@@ -699,6 +704,19 @@ class SkyletInternalError(Exception):
 class SkyletMethodNotImplementedError(Exception):
     """Raised when a Skylet gRPC method is not implemented on the server."""
     pass
+
+
+class SkyletUnavailableError(Exception):
+    """Raised when the Skylet gRPC server is unreachable."""
+    pass
+
+
+# Exception types that indicate gRPC failed and the caller should fall
+# back to the legacy SSH code path.
+SKYLET_GRPC_FALLBACK_ERRORS = (
+    SkyletMethodNotImplementedError,
+    SkyletUnavailableError,
+)
 
 
 class ClientError(Exception):

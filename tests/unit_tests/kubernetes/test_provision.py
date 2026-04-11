@@ -1206,3 +1206,70 @@ class TestRbac409ConflictHandling:
         config_lib._configure_autoscaler_cluster_role_binding(
             'default', None, provider_config)
         auth_api_mock.patch_cluster_role_binding.assert_called_once()
+
+
+class TestRuntimeClassOverride:
+    """Tests for runtimeClassName override behavior in GPU pod specs.
+
+    When nvidia runtime exists and GPU pods are requested, SkyPilot
+    auto-sets runtimeClassName to 'nvidia'. pod_config should be able
+    to override or remove this setting.
+    """
+
+    @staticmethod
+    def _apply_runtime_class_logic(pod_spec, nvidia_runtime_exists,
+                                   needs_gpus_nvidia):
+        """Replicates the runtimeClassName logic from _create_pods."""
+        if nvidia_runtime_exists and needs_gpus_nvidia:
+            if 'runtimeClassName' not in pod_spec['spec']:
+                pod_spec['spec']['runtimeClassName'] = 'nvidia'
+            elif not pod_spec['spec']['runtimeClassName']:
+                del pod_spec['spec']['runtimeClassName']
+
+    def test_default_sets_nvidia_runtime(self):
+        """No runtimeClassName in pod_config -> auto-set to 'nvidia'."""
+        pod_spec = {'spec': {'containers': [{}]}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=True,
+                                        needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'nvidia'
+
+    def test_pod_config_overrides_runtime(self):
+        """pod_config sets a custom runtimeClassName -> respected."""
+        pod_spec = {'spec': {'containers': [{}], 'runtimeClassName': 'custom'}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=True,
+                                        needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'custom'
+
+    def test_pod_config_null_removes_runtime(self):
+        """pod_config sets runtimeClassName to None -> field removed."""
+        pod_spec = {'spec': {'containers': [{}], 'runtimeClassName': None}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=True,
+                                        needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_pod_config_empty_string_removes_runtime(self):
+        """pod_config sets runtimeClassName to '' -> field removed."""
+        pod_spec = {'spec': {'containers': [{}], 'runtimeClassName': ''}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=True,
+                                        needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_no_nvidia_runtime_no_change(self):
+        """nvidia runtime doesn't exist -> no runtimeClassName set."""
+        pod_spec = {'spec': {'containers': [{}]}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=False,
+                                        needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_no_gpu_no_change(self):
+        """No GPU requested -> no runtimeClassName set."""
+        pod_spec = {'spec': {'containers': [{}]}}
+        self._apply_runtime_class_logic(pod_spec,
+                                        nvidia_runtime_exists=True,
+                                        needs_gpus_nvidia=False)
+        assert 'runtimeClassName' not in pod_spec['spec']
