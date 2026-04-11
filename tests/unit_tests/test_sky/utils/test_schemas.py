@@ -795,6 +795,34 @@ class TestAWSConfigSchema(unittest.TestCase):
         jsonschema.validate(instance=config, schema=self.aws_schema)
 
 
+class TestServiceSchema(unittest.TestCase):
+    """Tests for the service schema in schemas.py."""
+
+    def setUp(self):
+        self.service_schema = schemas.get_service_schema()
+
+    def test_valid_load_balancer_config(self):
+        config = {
+            'readiness_probe': '/',
+            'load_balancer': {
+                'stream_timeout_seconds': 240,
+            },
+        }
+
+        jsonschema.validate(instance=config, schema=self.service_schema)
+
+    def test_rejects_lb_stream_timeout_under_readiness_probe(self):
+        config = {
+            'readiness_probe': {
+                'path': '/health',
+                'lb_stream_timeout_seconds': 240,
+            },
+        }
+
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.service_schema)
+
+
 class TestRegisterKubernetesProperty(unittest.TestCase):
     """Tests for register_kubernetes_property and schema validation."""
 
