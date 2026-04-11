@@ -4085,8 +4085,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     metadata_jsons=metadata_jsons,
                     num_jobs=num_jobs,
                     execution=execution,
-                    is_primary_in_job_groups=
-                    is_primary_in_job_groups  # type: ignore[arg-type]
+                    # Deprecated field 13: plain bool (None becomes False).
+                    # Kept for backward compat with old servers.
+                    is_primary_in_job_groups=[
+                        v if v is not None else False
+                        for v in is_primary_in_job_groups
+                    ],
+                    # New field 14: supports nullable bools via wrapper.
+                    is_primary_in_job_groups_v2=[
+                        jobsv1_pb2.OptionalBool(value=v)
+                        if v is not None else jobsv1_pb2.OptionalBool()
+                        for v in is_primary_in_job_groups
+                    ],
                 )
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()

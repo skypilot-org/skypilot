@@ -215,6 +215,20 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    @staticmethod
+    def _unpack_is_primary(
+        request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
+    ) -> List[Optional[bool]]:
+        """Unpack is_primary_in_job_group from request.
+
+        Uses the v2 field (OptionalBool wrapper) if present, falling back to
+        the deprecated plain bool field which cannot represent NULL.
+        """
+        if request.is_primary_in_job_groups_v2:
+            return [(opt.value if opt.HasField('value') else None)
+                    for opt in request.is_primary_in_job_groups_v2]
+        return list(request.is_primary_in_job_groups)
+
     def SetJobInfoWithoutJobId(  # type: ignore[return]
         self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
         context: grpc.ServicerContext
@@ -228,7 +242,6 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             job_ids = []
             execution = request.execution
             for i in range(request.num_jobs):
-                is_primary_in_job_group = request.is_primary_in_job_groups[i]
                 job_id = managed_job_state.set_job_info_without_job_id(
                     name=request.name,
                     workspace=request.workspace,
@@ -239,13 +252,13 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     execution=execution)
                 job_ids.append(job_id)
                 # Set pending state for all tasks
-                for task_id, task_name, metadata_json in zip(
-                        request.task_ids, request.task_names,
-                        request.metadata_jsons):
+                for task_id, task_name, metadata_json, is_primary in zip(
+                        request.task_ids,
+                        request.task_names, request.metadata_jsons,
+                        self._unpack_is_primary(request)):
                     managed_job_state.set_pending(job_id, task_id, task_name,
                                                   request.resources_str,
-                                                  metadata_json,
-                                                  is_primary_in_job_group)
+                                                  metadata_json, is_primary)
             return jobsv1_pb2.SetJobInfoWithoutJobIdResponse(job_ids=job_ids)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
