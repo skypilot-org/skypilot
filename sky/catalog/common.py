@@ -350,8 +350,7 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid zone {zone!r}{region_str}')
                 error_msg += _get_candidate_str(
-                    zone, maybe_region_df['AvailabilityZone'].dropna().unique().
-                    tolist())
+                    zone, maybe_region_df['AvailabilityZone'].unique().tolist())
                 raise ValueError(error_msg)
         region_df = filter_df['Region'].unique()
         assert len(region_df) == 1, 'Zone should be unique across regions.'
