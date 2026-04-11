@@ -310,7 +310,7 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(
-            df['Region'].str.lower().unique().tolist())
+            df['Region'].dropna().str.lower().unique().tolist())
         return (f'\nList of supported {cloud_name} regions: '
                 f'{", ".join(all_regions)!r}')
 
@@ -323,7 +323,8 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
                 candidate_strs = _get_candidate_str(
-                    region.lower(), df['Region'].str.lower().unique())
+                    region.lower(),
+                    df['Region'].dropna().str.lower().unique())
                 if not candidate_strs:
                     if cloud_name in ('azure', 'gcp'):
                         faq_msg = (
@@ -349,7 +350,8 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid zone {zone!r}{region_str}')
                 error_msg += _get_candidate_str(
-                    zone, maybe_region_df['AvailabilityZone'].unique())
+                    zone,
+                    maybe_region_df['AvailabilityZone'].dropna().unique())
                 raise ValueError(error_msg)
         region_df = filter_df['Region'].unique()
         assert len(region_df) == 1, 'Zone should be unique across regions.'
