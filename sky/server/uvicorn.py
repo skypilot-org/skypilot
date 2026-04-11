@@ -76,19 +76,34 @@ def add_timestamp_prefix_for_server_logs() -> None:
     server_logger.propagate = False
     # Add date prefix to the log message printed by loggers under
     # server.
+    log_level = (logging.DEBUG
+                 if env_options.Options.SHOW_DEBUG_INFO.get() else logging.INFO)
     stream_handler = logging.StreamHandler(sys.stdout)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
+    stream_handler.setLevel(log_level)
     stream_handler.flush = sys.stdout.flush  # type: ignore
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
+
+    # Optionally mirror logs to a file.  This replaces the old
+    # ``| tee -a server.log`` pipeline which prevented SIGTERM from
+    # reaching the server process (tini could not signal through
+    # the pipe).  Writing to the file directly from Python keeps
+    # ``exec`` intact so the server is tini's direct child.
+    log_path = os.environ.get('SKYPILOT_SERVER_LOG_PATH')
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        file_handler = logging.FileHandler(log_path, mode='a')
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(sky_logging.FORMATTER)
+        server_logger.addHandler(file_handler)
+
     # Add date prefix to the log message printed by uvicorn.
+    handlers = server_logger.handlers
     for name in ['uvicorn', 'uvicorn.access']:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
-        uvicorn_logger.addHandler(stream_handler)
+        for h in handlers:
+            uvicorn_logger.addHandler(h)
 
 
 class Server(uvicorn.Server):

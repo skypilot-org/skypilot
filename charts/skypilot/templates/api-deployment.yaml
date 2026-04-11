@@ -150,6 +150,10 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
+        {{- if .Values.apiService.serveServerLog }}
+        - name: SKYPILOT_SERVER_LOG_PATH
+          value: /root/.sky/api_server/server.log
+        {{- end }}
         {{- if .Values.auth.disableBasicAuthMiddleware }}
         - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
           value: "true"
@@ -244,16 +248,10 @@ spec:
 
           {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
-          # Use trap to forward SIGTERM to the entire process group so
-          # that the server process receives it even through a pipeline.
-          # Without this, tini only signals the shell, and the server
-          # (a grandchild in the pipeline) never gets SIGTERM.
-          trap 'trap "" TERM; kill -TERM 0' TERM
-          sky api start {{ include "skypilot.apiArgs" . }} --foreground 2>&1 | tee -a /root/.sky/api_server/server.log &
-          wait
-          {{- else }}
-          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           {{- end }}
+          # exec ensures the server is tini's direct child so that
+          # SIGTERM is delivered correctly for graceful shutdown.
+          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
         ports:
         - containerPort: 46580
         livenessProbe:
