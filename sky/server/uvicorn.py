@@ -44,6 +44,15 @@ try:
 except ValueError:
     _WAIT_REQUESTS_TIMEOUT_SECONDS = 60
 
+# Delay before blocking requests during graceful shutdown. During this
+# window the server continues serving normally while Kubernetes propagates
+# endpoint removal. Default 0 (no delay) for non-Kubernetes environments.
+try:
+    _SHUTDOWN_WAIT_SECONDS = int(
+        os.environ.get(constants.SHUTDOWN_WAIT_SECONDS_ENV_VAR, '0'))
+except ValueError:
+    _SHUTDOWN_WAIT_SECONDS = 0
+
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
 _RETRIABLE_REQUEST_NAMES = {
@@ -122,10 +131,23 @@ class Server(uvicorn.Server):
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
         """Perform graceful shutdown."""
-        # Block new requests so that we can wait until all on-going requests
-        # are finished. Note that /api/$verb operations are still allowed in
-        # this stage to ensure the client can still operate the on-going
-        # requests, e.g. /api/logs, /api/cancel, etc.
+        # Phase 1: Continue serving during endpoint propagation.
+        # In Kubernetes, the pod is removed from Service endpoints once
+        # deletionTimestamp is set, but propagation to all kube-proxy nodes
+        # takes time. Keep serving during this window so that in-flight
+        # requests are completed normally without depending on ingress retry.
+        pre_block_delay = _SHUTDOWN_WAIT_SECONDS
+        if pre_block_delay > 0:
+            logger.info(
+                f'Worker {os.getpid()}: received shutdown signal, '
+                f'serving for {pre_block_delay}s during endpoint '
+                'propagation.')
+            time.sleep(pre_block_delay)
+
+        # Phase 2: Block new requests so that we can wait until all on-going
+        # requests are finished. Note that /api/$verb operations are still
+        # allowed in this stage to ensure the client can still operate the
+        # on-going requests, e.g. /api/logs, /api/cancel, etc.
         logger.info('Block new requests being submitted in worker '
                     f'{os.getpid()}.')
         state.set_block_requests(True)

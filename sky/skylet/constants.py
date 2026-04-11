@@ -685,6 +685,11 @@ MAX_PRIORITY = 1000
 DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
+# Delay (seconds) before blocking requests during graceful shutdown.
+# Allows Kubernetes endpoint propagation to complete while the server
+# continues serving normally.
+SHUTDOWN_WAIT_SECONDS_ENV_VAR = (SKYPILOT_ENV_VAR_PREFIX +
+                                'SHUTDOWN_WAIT_SECONDS')
 COST_REPORT_DEFAULT_DAYS = 30
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +

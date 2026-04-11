@@ -139,6 +139,8 @@ spec:
               fieldPath: metadata.uid
         - name: SKYPILOT_ROLLING_UPDATE_ENABLED
           value: "true"
+        - name: SKYPILOT_SHUTDOWN_WAIT_SECONDS
+          value: "15"
         {{- end }}
         {{- if .Values.storage.enabled }}
         - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
@@ -242,7 +244,13 @@ spec:
 
           {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
-          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground  2>&1 | tee -a /root/.sky/api_server/server.log
+          # Use trap to forward SIGTERM to the entire process group so
+          # that the server process receives it even through a pipeline.
+          # Without this, tini only signals the shell, and the server
+          # (a grandchild in the pipeline) never gets SIGTERM.
+          trap 'trap "" TERM; kill -TERM 0' TERM
+          sky api start {{ include "skypilot.apiArgs" . }} --foreground 2>&1 | tee -a /root/.sky/api_server/server.log &
+          wait
           {{- else }}
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           {{- end }}
