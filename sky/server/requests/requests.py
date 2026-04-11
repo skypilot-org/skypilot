@@ -1228,7 +1228,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return [Request.from_row(row) for row in rows]
 
     @init_db_async
+    @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
+        if not request_ids:
+            return
         assert _DB is not None
         id_list_str = ','.join(repr(rid) for rid in request_ids)
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):

@@ -109,9 +109,7 @@ class BlobStorage(abc.ABC):
         any replica can serve the ``/download`` request after another
         replica synced the logs from the cluster.
         """
-        d = os.path.expanduser('~/.sky/api_server/download_tmp')
-        os.makedirs(d, exist_ok=True)
-        return d
+        return os.path.expanduser('~/.sky/api_server/download_tmp')
 
     def get_staging_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the staging directory path for an in-progress upload."""
@@ -135,6 +133,7 @@ def get_blob_storage() -> BlobStorage:
         # pylint: disable=import-outside-toplevel
         from sky.server.blob import local_blob_storage as lbs
         _blob_storage = lbs.LocalFilesystemBlobStorage()
+        os.makedirs(_blob_storage.download_tmp_dir(), exist_ok=True)
     return _blob_storage
 
 
