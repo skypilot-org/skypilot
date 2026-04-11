@@ -292,6 +292,14 @@ class Resources:
             setup for FUSE mounting. This flag also safeguards against using
             FUSE mounting on existing clusters that do not support it. If None,
             defaults to False.
+          _cluster_config_overrides: an optional dict of cluster configuration
+            overrides. This is the Python SDK equivalent of the ``config`` field
+            in a :ref:`task YAML <yaml-spec-config>`. The dict structure mirrors
+            the :ref:`SkyPilot configuration syntax <config-yaml>` and supports
+            the same fields allowed in the task YAML ``config`` field (e.g.
+            ``kubernetes.pod_config``, ``kubernetes.provision_timeout``,
+            ``docker.run_options``, etc.). See
+            :ref:`config-sources-and-overrides` for full details.
 
         Raises:
             ValueError: if some attributes are invalid.

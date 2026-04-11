@@ -131,6 +131,59 @@ Example:
     nvidia_gpus:
       disable_ecc: ...
 
+.. _config-client-python-sdk:
+
+Python SDK
+~~~~~~~~~~
+
+When using the Python SDK, you can pass configuration overrides via the
+``_cluster_config_overrides`` parameter on :class:`sky.Resources`. The dict
+structure is identical to the YAML ``config`` field.
+
+Example:
+
+.. code-block:: python
+
+  import sky
+
+  task = sky.Task(run='nvidia-smi')
+  task.set_resources(
+      sky.Resources(
+          infra='k8s',
+          accelerators='H100:8',
+          _cluster_config_overrides={
+              'kubernetes': {
+                  'provision_timeout': 600,
+                  'pod_config': {
+                      'metadata': {
+                          'annotations': {
+                              'my-annotation': 'my-value',
+                          },
+                      },
+                  },
+              },
+          },
+      ))
+  sky.launch(task)
+
+This is equivalent to the following task YAML:
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s
+    accelerators: H100:8
+
+  config:
+    kubernetes:
+      provision_timeout: 600
+      pod_config:
+        metadata:
+          annotations:
+            my-annotation: my-value
+
+  run: nvidia-smi
+
 .. _config-client-cli-flag:
 
 CLI flag
