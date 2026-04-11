@@ -12,7 +12,6 @@ sky/clouds/service_catalog/data_fetchers/*.csv
 .vscode/
 .idea/
 .env
-bench-results/
 
 # For editor files
 *.swp
