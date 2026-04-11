@@ -36,7 +36,7 @@ with st.sidebar:
                 st.error("System offline")
         else:
             st.error("API error")
-    except:
+    except Exception:
         st.error("Connection failed")
 
 
