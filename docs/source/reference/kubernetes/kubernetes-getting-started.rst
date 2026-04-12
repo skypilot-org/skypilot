@@ -192,6 +192,8 @@ By default, we maintain and use two SkyPilot container images for use on Kuberne
 
 These images are pre-installed with SkyPilot dependencies for fast startup.
 
+The GPU image (``skypilot-gpu``) includes InfiniBand dependencies (``rdma-core``, ``libibverbs1``, ``libmlx5-1``, ``libibverbs-dev``) by default, enabling out-of-the-box support for InfiniBand/RDMA workloads. This eliminates the need to manually install these dependencies and avoids version conflicts. For examples of using InfiniBand with SkyPilot, see the `Nebius InfiniBand examples <https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/README.md>`__.
+
 To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
 
 .. code-block:: yaml
