@@ -81,7 +81,7 @@ jobs:
           # See: https://docs.readthedocs.com/platform/latest/versions.html
           # So we need to match that behavior when calling the API
           # Then URL-encode the sanitized branch name for the API call
-          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g')
+          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g' | tr '[:upper:]' '[:lower:]')
           VERSION_SLUG=$(echo -n "${SANITIZED_BRANCH}" | jq -sRr @uri)
 
           echo "Triggering ReadTheDocs build for project: ${READTHEDOCS_PROJECT}, branch: ${BRANCH_NAME}"
@@ -195,7 +195,7 @@ jobs:
             // See: https://docs.readthedocs.com/platform/latest/versions.html
             // So we need to match that behavior for the documentation URL
             // Then URL-encode the sanitized branch name for the documentation URL
-            const sanitizedBranch = branch.replace(/\//g, '-');
+            const sanitizedBranch = branch.replace(/\//g, '-').toLowerCase();
             const encodedBranch = encodeURIComponent(sanitizedBranch);
 
             // Add label to track that a preview was built
@@ -251,7 +251,7 @@ jobs:
           # See: https://docs.readthedocs.com/platform/latest/versions.html
           # So we need to match that behavior when calling the API
           # Then URL-encode the sanitized branch name for the API call
-          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g')
+          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g' | tr '[:upper:]' '[:lower:]')
           VERSION_SLUG=$(echo -n "${SANITIZED_BRANCH}" | jq -sRr @uri)
 
           echo "Deactivating ReadTheDocs preview for branch: ${BRANCH_NAME}"
