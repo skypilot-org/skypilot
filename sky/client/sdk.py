@@ -60,6 +60,7 @@ from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
@@ -97,6 +98,24 @@ logging.getLogger('httpx').setLevel(logging.CRITICAL)
 _LINE_PROCESSED_KEY = 'line_processed'
 
 T = TypeVar('T')
+
+
+def _try_fetch_server_timeline(request_id: str) -> None:
+    """Best-effort fetch of server timeline events into the local trace."""
+    if not os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+        return
+    try:
+        response = server_common.make_authenticated_request(
+            'GET', f'/api/timeline?request_id={request_id}')
+        if response.ok:
+            data = response.json()
+            server_events = data.get('traceEvents', [])
+            for e in server_events:
+                e['pid'] = 'server'
+            timeline.add_events(server_events)
+    except Exception:  # pylint: disable=broad-except
+        # Best effort — server may be unreachable or timeline not saved yet.
+        pass
 
 
 def reload_config() -> None:
@@ -156,6 +175,10 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             continue to run for long periods of time without further streaming.
     """
 
+    # Tag timeline events with the request_id for client-server correlation.
+    if request_id is not None and os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+        timeline.set_request_id(str(request_id))
+
     retry_context: Optional[rest.RetryContext] = None
     if resumable:
         retry_context = rest.get_retry_context()
@@ -177,8 +200,15 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
         if request_id is not None and get_result:
-            return get(request_id)
+            result = get(request_id)
+            # Fetch server-side timeline events so the local trace file
+            # contains the full picture (best-effort).
+            _try_fetch_server_timeline(str(request_id))
+            return result
         else:
+            # Still try to merge if the request finished.
+            if request_id is not None:
+                _try_fetch_server_timeline(str(request_id))
             return None
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')

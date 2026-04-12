@@ -206,6 +206,46 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
+### Tracing
+
+SkyPilot has built-in tracing that produces [Chrome Trace Format](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview) files viewable in [Perfetto UI](https://ui.perfetto.dev/). The trace captures both client-side and server-side events in a single file, giving a unified timeline of the full operation.
+
+#### Capturing a trace
+
+Set `SKYPILOT_TIMELINE_FILE_PATH` to an output path before any `sky` command:
+
+```bash
+SKYPILOT_TIMELINE_FILE_PATH=/tmp/trace.json sky launch -y -c mycluster -- echo hello
+```
+
+Then open `/tmp/trace.json` in [Perfetto UI](https://ui.perfetto.dev/).
+
+The output file contains events from the client process and from all API server requests triggered by that command, automatically merged. There is zero overhead when the variable is not set.
+
+#### Adding trace events to new code
+
+Use the `@timeline.event` decorator or the `timeline.Event` context manager:
+
+```python
+from sky.utils import timeline
+
+# Decorator — auto-generates name from module.function
+@timeline.event
+def my_function():
+    ...
+
+# Decorator with explicit name
+@timeline.event("my_custom_name")
+def my_function():
+    ...
+
+# Context manager for tracing a block
+with timeline.Event("my_block"):
+    ...
+```
+
+Add tracing to operations that are performance-sensitive or have variable latency (provisioning, SSH, network calls, lock acquisitions). Avoid adding it to trivial functions — the stack trace captured per event adds some overhead when tracing is enabled.
+
 ### Testing the API server
 
 #### Local API server (recommended for development)
