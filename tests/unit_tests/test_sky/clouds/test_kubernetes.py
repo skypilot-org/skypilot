@@ -374,6 +374,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.resources.zone = None
         self.resources.cluster_config_overrides = {}
         self.resources.image_id = None  # Set image_id to None to use default
+        self.resources.disk_size = 256  # DEFAULT_DISK_SIZE_GB
+        self.resources.disk_size_specified = False
 
         # Mock the assert_launchable method to return itself
         # Use setattr to avoid the assertion detection issue
@@ -1231,13 +1233,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_in_deploy_vars(
+    def test_disk_size_sets_ephemeral_storage_in_deploy_vars(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test that ephemeral_storage is included in deploy_vars."""
+        """Test that non-default disk_size sets ephemeral-storage."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1251,8 +1253,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=False)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1282,13 +1285,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_with_resource_limits(
+    def test_disk_size_with_resource_limits(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test ephemeral_storage limits with set_pod_resource_limits."""
+        """Test disk_size ephemeral-storage limits with set_pod_resource_limits."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1302,8 +1305,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=1.5)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1334,13 +1338,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_no_ephemeral_storage_when_not_set(
+    def test_no_ephemeral_storage_with_default_disk_size(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test no ephemeral-storage in deploy_vars when not specified."""
+        """Test no ephemeral-storage when disk_size is the default."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1354,9 +1358,8 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=True)
 
-        # ephemeral_storage is None (not set)
-        self.resources.ephemeral_storage = None
-
+        # disk_size not explicitly specified — should NOT set ephemeral-storage
+        self.resources.disk_size_specified = False
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
@@ -1370,36 +1373,6 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
 
         self.assertNotIn('k8s_ephemeral_storage', deploy_vars)
         self.assertNotIn('k8s_ephemeral_storage_limit', deploy_vars)
-
-
-class TestEphemeralStorageValidation(unittest.TestCase):
-    """Test that ephemeral_storage is rejected on non-Kubernetes clouds."""
-
-    def test_ephemeral_storage_rejected_on_non_k8s_cloud(self):
-        """Test that ephemeral_storage raises ValueError on non-K8s cloud."""
-        from sky import resources as resources_lib
-        from sky.clouds import aws
-        r = resources_lib.Resources(cloud=aws.AWS(), ephemeral_storage=50)
-        with self.assertRaises(ValueError) as cm:
-            r.validate()
-        self.assertIn('only supported on Kubernetes', str(cm.exception))
-
-    def test_ephemeral_storage_accepted_on_kubernetes(self):
-        """Test that ephemeral_storage is accepted on Kubernetes."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(cloud=kubernetes.Kubernetes(),
-                                    ephemeral_storage=50)
-        # validate() should not raise for Kubernetes
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
-
-    def test_ephemeral_storage_accepted_when_no_cloud(self):
-        """Test that ephemeral_storage is accepted when no cloud specified."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(ephemeral_storage=50)
-        # validate() should not raise when cloud is not specified
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
 
 
 class TestKubernetesSecurityContext(unittest.TestCase):

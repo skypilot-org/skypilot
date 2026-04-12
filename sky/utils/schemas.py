@@ -370,6 +370,9 @@ def _get_single_resources_schema():
                     'type': 'integer',
                 }],
             },
+            # Deprecated: use disk_size instead. Kept for backward
+            # compatibility with configs written by older versions.
+            # TODO (kyuds): remove v0.14.0.
             'ephemeral_storage': {
                 'anyOf': [{
                     'type': 'string',
