@@ -297,6 +297,7 @@ class Autoscaler:
             info.replica_id
             for info in replica_infos
             if info.version < latest_version_with_min_replicas
+            and not info.is_terminal
         ]
 
     def generate_scaling_decisions(
