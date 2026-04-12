@@ -74,7 +74,7 @@ jobs:
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests
         id: trigger_buildkite
-        uses: buildkite/trigger-pipeline-action@v2.3.0
+        uses: buildkite/trigger-pipeline-action@3b5d98081fffc1a90e7eaa739f05e6106585a11a # v2.3.0
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
           pipeline: skypilot-1/${{ inputs.pipeline }}
