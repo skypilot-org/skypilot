@@ -1159,6 +1159,15 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option(
+    '--resize',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Resize an existing cluster to --num-nodes. Supports both '
+          'scaling up (adding workers) and scaling down (removing workers). '
+          'Scale-down requires no running jobs. '
+          'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -1200,6 +1209,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
     fast: bool,
+    resize: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1212,8 +1222,24 @@ def launch(
 
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
+
+    With ``--resize``, scale an existing cluster up or down to ``--num-nodes``.
+    Scale-up adds new workers while preserving existing nodes. Scale-down
+    requires no running jobs and re-provisions workers to the new count.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Resize an existing cluster to 4 nodes.
+      sky launch -c my-cluster --resize --num-nodes 4
+      \b
+      # Resize using a YAML that specifies num_nodes.
+      sky launch -c my-cluster --resize cluster.yaml
+
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
     # submitted, while the synchronous way of `sky launch` does. We should
@@ -1224,6 +1250,9 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    if resize and cluster is None:
+        raise click.UsageError(
+            '--resize requires -c/--cluster to specify an existing cluster.')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1301,6 +1330,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        resize=resize,
         _need_confirmation=not yes,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')

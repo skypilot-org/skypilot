@@ -557,6 +557,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -627,6 +628,10 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -723,6 +728,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -743,6 +749,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -835,6 +842,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)

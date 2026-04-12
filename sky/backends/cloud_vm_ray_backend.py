@@ -3031,6 +3031,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
@@ -3071,7 +3072,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return self._locked_provision(lock_id, task, to_provision,
                                               dryrun, stream_logs, cluster_name,
                                               retry_until_up,
-                                              skip_unnecessary_provisioning)
+                                              skip_unnecessary_provisioning,
+                                              resize)
             except locks.LockTimeout:
                 if not communicated_with_user:
                     rich_utils.force_update_status(
@@ -3125,6 +3127,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         with lock_events.DistributedLockEvent(lock_id, _CLUSTER_LOCK_TIMEOUT):
             # Reset spinner message to remove any mention of being blocked
@@ -3136,7 +3139,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # cluster, this function will create a to_provision_config
             # with required resources.
             to_provision_config = self._check_existing_cluster(
-                task, to_provision, cluster_name, dryrun)
+                task, to_provision, cluster_name, dryrun, resize)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -5538,13 +5541,88 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     # --- Utilities ---
 
+    def _handle_resize_pre_provision(self, handle: CloudVmRayResourceHandle,
+                                     task: task_lib.Task,
+                                     cluster_name: str) -> None:
+        """Pre-provision steps for cluster resize.
+
+        For scale-down: checks that no jobs are running, then terminates
+        excess worker nodes so that the subsequent bulk_provision sees the
+        correct (reduced) instance count.
+
+        For scale-up or same-size: no-op (bulk_provision handles it).
+        """
+        current_nodes = handle.launched_nodes
+        requested_nodes = task.num_nodes
+
+        if requested_nodes >= current_nodes:
+            # Scale-up or no-op: nothing to do pre-provision.
+            if requested_nodes > current_nodes:
+                delta = requested_nodes - current_nodes
+                sky_logging.print(
+                    f'Resizing cluster {cluster_name!r} from '
+                    f'{current_nodes} to {requested_nodes} node(s) '
+                    f'(+{delta} worker(s)).')
+            else:
+                sky_logging.print(f'Cluster {cluster_name!r} already has '
+                                  f'{current_nodes} node(s). Nothing to do.')
+            return
+
+        to_remove = current_nodes - requested_nodes
+        sky_logging.print(
+            f'Resizing cluster {cluster_name!r} from {current_nodes} to '
+            f'{requested_nodes} node(s) (-{to_remove} worker(s)).')
+
+        # Check for running jobs.
+        returncode, stdout, stderr = self.run_on_head(
+            handle,
+            job_lib.JobLibCodeGen.get_job_queue(user_hash=None, all_jobs=False),
+            require_outputs=True,
+            stream_logs=False)
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(f'Failed to check job queue on cluster '
+                                   f'{cluster_name!r} before scale-down. '
+                                   f'Aborting resize for safety.\n'
+                                   f'stderr: {stderr}')
+        jobs = job_lib.load_job_queue(stdout)
+        in_progress = [
+            j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
+                                               job_lib.JobStatus.SETTING_UP,
+                                               job_lib.JobStatus.PENDING)
+        ]
+        if in_progress:
+            job_ids = ', '.join(str(j['job_id']) for j in in_progress)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot scale down: {len(in_progress)} job(s) still '
+                    f'running (IDs: {job_ids}). Cancel them first with: '
+                    f'sky cancel {cluster_name} -a')
+
+        # Terminate all worker nodes. Since we verified no jobs are
+        # running, all workers are idle. The subsequent bulk_provision
+        # will recreate only the workers needed for the new count.
+        launched = handle.launched_resources
+        assert launched is not None and launched.cloud is not None
+        cloud_name = repr(launched.cloud)
+        config_from_yaml = global_user_state.get_cluster_yaml_dict(
+            handle.cluster_yaml)
+        provider_config = config_from_yaml.get('provider')
+
+        logger.info(f'Terminating {to_remove} excess worker(s).')
+        provision_lib.terminate_instances(cloud_name,
+                                          handle.cluster_name_on_cloud,
+                                          provider_config,
+                                          worker_only=True)
+
     @timeline.event
     def _check_existing_cluster(
             self,
             task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
             cluster_name: str,
-            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
+            dryrun: bool = False,
+            resize: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -5595,7 +5673,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
-            self.check_resources_fit_cluster(handle, task)
+            if resize:
+                # Resize mode: allow num_nodes to change. Handle
+                # scale-down by checking for running jobs and removing
+                # excess workers before provisioning.
+                self._handle_resize_pre_provision(handle, task, cluster_name)
+            else:
+                self.check_resources_fit_cluster(handle, task)
 
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
@@ -5778,14 +5862,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
+            num_nodes = (task.num_nodes if resize else handle.launched_nodes)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
-                handle.launched_nodes,
+                num_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
                 prev_config_hash=prev_config_hash)
+        if resize:
+            logger.warning(
+                f'Cluster {cluster_name!r} does not exist. '
+                'Ignoring --resize and proceeding with a normal launch.')
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
