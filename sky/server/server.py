@@ -33,7 +33,6 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
-import filelock
 import jwt as pyjwt
 import starlette.background
 import starlette.middleware.base
@@ -76,7 +75,9 @@ from sky.server import websocket_utils
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
+from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
+from sky.server.requests import log_provider
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
@@ -573,41 +574,28 @@ async def cleanup_unreferenced_file_mounts():
     # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
     # blocking the event loop.
     def _do_cleanup():
-        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-        # Get all blob_id referenced by active requests.
-        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
-        if not clients_dir.exists():
-            return
-        for user_dir in clients_dir.iterdir():
-            if not user_dir.is_dir():
-                continue
-            try:
-                blobs_dir = user_dir / 'file_mounts' / 'blobs'
-                if not blobs_dir.exists():
-                    continue
-                # Delete unreferenced extraction dirs older than grace period.
-                grace_cutoff = time.time() - 3600  # 1 hour grace
-                for entry in blobs_dir.iterdir():
-                    if not entry.is_dir():
-                        continue
-                    if entry.name in ('.locks', '.staging'):
-                        continue
-                    blob_id = entry.name
-                    if (blob_id not in active_blob_ids and
-                            entry.stat().st_mtime < grace_cutoff):
-                        logger.info(f'GC: removing unreferenced blob '
-                                    f'{blob_id} for user {user_dir.name}')
-                        shutil.rmtree(entry, ignore_errors=True)
-                # Clean up stale staging directories from interrupted uploads.
-                staging_base = blobs_dir / '.staging'
-                if staging_base.exists():
-                    for staging in staging_base.iterdir():
-                        if staging.is_dir():
-                            if staging.stat().st_mtime < grace_cutoff:
-                                shutil.rmtree(staging, ignore_errors=True)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
-                             f'{common_utils.format_exception(e)}')
+        storage = bs.get_blob_storage()
+
+        with storage.gc_lock() as should_run:
+            if not should_run:
+                logger.debug('Another replica is running blob GC, skipping')
+                return
+
+            active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
+
+            for user_id in storage.list_users():
+                try:
+                    for blob_id, mtime in storage.list_blob_ids(user_id):
+                        if (blob_id not in active_blob_ids and
+                                mtime < grace_cutoff):
+                            logger.info(f'GC: removing unreferenced blob '
+                                        f'{blob_id} for user {user_id}')
+                            storage.delete_blob(user_id, blob_id)
+                    storage.release_stale_uploads(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                                 f'{common_utils.format_exception(e)}')
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -615,6 +603,39 @@ async def cleanup_unreferenced_file_mounts():
             await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_file_mounts: '
+                         f'{common_utils.format_exception(e)}')
+
+
+async def cleanup_download_tmp():
+    """Delete expired download tmp directories.
+
+    Downloaded logs are transient — synced from the cluster for the client
+    to download, then no longer needed.  Clean up anything older than the
+    blob GC grace period (1 hour by default).
+    """
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+            if tmp_dir is None:
+                # Backend shares the persistent log dir; no separate
+                # cleanup needed.
+                continue
+            if not os.path.exists(tmp_dir):
+                continue
+            cutoff = time.time() - bs.GC_GRACE_SECONDS
+            for user_entry in os.scandir(tmp_dir):
+                if not user_entry.is_dir():
+                    continue
+                for entry in os.scandir(user_entry.path):
+                    if entry.is_dir():
+                        try:
+                            if entry.stat().st_mtime < cutoff:
+                                shutil.rmtree(entry.path, ignore_errors=True)
+                        except OSError:
+                            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_download_tmp: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -661,6 +682,7 @@ async def schedule_on_boot_check_async():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
+
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
@@ -690,7 +712,6 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         # event loop (process).
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
-    # Shutdown: Add any cleanup code here if needed
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -1485,13 +1506,8 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-                'file_mounts' / 'blobs' / blob_id)
-    if blob_dir.is_dir():
-        # Refresh mtime to claim a longer lifetime of the blob cache
-        os.utime(blob_dir)
-        return {'exists': True}
-    return {'exists': False}
+    exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
+    return {'exists': exists}
 
 
 @app.post('/upload_v2')
@@ -1507,26 +1523,23 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if not re.match(r'^[0-9a-f]{64}$', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
-    # Here we still isolate the blobs between users, as the upload_id is
-    # provided by the client and we want to be careful about cross-user
-    # blob sharing.
-    mount_dir = await _prepare_client_mount_dir(user_hash, request)
-    blobs_dir = mount_dir / 'blobs'
-    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    target_dir = blobs_dir / upload_id
+
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+
+    storage = bs.get_blob_storage()
+
+    # Ensure blobs directory exists.
+    await anyio.Path(storage.blobs_dir(user_id)).mkdir(parents=True,
+                                                       exist_ok=True)
+    target_dir = storage.get_target_dir(user_id, upload_id)
 
     if target_dir.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
-    # Per-blob filelock to prevent concurrent uploads of the same blob.
-    locks_dir = blobs_dir / '.locks'
-    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
-    lock = filelock.AsyncFileLock(
-        lock_file=str(locks_dir / f'{upload_id}.lock'),
-        executor=executor.get_request_thread_executor())
-
-    async with lock:
+    async with storage.acquire_upload_lock(user_id, upload_id):
         # Re-check after acquiring the lock: another upload may have
         # completed while we were waiting.
         if target_dir.exists():
@@ -1534,7 +1547,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
                 status=responses.UploadStatus.COMPLETED.value)
 
         # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = blobs_dir / '.staging' / upload_id
+        staging_dir = storage.get_staging_dir(user_id, upload_id)
         result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                     zip_name='staging',
                                                     request=request,
@@ -1544,7 +1557,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
             return result
         # Atomic rename of the extracted staging dir to the final
         # directory (same filesystem).
-        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
@@ -1852,7 +1865,8 @@ async def download_logs(
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
+    logs_dir_on_api_server = pathlib.Path(
+        bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
@@ -1877,8 +1891,13 @@ async def download(download_body: payloads.DownloadBody,
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
+    download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
-        if not str(folder_path).startswith(str(logs_dir_on_api_server)):
+        folder_str = str(folder_path)
+        expanded_str = str(folder_path.expanduser())
+        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
+                folder_str.startswith(download_tmp) or
+                expanded_str.startswith(os.path.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
@@ -2251,12 +2270,6 @@ async def stream(
         # req.log_path is derived from request_id,
         # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
-        if not log_path_to_stream.exists():
-            # The log file might be deleted by the request GC daemon but the
-            # request task is still in the database.
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=f'Log of request {request_id!r} has been deleted')
         if request_task.schedule_type == requests_lib.ScheduleType.LONG:
             polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
         del request_task
@@ -2304,13 +2317,24 @@ async def stream(
             user_supplied_request_id
             if user_supplied_request_id else request_id)
 
+    if request_id is not None:
+        content = log_provider.get_log_provider().log_stream(
+            request_id=request_id,
+            log_path=log_path_to_stream,
+            plain_logs=format == 'plain',
+            tail=tail,
+            follow=follow,
+            polling_interval=polling_interval)
+    else:
+        content = stream_utils.log_streamer(request_id=None,
+                                            log_path=log_path_to_stream,
+                                            plain_logs=format == 'plain',
+                                            tail=tail,
+                                            follow=follow,
+                                            polling_interval=polling_interval)
+
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(request_id,
-                                          log_path_to_stream,
-                                          plain_logs=format == 'plain',
-                                          tail=tail,
-                                          follow=follow,
-                                          polling_interval=polling_interval),
+        content=content,
         media_type='text/plain',
         headers=headers,
     )
@@ -3153,6 +3177,12 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
+    # Always load plugin in main process, an edge case is that the main process
+    # will also run uvicorn server when num_worker=1 and then the plugins will
+    # be installed twice in main process (second time with the uvicorn app).
+    # This is okay since plugin install is considered idempotent.
+    plugins.load_plugins(plugins.ExtensionContext())
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -3222,6 +3252,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
+        global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

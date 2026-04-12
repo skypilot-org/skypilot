@@ -406,6 +406,9 @@ def mock_queue(monkeypatch):
     # Apply monkeypatch to replace `mp_queue.get_queue`
     monkeypatch.setattr("sky.server.requests.queues.mp_queue.get_queue",
                         mock_get_queue)
+    # Also patch executor._get_queue which uses the factory pattern
+    monkeypatch.setattr("sky.server.requests.executor._get_queue",
+                        mock_get_queue)
 
     # Return the mock_queue_instance for use in tests
     return mock_queue_instance
