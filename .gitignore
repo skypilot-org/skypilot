@@ -22,3 +22,6 @@ bench-results/
 
 # Somehow the rate_limit db will be created in the root directory, ignore it
 rate_limit.db
+
+# Git worktrees
+.worktrees/
