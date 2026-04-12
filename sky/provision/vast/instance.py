@@ -301,3 +301,59 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    head_ip: Optional[str] = None,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """Returns externally-accessible endpoints for the given ports.
+
+    Vast.ai exposes container ports via SSH reverse-proxy with a fixed mapping:
+      container:22   → ssh_host:ssh_port
+      container:N    → ssh_host:(ssh_port + N - 21)
+
+    In practice, only port 8080 (the second forwarded port) is supported:
+      container:8080 → ssh_host:(ssh_port + 1)
+
+    Using the raw ssh_host + service port (e.g. :8080) fails because the
+    Vast.ai SSH gateway does not relay arbitrary ports directly. The correct
+    externally-accessible endpoint is ssh_host:(ssh_port+1).
+    """
+    del head_ip, provider_config  # Unused.
+    from sky.utils import resources_utils  # pylint: disable=import-outside-toplevel
+    ports_to_query = resources_utils.port_ranges_to_set(ports)
+
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'],
+                                          head_only=True)
+    if not running_instances:
+        return {}
+
+    head_inst = list(running_instances.values())[0]
+    ssh_host = head_inst.get('ssh_host') or head_inst.get('public_ipaddr', '')
+    ssh_port = head_inst.get('ssh_port')
+
+    if not ssh_host or ssh_port is None:
+        return {}
+
+    # Vast.ai port forward: container:8080 → ssh_host:(ssh_port+1)
+    # Only port 8080 is supported via the gateway's second reverse-tunnel slot.
+    result: Dict[int, List[common.Endpoint]] = {}
+    for port in ports_to_query:
+        if port == 8080:
+            external_port = ssh_port + 1
+        else:
+            # For other ports, fall back to the host with the original port.
+            # Note: these are unlikely to be reachable unless the user has
+            # configured additional port forwarding on their Vast.ai instance.
+            logger.warning(
+                f'Port {port} requested but Vast.ai only natively forwards '
+                f'port 8080 via ssh_host:(ssh_port+1). Port {port} may not '
+                f'be reachable. Use port 8080 for service endpoints.')
+            external_port = port
+        result[port] = [common.SocketEndpoint(host=ssh_host,
+                                               port=external_port)]
+
+    return result
