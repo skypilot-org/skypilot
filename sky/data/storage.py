@@ -28,6 +28,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
@@ -52,6 +53,8 @@ StorageStatus = status_lib.StorageStatus
 Path = str
 SourceType = Union[Path, List[Path]]
 
+_SEEWEB_URL_PREFIX = 'seeweb://'
+
 # Clouds with object storage implemented in this module. Azure Blob
 # Storage isn't supported yet (even though Azure is).
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
@@ -66,6 +69,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     cloudflare.NAME,
     coreweave.NAME,
     vastdata.NAME,
+    str(clouds.Seeweb()),
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -107,6 +111,12 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     if vastdata_is_enabled:
         enabled_clouds.append(vastdata.NAME)
 
+    try:
+        if seeweb_adaptor.check_storage_credentials():
+            enabled_clouds.append(str(clouds.Seeweb()))
+    except Exception:  # pylint: disable=broad-except
+        pass
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -142,6 +152,7 @@ class StoreType(enum.Enum):
     NEBIUS = 'NEBIUS'
     COREWEAVE = 'COREWEAVE'
     VASTDATA = 'VASTDATA'
+    SEEWEB = 'SEEWEB'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -1182,7 +1193,7 @@ class Storage(object):
                 is_local_source = True
             elif split_path.scheme in [
                     's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
-                    'vastdata'
+                    'vastdata', 'seeweb'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -1208,7 +1219,7 @@ class Storage(object):
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
                         f'r2://, cos://, oci://, nebius://, cw://, '
-                        f'vastdata://. Got: {source}')
+                        f'vastdata://, seeweb://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -1233,6 +1244,7 @@ class Storage(object):
                     'nebius',
                     'cw',
                     'vastdata',
+                    'seeweb',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
@@ -5196,6 +5208,60 @@ class VastDataStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.VASTDATA.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.VASTDATA.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            config)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class SeewebStore(S3CompatibleStore):
+    """S3-compatible backend for Seeweb Cloud Object Storage."""
+
+    _DEFAULT_REGION = 'eu-milano-1'
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        return S3CompatibleConfig(
+            store_type='SEEWEB',
+            url_prefix='seeweb://',
+            client_factory=lambda region: data_utils.create_seeweb_client(),
+            resource_factory=lambda name: seeweb_adaptor.resource('s3').Bucket(
+                name),
+            split_path=data_utils.split_seeweb_path,
+            verify_bucket=data_utils.verify_seeweb_bucket,
+            aws_profile=seeweb_adaptor.SEEWEB_PROFILE_NAME,
+            get_endpoint_url=seeweb_adaptor.get_endpoint,
+            cloud_name=str(clouds.Seeweb()),
+            default_region=cls._DEFAULT_REGION,
+            mount_cmd_factory=cls._get_seeweb_mount_cmd,
+        )
+
+    @classmethod
+    def _get_seeweb_mount_cmd(cls,
+                              bucket_name: str,
+                              mount_path: str,
+                              bucket_sub_path: Optional[str],
+                              read_only: bool = False) -> str:
+        endpoint_url = seeweb_adaptor.get_endpoint()
+        return mounting_utils.get_seeweb_mount_cmd(
+            seeweb_adaptor.SEEWEB_PROFILE_NAME,
+            bucket_name,
+            endpoint_url,
+            mount_path,
+            bucket_sub_path,
+            read_only=read_only)
+
+    def mount_cached_command(self,
+                             mount_path: str,
+                             config: Optional[MountCachedConfig] = None) -> str:
+        """Seeweb-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.SEEWEB.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.SEEWEB.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
