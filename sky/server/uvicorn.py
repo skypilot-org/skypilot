@@ -3,6 +3,7 @@
 This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
+
 import asyncio
 import logging
 import os
@@ -22,6 +23,7 @@ from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import state
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import storage as request_storage
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import env_options
@@ -31,6 +33,8 @@ from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# A short wait for the endpoints update propagated to the ingress/LB
+_GRACE_WAIT_SECONDS = 5
 # File lock path for coordinating graceful shutdown across processes
 _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 
@@ -122,6 +126,7 @@ class Server(uvicorn.Server):
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
         """Perform graceful shutdown."""
+        time.sleep(_GRACE_WAIT_SECONDS)
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
         # this stage to ensure the client can still operate the on-going
@@ -147,15 +152,8 @@ class Server(uvicorn.Server):
         """Wait until all on-going requests are finished or cancelled."""
         start_time = time.time()
         while True:
-            statuses = [
-                requests_lib.RequestStatus.PENDING,
-                requests_lib.RequestStatus.RUNNING,
-            ]
-            requests = [(request_task.request_id, request_task.name)
-                        for request_task in requests_lib.get_request_tasks(
-                            req_filter=requests_lib.RequestTaskFilter(
-                                status=statuses, fields=['request_id', 'name']))
-                       ]
+            requests = (request_storage.get_request_backend().
+                        get_shutdown_active_requests())
             if not requests:
                 break
             logger.info(f'{len(requests)} on-going requests '
@@ -215,9 +213,11 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         stop_monitor = threading.Event()
-        monitor = threading.Thread(target=metrics_lib.process_monitor,
-                                   args=('server', stop_monitor),
-                                   daemon=True)
+        monitor = threading.Thread(
+            target=metrics_lib.process_monitor,
+            args=('server', stop_monitor),
+            daemon=True,
+        )
         monitor.start()
         try:
             with self.capture_signals():

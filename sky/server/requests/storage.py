@@ -1,9 +1,11 @@
 """Abstract interface for request persistence."""
+
 from __future__ import annotations
 
 import abc
 import contextlib
-from typing import AsyncGenerator, Generator, List, Optional, Set, TYPE_CHECKING
+from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
+                    TYPE_CHECKING)
 
 if TYPE_CHECKING:
     from sky.server.requests.requests import Request
@@ -147,6 +149,11 @@ class RequestBackend(abc.ABC):
         """Get blob IDs referenced by active (PENDING/RUNNING) requests."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:
+        """Get (request_id, name) pairs to wait for during graceful shutdown."""
+        raise NotImplementedError
+
     def reset_on_startup(self) -> None:
         """Called on server startup for backend-specific initialization.
 
@@ -165,6 +172,7 @@ def get_request_backend() -> RequestBackend:
     if _storage_backend is None:
         # pylint: disable=import-outside-toplevel
         from sky.server.requests.requests import SqliteRequestBackend
+
         _storage_backend = SqliteRequestBackend()
     return _storage_backend
 

@@ -1411,6 +1411,19 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
             return {row[0] for row in cursor.fetchall()}
 
+    def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:
+        """Get (request_id, name) pairs to wait for during graceful shutdown."""
+
+        tasks = self.query_requests(
+            RequestTaskFilter(
+                status=[
+                    RequestStatus.PENDING,
+                    RequestStatus.RUNNING,
+                ],
+                fields=['request_id', 'name'],
+            ))
+        return [(t.request_id, t.name) for t in tasks]
+
     # --- Lifecycle ---
 
     def reset_on_startup(self) -> None:
