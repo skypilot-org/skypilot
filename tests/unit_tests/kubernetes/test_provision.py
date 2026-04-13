@@ -1273,3 +1273,286 @@ class TestRuntimeClassOverride:
                                         nvidia_runtime_exists=True,
                                         needs_gpus_nvidia=False)
         assert 'runtimeClassName' not in pod_spec['spec']
+
+
+class TestWaitForPodsToScheduleAutoscaleTimeout:
+    """Tests for the autoscaler-aware timeout extension in
+    _wait_for_pods_to_schedule.
+
+    The production bug: when an autoscaler is configured, node scale-up can
+    take 10+ minutes, but the default provision_timeout (10s) is tuned for
+    normal scheduling latency. Tests verify that once autoscaling is
+    detected, the deadline is extended from the detection moment.
+    """
+
+    class _FakeClock:
+        """Deterministic clock that advances only when sleep() is called.
+
+        Replaces time.time()/time.sleep() in the instance module so the
+        while loop in _wait_for_pods_to_schedule is driven by simulated
+        time rather than wall-clock time.
+        """
+
+        def __init__(self):
+            self.now = 0.0
+
+        def time(self):
+            return self.now
+
+        def sleep(self, secs):
+            self.now += secs
+
+    @staticmethod
+    def _make_node(name: str, cluster_name_on_cloud: str):
+        """Build a mock new_node (used to derive expected pod names)."""
+        from sky.provision import constants as prov_constants
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        return node
+
+    @staticmethod
+    def _make_pending_pod(name: str, cluster_name_on_cloud: str):
+        """Build a pod that is Pending with no container_statuses.
+
+        This represents a pod that has not yet been scheduled — the loop
+        should keep waiting for it.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        return pod
+
+    def _setup(self, monkeypatch, autoscaler_type, autoscale_detected):
+        """Wire up all mocks. Returns (clock, raise_errors_mock)."""
+
+        # 1. Config lookup — return the autoscaler type when asked.
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            if keys == ('autoscaler',):
+                return autoscaler_type
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        # 2. k8s core API — always return the same pending pod.
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_pending_pod('pod-0', cluster_name_on_cloud)
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        # 3. Autoscale detection — return caller-supplied flag.
+        monkeypatch.setattr(instance, '_cluster_had_autoscale_event',
+                            lambda *a, **kw: autoscale_detected)
+        monkeypatch.setattr(instance, '_cluster_maybe_autoscaling',
+                            lambda *a, **kw: autoscale_detected)
+
+        # 4. Replace the slow error-surfacing path with a simple marker
+        #    so we can cheaply detect that the timeout path fired.
+        raise_errors = mock.MagicMock(
+            side_effect=config_lib.KubernetesError('simulated-timeout'))
+        monkeypatch.setattr(instance, '_raise_pod_scheduling_errors',
+                            raise_errors)
+
+        # 5. Deterministic clock — advances only via sleep().
+        clock = self._FakeClock()
+        monkeypatch.setattr(instance.time, 'time', clock.time)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+
+        # 6. No-op spinner update to avoid rich_utils side effects.
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+
+        return clock, raise_errors, cluster_name_on_cloud
+
+    def test_timeout_fires_without_autoscaler(self, monkeypatch):
+        """Without any autoscaler configured, the original timeout is
+        enforced — the function should exit the loop and raise once the
+        user-specified timeout elapses."""
+        _, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type=None, autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        assert raise_errors.called, (
+            'Without autoscaler, timeout=5s must trigger the error path.')
+
+    def test_autoscale_detection_extends_deadline(self, monkeypatch):
+        """When autoscaling is detected, the deadline is extended from the
+        detection moment by _AUTOSCALE_DETECTED_TIMEOUT_SECONDS. A short
+        user timeout alone would exit in seconds, but the extension keeps
+        the loop alive for much longer."""
+        clock, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type='gke', autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,  # far shorter than the 900s extension
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        # The loop sleeps 1s per iteration via the fake clock. If the
+        # extension did NOT apply we would exit after ~5s of simulated
+        # time. It must run for at least the extension window instead.
+        assert clock.now >= instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'Expected simulated time >= '
+            f'{instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS}s after '
+            f'autoscale detection, but got {clock.now}s — the extension '
+            f'did not take effect.')
+        assert raise_errors.called
+
+    def test_autoscale_extension_does_not_shorten_user_timeout(
+            self, monkeypatch):
+        """If the user set a provision_timeout longer than the extension
+        window, their value must still be honored (max of the two)."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type='gke',
+                                                      autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        long_timeout = instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS + 600
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=long_timeout,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        # The function should run at least until the longer user timeout
+        # elapses, even though the extension window expired earlier.
+        assert clock.now >= long_timeout, (
+            f'User-specified timeout of {long_timeout}s must not be '
+            f'shortened by the autoscale extension; loop ran for only '
+            f'{clock.now}s.')
+
+    def test_karpenter_heuristic_does_not_extend_deadline(self, monkeypatch):
+        """Karpenter does not emit TriggeredScaleUp; the code falls back
+        to heuristic FailedScheduling detection. That signal is NOT
+        reliable enough (same event fires for oversized requests,
+        taints, PVC binding errors, etc.) to extend the deadline by
+        15 min, so the heuristic path must only update the spinner
+        message and leave the deadline alone.
+
+        The autoscaler-configured initial minimum timeout still applies,
+        but nothing beyond that.
+        """
+        clock, _, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type='karpenter', autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        # Initial timeout is bumped to the autoscaler minimum (60s), but
+        # the 15 min extension must NOT apply under the heuristic path.
+        assert clock.now >= instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'Expected at least the autoscaler initial minimum '
+            f'({instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s) of '
+            f'waiting, got {clock.now}s.')
+        assert clock.now < instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'Heuristic FailedScheduling detection must NOT extend the '
+            f'deadline by the full 15 min window, but loop ran for '
+            f'{clock.now}s.')
+
+    def test_autoscaler_configured_bumps_short_timeout_to_minimum(
+            self, monkeypatch):
+        """The default provision_timeout (10s) is shorter than the
+        Cluster Autoscaler scan interval (~10s), so with a vanilla
+        config the loop would exit before any TriggeredScaleUp could
+        be emitted. When an autoscaler is configured, the initial
+        timeout must be bumped to at least
+        _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS so detection has a
+        chance to run."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type='gke',
+                                                      autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=10,  # default; shorter than CA scan interval
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        # No detection → no 15 min extension. But the initial timeout
+        # must have been bumped to the autoscaler minimum, so the loop
+        # should run for at least that long.
+        assert clock.now >= instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'Autoscaler-configured timeout should be bumped to >= '
+            f'{instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s, but '
+            f'loop ran only {clock.now}s.')
+        assert clock.now < instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'No TriggeredScaleUp detected → 15 min extension must not '
+            f'apply, but loop ran for {clock.now}s.')
+
+    def test_no_autoscaler_does_not_bump_timeout(self, monkeypatch):
+        """Without an autoscaler configured, the initial-minimum bump
+        must NOT apply — a user who explicitly sets a short timeout on
+        a non-autoscaling cluster expects it to be honored."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type=None,
+                                                      autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.utcnow())
+
+        # Without autoscaler, the 5s timeout must be honored (not bumped
+        # to the 60s autoscaler minimum). Loop should exit shortly after
+        # 5s — generously below the autoscaler minimum.
+        assert clock.now < instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'No autoscaler configured → short user timeout must not be '
+            f'bumped, but loop ran for {clock.now}s.')
