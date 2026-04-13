@@ -28,6 +28,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- include "skypilot.apiPodScheduling" . }}
       containers:
       - name: redis
         image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image"))) }}

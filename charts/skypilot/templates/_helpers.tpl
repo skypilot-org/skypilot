@@ -55,6 +55,26 @@ Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
 {{- end -}}
 {{- end -}}
 
+{{/*
+Pod scheduling aligned with apiService (nodeSelector, affinity, tolerations).
+Applied to oauth2-proxy and bundled redis so they schedule like the API server
+when umbrella charts set apiService.nodeSelector / tolerations / affinity.
+*/}}
+{{- define "skypilot.apiPodScheduling" -}}
+{{- with .Values.apiService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- with .Values.apiService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- with .Values.apiService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- end -}}
+
 
 {{/*
 Check for apiService.config during upgrade and display warning
