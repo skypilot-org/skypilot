@@ -1,6 +1,10 @@
 from unittest import mock
 
+import pytest
+
 from sky import core
+from sky import exceptions
+from sky import models
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.utils import common
 from sky.utils import common_utils
@@ -80,3 +84,32 @@ def test_status_best_effort(mock_get_clusters) -> None:
     log_message = mock_logger.warning.call_args[0][0]
     assert ('Failed to validate status responses for cluster malformed-cluster'
             in log_message)
+
+
+class TestEnabledCloudsWorkspacePermission:
+    """Tests for workspace permission check in core.enabled_clouds."""
+
+    @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
+                return_value=[])
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_rejects_unauthorized_workspace(self, mock_check, _):
+        mock_check.side_effect = exceptions.PermissionDeniedError('no access')
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.core.common_utils.get_current_user',
+                        return_value=mock_user):
+            with pytest.raises(exceptions.PermissionDeniedError,
+                               match='no access'):
+                core.enabled_clouds(workspace='restricted')
+        mock_check.assert_called_once_with(mock_user, 'restricted')
+
+    @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
+                return_value=[])
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_skips_check_when_workspace_is_none(self, mock_check, _):
+        """When workspace is None, falls back to active workspace
+        and does not call check_workspace_permission."""
+        with mock.patch('sky.core.skypilot_config.get_active_workspace',
+                        return_value='default'), \
+             mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
+            core.enabled_clouds(workspace=None)
+        mock_check.assert_not_called()
