@@ -115,6 +115,65 @@ def test_aws_az_fetching_error():
     assert deserialized.stacktrace == 'test_stacktrace'
 
 
+def test_deserialize_none_input():
+    """Test that None input returns RuntimeError instead of crashing."""
+    e = exceptions.deserialize_exception(None)
+    assert isinstance(e, RuntimeError)
+    assert 'Unknown server error' in str(e)
+
+
+def test_deserialize_string_input():
+    """Test that string input is wrapped in RuntimeError."""
+    e = exceptions.deserialize_exception('Something went wrong')
+    assert isinstance(e, RuntimeError)
+    assert str(e) == 'Something went wrong'
+
+    # Empty string
+    e = exceptions.deserialize_exception('')
+    assert isinstance(e, RuntimeError)
+    assert str(e) == ''
+
+
+def test_deserialize_non_dict_input():
+    """Test that non-dict inputs (list, int, bool) return RuntimeError."""
+    for bad_input in [42, True, [{'loc': ['body'], 'msg': 'invalid'}]]:
+        e = exceptions.deserialize_exception(bad_input)
+        assert isinstance(e, RuntimeError)
+        assert 'Server error' in str(e)
+
+
+def test_deserialize_partial_dict():
+    """Test that dicts with 'type' but missing other keys still work."""
+    # Dict with only 'type' - should construct with no args
+    e = exceptions.deserialize_exception({'type': 'ValueError'})
+    assert isinstance(e, ValueError)
+
+    # Dict with 'type' and 'message' but missing others
+    e = exceptions.deserialize_exception({
+        'type': 'ValueError',
+        'message': 'test'
+    })
+    assert isinstance(e, ValueError)
+
+    # Empty dict - no 'type' key, falls through to RuntimeError
+    e = exceptions.deserialize_exception({})
+    assert isinstance(e, RuntimeError)
+
+    # Unknown type with message uses message in fallback
+    e = exceptions.deserialize_exception({
+        'type': 'NonExistent',
+        'message': 'details'
+    })
+    assert isinstance(e, Exception)
+    assert 'NonExistent' in str(e)
+    assert 'details' in str(e)
+
+    # Unknown type without message still works
+    e = exceptions.deserialize_exception({'type': 'NonExistent'})
+    assert isinstance(e, Exception)
+    assert 'NonExistent' in str(e)
+
+
 def test_wrap_unsafe_exceptions():
     """Test that non-safe exceptions are wrapped properly."""
 
