@@ -15,8 +15,10 @@ resources:
         || true
     timeout: 90
 
+num_nodes: 2
+
 setup: |
-  echo "Setup complete"
+  echo "Setup complete on $(hostname)"
 
 run: |
   echo "Running on $(hostname)..."

@@ -1,0 +1,16 @@
+# Multi-node baseline with NO hook, for the "no hook -> with hook"
+# second-launch scenario. Using the same num_nodes and cpus as
+# test_k8s_termination_hook.yaml keeps the only meaningful change
+# between launches the termination_hook itself.
+resources:
+  cloud: kubernetes
+  cpus: 1
+
+num_nodes: 2
+
+setup: |
+  echo "Setup complete on $(hostname)"
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

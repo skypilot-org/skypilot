@@ -230,3 +230,60 @@ class TestTerminationHookResources:
             'command': 'legacy.sh',
             'timeout': 30,
         }
+
+    def test_autostop_without_hook_plus_termination_hook_combines(self):
+        """`autostop: {idle_minutes: N}` + `termination_hook` is not a conflict.
+
+        The mutual-exclusion rule only fires when both sources specify a hook.
+        """
+        r = Resources(infra='kubernetes',
+                      autostop={
+                          'idle_minutes': 5,
+                          'down': True,
+                      },
+                      termination_hook={
+                          'command': 'cleanup.sh',
+                          'timeout': 60,
+                      })
+        assert r.autostop_config.enabled is True
+        assert r.autostop_config.idle_minutes == 5
+        assert r.autostop_config.down is True
+        assert r.autostop_config.hook == 'cleanup.sh'
+        assert r.autostop_config.hook_timeout == 60
+
+    def test_copy_preserves_termination_hook(self):
+        """`Resources.copy()` must carry the hook through when no override."""
+        r = Resources(infra='kubernetes',
+                      termination_hook={
+                          'command': 'save.sh',
+                          'timeout': 42,
+                      })
+        copied = r.copy()
+        assert copied.autostop_config is not None
+        assert copied.autostop_config.hook == 'save.sh'
+        assert copied.autostop_config.hook_timeout == 42
+        # The hook also round-trips via to_yaml_config on the copy.
+        yc = copied.to_yaml_config()
+        assert yc['termination_hook'] == {
+            'command': 'save.sh',
+            'timeout': 42,
+        }
+
+    def test_copy_with_termination_hook_override(self):
+        """Override via copy(termination_hook=...) must apply cleanly.
+
+        The existing autostop_config carries the same hook, so the override
+        should match (no mutual-exclusion error) and values propagate.
+        """
+        r = Resources(infra='kubernetes',
+                      termination_hook={
+                          'command': 'save.sh',
+                          'timeout': 10,
+                      })
+        # Override the timeout (command stays the same to avoid conflict).
+        copied = r.copy(termination_hook={
+            'command': 'save.sh',
+            'timeout': 99,
+        })
+        assert copied.autostop_config.hook == 'save.sh'
+        assert copied.autostop_config.hook_timeout == 99

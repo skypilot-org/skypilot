@@ -1,8 +1,12 @@
+# Same hook body/timeout as test_k8s_termination_hook.yaml but specified via
+# the legacy `autostop.hook` form. Used by smoke tests to verify that
+# `termination_hook` and `autostop.hook` produce identical pod specs
+# (backward compat).
 resources:
   cloud: kubernetes
   cpus: 1
-  termination_hook:
-    command: |
+  autostop:
+    hook: |
       # Write proof to a Kubernetes ConfigMap that persists after pod deletion.
       KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
       NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
@@ -13,11 +17,8 @@ resources:
         -H "Content-Type: application/json" \
         -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"${CM_NAME}\"},\"data\":{\"status\":\"hook fired\",\"timestamp\":\"$(date)\"}}" \
         || true
-    timeout: 60
+    hook_timeout: 60
 
-# Multi-node so smoke tests can verify the hook is injected on BOTH head and
-# worker pods — the Kubernetes template shares one container spec across all
-# pods, so the preStop lifecycle must render identically on both.
 num_nodes: 2
 
 setup: |
