@@ -1,0 +1,23 @@
+resources:
+  cloud: kubernetes
+  cpus: 1
+  termination_hook:
+    command: |
+      # v2: different hook body so re-launch detects the change.
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      CM_NAME="termination-proof-v2-$(hostname)"
+      curl -sk -X POST \
+        "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/configmaps" \
+        -H "Authorization: Bearer ${KUBE_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"${CM_NAME}\"},\"data\":{\"status\":\"hook v2 fired\",\"timestamp\":\"$(date)\"}}" \
+        || true
+    timeout: 90
+
+setup: |
+  echo "Setup complete"
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

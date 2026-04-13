@@ -1083,6 +1083,92 @@ def _wait_for_deployment_pod(context,
         'ready.')
 
 
+def _lifecycle_spec_matches(new_lifecycle: Any,
+                            existing_lifecycle: Any) -> bool:
+    """Compare a new (dict) lifecycle spec with an existing (K8s model) one."""
+    if new_lifecycle is None and existing_lifecycle is None:
+        return True
+    if new_lifecycle is None or existing_lifecycle is None:
+        return False
+    # Existing pods return K8s client V1Lifecycle objects; normalize by going
+    # through to_dict (which produces snake_case). Convert the new (user) dict
+    # to the same snake_case shape for comparison.
+    try:
+        existing = existing_lifecycle.to_dict()
+    except AttributeError:
+        existing = existing_lifecycle
+
+    def _snake_case(s: str) -> str:
+        out = []
+        for i, ch in enumerate(s):
+            if ch.isupper() and i > 0:
+                out.append('_')
+            out.append(ch.lower())
+        return ''.join(out)
+
+    def _normalize(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {_snake_case(k): _normalize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_normalize(x) for x in obj]
+        return obj
+
+    return _normalize(new_lifecycle) == _normalize(existing)
+
+
+def _maybe_replace_pods_for_termination_hook(
+        namespace: str, context: Optional[str], pod_spec: Dict[str, Any],
+        running_pods: Dict[str, Any]) -> List[str]:
+    """Delete pods whose lifecycle hook or grace period differs from pod_spec.
+
+    Returns the list of pod names that were deleted so the caller can account
+    for them when computing ``to_start_count``. The normal provisioning flow
+    will then re-create them with the updated spec.
+    """
+    containers = pod_spec.get('spec', {}).get('containers') or [{}]
+    new_lifecycle = containers[0].get('lifecycle') if containers else None
+    new_term_grace = pod_spec.get('spec',
+                                  {}).get('terminationGracePeriodSeconds')
+
+    pods_to_replace: List[str] = []
+    for pod_name, pod in running_pods.items():
+        old_lifecycle = None
+        if (pod.spec.containers and
+                getattr(pod.spec.containers[0], 'lifecycle', None)):
+            old_lifecycle = pod.spec.containers[0].lifecycle
+        old_term_grace = pod.spec.termination_grace_period_seconds
+        lifecycle_matches = _lifecycle_spec_matches(new_lifecycle,
+                                                    old_lifecycle)
+        grace_matches = (new_term_grace is None or
+                         new_term_grace == old_term_grace)
+        if not lifecycle_matches or not grace_matches:
+            pods_to_replace.append(pod_name)
+
+    if not pods_to_replace:
+        return []
+
+    logger.info(f'Detected termination-hook/lifecycle change on '
+                f'{len(pods_to_replace)} pods; recreating to pick up new spec: '
+                f'{pods_to_replace}')
+    for pod_name in pods_to_replace:
+        # Allow the old preStop hook enough time to run, but cap at the
+        # new/old grace period to avoid blocking forever.
+        grace = new_term_grace or running_pods[
+            pod_name].spec.termination_grace_period_seconds or 30
+        try:
+            kubernetes.core_api(context).delete_namespaced_pod(
+                pod_name,
+                namespace,
+                grace_period_seconds=grace,
+                _request_timeout=config_lib.DELETION_TIMEOUT)
+        except kubernetes.kubernetes.client.ApiException as e:
+            if e.status == 404:
+                # Already gone, treat as deleted.
+                continue
+            raise
+    return pods_to_replace
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -1188,6 +1274,31 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     } for pod in running_pods.values()]
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{running_pod_statuses}')
+
+    # If the termination-hook / lifecycle spec has changed vs. the existing
+    # pods, delete the outdated pods so that the normal create flow below
+    # re-provisions them with the new pod spec. K8s pods are immutable for
+    # `lifecycle` / `terminationGracePeriodSeconds`, so this is the only way
+    # to propagate a hook change on an existing cluster.
+    if running_pods:
+        replaced = _maybe_replace_pods_for_termination_hook(
+            namespace, context, pod_spec, running_pods)
+        if replaced:
+            # Wait for replaced pods to fully terminate before re-counting, so
+            # that the normal create flow below provisions new pods.
+            wait_start = time.time()
+            while time.time() - wait_start < _TIMEOUT_FOR_POD_TERMINATION:
+                remaining = kubernetes_utils.filter_pods(
+                    namespace, context, tags, ['Pending', 'Running'])
+                if len(remaining) == len(running_pods) - len(replaced):
+                    running_pods = remaining
+                    break
+                time.sleep(POLL_INTERVAL)
+            else:
+                # Fall back: refresh running_pods anyway.
+                running_pods = kubernetes_utils.filter_pods(
+                    namespace, context, tags, ['Pending', 'Running'])
+            head_pod_name = _get_head_pod_name(running_pods)
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:

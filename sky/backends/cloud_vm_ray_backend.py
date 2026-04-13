@@ -5644,6 +5644,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
 
+            # If the new task specifies an autostop_config (which carries the
+            # termination_hook / autostop.hook), override the existing
+            # resources so the hook can be added, updated, or removed on a
+            # re-launch of an existing cluster. Without this override,
+            # `to_provision` reuses `handle.launched_resources` which may
+            # reflect stale hook settings.
+            if one_task_resource.autostop_config is not None:
+                to_provision = to_provision.copy(
+                    autostop=one_task_resource.autostop_config.to_yaml_config())
+
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:
                 assert (resource.cluster_config_overrides ==

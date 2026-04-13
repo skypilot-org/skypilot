@@ -285,34 +285,40 @@ Common use cases for autostop hooks:
 
 .. _preemption-hooks:
 
-Autostop hooks on Kubernetes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Termination hooks on Kubernetes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-On Kubernetes, ``autostop.hook`` is automatically embedded as a
-Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time.
-This means the same hook fires on both idle autostop and involuntary
-termination (preemption, node drain, eviction).
+On Kubernetes, use the top-level ``termination_hook`` under ``resources`` to
+register a script that runs before the pod is terminated (for any reason —
+idle autostop, preemption, node drain, or eviction). The hook is embedded as a
+Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time
+and fires on **all nodes** (head + workers).
 
 .. code-block:: yaml
 
    resources:
      cloud: kubernetes
-     autostop:
-       idle_minutes: 10
-       hook: |
+     termination_hook:
+       command: |
          echo "Saving checkpoint before shutdown"
          cp checkpoint.pt s3://bucket/checkpoints/
-       hook_timeout: 600  # seconds
+       timeout: 600  # seconds
+
+``termination_hook`` is the recommended way to configure this behavior. For
+backward compatibility, ``autostop.hook`` is still accepted and produces the
+same pod spec; the two are mutually exclusive within one resources block and
+SkyPilot will raise an error if both specify different values.
 
 **How it works:**
 
-- The hook runs on **all nodes** (head + workers) via the Kubernetes ``preStop`` lifecycle hook
+- The hook runs on **all nodes** via the Kubernetes ``preStop`` lifecycle hook
 - On Kubernetes, the hook is only executed via the ``preStop`` path (not via the
   skylet), so it fires exactly once per termination event
-- ``hook_timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
-  (default: uses the autostop hook timeout if set, otherwise 30s)
-- The hook is embedded in the pod spec at launch time; updating the hook requires
-  ``sky down`` followed by ``sky launch``
+- ``timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
+  (default: 30s when unset)
+- Re-launching an existing cluster with a changed ``termination_hook`` will
+  recreate the affected pods with the new lifecycle spec. Re-launching with the
+  same hook is a no-op (the config hash matches and provisioning is skipped)
 
 **When the hook fires:**
 
@@ -336,9 +342,3 @@ preemption events, but may or may not complete on user-initiated teardown.
 .. note::
 
    ``sky stop`` is not supported on Kubernetes clusters.
-
-.. note::
-
-   Preemption hooks are separate from :ref:`autostop hooks <auto-stop-hooks>`.
-   Setting an autostop hook does **not** enable a preemption hook, and vice versa.
-   Each must be configured independently.

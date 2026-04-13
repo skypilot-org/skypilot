@@ -1,0 +1,13 @@
+# Specifying BOTH `autostop.hook` and a conflicting `termination_hook`
+# should raise a ValueError at parse time.
+resources:
+  cloud: kubernetes
+  cpus: 1
+  autostop:
+    idle_minutes: 5
+    hook: "echo autostop-hook"
+  termination_hook:
+    command: "echo termination-hook"
+
+run: |
+  echo "should never run"

@@ -94,6 +94,21 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+_TERMINATION_HOOK_SCHEMA = {
+    'type': 'object',
+    'required': ['command'],
+    'additionalProperties': False,
+    'properties': {
+        'command': {
+            'type': 'string',
+        },
+        'timeout': {
+            'type': 'integer',
+            'minimum': 1,
+        },
+    },
+}
+
 _AUTOSTOP_SCHEMA = {
     'anyOf': [
         {
@@ -448,6 +463,7 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'termination_hook': _TERMINATION_HOOK_SCHEMA,
             'priority': {
                 'type': 'integer',
                 'minimum': constants.MIN_PRIORITY,
