@@ -1,0 +1,25 @@
+# Primary Status Smoke Test
+# Tests that the overall job group status reflects primary tasks, not the
+# last task. When the primary task succeeds and the auxiliary is
+# auto-terminated (CANCELLED), the job status should be SUCCEEDED.
+---
+name: {{name}}
+execution: parallel
+primary_tasks: [primary-job]
+---
+name: primary-job
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Primary task starting"
+  sleep 10
+  echo "PRIMARY DONE"
+---
+name: aux-job
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Auxiliary task starting"
+  while true; do sleep 5; done

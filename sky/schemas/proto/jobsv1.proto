@@ -183,6 +183,13 @@ message GetJobExitCodesResponse {
   repeated int32 exit_codes = 1;
 }
 
+// Wrapper for nullable bool in repeated fields.
+// Proto3 repeated bool cannot represent NULL - this wrapper allows it.
+// When the optional value field is absent, the value is NULL/None.
+message OptionalBool {
+  optional bool value = 1;
+}
+
 message SetJobInfoWithoutJobIdRequest {
   string name = 1;
   string workspace = 2;
@@ -196,7 +203,10 @@ message SetJobInfoWithoutJobIdRequest {
   repeated string metadata_jsons = 10;
   int32 num_jobs = 11;
   string execution = 12;
-  repeated bool is_primary_in_job_groups = 13;
+  // Deprecated: use is_primary_in_job_groups_v2 which supports NULL values.
+  repeated bool is_primary_in_job_groups = 13 [deprecated = true];
+  // Whether each task is primary in a job group. Supports NULL (non-job-group).
+  repeated OptionalBool is_primary_in_job_groups_v2 = 14;
 }
 
 message SetJobInfoWithoutJobIdResponse {

@@ -2744,6 +2744,84 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_job_group_primary_status(generic_cloud: str):
+    """Test that overall job status reflects primary tasks, not last task.
+
+    When a job group's primary task succeeds and auxiliary task is
+    auto-terminated (CANCELLED), the overall job status and log streaming
+    should report SUCCEEDED rather than CANCELLED.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_primary_status.yaml', name, generic_cloud)
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+
+    test = smoke_tests_utils.Test(
+        'job_group_primary_status',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            # Wait for the job to complete (should SUCCEED based on primary)
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            # Verify log streaming reports SUCCEEDED (not CANCELLED) and
+            # exits with code 0 (not 103). Use job ID since -n only finds
+            # non-terminal jobs.
+            f'job_id=$({get_job_id_cmd}); '
+            f's=$(sky jobs logs $job_id --no-follow 2>&1); '
+            f'echo "$s"; echo "$s" | '
+            f'grep "Job finished (status: SUCCEEDED)"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_pipeline_status(generic_cloud: str):
+    """Test that pipeline (non-job-group) jobs report correct overall status.
+
+    Ensures the primary-task filtering in get_latest_task_id_status() does
+    not regress pipeline jobs where is_primary_in_job_group is NULL.
+    Both sequential tasks should SUCCEED and the log streaming should
+    report 'Job finished (status: SUCCEEDED)'.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_pipeline_status.yaml', name, generic_cloud)
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+
+    test = smoke_tests_utils.Test(
+        'pipeline_status',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            # Verify both tasks succeeded and overall status is SUCCEEDED.
+            f'job_id=$({get_job_id_cmd}); '
+            f's=$(sky jobs logs $job_id --no-follow 2>&1); '
+            f'echo "$s"; echo "$s" | '
+            f'grep "Job finished (status: SUCCEEDED)"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_git_workdir(generic_cloud: str):
     """Test JobGroup with --git-url to use a git repo as the workdir."""
     name = smoke_tests_utils.get_cluster_name()
