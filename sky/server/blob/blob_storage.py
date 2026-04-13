@@ -103,16 +103,7 @@ class BlobStorage(abc.ABC):
         return os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
 
     def download_tmp_dir(self, user_hash: str) -> str:
-        """Return a staging directory for log downloads for a user.
-
-        The returned path is set as `local_dir` for log sync-down
-        requests, so the server stores downloaded logs there and returns
-        paths under it to the client.
-
-        In multi-replica mode this must be on shared storage so that
-        any replica can serve the ``/download`` request after another
-        replica synced the logs from the cluster.
-        """
+        """Return a staging directory for log downloads for a user."""
         raise NotImplementedError
 
     def download_tmp_base_dir(self) -> Optional[str]:
@@ -122,6 +113,11 @@ class BlobStorage(abc.ABC):
         (no separate cleanup needed).
         """
         return None
+
+    @abc.abstractmethod
+    def reset_on_startup(self) -> None:
+        """Called on server startup to clean up ephemeral client state."""
+        raise NotImplementedError
 
     def get_staging_dir(self, user_id: str, blob_id: str) -> pathlib.Path:
         """Return the staging directory path for an in-progress upload."""
