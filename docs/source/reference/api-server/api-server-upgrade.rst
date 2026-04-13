@@ -192,8 +192,17 @@ Upgrade strategy
 By default, the API server is upgraded with the ``Recreate`` strategy, which introduces waiting time for new requests during upgrade. To eliminate the waiting time, you can upgrade the API server with the ``RollingUpdate`` strategy.
 
 .. note::
-    
+
     ``RollingUpdate`` is an experimental feature. There is a known limitation that some running commands might fail when the old version of the API server gets removed from the ingress backend. It is recommended to schedule the upgrade during a maintenance window.
+
+.. warning::
+
+    **Managed jobs and local file mounts:** Local ``file_mounts`` and ``workdir`` for managed jobs are stored on the pod's ephemeral filesystem and will be lost when the old pod is replaced during a rolling update. To avoid this:
+
+    - Enable :ref:`persistent storage <helm-values-storage-enabled>` with a ``ReadWriteMany`` (RWX) PVC so both pods can access the files during the transition.
+    - Alternatively, use :ref:`cloud buckets <sky-storage>`, :ref:`volumes <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>` instead of local paths; or set :ref:`jobs.bucket <config-yaml-jobs-bucket>` to redirect all local file uploads to a cloud bucket.
+
+    This does not apply if you are using a :ref:`remote jobs controller <jobs-controller-remote>`.
 
 The following table compares the two upgrade strategies:
 

@@ -843,6 +843,20 @@ def lookup_gpu_partition_map(
     return None
 
 
+def lookup_cpu_partition(cluster: str) -> Optional[str]:
+    """Look up the cpu_partition for a Slurm cluster.
+
+    Reads cpu_partition from global and per-cluster config (with per-cluster
+    values overriding global ones).
+
+    Returns the partition name, or None if not configured.
+    """
+    return skypilot_config.get_effective_region_config(cloud='slurm',
+                                                       keys=('cpu_partition',),
+                                                       region=cluster,
+                                                       default_value=None)
+
+
 def resolve_gres_gpu_type(
     cluster: str,
     requested_gpu_type: str,

@@ -2071,65 +2071,82 @@ def _check_owner_identity_with_record(cluster_name: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
+    is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
-    # The user identity can be None, if the cluster is created by an older
-    # version of SkyPilot. In that case, we set the user identity to the
-    # current active one.
-    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
-    # immediately without `sky status --refresh` first, will cause a leakage
-    # of the existing cluster. We deem this an acceptable tradeoff mainly
-    # because multi-identity is not common (at least at the moment).
-    if owner_identity is None:
-        global_user_state.set_owner_identity_for_cluster(
-            cluster_name, user_identities[0])
-    else:
-        assert isinstance(owner_identity, list)
-        # It is OK if the owner identity is shorter, which will happen when
-        # the cluster is launched before #1808. In that case, we only check
-        # the same length (zip will stop at the shorter one).
-        for identity in user_identities:
-            for i, (owner, current) in enumerate(zip(owner_identity, identity)):
-                # Clean up the owner identity for the backslash and newlines, caused
-                # by the cloud CLI output, e.g. gcloud.
-                owner = owner.replace('\n', '').replace('\\', '')
-                if owner == current:
-                    if i != 0:
-                        logger.warning(
-                            f'The cluster was owned by {owner_identity}, but '
-                            f'a new identity {identity} is activated. We still '
-                            'allow the operation as the two identities are '
-                            'likely to have the same access to the cluster. '
-                            'Please be aware that this can cause unexpected '
-                            'cluster leakage if the two identities are not '
-                            'actually equivalent (e.g., belong to the same '
-                            'person).')
-                    if i != 0 or len(owner_identity) != len(identity):
-                        # We update the owner of a cluster, when:
-                        # 1. The strictest identty (i.e. the first one) does not
-                        # match, but the latter ones match.
-                        # 2. The length of the two identities are different,
-                        # which will only happen when the cluster is launched
-                        # before #1808. Update the user identity to avoid
-                        # showing the warning above again.
-                        global_user_state.set_owner_identity_for_cluster(
-                            cluster_name, identity)
-                    return  # The user identity matches.
+
+    def _raise_identity_error():
         # Generate error message if no match found
         if len(user_identities) == 1:
             err_msg = f'the activated identity is {user_identities[0]!r}.'
         else:
             err_msg = (f'available identities are {user_identities!r}.')
-        if cloud.is_same_cloud(clouds.Kubernetes()):
+        if is_k8s_cloud:
             err_msg += (' Check your kubeconfig file and make sure the '
                         'correct context is available.')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
+
+    if owner_identity is None and is_k8s_cloud:
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        provider_config = config['provider']
+        context = provider_config.get('context')
+        assert isinstance(context, str)
+        try:
+            identity = clouds.Kubernetes.get_identity_from_context_name(context)
+            global_user_state.set_owner_identity_for_cluster(
+                cluster_name, identity)
+            logger.debug(f'Successfully patched {cluster_name} owner identity '
+                         f'to {identity} (launched on {context}).')
+            return
+        except exceptions.CloudUserIdentityError:
+            _raise_identity_error()
+
+    assert isinstance(owner_identity, list)
+    # It is OK if the owner identity is shorter, which will happen when
+    # the cluster is launched before #1808. In that case, we only check
+    # the same length (zip will stop at the shorter one).
+    for identity in user_identities:
+        for i, (owner, current) in enumerate(zip(owner_identity, identity)):
+            # Clean up the owner identity for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
+            if owner == current:
+                if not is_k8s_cloud:
+                    # We skip patching owner identities for Kubernetes as
+                    # we expect users to naturally have multiple clusters
+                    # in their kubeconfig. The "active" identity is
+                    # considered as the current context, but users can and
+                    # will use contexts other than their current context
+                    # intentionally.
+                    if i != 0:
+                        logger.warning(
+                            f'The cluster was owned by {owner_identity}, '
+                            f'but a new identity {identity} is activated. '
+                            'We still allow the operation as the two '
+                            'identities are likely to have the same '
+                            'access to the cluster. Please be aware that '
+                            'this can cause unexpected cluster leakage if '
+                            'the two identities are not actually equivalent '
+                            '(e.g., belong to the same person).')
+                    if i != 0 or len(owner_identity) != len(identity):
+                        # We update the owner of a cluster, when:
+                        # 1. The strictest identty (i.e. the first one)
+                        # does not match, but the latter ones match.
+                        # 2. The length of the two identities are different,
+                        # which will only happen when the cluster is launched
+                        # before #1808. Update the user identity to avoid
+                        # showing the warning above again.
+                        global_user_state.set_owner_identity_for_cluster(
+                            cluster_name, identity)
+                return  # The user identity matches.
+    _raise_identity_error()
 
 
 def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
@@ -4188,7 +4205,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
     ) from last_exception
 
@@ -4209,7 +4226,7 @@ def invoke_skylet_streaming_with_retries(
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to stream Skylet response after {max_attempts} attempts'
     ) from last_exception
 
@@ -4219,6 +4236,11 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        details = e.details() or ''
+        if 'Connection refused' in details:
+            # Skylet is not running — retrying won't help.
+            raise exceptions.SkyletUnavailableError(
+                f'Skylet is not running (connection refused): {details}') from e
         time.sleep(current_backoff)
     elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
     ) == grpc.StatusCode.UNKNOWN:

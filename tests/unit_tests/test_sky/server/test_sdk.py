@@ -474,6 +474,110 @@ def test_api_login_user_hash_server_healthy(monkeypatch: pytest.MonkeyPatch,
         assert user_hash_path.read_text() == user_hash
 
 
+def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
+                                            tmp_path: Path):
+    """After login with sa token, a subsequent login without token should clear
+    the residual sa token from config before the first health check, so the
+    server can return NEEDS_AUTH and trigger the SSO flow."""
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    sa_user_hash = 'sa11fb39'
+    sso_user_hash = '0f6adbca'
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Step 1: Login with service account token. This writes the sa token
+    # into config and sets local user hash to the sa user.
+    sa_user = {'id': sa_user_hash, 'name': 'hailong'}
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False,
+                user=sa_user))
+        client_sdk.api_login(test_endpoint,
+                             service_account_token="sky_test_token")
+
+    # Verify sa token is in config and local hash is sa user.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert user_hash_path.read_text() == sa_user_hash
+
+    # Step 2: Login again without token. The residual sa token should be
+    # cleared before the first health check. With the sa token gone, the
+    # server returns NEEDS_AUTH, triggering the SSO flow.
+    sa_token_at_health_check = []
+
+    def _capture_check_server_healthy(endpoint):
+        # Capture whether sa token is still in config at the time of
+        # the health check.
+        token = skypilot_config.get_nested(
+            ('api_server', 'service_account_token'), default_value=None)
+        sa_token_at_health_check.append(token)
+        raise StopIteration  # Abort to inspect captured state
+
+    with mock.patch('sky.server.common.check_server_healthy',
+                    side_effect=_capture_check_server_healthy):
+        with pytest.raises(StopIteration):
+            client_sdk.api_login(test_endpoint)
+
+    # The sa token must have been cleared from config BEFORE the first
+    # health check was made.
+    assert sa_token_at_health_check[0] is None
+    config = skypilot_config.get_user_config()
+    assert 'service_account_token' not in config.get('api_server', {})
+
+
+def test_api_login_syncs_hash_from_final_health_check(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The 2nd health check is the final source of truth for user identity.
+    The local user hash must be updated to match it, even if the 1st health
+    check or the auth flow set a different hash."""
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    first_user_hash = 'aaaaaaaa'
+    final_user_hash = 'bbbbbbbb'
+
+    test_endpoint = "http://test.skypilot.co"
+
+    first_user = {'id': first_user_hash, 'name': 'user_a'}
+    final_user = {'id': final_user_hash, 'name': 'user_b'}
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        # 1st health check: HEALTHY with user_a (e.g. from cookie/sa).
+        first_return_value = (server_common.ApiServerStatus.HEALTHY,
+                              server_common.ApiServerInfo(
+                                  status=server_common.ApiServerStatus.HEALTHY,
+                                  basic_auth_enabled=False,
+                                  user=first_user))
+
+        # 2nd health check: HEALTHY with user_b (e.g. actual SSO identity
+        # after sa token was cleared from config).
+        second_return_value = (server_common.ApiServerStatus.HEALTHY,
+                               server_common.ApiServerInfo(
+                                   status=server_common.ApiServerStatus.HEALTHY,
+                                   basic_auth_enabled=False,
+                                   user=final_user))
+
+        mock_check.side_effect = [first_return_value, second_return_value]
+        client_sdk.api_login(test_endpoint)
+
+    # The local hash must match the 2nd health check's user, not the 1st.
+    assert user_hash_path.exists()
+    assert user_hash_path.read_text() == final_user_hash
+
+
 def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
                                   tmp_path: Path):
     # Test that we don't set the user hash if we fail to login.

@@ -22,9 +22,7 @@ provider:
     namespace: {{k8s_namespace}}
 
     # The kubecontext used to connect to the Kubernetes cluster.
-    {% if k8s_context is not none %}
     context: {{k8s_context}}
-    {% endif %}
 
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
@@ -1244,6 +1242,7 @@ available_node_types:
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
+          - containerPort: 46590  # Used by Skylet gRPC
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to

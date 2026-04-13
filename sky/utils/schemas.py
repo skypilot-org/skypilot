@@ -4,19 +4,19 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
+import os
 from typing import Any, Dict, List, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
-from sky.utils import annotations
 from sky.utils import kubernetes_enums
 
 # Registry for plugin-provided job_recovery schema properties.
 # Plugins call register_job_recovery_property() to add strategy-specific
-# config fields. On the server (is_on_api_server=True), plugins have
-# registered their properties so additionalProperties is False. On
-# the client (is_on_api_server=False), additionalProperties is True
-# to let plugin config pass through for server-side validation.
+# config fields. On the server, once plugins have loaded, their properties
+# are registered so additionalProperties is False. On the client (or
+# before plugins load), additionalProperties is True to let plugin
+# config pass through for server-side validation.
 _extra_job_recovery_properties: Dict[str, Any] = {}
 
 
@@ -34,6 +34,40 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
             (e.g., {'type': 'integer'}).
     """
     _extra_job_recovery_properties[name] = schema
+
+
+_extra_kubernetes_properties: Dict[str, Any] = {}
+
+
+def _allow_additional_properties() -> bool:
+    """Return True if schemas should allow additional properties.
+
+    On the client (ENV_VAR_IS_SKYPILOT_SERVER not set), always allow
+    additional properties so they pass through for server-side validation.
+    On the server, allow additional properties only until plugins have
+    been loaded — after that, enforce strict validation.
+    """
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    # Import here to avoid circular imports (plugins imports from sky.utils).
+    from sky.server import plugins  # pylint: disable=import-outside-toplevel
+    return not plugins.plugins_loaded()
+
+
+def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the kubernetes schema.
+
+    This allows plugins to extend the kubernetes dict schema with
+    kubernetes-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
+    """
+    _extra_kubernetes_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -250,12 +284,10 @@ def _get_single_resources_schema():
                         # On the server, plugins have registered
                         # their properties via
                         # register_job_recovery_property(), so we
-                        # can be strict. On the client (where
-                        # is_on_api_server is False), we allow
+                        # can be strict. On the client we allow
                         # unknown properties to pass through for
                         # server-side validation.
-                        'additionalProperties':
-                            not annotations.is_on_api_server,
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             'strategy': {
                                 'anyOf': [{
@@ -1760,7 +1792,13 @@ def get_config_schema():
         'kubernetes': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered
+            # their properties via
+            # register_kubernetes_property(), so we
+            # can be strict. On the client we allow
+            # unknown properties to pass through for
+            # server-side validation.
+            'additionalProperties': _allow_additional_properties(),
             'properties': {
                 'allowed_contexts': {
                     'oneOf': [{
@@ -1781,13 +1819,21 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_kubernetes_property(), so we
+                        # can be strict. On the client we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                            **_extra_kubernetes_properties,
                         },
                     },
                 },
                 **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                **_extra_kubernetes_properties,
             }
         },
         'ssh': {
@@ -1841,6 +1887,9 @@ def get_config_schema():
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                'cpu_partition': {
+                    'type': 'string',
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1859,6 +1908,9 @@ def get_config_schema():
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                            'cpu_partition': {
+                                'type': 'string',
+                            },
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -2233,7 +2285,14 @@ def get_config_schema():
                             'additionalProperties': {
                                 'type': 'object',
                                 'required': [],
-                                'additionalProperties': False,
+                                # On the server, plugins have registered
+                                # their properties via
+                                # register_kubernetes_property(), so we
+                                # can be strict. On the client we allow
+                                # unknown properties to pass through for
+                                # server-side validation.
+                                'additionalProperties':
+                                    _allow_additional_properties(),
                                 'properties': {
                                     'kueue': {
                                         'type': 'object',
@@ -2245,11 +2304,19 @@ def get_config_schema():
                                             },
                                         },
                                     },
+                                    **_extra_kubernetes_properties,
                                 },
                             },
                         },
+                        **_extra_kubernetes_properties,
                     },
-                    'additionalProperties': False,
+                    # On the server, plugins have registered
+                    # their properties via
+                    # register_kubernetes_property(), so we
+                    # can be strict. On the client we allow
+                    # unknown properties to pass through for
+                    # server-side validation.
+                    'additionalProperties': _allow_additional_properties(),
                 },
                 'nebius': {
                     'type': 'object',

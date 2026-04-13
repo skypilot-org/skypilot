@@ -253,7 +253,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
             spinner.update(f'{status_message}[/]')
             try:
                 job_list = managed_jobs_core.queue_from_kubernetes_pod(
-                    pod.metadata.name)
+                    pod.metadata.name, context=context)
             except RuntimeError as e:
                 logger.warning('Failed to get managed jobs from controller '
                                f'{pod.metadata.name}: {str(e)}')
@@ -1038,6 +1038,57 @@ def autostop(
 # ==================
 
 
+def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
+                   backend: backends.CloudVmRayBackend,
+                   user_hash: Optional[str],
+                   all_jobs: bool) -> List[Dict[str, Any]]:
+    """Get the job queue from the cluster via gRPC or SSH fallback."""
+    if handle.is_grpc_enabled_with_flag:
+        try:
+            request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
+                                                    all_jobs=all_jobs)
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: cloud_vm_ray_backend.SkyletClient(
+                    handle.get_grpc_channel()).get_job_queue(request))
+            jobs = []
+            for job_info in response.jobs:
+                job_dict = {
+                    'job_id': job_info.job_id,
+                    'job_name': job_info.job_name,
+                    'submitted_at': job_info.submitted_at,
+                    'status': job_lib.JobStatus.from_protobuf(job_info.status),
+                    'run_timestamp': job_info.run_timestamp,
+                    'start_at': job_info.start_at
+                                if job_info.HasField('start_at') else None,
+                    'end_at': job_info.end_at
+                              if job_info.HasField('end_at') else None,
+                    'resources': job_info.resources,
+                    'log_path': job_info.log_path,
+                    'user_hash': job_info.username,
+                }
+                # Copied from job_lib.load_job_queue.
+                user = global_user_state.get_user(job_dict['user_hash'])
+                job_dict['username'] = user.name if user is not None else None
+                jobs.append(job_dict)
+            return jobs
+        except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+            logger.debug(f'gRPC failed, falling back to SSH: {e}')
+
+    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
+    returncode, jobs_payload, stderr = backend.run_on_head(handle,
+                                                           code,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        command=code,
+        error_msg=f'Failed to get job queue on cluster '
+        f'{handle.cluster_name}.',
+        stderr=f'{jobs_payload + stderr}',
+        stream_logs=True)
+    return job_lib.load_job_queue(jobs_payload)
+
+
 @usage_lib.entrypoint
 def queue(cluster_name: str,
           skip_finished: bool = False,
@@ -1086,48 +1137,7 @@ def queue(cluster_name: str,
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    use_legacy = not handle.is_grpc_enabled_with_flag
-
-    if not use_legacy:
-        try:
-            request = jobsv1_pb2.GetJobQueueRequest(user_hash=user_hash,
-                                                    all_jobs=all_jobs)
-            response = backend_utils.invoke_skylet_with_retries(
-                lambda: cloud_vm_ray_backend.SkyletClient(
-                    handle.get_grpc_channel()).get_job_queue(request))
-            jobs = []
-            for job_info in response.jobs:
-                job_dict = {
-                    'job_id': job_info.job_id,
-                    'job_name': job_info.job_name,
-                    'submitted_at': job_info.submitted_at,
-                    'status': job_lib.JobStatus.from_protobuf(job_info.status),
-                    'run_timestamp': job_info.run_timestamp,
-                    'start_at': job_info.start_at
-                                if job_info.HasField('start_at') else None,
-                    'end_at': job_info.end_at
-                              if job_info.HasField('end_at') else None,
-                    'resources': job_info.resources,
-                    'log_path': job_info.log_path,
-                    'user_hash': job_info.username,
-                }
-                # Copied from job_lib.load_job_queue.
-                user = global_user_state.get_user(job_dict['user_hash'])
-                job_dict['username'] = user.name if user is not None else None
-                jobs.append(job_dict)
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-    if use_legacy:
-        code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
-        returncode, jobs_payload, stderr = backend.run_on_head(
-            handle, code, require_outputs=True, separate_stderr=True)
-        subprocess_utils.handle_returncode(
-            returncode,
-            command=code,
-            error_msg=f'Failed to get job queue on cluster {cluster_name}.',
-            stderr=f'{jobs_payload + stderr}',
-            stream_logs=True)
-        jobs = job_lib.load_job_queue(jobs_payload)
+    jobs = _get_job_queue(handle, backend, user_hash, all_jobs)
     return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
