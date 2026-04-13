@@ -130,9 +130,13 @@ class QpsGenerator(GeneratorBase):
             return
 
         self._t0 = time.time()
-        deadline = self._t0 + self.ctx.duration_s
         next_tick = self._t0
-        while not self.stopped and time.time() < deadline:
+        # Run until stop() is called by the worker. The worker drives
+        # termination based on either shell-generator completion or
+        # cfg.duration_s (when no shell is configured) — we don't enforce a
+        # deadline here, otherwise the generator would quit early when a
+        # long-running shell workload exceeds duration_s.
+        while not self.stopped:
             now = time.time()
             sleep_for = next_tick - now
             if sleep_for > 0:

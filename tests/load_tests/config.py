@@ -201,10 +201,16 @@ def load_from_yaml(path: str) -> BenchmarkConfig:
     )
 
     vp_d = raw.get('victim_pool') or {}
+    # Default victim cloud to target.cloud: victims are provisioned on the
+    # target API server, and for the ssh_idle long-connection generator to
+    # actually drive websocket traffic through the API server, the victims
+    # must live on a backend whose SSH is proxied through the server
+    # (Kubernetes: /kubernetes-pod-ssh-proxy; Slurm: /slurm-job-ssh-proxy).
+    # AWS/GCP clusters use direct TCP SSH which bypasses the API server.
     victim_pool = VictimPool(
         enabled=bool(vp_d.get('enabled', False)),
         count=int(vp_d.get('count', 0)),
-        cloud=vp_d.get('cloud', workers.cloud),
+        cloud=vp_d.get('cloud', target.cloud),
         cpus=int(vp_d.get('cpus', 2)),
         memory=int(vp_d.get('memory', 4)),
         name_prefix=vp_d.get('name_prefix', 'bench-victim'),

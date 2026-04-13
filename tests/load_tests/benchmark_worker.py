@@ -76,26 +76,34 @@ def run_worker(cfg: BenchmarkConfig, worker_id: int, output_dir: str,
     for g in gens:
         g.start()
 
-    # Termination policy: shell generators block until completion.
-    # Non-shell generators run for cfg.duration_s. We wait for shell
-    # generators to finish (or until duration_s elapses, whichever later),
-    # then signal stop.
+    # Termination policy:
+    #   - If any shell generator is configured, it is the driver. Non-shell
+    #     generators (qps, long_conn) run until ALL shell generators finish,
+    #     however long that takes (basic.sh can easily exceed cfg.duration_s
+    #     because of sky launch / ssh / logs / etc). duration_s acts only
+    #     as a lower bound in that case.
+    #   - If no shell generator is configured, cfg.duration_s is the fence.
     shell_gens = [g for g in gens if g.spec.type == 'shell']
     other_gens = [g for g in gens if g.spec.type != 'shell']
 
     if shell_gens:
         for g in shell_gens:
             g.wait()
-    # If we still have time on the duration fence, wait it out so QPS /
-    # long_conn generators get their full window.
-    elapsed = time.time() - t0
-    remaining = cfg.duration_s - elapsed
-    if other_gens and remaining > 0:
+        elapsed = time.time() - t0
+        remaining = cfg.duration_s - elapsed
+        if other_gens and remaining > 0:
+            print(
+                f'[worker {worker_id}] shell done in {elapsed:.1f}s; '
+                f'waiting {remaining:.1f}s more to reach duration_s',
+                flush=True)
+            time.sleep(remaining)
+    elif other_gens:
+        # No shell driver — let non-shell generators run for duration_s.
         print(
-            f'[worker {worker_id}] shell done in {elapsed:.1f}s; '
-            f'waiting {remaining:.1f}s for non-shell generators',
+            f'[worker {worker_id}] no shell generator; '
+            f'running non-shell for {cfg.duration_s}s',
             flush=True)
-        time.sleep(remaining)
+        time.sleep(cfg.duration_s)
 
     print(f'[worker {worker_id}] stopping generators', flush=True)
     for g in gens:

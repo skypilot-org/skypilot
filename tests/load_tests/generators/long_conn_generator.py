@@ -23,6 +23,18 @@ from .base import GeneratorBase
 from .base import summarize_durations
 
 
+def _tail_file(path: Optional[str], n_lines: int) -> Optional[str]:
+    """Return last n_lines of a file, or None if the file is unreadable."""
+    if not path:
+        return None
+    try:
+        with open(path, 'r', errors='replace') as f:
+            lines = f.readlines()
+        return ''.join(lines[-n_lines:])
+    except OSError:
+        return None
+
+
 class _Slot:
 
     def __init__(self, slot_id: int, kind: str, victim: str):
@@ -110,16 +122,25 @@ class LongConnGenerator(GeneratorBase):
 
     def _open_ssh(self, slot: _Slot) -> None:
         ssh_bin = shutil.which('ssh') or 'ssh'
+        # -vv gives verbose diagnostic output (connection + auth details) so
+        # we can see why ssh fails; written to a per-slot log file on the
+        # worker for post-mortem inspection.
         cmd = [
-            ssh_bin, '-o', 'StrictHostKeyChecking=no', '-o',
+            ssh_bin, '-vv', '-o', 'StrictHostKeyChecking=no', '-o',
             'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', slot.victim,
             'tail', '-f', '/dev/null'
         ]
+        log_path = os.path.join(
+            self.ctx.output_dir,
+            f'ssh_{self.name}_w{self.ctx.worker_id}_slot{slot.slot_id}.log')
+        slot.stderr_log = log_path  # type: ignore[attr-defined]
         try:
+            # Open the log for appending; reconnect attempts accumulate.
+            log_fh = open(log_path, 'a')
             slot.proc = subprocess.Popen(cmd,
                                          stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL,
+                                         stdout=log_fh,
+                                         stderr=log_fh,
                                          start_new_session=True)
             slot.connect_ts = time.time()
             self._emit({
@@ -128,6 +149,7 @@ class LongConnGenerator(GeneratorBase):
                 'slot_id': slot.slot_id,
                 'victim': slot.victim,
                 'ts': slot.connect_ts,
+                'log': log_path,
             })
         except Exception as e:  # noqa: BLE001
             self._emit({
@@ -137,6 +159,7 @@ class LongConnGenerator(GeneratorBase):
                 'victim': slot.victim,
                 'error': f'{type(e).__name__}: {e}',
                 'ts': time.time(),
+                'log': log_path,
             })
 
     def _open_logs(self, slot: _Slot) -> None:
@@ -249,9 +272,12 @@ class LongConnGenerator(GeneratorBase):
             })
 
     def _monitor_loop(self) -> None:
-        deadline = time.time() + self.ctx.duration_s
+        # Run until stop() is called by the worker. No internal deadline:
+        # when a shell generator drives the run, it can take much longer
+        # than cfg.duration_s, and we want connections held for the whole
+        # time.
         interval = max(1, self.spec.health_check_interval_s)
-        while not self.stopped and time.time() < deadline:
+        while not self.stopped:
             self._stop.wait(interval)
             if self.stopped:
                 return
@@ -260,17 +286,19 @@ class LongConnGenerator(GeneratorBase):
                          slot.iterator is not None)
                 if alive:
                     continue
-                # Slot is down — emit disconnect (if not already) and reconnect.
+                # Slot is down — collect why (ssh stderr tail) and reconnect.
+                rc = slot.proc.returncode if slot.proc else None
+                tail = _tail_file(getattr(slot, 'stderr_log', None), 40)
                 self._emit({
                     'event': 'health_check',
                     'kind': slot.kind,
                     'slot_id': slot.slot_id,
                     'victim': slot.victim,
                     'state': 'dead',
+                    'returncode': rc,
+                    'log_tail': tail,
                     'ts': time.time(),
                 })
                 if self.spec.reconnect_on_drop:
                     slot.reconnects += 1
                     self._open(slot)
-        # Duration elapsed — request stop so finally-block in caller closes.
-        self.request_stop()
