@@ -36,6 +36,25 @@ _MAX_RETRIES = 3
 _MAX_MISSING_PODS_RETRIES = 5
 _MAX_QUERY_INSTANCES_RETRIES = 5
 _QUERY_INSTANCES_RETRY_INTERVAL = .5
+# Once a definitive cluster autoscaling event (TriggeredScaleUp) is observed,
+# extend the pod scheduling deadline from the detection moment by this many
+# seconds. Node scale-up time is unpredictable (often 5-20 min) and the
+# user-configured provision_timeout is typically tuned for normal scheduling
+# latency; with positive evidence that the autoscaler is working on the
+# request, we give it a generous window to complete before failing over.
+#
+# Only TriggeredScaleUp is used as the trigger here — the FailedScheduling
+# heuristic (Karpenter fallback) is NOT reliable enough to extend a deadline
+# by 15 min, because FailedScheduling also fires for genuine resource
+# mismatches (oversized requests, taints, PVC issues, etc.) which would
+# otherwise be masked as "autoscaling in progress" and waste the full window.
+_AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
+# When an autoscaler is configured, ensure the initial wait is at least this
+# long so the Cluster Autoscaler has a chance to scan (default scan interval
+# is 10s) and emit the first TriggeredScaleUp event. Without this floor, a
+# short user-configured provision_timeout (e.g. the default 10s) would exit
+# the wait loop before any event is emitted, defeating the detection logic.
+_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 COMMON_NON_PENDING_EVENT_REASONS = {
@@ -525,12 +544,45 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                                not kubernetes_enums.KubernetesAutoscalerType(
                                    autoscaler_type).emits_autoscale_event())
     is_autoscaling = False
+    # When a definitive TriggeredScaleUp event is observed, this records the
+    # detection moment so that we can extend the deadline — node scale-up is
+    # unpredictable and the user-configured provision_timeout is usually
+    # tuned for normal scheduling latency rather than for waiting on
+    # autoscaler nodes. Heuristic FailedScheduling detection (Karpenter) does
+    # NOT set this — extending a deadline by 15 min based on FailedScheduling
+    # alone would mask real failures (oversized requests, taints, etc.).
+    autoscale_detected_time: Optional[float] = None
+
+    # If the user configured an autoscaler but left provision_timeout too
+    # short, bump the initial timeout up to the minimum so the Cluster
+    # Autoscaler has time to scan and emit its first event. Without this
+    # floor the loop would exit before autoscale_detected_time could ever
+    # be set. Negative timeout (indefinite wait) is left alone.
+    if (autoscaler_is_set and
+            0 <= timeout < _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS):
+        logger.debug(
+            f'Autoscaler is configured but provision_timeout ({timeout}s) '
+            f'is shorter than the minimum needed for the autoscaler to '
+            f'emit its first event; bumping initial timeout to '
+            f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
+        timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
+
+    original_deadline = start_time + timeout
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
-        return time.time() - start_time < timeout
+        # If autoscaling has been detected, extend the deadline from the
+        # detection moment. Use max(...) so an explicitly long user timeout
+        # is never shortened by this extension.
+        if autoscale_detected_time is not None:
+            extended_deadline = (autoscale_detected_time +
+                                 _AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
+            deadline = max(original_deadline, extended_deadline)
+        else:
+            deadline = original_deadline
+        return time.time() < deadline
 
     iteration = 0
     while _evaluate_timeout():
@@ -580,6 +632,10 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 is_autoscaling = _cluster_had_autoscale_event(
                     namespace, context, create_pods_start)
                 msg = 'Kubernetes cluster is autoscaling'
+                if is_autoscaling:
+                    # Definitive TriggeredScaleUp observed — extend the
+                    # deadline from this moment in _evaluate_timeout().
+                    autoscale_detected_time = time.time()
 
             if is_autoscaling:
                 rich_utils.force_update_status(
