@@ -141,8 +141,6 @@ def launch(name: str,
 
     # Required skypilot parameters
     launch_params['id'] = instance_touse['id']
-    launch_params['direct'] = True
-    launch_params['ssh'] = True
     # Use user's label if provided, otherwise use skypilot name
     if 'label' not in launch_params:
         launch_params['label'] = name
@@ -174,11 +172,11 @@ def launch(name: str,
             'were provided.')
 
     # Handle price/bid_price - user can override
-    if 'price' in launch_params:
-        # Normalize to bid_price for SDK compatibility
-        launch_params['bid_price'] = launch_params.pop('price')
-    if 'bid_price' not in launch_params and preemptible:
-        launch_params['bid_price'] = instance_touse.get('min_bid')
+    # Vast.ai SDK uses 'price' since SDK v6+; normalize bid_price for compat
+    if 'bid_price' in launch_params:
+        launch_params['price'] = launch_params.pop('bid_price')
+    if 'price' not in launch_params and preemptible:
+        launch_params['price'] = instance_touse.get('min_bid')
 
     # Handle onstart_cmd - read from file if onstart path provided
     user_onstart_cmd = launch_params.pop('onstart_cmd', None)
@@ -199,7 +197,7 @@ def launch(name: str,
     # even when using a template
     skypilot_onstart = [
         'touch ~/.no_auto_tmux',
-        f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
+        f'echo "{vast.vast().client.api_key}" > ~/.vast_api_key',
     ]
 
     # Inject SSH public key into authorized_keys if provided
@@ -220,16 +218,19 @@ def launch(name: str,
         skypilot_onstart.append(user_onstart_cmd)
     launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
 
-    # Handle env - merge port mappings and user env
-    # Always include __SOURCE=skypilot for instance tracking
+    # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
+    # Merge user-provided env (dict or legacy string) with skypilot metadata.
     user_env = launch_params.pop('env', None)
-    port_map = ' '.join([f'-p {p}:{p}' for p in ports]) if ports else ''
-    env_parts = ['-e __SOURCE=skypilot']
-    if port_map:
-        env_parts.append(port_map)
-    if user_env:
-        env_parts.append(user_env)
-    launch_params['env'] = ' '.join(env_parts).strip()
+    env_dict: Dict[str, str] = {'__SOURCE': 'skypilot'}
+    if user_env is not None:
+        if isinstance(user_env, dict):
+            env_dict.update(user_env)
+        elif isinstance(user_env, str):
+            # Parse legacy "-e KEY=VAL" style strings for backwards compat
+            import re  # pylint: disable=import-outside-toplevel
+            for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
+                env_dict[match.group(1)] = match.group(2)
+    launch_params['env'] = env_dict
 
     new_instance_contract = vast.vast().create_instance(**launch_params)
 
