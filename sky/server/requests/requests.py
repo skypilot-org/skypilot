@@ -30,6 +30,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
 from sky.server.requests.serializers import decoders
@@ -540,10 +541,7 @@ def reset_db_and_logs():
                  f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
     shutil.rmtree(pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
-    logger.debug('clearing local API server client directory at '
-                 f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
-    shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
-                  ignore_errors=True)
+    bs.get_blob_storage().reset_on_startup()
     request_storage.get_request_backend().reset_on_startup()
 
 
@@ -1228,7 +1226,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         return [Request.from_row(row) for row in rows]
 
     @init_db_async
+    @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
+        if not request_ids:
+            return
         assert _DB is not None
         id_list_str = ','.join(repr(rid) for rid in request_ids)
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
@@ -1407,6 +1408,19 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
                 (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
             return {row[0] for row in cursor.fetchall()}
+
+    def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:
+        """Get (request_id, name) pairs to wait for during graceful shutdown."""
+
+        tasks = self.query_requests(
+            RequestTaskFilter(
+                status=[
+                    RequestStatus.PENDING,
+                    RequestStatus.RUNNING,
+                ],
+                fields=['request_id', 'name'],
+            ))
+        return [(t.request_id, t.name) for t in tasks]
 
     # --- Lifecycle ---
 

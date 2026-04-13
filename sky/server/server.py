@@ -616,7 +616,11 @@ async def cleanup_download_tmp():
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_dir()
+            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+            if tmp_dir is None:
+                # Backend shares the persistent log dir; no separate
+                # cleanup needed.
+                continue
             if not os.path.exists(tmp_dir):
                 continue
             cutoff = time.time() - bs.GC_GRACE_SECONDS
@@ -1862,8 +1866,8 @@ async def download_logs(
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = pathlib.Path(
-        bs.get_blob_storage().download_tmp_dir()) / user_hash
-    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+        bs.get_blob_storage().download_tmp_dir(user_hash))
+    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
@@ -1887,11 +1891,13 @@ async def download(download_body: payloads.DownloadBody,
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
-    download_tmp = bs.get_blob_storage().download_tmp_dir()
+    download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
         folder_str = str(folder_path)
+        expanded_str = str(folder_path.expanduser())
         if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp)):
+                folder_str.startswith(download_tmp) or
+                expanded_str.startswith(os.path.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
@@ -2149,6 +2155,10 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
     # Validate request_id prefix matches a single request.
     request_id = await get_expanded_request_id(request_id)
 
+    # Exponential backoff: start fast (10ms) for short requests like
+    # status/queue, then back off to 100ms for long requests like
+    # launch/exec.
+    poll_interval = 0.01
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -2161,9 +2171,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             break
         if req_status.status > requests_lib.RequestStatus.RUNNING:
             break
-        # yield control to allow other coroutines to run, sleep shortly
-        # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(poll_interval)
+        # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
+        poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
     # TODO(aylei): refine this, /api/get will not be retried and this is
     # meaningless to retry. It is the original request that should be retried.

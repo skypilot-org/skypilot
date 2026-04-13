@@ -11,13 +11,25 @@ from typing import List, Tuple
 import anyio
 import filelock
 
+from sky import sky_logging
 from sky.server import common as server_common
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
 
+logger = sky_logging.init_logger(__name__)
+
 
 class LocalFilesystemBlobStorage(bs.BlobStorage):
     """Local-filesystem blob storage"""
+
+    def download_tmp_dir(self, user_hash: str) -> str:
+        path = server_common.api_server_user_logs_dir_prefix(user_hash)
+        path.expanduser().mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    def download_tmp_base_dir(self):
+        # Downloads share the persistent log directory; no separate cleanup.
+        return None
 
     def blobs_dir(self, user_id: str) -> pathlib.Path:
 
@@ -98,3 +110,10 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
             if entry.is_dir() and (entry / 'file_mounts' / 'blobs').is_dir():
                 users.append(entry.name)
         return users
+
+    def reset_on_startup(self) -> None:
+        """Called on server startup to clean up ephemeral client state."""
+        logger.debug('clearing local API server client directory at '
+                     f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
+        shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
+                      ignore_errors=True)

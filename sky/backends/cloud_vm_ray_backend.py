@@ -1893,6 +1893,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     # compatibility logic in __setstate__ and/or __getstate__.
     _VERSION = 12
 
+    # Set by from_dict() since cached_cluster_info is not available
+    # when reconstructing from a dict.
+    _ssh_user: Optional[str] = None
+
     def __init__(
             self,
             *,
@@ -2493,7 +2497,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # container image used. For those clusters launched with ray
             # autoscaler, we directly use the ssh_user in yaml config.
             return self.cached_cluster_info.ssh_user
-        return None
+        return getattr(self, '_ssh_user', None)
 
     @property
     def head_ip(self):
@@ -2525,6 +2529,51 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return (env_options.Options.ENABLE_GRPC.get() and
                 self.is_grpc_enabled and
                 not isinstance(self.launched_resources.cloud, clouds.Slurm))
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
+        return {
+            'cluster_name': self.cluster_name,
+            'cluster_name_on_cloud': self.cluster_name_on_cloud,
+            'cluster_yaml': self._cluster_yaml,
+            'launched_nodes': self.launched_nodes,
+            'launched_resources':
+                (self.launched_resources.to_yaml_config()
+                 if self.launched_resources is not None else None),
+            'stable_internal_external_ips': self.stable_internal_external_ips,
+            'stable_ssh_ports': self.stable_ssh_ports,
+            'docker_user': self.docker_user,
+            'is_grpc_enabled': self.is_grpc_enabled,
+            'ssh_user': self.ssh_user,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'CloudVmRayResourceHandle':
+        """Reconstruct from a dict produced by to_dict()."""
+        resources_dict = d.get('launched_resources')
+        launched_resources: Optional[resources_lib.Resources]
+        if resources_dict is not None:
+            launched_resources = (
+                resources_lib.Resources._from_yaml_config_single(  # pylint: disable=protected-access
+                    resources_dict.copy()))
+        else:
+            launched_resources = None
+
+        handle = cls.__new__(cls)
+        handle._version = cls._VERSION
+        handle.cluster_name = d['cluster_name']
+        handle.cluster_name_on_cloud = d.get('cluster_name_on_cloud', '')
+        handle._cluster_yaml = d.get('cluster_yaml')
+        handle.launched_nodes = d.get('launched_nodes', 0)
+        handle.launched_resources = launched_resources  # type: ignore
+        handle.stable_internal_external_ips = d.get(
+            'stable_internal_external_ips')
+        handle.stable_ssh_ports = d.get('stable_ssh_ports')
+        handle.docker_user = d.get('docker_user')
+        handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
+        handle.cached_cluster_info = None
+        handle._ssh_user = d.get('ssh_user')
+        return handle
 
     def __getstate__(self):
         state = self.__dict__.copy()

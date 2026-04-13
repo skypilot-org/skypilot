@@ -2,6 +2,10 @@
 
 name: {{service_name}}
 
+# The serve controller needs to be able to communicate to the local API server it starts.
+# It should not use the remote API server.
+api_server_access: false
+
 setup: |
   {{ sky_activate_python_env }}
   # Disable the pip version check to avoid the warning message, which makes the
