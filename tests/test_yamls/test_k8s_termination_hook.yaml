@@ -1,0 +1,28 @@
+resources:
+  cloud: kubernetes
+  cpus: 1
+  termination_hook:
+    command: |
+      # Write proof to a Kubernetes ConfigMap that persists after pod deletion.
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      CM_NAME="termination-proof-$(hostname)"
+      curl -sk -X POST \
+        "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/configmaps" \
+        -H "Authorization: Bearer ${KUBE_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"${CM_NAME}\"},\"data\":{\"status\":\"hook fired\",\"timestamp\":\"$(date)\"}}" \
+        || true
+    timeout: 60
+
+# Multi-node so smoke tests can verify the hook is injected on BOTH head and
+# worker pods — the Kubernetes template shares one container spec across all
+# pods, so the preStop lifecycle must render identically on both.
+num_nodes: 2
+
+setup: |
+  echo "Setup complete on $(hostname)"
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

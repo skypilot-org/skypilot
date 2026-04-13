@@ -1,0 +1,16 @@
+# Verifies that `autostop` (without a hook) and `termination_hook` coexist.
+# The autostop block here only sets idle_minutes; the termination_hook
+# provides the actual preStop script. No mutual-exclusion conflict.
+resources:
+  cloud: kubernetes
+  cpus: 1
+  autostop:
+    idle_minutes: 5
+    down: true
+  termination_hook:
+    command: |
+      echo "shutting down gracefully"
+    timeout: 60
+
+run: |
+  echo "hello"

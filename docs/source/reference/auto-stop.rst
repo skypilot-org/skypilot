@@ -282,3 +282,63 @@ Common use cases for autostop hooks:
            hook: |
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
+
+.. _preemption-hooks:
+
+Termination hooks on Kubernetes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Kubernetes, use the top-level ``termination_hook`` under ``resources`` to
+register a script that runs before the pod is terminated (for any reason —
+idle autostop, preemption, node drain, or eviction). The hook is embedded as a
+Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time
+and fires on **all nodes** (head + workers).
+
+.. code-block:: yaml
+
+   resources:
+     cloud: kubernetes
+     termination_hook:
+       command: |
+         echo "Saving checkpoint before shutdown"
+         cp checkpoint.pt s3://bucket/checkpoints/
+       timeout: 600  # seconds
+
+``termination_hook`` is the recommended way to configure this behavior. For
+backward compatibility, ``autostop.hook`` is still accepted and produces the
+same pod spec; the two are mutually exclusive within one resources block and
+SkyPilot will raise an error if both specify different values.
+
+**How it works:**
+
+- The hook runs on **all nodes** via the Kubernetes ``preStop`` lifecycle hook
+- On Kubernetes, the hook is only executed via the ``preStop`` path (not via the
+  skylet), so it fires exactly once per termination event
+- ``timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
+  (default: 30s when unset)
+- Re-launching an existing cluster with a changed ``termination_hook`` will
+  recreate the affected pods with the new lifecycle spec. Re-launching with the
+  same hook is a no-op (the config hash matches and provisioning is skipped)
+
+**When the hook fires:**
+
+- Cluster autostop/autodown (idle timeout triggers pod deletion)
+- Kubernetes preemption (higher-priority pod needs resources)
+- Node drain (e.g., during cluster maintenance)
+- Pod eviction (e.g., resource pressure)
+
+**Behavior on** ``sky down``:
+
+SkyPilot uses ``grace_period_seconds=0`` (force delete) when tearing down clusters,
+which is intended to skip the ``preStop`` hook. However, due to a `known kubelet
+regression <https://github.com/kubernetes/kubernetes/issues/123408>`_, the
+``preStop`` hook may still execute briefly (~1-2 seconds) before the container is
+killed. Fast hooks (e.g., uploading a small file) may complete; longer hooks (e.g.,
+saving a large checkpoint) will be interrupted.
+
+Design your hook to be **best-effort** — it is guaranteed to run on genuine
+preemption events, but may or may not complete on user-initiated teardown.
+
+.. note::
+
+   ``sky stop`` is not supported on Kubernetes clusters.

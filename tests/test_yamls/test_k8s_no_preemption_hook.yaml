@@ -1,0 +1,7 @@
+resources:
+  cloud: kubernetes
+  cpus: 1
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

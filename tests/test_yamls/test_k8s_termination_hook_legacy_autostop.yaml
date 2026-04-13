@@ -1,0 +1,29 @@
+# Same hook body/timeout as test_k8s_termination_hook.yaml but specified via
+# the legacy `autostop.hook` form. Used by smoke tests to verify that
+# `termination_hook` and `autostop.hook` produce identical pod specs
+# (backward compat).
+resources:
+  cloud: kubernetes
+  cpus: 1
+  autostop:
+    hook: |
+      # Write proof to a Kubernetes ConfigMap that persists after pod deletion.
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      CM_NAME="termination-proof-$(hostname)"
+      curl -sk -X POST \
+        "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/configmaps" \
+        -H "Authorization: Bearer ${KUBE_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"${CM_NAME}\"},\"data\":{\"status\":\"hook fired\",\"timestamp\":\"$(date)\"}}" \
+        || true
+    hook_timeout: 60
+
+num_nodes: 2
+
+setup: |
+  echo "Setup complete on $(hostname)"
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

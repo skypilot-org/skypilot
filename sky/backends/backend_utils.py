@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import asyncio
+import base64
 from datetime import datetime
 import enum
 import fnmatch
@@ -552,6 +553,84 @@ def _replace_yaml_dicts(
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
     return yaml_utils.dump_yaml_str(new_config)
+
+
+def _reinject_termination_hook_fields(restored_yaml: str, new_yaml: str) -> str:
+    """Re-injects termination hook fields from the new yaml into the restored.
+
+    When _replace_yaml_dicts() restores ``node_config`` from the old cluster
+    yaml, any updates to ``lifecycle.preStop`` (for the termination hook) and
+    ``terminationGracePeriodSeconds`` rendered from the new task get reverted
+    along with the rest of the pod spec. This helper copies those specific
+    fields from the new yaml back over the restored yaml so that a re-launch
+    of an existing K8s cluster propagates hook changes to the pod template.
+
+    For non-K8s / non-templated yamls, this is a no-op.
+    """
+    restored_obj = yaml_utils.safe_load(restored_yaml)
+    new_obj = yaml_utils.safe_load(new_yaml)
+    if not isinstance(restored_obj, dict) or not isinstance(new_obj, dict):
+        return restored_yaml
+    restored_nodes = restored_obj.get('available_node_types') or {}
+    new_nodes = new_obj.get('available_node_types') or {}
+    if not isinstance(restored_nodes, dict) or not isinstance(new_nodes, dict):
+        return restored_yaml
+
+    changed = False
+    for node_type_key, new_node in new_nodes.items():
+        if node_type_key not in restored_nodes:
+            continue
+        rest_node = restored_nodes[node_type_key]
+        if not isinstance(new_node, dict) or not isinstance(rest_node, dict):
+            continue
+        new_nc = new_node.get('node_config') or {}
+        rest_nc = rest_node.get('node_config') or {}
+        if not isinstance(new_nc, dict) or not isinstance(rest_nc, dict):
+            continue
+        new_spec = new_nc.get('spec')
+        if not isinstance(new_spec, dict):
+            continue
+        rest_spec = rest_nc.setdefault('spec', {})
+
+        # lifecycle lives on the first container of the pod spec.
+        new_containers = new_spec.get('containers') or []
+        if new_containers:
+            new_container = new_containers[0] if isinstance(
+                new_containers[0], dict) else {}
+            rest_containers = rest_spec.setdefault('containers', [{}])
+            if not rest_containers:
+                rest_containers.append({})
+            if not isinstance(rest_containers[0], dict):
+                # Unexpected shape — leave alone.
+                continue
+            new_lifecycle = new_container.get('lifecycle')
+            old_lifecycle = rest_containers[0].get('lifecycle')
+            if new_lifecycle is not None:
+                # Only rewrite + mark changed if the value actually differs;
+                # otherwise we'd re-dump the yaml with slightly different
+                # formatting and invalidate the config-hash match for
+                # legitimate same-spec re-launches.
+                if old_lifecycle != new_lifecycle:
+                    rest_containers[0]['lifecycle'] = new_lifecycle
+                    changed = True
+            elif 'lifecycle' in rest_containers[0]:
+                del rest_containers[0]['lifecycle']
+                changed = True
+
+        # terminationGracePeriodSeconds lives on the pod spec.
+        new_tg = new_spec.get('terminationGracePeriodSeconds')
+        old_tg = rest_spec.get('terminationGracePeriodSeconds')
+        if 'terminationGracePeriodSeconds' in new_spec:
+            if new_tg != old_tg:
+                rest_spec['terminationGracePeriodSeconds'] = new_tg
+                changed = True
+        elif 'terminationGracePeriodSeconds' in rest_spec:
+            del rest_spec['terminationGracePeriodSeconds']
+            changed = True
+
+    if not changed:
+        return restored_yaml
+    return yaml_utils.dump_yaml_str(restored_obj)
 
 
 def get_expirable_clouds(
@@ -1151,6 +1230,21 @@ def write_cluster_config(
             # This is currently only used by AWS and Kubernetes.
             'runcmd': runcmd,
 
+            # Autostop hook reused as K8s preStop lifecycle hook.
+            # hook_timeout sets both the script timeout and
+            # terminationGracePeriodSeconds in the pod spec.
+            # Base64-encode the hook script so it can be safely embedded
+            # in YAML without Jinja2's tojson HTML-escaping (which
+            # converts > to \u003e, breaking shell redirects).
+            'preemption_hook': (base64.b64encode(
+                to_provision.autostop_config.hook.encode()).decode()
+                                if to_provision.autostop_config and
+                                to_provision.autostop_config.hook else None),
+            'preemption_hook_timeout':
+                (to_provision.autostop_config.hook_timeout
+                 if to_provision.autostop_config and
+                 to_provision.autostop_config.hook else None),
+
             # Priority class
             'priority_class': to_provision.priority_class,
         },
@@ -1208,6 +1302,13 @@ def write_cluster_config(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+        # Re-inject hook-related fields from the new yaml so that
+        # termination_hook / autostop.hook changes take effect on re-launch.
+        # _replace_yaml_dicts() restores node_config from the old yaml, which
+        # erases any updated `lifecycle` block and
+        # `terminationGracePeriodSeconds` rendered from the new task.
+        restored_yaml_content = _reinject_termination_hook_fields(
+            restored_yaml_content, new_yaml_content)
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
