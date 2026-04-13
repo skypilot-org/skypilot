@@ -94,8 +94,10 @@ def launch(name: str,
          as ours would fail to return this host in a simple string
          comparison if a user searched for "JP".
          Since regardless of specificity, all our geolocations end
-         in two-letter country codes we just snip that to conform
-         to how many providers state their geolocation.
+         in two-letter codes we extract the last comma-separated
+         segment and strip whitespace. This handles both simple codes
+         like "US" and compound strings like ", US, NA" or
+         "Yutakachō, Shinagawa District, Tokyo, JP".
       *  Since the catalog is cached, we can't gaurantee availability
          of any machine at the point of inquiry.  As a consequence we
          search for the machine again and potentially return a failure
@@ -114,7 +116,7 @@ def launch(name: str,
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
+        f'geolocation="{region.split(",")[-1].strip()}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
