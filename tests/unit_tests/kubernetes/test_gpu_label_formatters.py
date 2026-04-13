@@ -378,14 +378,28 @@ class TestAcceleratorNameMatches:
     def test_no_cross_variant_matching(self):
         """Test that different GPU variants don't incorrectly match.
 
-        H100 and H100-MEGA are different GPUs and should not match each
-        other. However, due to prefix matching, H100 will match H100-MEGA.
-        This is a known limitation that's acceptable because:
-        1. It's unlikely a user launches with H100-MEGA and expects H100
-        2. Not matching would break backward compat for valid cases
+        H100 and H100-MEGA are different canonical GPUs and should not match
+        each other. Both are in the CANONICAL_GPU_NAMES list, but H100-MEGA
+        is not a memory variant of H100 (suffix is not a memory size like '80GB').
         """
-        # These will match due to prefix logic - this is expected behavior
-        assert _accelerator_name_matches('H100', ['h100-mega'])
-        # But ensure unrelated GPUs don't match
+        # H100 should NOT match H100-MEGA (both are canonical, not memory variants)
+        assert not _accelerator_name_matches('H100', ['h100-mega'])
+        assert not _accelerator_name_matches('H100-MEGA', ['h100'])
+        # Ensure unrelated GPUs don't match
         assert not _accelerator_name_matches('H200', ['h100-mega'])
         assert not _accelerator_name_matches('A100', ['h100-mega'])
+
+    def test_canonical_non_memory_variants(self):
+        """Test that canonical names with non-memory suffixes don't cross-match.
+
+        L40S is not a memory variant of L40 (suffix is 'S', not a memory size).
+        These are different GPUs and should not match.
+        """
+        # L40S is a different GPU from L40, not a memory variant
+        assert not _accelerator_name_matches('L40', ['l40s'])
+        assert not _accelerator_name_matches('L40S', ['l40'])
+        # L4 is a different GPU from L40/L40S
+        assert not _accelerator_name_matches('L4', ['l40'])
+        assert not _accelerator_name_matches('L4', ['l40s'])
+        assert not _accelerator_name_matches('L40', ['l4'])
+        assert not _accelerator_name_matches('L40S', ['l4'])
