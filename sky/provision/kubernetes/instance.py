@@ -1085,14 +1085,21 @@ def _wait_for_deployment_pod(context,
 
 def _lifecycle_spec_matches(new_lifecycle: Any,
                             existing_lifecycle: Any) -> bool:
-    """Compare a new (dict) lifecycle spec with an existing (K8s model) one."""
+    """Compare a new (dict) lifecycle spec with an existing (K8s model) one.
+
+    The two representations need to be normalized to the same shape:
+    - The new spec is a dict in camelCase (``preStop``, ``httpGet``) coming
+      from the rendered pod yaml.
+    - The existing spec on a running pod is a K8s client ``V1Lifecycle``
+      object. Its ``to_dict()`` produces a snake_case dict but also emits
+      ``None`` for every unset optional field (``post_start``, ``http_get``,
+      etc.). We drop those None values before comparing so that the spec
+      renders round-trip to the same logical content.
+    """
     if new_lifecycle is None and existing_lifecycle is None:
         return True
     if new_lifecycle is None or existing_lifecycle is None:
         return False
-    # Existing pods return K8s client V1Lifecycle objects; normalize by going
-    # through to_dict (which produces snake_case). Convert the new (user) dict
-    # to the same snake_case shape for comparison.
     try:
         existing = existing_lifecycle.to_dict()
     except AttributeError:
@@ -1106,9 +1113,23 @@ def _lifecycle_spec_matches(new_lifecycle: Any,
             out.append(ch.lower())
         return ''.join(out)
 
+    def _canonical_key(k: str) -> str:
+        # The K8s Python client prefixes reserved-word fields with '_' in its
+        # model's to_dict() output (e.g. `_exec` for `exec`). Strip a single
+        # leading underscore so it matches the yaml representation.
+        if k.startswith('_') and len(k) > 1:
+            k = k[1:]
+        return _snake_case(k)
+
     def _normalize(obj: Any) -> Any:
         if isinstance(obj, dict):
-            return {_snake_case(k): _normalize(v) for k, v in obj.items()}
+            # Drop keys whose value is None (K8s client models populate
+            # unset fields with None) and recurse.
+            return {
+                _canonical_key(k): _normalize(v)
+                for k, v in obj.items()
+                if v is not None
+            }
         if isinstance(obj, list):
             return [_normalize(x) for x in obj]
         return obj

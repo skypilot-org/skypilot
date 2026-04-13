@@ -604,18 +604,26 @@ def _reinject_termination_hook_fields(restored_yaml: str, new_yaml: str) -> str:
                 # Unexpected shape — leave alone.
                 continue
             new_lifecycle = new_container.get('lifecycle')
+            old_lifecycle = rest_containers[0].get('lifecycle')
             if new_lifecycle is not None:
-                rest_containers[0]['lifecycle'] = new_lifecycle
-                changed = True
+                # Only rewrite + mark changed if the value actually differs;
+                # otherwise we'd re-dump the yaml with slightly different
+                # formatting and invalidate the config-hash match for
+                # legitimate same-spec re-launches.
+                if old_lifecycle != new_lifecycle:
+                    rest_containers[0]['lifecycle'] = new_lifecycle
+                    changed = True
             elif 'lifecycle' in rest_containers[0]:
                 del rest_containers[0]['lifecycle']
                 changed = True
 
         # terminationGracePeriodSeconds lives on the pod spec.
+        new_tg = new_spec.get('terminationGracePeriodSeconds')
+        old_tg = rest_spec.get('terminationGracePeriodSeconds')
         if 'terminationGracePeriodSeconds' in new_spec:
-            rest_spec['terminationGracePeriodSeconds'] = new_spec[
-                'terminationGracePeriodSeconds']
-            changed = True
+            if new_tg != old_tg:
+                rest_spec['terminationGracePeriodSeconds'] = new_tg
+                changed = True
         elif 'terminationGracePeriodSeconds' in rest_spec:
             del rest_spec['terminationGracePeriodSeconds']
             changed = True

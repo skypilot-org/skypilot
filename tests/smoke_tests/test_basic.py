@@ -2976,15 +2976,17 @@ def test_k8s_termination_hook_second_launch_updates_hook():
             f'kubectl get pod {worker} -o '
             "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^90$'",
             # The new preStop command must contain the v2 marker on both pods.
-            # The command is base64-encoded in the template, so we decode the
-            # relevant segment and grep for the v2 ConfigMap-name substring.
+            # The hook body is base64-encoded in the template as a single long
+            # token; extract the longest base64-looking run, decode it, and
+            # grep for the v2 ConfigMap-name substring.
             f'kubectl get pod {head} -o '
             "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
-            "| tr ' ' '\\n' | grep -Eo '[A-Za-z0-9+/=]{20,}' "
-            "| while read b64; do "
-            "     echo \"$b64\" | base64 --decode 2>/dev/null "
-            "        | grep -q 'termination-proof-v2-' && exit 0; "
-            '   done; exit 1',
+            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
+            "| base64 --decode | grep -q 'termination-proof-v2-'",
+            f'kubectl get pod {worker} -o '
+            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
+            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
+            "| base64 --decode | grep -q 'termination-proof-v2-'",
         ],
         f'sky down -y {name}',
         timeout=30 * 60,
