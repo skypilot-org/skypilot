@@ -33,12 +33,18 @@ def pickle_and_encode(obj: Any) -> str:
 
 
 def encode_handle(handle: Any) -> Any:
-    """Encode a ResourceHandle. Plugins can replace this function."""
+    """Encode a ResourceHandle for the REST API response.
+
+    Plugin extension point — do not inline into callers.
+    """
     return pickle_and_encode(handle)
 
 
 def encode_resources(resources: Any) -> Any:
-    """Encode a Resources object. Plugins can replace this function."""
+    """Encode a Resources object for the REST API response.
+
+    Plugin extension point — do not inline into callers.
+    """
     return pickle_and_encode(resources)
 
 

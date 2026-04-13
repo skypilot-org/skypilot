@@ -27,7 +27,10 @@ def decode_and_unpickle(obj: str) -> Any:
 
 
 def decode_handle(data: Any) -> Any:
-    """Decode a ResourceHandle from either a dict or pickle string."""
+    """Decode a ResourceHandle from either a dict or pickle string.
+
+    Plugin extension point — do not inline into callers.
+    """
     if data is None:
         return None
     if isinstance(data, dict):
@@ -38,7 +41,10 @@ def decode_handle(data: Any) -> Any:
 
 
 def decode_resources(data: Any) -> Any:
-    """Decode a Resources object from either a dict or pickle string."""
+    """Decode a Resources object from either a dict or pickle string.
+
+    Plugin extension point — do not inline into callers.
+    """
     if data is None:
         return None
     if isinstance(data, dict):
