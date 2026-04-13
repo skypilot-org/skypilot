@@ -150,7 +150,7 @@ class Server(uvicorn.Server):
 
     def _wait_requests(self) -> None:
         """Wait until all on-going requests are finished or cancelled."""
-        start_time = time.time()
+        start_time = time.time() - _GRACE_WAIT_SECONDS
         while True:
             requests = (request_storage.get_request_backend().
                         get_shutdown_active_requests())

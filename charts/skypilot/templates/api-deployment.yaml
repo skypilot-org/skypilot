@@ -244,7 +244,7 @@ spec:
           mkdir -p /root/.sky/api_server
           # Use a FIFO instead of a pipe so that exec replaces the shell,
           # allowing tini to send SIGTERM directly to the API server process
-          mkfifo /tmp/skylog
+          rm -f /tmp/skylog && mkfifo /tmp/skylog
           tee -a /root/.sky/api_server/server.log < /tmp/skylog &
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
           {{- else }}

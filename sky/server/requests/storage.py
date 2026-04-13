@@ -155,12 +155,7 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     def reset_on_startup(self) -> None:
-        """Called on server startup for backend-specific initialization.
-
-        The default SQLite implementation re-creates the database and checks
-        the SQLite version. Alternative backends may run migrations, mark
-        stale requests as failed, etc.
-        """
+        """Called on server startup for backend-specific initialization."""
 
 
 _storage_backend: Optional[RequestBackend] = None

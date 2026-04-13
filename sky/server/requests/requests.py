@@ -30,6 +30,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
 from sky.server.requests.serializers import decoders
@@ -540,10 +541,7 @@ def reset_db_and_logs():
                  f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
     shutil.rmtree(pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
-    logger.debug('clearing local API server client directory at '
-                 f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
-    shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
-                  ignore_errors=True)
+    bs.get_blob_storage().reset_on_startup()
     request_storage.get_request_backend().reset_on_startup()
 
 
