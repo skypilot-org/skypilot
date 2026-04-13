@@ -1394,7 +1394,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=5,
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         assert raise_errors.called, (
             'Without autoscaler, timeout=5s must trigger the error path.')
@@ -1417,7 +1417,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=5,  # far shorter than the 900s extension
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         # The loop sleeps 1s per iteration via the fake clock. If the
         # extension did NOT apply we would exit after ~5s of simulated
@@ -1448,7 +1448,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=long_timeout,
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         # The function should run at least until the longer user timeout
         # elapses, even though the extension window expired earlier.
@@ -1481,7 +1481,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=5,
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         # Initial timeout is bumped to the autoscaler minimum (60s), but
         # the 15 min extension must NOT apply under the heuristic path.
@@ -1517,7 +1517,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=10,  # default; shorter than CA scan interval
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         # No detection → no 15 min extension. But the initial timeout
         # must have been bumped to the autoscaler minimum, so the loop
@@ -1548,7 +1548,7 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
                 new_nodes=[node],
                 timeout=5,
                 cluster_name='cn',
-                create_pods_start=datetime.datetime.utcnow())
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
 
         # Without autoscaler, the 5s timeout must be honored (not bumped
         # to the 60s autoscaler minimum). Loop should exit shortly after

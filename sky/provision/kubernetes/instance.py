@@ -567,11 +567,12 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
         timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
 
+    original_deadline = start_time + timeout
+
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
-        original_deadline = start_time + timeout
         # If autoscaling has been detected, extend the deadline from the
         # detection moment. Use max(...) so an explicitly long user timeout
         # is never shortened by this extension.
