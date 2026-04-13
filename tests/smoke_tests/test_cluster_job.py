@@ -44,6 +44,7 @@ from sky.utils import resources_utils
 # ---------- Job Queue. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
+@pytest.mark.no_spheron  # Spheron does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
@@ -93,6 +94,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
+@pytest.mark.no_spheron  # Spheron does not have T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
@@ -239,6 +241,7 @@ def test_scp_job_queue():
 
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
+@pytest.mark.no_spheron  # Spheron does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
@@ -247,6 +250,7 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 @pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
@@ -327,6 +331,7 @@ def test_job_queue_multi_gpu(generic_cloud: str):
 
 @pytest.mark.no_vast
 @pytest.mark.no_shadeform
+@pytest.mark.no_spheron
 @pytest.mark.no_fluidstack
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
@@ -366,6 +371,7 @@ def test_exec_gpu_visibility(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -424,6 +430,7 @@ def test_large_job_queue(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic
 @pytest.mark.resource_heavy
 def test_fast_large_job_queue(generic_cloud: str):
@@ -491,6 +498,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_shadeform  # Doesn't support Shadeform for now
+@pytest.mark.no_spheron  # Doesn't support Spheron for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -559,6 +567,7 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
+@pytest.mark.no_spheron  # Spheron does not have T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
@@ -697,6 +706,7 @@ def test_multi_echo(generic_cloud: str):
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs
+@pytest.mark.no_spheron  # Spheron does not have T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
@@ -863,6 +873,7 @@ def test_tpu_pod_slice_gke():
 # ---------- Simple apps. ----------
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_hostname(generic_cloud: str):
@@ -886,6 +897,7 @@ def test_multi_hostname(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_node_failure(generic_cloud: str):
@@ -1834,6 +1846,7 @@ def test_azure_start_stop():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 @pytest.mark.no_slurm  # Slurm does not support autostop yet
@@ -1911,6 +1924,7 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 @pytest.mark.no_slurm  # Slurm does not support autostop yet
@@ -1959,6 +1973,7 @@ def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 @pytest.mark.no_slurm  # Slurm does not support autostop yet
@@ -2046,6 +2061,7 @@ def test_cancel_azure():
 @pytest.mark.no_scp  # SCP does not have T4 gpus
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
@@ -2122,6 +2138,7 @@ def test_cancel_ibm():
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.no_shadeform  # Shadeform does not support spot instances
+@pytest.mark.no_spheron  # Spheron does not support spot instances
 @pytest.mark.no_seeweb  # Seeweb does not support spot instances
 @pytest.mark.no_do
 def test_use_spot(generic_cloud: str):
@@ -2811,6 +2828,7 @@ def test_remote_server_api_login():
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 @pytest.mark.no_slurm  # Slurm does not support autostop yet
 def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
@@ -2851,6 +2869,7 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_spheron  # Spheron does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
