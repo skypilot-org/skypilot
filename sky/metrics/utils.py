@@ -494,12 +494,16 @@ async def get_metrics_for_context(context: str) -> str:
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    # Query both DCGM metrics and kube_pod_labels metrics
-    # This ensures the dashboard can perform joins to filter by skypilot cluster
+    # Query DCGM, host CPU/memory, kube_pod_labels, and cAdvisor container
+    # metrics. The container_* metrics enable per-pod CPU/Memory in the
+    # Telemetry section by joining on (pod, namespace) with kube_pod_labels —
+    # same join shape the GPU panels use to filter by SkyPilot cluster name.
     match_patterns = [
         '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
         'kube_pod_labels',
-        'node_cpu_seconds_total{mode="idle"}'
+        'node_cpu_seconds_total{mode="idle"}',
+        'container_cpu_usage_seconds_total{container!="",container!="POD"}',
+        'container_memory_working_set_bytes{container!="",container!="POD"}',
     ]
 
     # TODO(rohan): don't hardcode the namespace and service name

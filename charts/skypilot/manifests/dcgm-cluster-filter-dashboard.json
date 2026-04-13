@@ -636,9 +636,8 @@
               }
             ]
           },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
+          "unit": "short",
+          "min": 0
         },
         "overrides": []
       },
@@ -674,15 +673,15 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(1 - avg by (node) (\n  rate(node_cpu_seconds_total{mode=\"idle\"}[2m])\n  * on(node) group_left() (\n    group by (node) (\n      kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n    )\n  )\n)) * 100",
+          "expr": "sum by (pod, namespace) (\n  rate(container_cpu_usage_seconds_total{container!=\"\", container!=\"POD\"}[5m])\n)\n* on(pod, namespace) group_left(label_skypilot_cluster_name)\ngroup by (pod, namespace, label_skypilot_cluster_name) (\n  kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n)",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{pod}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "CPU Utilization",
+      "title": "CPU Usage",
       "type": "timeseries"
     },
     {
@@ -741,9 +740,8 @@
               }
             ]
           },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
+          "unit": "bytes",
+          "min": 0
         },
         "overrides": []
       },
@@ -779,15 +777,15 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(1 - (\n  (node_memory_MemAvailable_bytes\n    * on(node) group_left() (\n      group by (node) (\n        kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n      )\n    )\n  )\n  / on(node)\n  (node_memory_MemTotal_bytes\n    * on(node) group_left() (\n      group by (node) (\n        kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n      )\n    )\n  )\n)) * 100",
+          "expr": "sum by (pod, namespace) (\n  container_memory_working_set_bytes{container!=\"\", container!=\"POD\"}\n)\n* on(pod, namespace) group_left(label_skypilot_cluster_name)\ngroup by (pod, namespace, label_skypilot_cluster_name) (\n  kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}\n)",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{pod}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Memory Utilization",
+      "title": "Memory Usage",
       "type": "timeseries"
     }
   ],
