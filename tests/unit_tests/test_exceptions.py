@@ -1,5 +1,7 @@
 """Test exception serialization and deserialization."""
 
+import pickle
+
 from sky import exceptions
 from sky.utils import status_lib
 
@@ -113,6 +115,17 @@ def test_aws_az_fetching_error():
     assert deserialized.region == 'us-east-1'
     assert deserialized.reason == exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
     assert deserialized.stacktrace == 'test_stacktrace'
+
+
+def test_cloud_error_pickling():
+    """Test that CloudError can be pickled and unpickled correctly."""
+    e = exceptions.CloudError('some error message', 'aws', 'some message type')
+    pickled = pickle.dumps(e)
+    unpickled = pickle.loads(pickled)
+    assert isinstance(unpickled, exceptions.CloudError)
+    assert unpickled.cloud_provider == 'aws'
+    assert unpickled.error_type == 'some message type'
+    assert str(unpickled) == 'aws error (some message type): some error message'
 
 
 def test_wrap_unsafe_exceptions():

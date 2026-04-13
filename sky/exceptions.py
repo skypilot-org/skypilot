@@ -138,6 +138,10 @@ class CloudError(Exception):
         return (f'{self.cloud_provider} error ({self.error_type}): '
                 f'{super().__str__()}')
 
+    def __reduce__(self):
+        return (self.__class__, (super().__str__(), self.cloud_provider,
+                                 self.error_type))
+
 
 class InvalidSkyPilotConfigError(ValueError):
     """Raised when the SkyPilot config is invalid."""
