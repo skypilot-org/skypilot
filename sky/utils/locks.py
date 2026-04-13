@@ -217,6 +217,13 @@ class PostgresLock(DistributedLock):
             return AcquireReturnProxy(self)
 
         self._connection = self._get_connection()
+        # Advisory locks are session-scoped, not transaction-scoped, so
+        # transactional semantics are unnecessary here. Enabling autocommit
+        # avoids leaving the connection in the "idle in transaction" state
+        # while polling in the acquire loop and while the lock is held
+        # between acquire() and release() — which would otherwise tie up a
+        # connection and, at scale, exhaust the database connection pool.
+        self._connection.autocommit = True
         cursor = self._connection.cursor()
 
         start_time = time.time()
@@ -290,6 +297,7 @@ class PostgresLock(DistributedLock):
             # The lock is held by another routine, force unlock it.
             if self._connection is None:
                 self._connection = self._get_connection()
+                self._connection.autocommit = True
             cursor = self._connection.cursor()
             if self._shared_lock:
                 unlock_func = 'pg_advisory_unlock_shared'

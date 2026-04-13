@@ -254,6 +254,9 @@ class TestPostgresLock:
         assert isinstance(proxy, locks.AcquireReturnProxy)
         assert lock._acquired
         assert lock._connection is connection
+        # Autocommit must be enabled so advisory-lock polling / holding
+        # doesn't leave the session in "idle in transaction".
+        assert connection.autocommit is True
         cursor.execute.assert_called_once_with(
             'SELECT pg_try_advisory_lock(%s)', (mock.ANY,))
 
