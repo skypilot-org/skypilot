@@ -80,3 +80,30 @@ export function canonicalizeGpuName(rawName) {
       .trim() || 'Unknown'
   );
 }
+
+/**
+ * Heuristic: does a resources / requested-resources string mention any GPU?
+ *
+ * Returns true if the string contains any canonical GPU model name as a word
+ * (e.g. "1x(cpus=4, mem=16GB, A100:1)" → true, "1x(cpus=4, mem=16GB)" → false).
+ *
+ * Used to decide whether to render GPU telemetry panels for a cluster or job;
+ * CPU-only resources should suppress GPU panels to avoid empty charts.
+ *
+ * @param {string} resourcesStr - A SkyPilot resources string
+ * @returns {boolean} True if any GPU model name is detected.
+ */
+export function resourcesHaveGpu(resourcesStr) {
+  if (!resourcesStr) return false;
+  for (const canonical of CANONICAL_GPU_NAMES) {
+    const re = new RegExp(
+      `\\b${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      'i'
+    );
+    if (re.test(resourcesStr)) return true;
+  }
+  // Generic fallbacks for accelerators not in CANONICAL_GPU_NAMES.
+  if (/\bgpu\b/i.test(resourcesStr)) return true;
+  if (/\bnvidia[\s-]/i.test(resourcesStr)) return true;
+  return false;
+}

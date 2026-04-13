@@ -26,43 +26,50 @@ const TIME_RANGE_PRESETS = [
 // Telemetry panels configuration. Each panel specifies which Grafana
 // dashboard it lives in so we can mix GPU panels (skypilot-dcgm-gpu) with
 // host-level CPU/Memory panels (skypilot-dcgm-cluster-dashboard) in one
-// section.
+// section. The `family` field lets consumers hide GPU panels when the
+// underlying cluster/job is CPU-only.
 const TELEMETRY_PANELS = [
   {
     id: '1',
     title: 'GPU Utilization',
     keyPrefix: 'gpu-util',
     dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+    family: 'gpu',
   },
   {
     id: '2',
     title: 'GPU Memory Utilization',
     keyPrefix: 'gpu-memory',
     dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+    family: 'gpu',
   },
   {
     id: '3',
     title: 'GPU Temperature',
     keyPrefix: 'gpu-temp',
     dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+    family: 'gpu',
   },
   {
     id: '4',
     title: 'GPU Power Usage',
     keyPrefix: 'gpu-power',
     dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+    family: 'gpu',
   },
   {
     id: '22',
     title: 'CPU Utilization',
     keyPrefix: 'cpu-util',
     dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
+    family: 'host',
   },
   {
     id: '21',
     title: 'Memory Utilization',
     keyPrefix: 'mem-util',
     dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
+    family: 'host',
   },
 ];
 
@@ -100,6 +107,7 @@ const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
  * @param {string} props.storageKey - LocalStorage key for expanded state
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
  * @param {string} props.noMetricsMessage - Custom message when no metrics available
+ * @param {boolean} props.hasGpu - When false, hide GPU panels and only show CPU/Memory.
  */
 export function TelemetrySection({
   clusterNameOnCloud,
@@ -108,7 +116,11 @@ export function TelemetrySection({
   storageKey = 'skypilot-telemetry-expanded',
   headerExtra = null,
   noMetricsMessage = 'No telemetry available.',
+  hasGpu = true,
 }) {
+  const visiblePanels = hasGpu
+    ? TELEMETRY_PANELS
+    : TELEMETRY_PANELS.filter((p) => p.family !== 'gpu');
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -222,7 +234,7 @@ export function TelemetrySection({
 
             {clusterNameOnCloud ? (
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-                {TELEMETRY_PANELS.map((panel) => (
+                {visiblePanels.map((panel) => (
                   <div
                     key={panel.id}
                     className="bg-white rounded-md border border-gray-200 shadow-sm"

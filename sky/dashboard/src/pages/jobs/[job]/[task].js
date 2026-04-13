@@ -30,6 +30,7 @@ import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import { TelemetrySection } from '@/components/TelemetrySection';
+import { resourcesHaveGpu } from '@/utils/gpuUtils';
 
 function TaskDetails() {
   const router = useRouter();
@@ -193,6 +194,9 @@ function TaskDetails() {
                   displayName={taskData.task || `Task ${taskIndex}`}
                   refreshTrigger={gpuMetricsRefreshTrigger}
                   storageKey="skypilot-task-telemetry-expanded"
+                  hasGpu={resourcesHaveGpu(
+                    taskData.requested_resources || taskData.resources_str
+                  )}
                 />
               )}
 
