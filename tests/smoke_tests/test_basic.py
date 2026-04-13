@@ -2803,40 +2803,115 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
 # ---------- K8s termination_hook (top-level) ----------
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
-def test_k8s_termination_hook_multinode_pod_spec():
-    """Verify `termination_hook` renders lifecycle on BOTH head and workers.
+def test_k8s_termination_hook_lifecycle():
+    """End-to-end lifecycle of `termination_hook` on a single cluster.
 
-    The K8s template uses a single shared container spec for all pods, so the
-    preStop lifecycle and terminationGracePeriodSeconds must appear on both
-    the head pod and worker pods.
+    Walks a single multi-node cluster through four sequential ``sky launch``
+    calls to verify (without tearing the cluster down between them):
+
+    1. First launch with no hook — pods have no ``lifecycle`` block.
+    2. Re-launch with ``termination_hook`` v1 (timeout=60) — pods are
+       recreated; both head and worker have the preStop lifecycle with
+       base64-encoded hook and ``terminationGracePeriodSeconds=60``.
+    3. Re-launch with the SAME ``termination_hook`` v1 — pod UIDs are
+       preserved (no churn; same-spec re-launch is a no-op).
+    4. Re-launch with ``termination_hook`` v2 (timeout=90, different hook
+       body) — pods are recreated again; ``terminationGracePeriodSeconds=90``;
+       the new base64-decoded preStop contains the v2 marker.
+
+    Replaces four separate smoke tests with one flow so we pay the cluster
+    setup cost once instead of four times.
     """
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
     head = f'{name}-{user_hash}-head'
     worker = f'{name}-{user_hash}-worker1'
     test = smoke_tests_utils.Test(
-        'k8s_termination_hook_multinode_pod_spec',
+        'k8s_termination_hook_lifecycle',
         [
-            # Launch a 2-node cluster with termination_hook.
+            # --- Step 1: First launch, no hook. ---
             f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml',
-            # Head pod: terminationGracePeriodSeconds == 60.
+            'tests/test_yamls/test_k8s_termination_hook_nohook.yaml',
+            # Neither head nor worker should have a lifecycle block yet.
+            f'LIFECYCLE=$(kubectl get pod {head} -o '
+            "jsonpath='{.spec.containers[0].lifecycle}') && "
+            '[ -z "$LIFECYCLE" ]',
+            f'LIFECYCLE=$(kubectl get pod {worker} -o '
+            "jsonpath='{.spec.containers[0].lifecycle}') && "
+            '[ -z "$LIFECYCLE" ]',
+
+            # --- Step 2: Re-launch ADDING termination_hook v1 (timeout=60). ---
+            # Pods must be recreated with the new spec.
+            f'HEAD_UID_0=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_0=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_termination_hook.yaml && '
+            f'HEAD_UID_1=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_1=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            '[ "$HEAD_UID_0" != "$HEAD_UID_1" ] && '
+            '[ "$WORKER_UID_0" != "$WORKER_UID_1" ]',
+            # terminationGracePeriodSeconds must be 60 on both pods.
             f'kubectl get pod {head} -o '
             "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^60$'",
-            # Head pod: preStop lifecycle block present with base64-encoded hook.
+            f'kubectl get pod {worker} -o '
+            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^60$'",
+            # preStop lifecycle present with base64-encoded hook on both.
             f'kubectl get pod {head} -o '
             "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
             "| grep 'base64'",
-            # Worker pod: same terminationGracePeriodSeconds.
-            f'kubectl get pod {worker} -o '
-            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^60$'",
-            # Worker pod: same preStop lifecycle.
             f'kubectl get pod {worker} -o '
             "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
             "| grep 'base64'",
+
+            # --- Step 3: Re-launch with SAME v1 — pods must NOT be recreated. ---
+            f'HEAD_UID_1=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_1=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_termination_hook.yaml && '
+            f'HEAD_UID_SAME=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_SAME=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            '[ "$HEAD_UID_1" = "$HEAD_UID_SAME" ] && '
+            '[ "$WORKER_UID_1" = "$WORKER_UID_SAME" ]',
+
+            # --- Step 4: Re-launch with DIFFERENT v2 hook (timeout=90). ---
+            # Pods must be recreated with the new spec.
+            f'HEAD_UID_1=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_1=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'sky launch -y -d -c {name} '
+            'tests/test_yamls/test_k8s_termination_hook_v2.yaml && '
+            f'HEAD_UID_2=$(kubectl get pod {head} '
+            "-o jsonpath='{.metadata.uid}') && "
+            f'WORKER_UID_2=$(kubectl get pod {worker} '
+            "-o jsonpath='{.metadata.uid}') && "
+            '[ "$HEAD_UID_1" != "$HEAD_UID_2" ] && '
+            '[ "$WORKER_UID_1" != "$WORKER_UID_2" ]',
+            # terminationGracePeriodSeconds must now be 90 on both pods.
+            f'kubectl get pod {head} -o '
+            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^90$'",
+            f'kubectl get pod {worker} -o '
+            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^90$'",
+            # The new base64-decoded preStop must contain the v2 marker.
+            f'kubectl get pod {head} -o '
+            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
+            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
+            "| base64 --decode | grep -q 'termination-proof-v2-'",
+            f'kubectl get pod {worker} -o '
+            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
+            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
+            "| base64 --decode | grep -q 'termination-proof-v2-'",
         ],
         f'sky down -y {name}',
-        timeout=25 * 60,
+        timeout=35 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -2846,10 +2921,9 @@ def test_k8s_termination_hook_multinode_pod_spec():
 def test_k8s_termination_hook_backward_compat_autostop_hook():
     """`autostop.hook` produces an equivalent pod spec to `termination_hook`.
 
-    Launches two clusters, one with the new `termination_hook` key and one
-    with the legacy `autostop.hook` form, using the same hook body/timeout.
-    Verifies both render identical `terminationGracePeriodSeconds` and
-    `lifecycle.preStop` fields.
+    Needs two clusters live at the same time so we can diff their pod specs
+    directly — this check can't be folded into the single-cluster lifecycle
+    test above.
     """
     name = smoke_tests_utils.get_cluster_name()
     legacy_name = f'{name}-legacy'
@@ -2884,162 +2958,12 @@ def test_k8s_termination_hook_backward_compat_autostop_hook():
 
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
-def test_k8s_termination_hook_second_launch_adds_hook():
-    """Re-launching with a hook ADDED must recreate all pods.
-
-    Covers the "no hook -> with hook" case: first launch has no lifecycle
-    block, second launch introduces one. The K8s provisioner must detect
-    the delta and recreate both head and worker pods.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    user_hash = common_utils.get_user_hash()
-    head = f'{name}-{user_hash}-head'
-    worker = f'{name}-{user_hash}-worker1'
-    test = smoke_tests_utils.Test(
-        'k8s_termination_hook_second_launch_adds_hook',
-        [
-            # First launch: no hook.
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook_nohook.yaml',
-            # Verify no lifecycle block present on the head pod.
-            f'LIFECYCLE=$(kubectl get pod {head} -o '
-            "jsonpath='{.spec.containers[0].lifecycle}') && "
-            '[ -z "$LIFECYCLE" ]',
-            # Record UIDs then re-launch WITH a hook; pods must be replaced.
-            f'HEAD_UID_1=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_1=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml && '
-            f'HEAD_UID_2=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_2=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            '[ "$HEAD_UID_1" != "$HEAD_UID_2" ] && '
-            '[ "$WORKER_UID_1" != "$WORKER_UID_2" ]',
-            # Lifecycle must now be present on both head and worker.
-            f'kubectl get pod {head} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
-            "| grep 'base64'",
-            f'kubectl get pod {worker} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
-            "| grep 'base64'",
-        ],
-        f'sky down -y {name}',
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
-def test_k8s_termination_hook_second_launch_updates_hook():
-    """Re-launching with a DIFFERENT hook must recreate all pods.
-
-    Verifies the end-to-end fix for the second-launch bug: autostop_config
-    transfer, yaml-restore re-injection, and K8s provisioner pod replacement
-    all cooperate to propagate the new hook to both head and worker pods.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    user_hash = common_utils.get_user_hash()
-    head = f'{name}-{user_hash}-head'
-    worker = f'{name}-{user_hash}-worker1'
-    test = smoke_tests_utils.Test(
-        'k8s_termination_hook_second_launch_updates_hook',
-        [
-            # First launch: v1 hook (referencing "termination-proof-").
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml',
-            # Record pod UIDs so we can verify they get replaced.
-            f'HEAD_UID_1=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_1=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            # Second launch: v2 hook (referencing "termination-proof-v2-",
-            # timeout 90s). This changes `lifecycle` and
-            # `terminationGracePeriodSeconds`, so our K8s provisioner must
-            # detect the diff and recreate the pods.
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook_v2.yaml && '
-            # Both pod UIDs must have changed.
-            f'HEAD_UID_2=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_2=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            '[ "$HEAD_UID_1" != "$HEAD_UID_2" ] && '
-            '[ "$WORKER_UID_1" != "$WORKER_UID_2" ]',
-            # terminationGracePeriodSeconds on head must now be 90 (v2 value).
-            f'kubectl get pod {head} -o '
-            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^90$'",
-            # terminationGracePeriodSeconds on worker must also be 90.
-            f'kubectl get pod {worker} -o '
-            "jsonpath='{.spec.terminationGracePeriodSeconds}' | grep '^90$'",
-            # The new preStop command must contain the v2 marker on both pods.
-            # The hook body is base64-encoded in the template as a single long
-            # token; extract the longest base64-looking run, decode it, and
-            # grep for the v2 ConfigMap-name substring.
-            f'kubectl get pod {head} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
-            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
-            "| base64 --decode | grep -q 'termination-proof-v2-'",
-            f'kubectl get pod {worker} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}' "
-            "| grep -oE '[A-Za-z0-9+/=]{100,}' | head -1 "
-            "| base64 --decode | grep -q 'termination-proof-v2-'",
-        ],
-        f'sky down -y {name}',
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
-def test_k8s_termination_hook_second_launch_same_hook_no_recreate():
-    """Re-launching with the SAME hook must NOT recreate pods.
-
-    The config-hash check in `write_cluster_config()` should match on the
-    second launch, provisioning should be skipped, and pod UIDs should remain
-    unchanged.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    user_hash = common_utils.get_user_hash()
-    head = f'{name}-{user_hash}-head'
-    worker = f'{name}-{user_hash}-worker1'
-    test = smoke_tests_utils.Test(
-        'k8s_termination_hook_second_launch_same_hook_no_recreate',
-        [
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml',
-            # Record UIDs, re-launch with the SAME yaml, compare UIDs.
-            f'HEAD_UID_1=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_1=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml && '
-            f'HEAD_UID_2=$(kubectl get pod {head} '
-            "-o jsonpath='{.metadata.uid}') && "
-            f'WORKER_UID_2=$(kubectl get pod {worker} '
-            "-o jsonpath='{.metadata.uid}') && "
-            '[ "$HEAD_UID_1" = "$HEAD_UID_2" ] && '
-            '[ "$WORKER_UID_1" = "$WORKER_UID_2" ]',
-        ],
-        f'sky down -y {name}',
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
 def test_k8s_termination_hook_mutual_exclusion_errors():
     """Specifying both `autostop.hook` and `termination_hook` must error.
 
-    The Resources constructor raises `ValueError` when the two hook sources
-    specify different values. `sky launch` should surface a non-zero exit
-    code and an error message mentioning the unified hook key.
+    Fast parse-time check — no cluster is ever provisioned. Kept separate
+    from the lifecycle test so that an unrelated parser regression fails in
+    an obvious test rather than getting swallowed by a ~5 min setup.
     """
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
