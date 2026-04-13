@@ -32,6 +32,22 @@ def pickle_and_encode(obj: Any) -> str:
         raise ValueError(f'Failed to pickle object: {obj}') from e
 
 
+def encode_handle(handle: Any) -> Any:
+    """Encode a ResourceHandle for the REST API response.
+
+    Plugin extension point — do not inline into callers.
+    """
+    return pickle_and_encode(handle)
+
+
+def encode_resources(resources: Any) -> Any:
+    """Encode a Resources object for the REST API response.
+
+    Plugin extension point — do not inline into callers.
+    """
+    return pickle_and_encode(resources)
+
+
 def register_encoder(*names: str):
     """Decorator to register an encoder."""
 
@@ -75,9 +91,7 @@ def encode_status(
                 'labels') is None:
             response_cluster['labels'] = {}
         response_cluster['status'] = cluster['status'].value
-        handle = serialize_utils.prepare_handle_for_backwards_compatibility(
-            cluster['handle'])
-        response_cluster['handle'] = pickle_and_encode(handle)
+        response_cluster['handle'] = encode_handle(cluster['handle'])
         # TODO (syang) We still need to return this field for backwards
         # compatibility.
         # Remove this field at or after v0.12.0
@@ -92,19 +106,15 @@ def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
     job_id, handle = job_id_handle
-    handle = serialize_utils.prepare_handle_for_backwards_compatibility(handle)
     return {
         'job_id': job_id,
-        'handle': pickle_and_encode(handle),
+        'handle': encode_handle(handle),
     }
 
 
 @register_encoder('start')
 def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
-    resource_handle = (
-        serialize_utils.prepare_handle_for_backwards_compatibility(
-            resource_handle))
-    return pickle_and_encode(resource_handle)
+    return encode_handle(resource_handle)
 
 
 @register_encoder('queue')
@@ -183,9 +193,7 @@ def _encode_serve_status(
         service_status['status'] = service_status['status'].value
         for replica_info in service_status.get('replica_info', []):
             replica_info['status'] = replica_info['status'].value
-            handle = serialize_utils.prepare_handle_for_backwards_compatibility(
-                replica_info['handle'])
-            replica_info['handle'] = pickle_and_encode(handle)
+            replica_info['handle'] = encode_handle(replica_info['handle'])
     return service_statuses
 
 
@@ -208,7 +216,7 @@ def encode_cost_report(
         if cluster_report['status'] is not None:
             cluster_report['status'] = cluster_report['status'].value
         if 'resources' in cluster_report:
-            cluster_report['resources'] = pickle_and_encode(
+            cluster_report['resources'] = encode_resources(
                 cluster_report['resources'])
     return cost_report
 
