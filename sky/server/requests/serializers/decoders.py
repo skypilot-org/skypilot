@@ -32,6 +32,7 @@ def decode_handle(data: Any) -> Any:
     Plugin extension point — do not inline into callers.
     """
 
+
     if data is None:
         return None
     if isinstance(data, dict):
@@ -46,6 +47,7 @@ def decode_resources(data: Any) -> Any:
 
     Plugin extension point — do not inline into callers.
     """
+
 
     if data is None:
         return None
