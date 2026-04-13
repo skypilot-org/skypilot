@@ -38,7 +38,10 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { TelemetrySection } from '@/components/TelemetrySection';
+import {
+  TelemetrySection,
+  extractKubernetesContext,
+} from '@/components/TelemetrySection';
 import { resourcesHaveGpu } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
@@ -662,6 +665,9 @@ function ActiveTab({
           <div className="mb-6">
             <TelemetrySection
               clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              kubernetesContext={extractKubernetesContext(
+                clusterData?.full_infra || clusterData?.infra
+              )}
               displayName={clusterData?.cluster}
               refreshTrigger={gpuMetricsRefreshTrigger}
               storageKey="skypilot-clusters-telemetry-expanded"

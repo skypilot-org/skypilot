@@ -29,7 +29,10 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { TelemetrySection } from '@/components/TelemetrySection';
+import {
+  TelemetrySection,
+  extractKubernetesContext,
+} from '@/components/TelemetrySection';
 import { resourcesHaveGpu } from '@/utils/gpuUtils';
 
 function TaskDetails() {
@@ -191,6 +194,9 @@ function TaskDetails() {
               taskData.cluster_name_on_cloud && (
                 <TelemetrySection
                   clusterNameOnCloud={taskData.cluster_name_on_cloud}
+                  kubernetesContext={extractKubernetesContext(
+                    taskData.full_infra
+                  )}
                   displayName={taskData.task || `Task ${taskIndex}`}
                   refreshTrigger={gpuMetricsRefreshTrigger}
                   storageKey="skypilot-task-telemetry-expanded"
