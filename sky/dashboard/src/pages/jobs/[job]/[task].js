@@ -29,7 +29,7 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { TelemetrySection } from '@/components/TelemetrySection';
 
 function TaskDetails() {
   const router = useRouter();
@@ -183,16 +183,16 @@ function TaskDetails() {
               </Card>
             </div>
 
-            {/* GPU Metrics Section - Show for Kubernetes tasks with cluster_name_on_cloud */}
+            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes tasks with cluster_name_on_cloud */}
             {isGrafanaAvailable &&
               taskData.full_infra?.includes('Kubernetes') &&
               !taskData.pool &&
               taskData.cluster_name_on_cloud && (
-                <GPUMetricsSection
+                <TelemetrySection
                   clusterNameOnCloud={taskData.cluster_name_on_cloud}
                   displayName={taskData.task || `Task ${taskIndex}`}
                   refreshTrigger={gpuMetricsRefreshTrigger}
-                  storageKey="skypilot-task-gpu-metrics-expanded"
+                  storageKey="skypilot-task-telemetry-expanded"
                 />
               )}
 

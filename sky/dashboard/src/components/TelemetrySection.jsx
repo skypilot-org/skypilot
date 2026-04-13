@@ -8,10 +8,13 @@ import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
 
 // Grafana configuration constants
-const GRAFANA_DASHBOARD_SLUG = 'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+const GRAFANA_GPU_DASHBOARD_SLUG =
+  'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+const GRAFANA_CLUSTER_DASHBOARD_SLUG =
+  'skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard';
 const GRAFANA_ORG_ID = '1';
 
-// Time range presets for GPU metrics
+// Time range presets
 const TIME_RANGE_PRESETS = [
   { label: '15m', value: '15m' },
   { label: '1h', value: '1h' },
@@ -20,35 +23,75 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
-// GPU panels configuration
-const GPU_PANELS = [
-  { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
-  { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
-  { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
-  { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
+// Telemetry panels configuration. Each panel specifies which Grafana
+// dashboard it lives in so we can mix GPU panels (skypilot-dcgm-gpu) with
+// host-level CPU/Memory panels (skypilot-dcgm-cluster-dashboard) in one
+// section.
+const TELEMETRY_PANELS = [
+  {
+    id: '1',
+    title: 'GPU Utilization',
+    keyPrefix: 'gpu-util',
+    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+  },
+  {
+    id: '2',
+    title: 'GPU Memory Utilization',
+    keyPrefix: 'gpu-memory',
+    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+  },
+  {
+    id: '3',
+    title: 'GPU Temperature',
+    keyPrefix: 'gpu-temp',
+    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+  },
+  {
+    id: '4',
+    title: 'GPU Power Usage',
+    keyPrefix: 'gpu-power',
+    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
+  },
+  {
+    id: '22',
+    title: 'CPU Utilization',
+    keyPrefix: 'cpu-util',
+    dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
+  },
+  {
+    id: '21',
+    title: 'Memory Utilization',
+    keyPrefix: 'mem-util',
+    dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
+  },
 ];
 
 /**
- * Build Grafana panel URL with filters
+ * Build Grafana panel URL with filters. Both target dashboards accept
+ * var-cluster, var-gpu, and either var-node or var-host; setting all of
+ * them is harmless because Grafana ignores unknown template variables.
  */
-const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
+const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
   const grafanaUrl = getGrafanaUrl();
   const params = new URLSearchParams({
     orgId: GRAFANA_ORG_ID,
     from: timeRange.from,
     to: timeRange.to,
     timezone: 'browser',
+    'var-datasource': 'prometheus',
     'var-cluster': clusterNameOnCloud,
     'var-node': '$__all',
+    'var-host': '$__all',
     'var-gpu': '$__all',
     theme: 'light',
-    panelId: panelId,
+    panelId: panel.id,
   });
-  return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}&__feature.dashboardSceneSolo`;
+  return `${grafanaUrl}/d-solo/${panel.dashboardSlug}?${params.toString()}&__feature.dashboardSceneSolo`;
 };
 
 /**
- * Reusable GPU Metrics Section component
+ * Reusable Telemetry section that embeds Grafana panels for GPU metrics
+ * (utilization, memory, temperature, power) and host-level CPU/Memory.
  *
  * @param {Object} props
  * @param {string} props.clusterNameOnCloud - The cluster name for filtering metrics
@@ -58,13 +101,13 @@ const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
  * @param {string} props.noMetricsMessage - Custom message when no metrics available
  */
-export function GPUMetricsSection({
+export function TelemetrySection({
   clusterNameOnCloud,
   displayName,
   refreshTrigger = 0,
-  storageKey = 'skypilot-gpu-metrics-expanded',
+  storageKey = 'skypilot-telemetry-expanded',
   headerExtra = null,
-  noMetricsMessage = 'No GPU metrics available.',
+  noMetricsMessage = 'No telemetry available.',
 }) {
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -90,18 +133,23 @@ export function GPUMetricsSection({
     }
   };
 
+  // Open the cluster dashboard (which contains both GPU and host-level
+  // panels) so the user lands on the most comprehensive view.
   const openInGrafana = () => {
     const queryParams = new URLSearchParams({
       orgId: GRAFANA_ORG_ID,
       from: timeRange.from,
       to: timeRange.to,
       timezone: 'browser',
+      'var-datasource': 'prometheus',
       'var-cluster': clusterNameOnCloud,
-      'var-node': '$__all',
+      'var-host': '$__all',
       'var-gpu': '$__all',
     });
     window.open(
-      buildGrafanaUrl(`/d/${GRAFANA_DASHBOARD_SLUG}?${queryParams.toString()}`),
+      buildGrafanaUrl(
+        `/d/${GRAFANA_CLUSTER_DASHBOARD_SLUG}?${queryParams.toString()}`
+      ),
       '_blank'
     );
   };
@@ -122,7 +170,7 @@ export function GPUMetricsSection({
               ) : (
                 <ChevronRightIcon className="w-5 h-5 mr-2" />
               )}
-              <h3 className="text-lg font-semibold">GPU Metrics</h3>
+              <h3 className="text-lg font-semibold">Telemetry</h3>
             </button>
             {headerExtra}
           </div>
@@ -174,15 +222,15 @@ export function GPUMetricsSection({
 
             {clusterNameOnCloud ? (
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-                {GPU_PANELS.map((panel) => (
+                {TELEMETRY_PANELS.map((panel) => (
                   <div
                     key={panel.id}
                     className="bg-white rounded-md border border-gray-200 shadow-sm"
                   >
                     <div className="p-2">
                       <iframe
-                        src={buildGrafanaMetricsUrl(
-                          panel.id,
+                        src={buildGrafanaPanelUrl(
+                          panel,
                           clusterNameOnCloud,
                           timeRange
                         )}
@@ -209,4 +257,4 @@ export function GPUMetricsSection({
   );
 }
 
-export default GPUMetricsSection;
+export default TelemetrySection;

@@ -60,7 +60,7 @@ import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { TelemetrySection } from '@/components/TelemetrySection';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -85,11 +85,11 @@ function JobDetails() {
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
-  // GPU metrics task selection for job groups
+  // Telemetry task selection for job groups
   const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
-  const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
+  const TELEMETRY_EXPANDED_KEY = 'skypilot-jobs-telemetry-expanded';
 
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -519,9 +519,9 @@ function JobDetails() {
               </div>
             )}
 
-            {/* GPU Metrics Section - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
+            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
             {isGrafanaAvailable && hasAnyTaskWithGpuMetrics && (
-              <GPUMetricsSection
+              <TelemetrySection
                 clusterNameOnCloud={gpuMetricsClusterName}
                 displayName={
                   isMultiTask
@@ -530,13 +530,13 @@ function JobDetails() {
                       gpuMetricsTask?.name ||
                       detailJobData.name
                 }
-                storageKey={GPU_METRICS_EXPANDED_KEY}
+                storageKey={TELEMETRY_EXPANDED_KEY}
                 noMetricsMessage={
                   gpuMetricsTask?.pool
-                    ? 'GPU metrics are not available for pool jobs.'
+                    ? 'Telemetry is not available for pool jobs.'
                     : !gpuMetricsTask?.full_infra?.includes('Kubernetes')
-                      ? 'GPU metrics are only available for Kubernetes tasks.'
-                      : 'No GPU metrics available for this task.'
+                      ? 'Telemetry is only available for Kubernetes tasks.'
+                      : 'No telemetry available for this task.'
                 }
                 headerExtra={
                   isMultiTask && (
