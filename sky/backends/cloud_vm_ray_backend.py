@@ -2570,7 +2570,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             'stable_internal_external_ips')
         handle.stable_ssh_ports = d.get('stable_ssh_ports')
         handle.docker_user = d.get('docker_user')
-        handle.is_grpc_enabled = d.get('is_grpc_enabled', False)
+        handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
         handle.cached_cluster_info = None
         handle._ssh_user = d.get('ssh_user')
         return handle
