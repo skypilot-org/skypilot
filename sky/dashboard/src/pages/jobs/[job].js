@@ -60,10 +60,7 @@ import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import {
-  TelemetrySection,
-  extractKubernetesContext,
-} from '@/components/TelemetrySection';
+import { TelemetrySection } from '@/components/TelemetrySection';
 import { resourcesHaveGpu } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
@@ -527,9 +524,6 @@ function JobDetails() {
             {isGrafanaAvailable && hasAnyTaskWithGpuMetrics && (
               <TelemetrySection
                 clusterNameOnCloud={gpuMetricsClusterName}
-                kubernetesContext={extractKubernetesContext(
-                  gpuMetricsTask?.full_infra
-                )}
                 displayName={
                   isMultiTask
                     ? `${gpuMetricsTask?.task || gpuMetricsTask?.name || detailJobData.name} (Task ${gpuMetricsTaskIndex})`

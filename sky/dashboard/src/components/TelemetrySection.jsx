@@ -7,26 +7,12 @@ import {
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
 
-/**
- * Extract the Kubernetes context name from a SkyPilot infra string.
- *
- * SkyPilot's full_infra is formatted like "Kubernetes (coreweave-dev)" — the
- * value inside the parentheses is the K8s context name used as the
- * `cluster` label by node_exporter scrapes. Returns null if the string isn't
- * a Kubernetes infra or can't be parsed.
- */
-export function extractKubernetesContext(fullInfra) {
-  if (!fullInfra || typeof fullInfra !== 'string') return null;
-  if (!fullInfra.toLowerCase().includes('kubernetes')) return null;
-  const m = fullInfra.match(/\(([^)]+)\)/);
-  return m ? m[1].trim() : null;
-}
 
-// Grafana configuration constants
-const GRAFANA_GPU_DASHBOARD_SLUG =
-  'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
-const GRAFANA_CLUSTER_DASHBOARD_SLUG =
-  'skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard';
+// All Telemetry panels — GPU (DCGM) and per-pod CPU/Memory (cAdvisor) — live
+// in the same SkyPilot cluster-filter dashboard so a single var-cluster
+// (the SkyPilot cluster_name_on_cloud) filters all of them via the standard
+// kube_pod_labels join.
+const GRAFANA_DASHBOARD_SLUG = 'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
 const GRAFANA_ORG_ID = '1';
 
 // Time range presets
@@ -38,92 +24,45 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
-// Telemetry panels configuration. Each panel specifies which Grafana
-// dashboard it lives in so we can mix GPU panels (skypilot-dcgm-gpu) with
-// host-level CPU/Memory panels (skypilot-dcgm-cluster-dashboard) in one
-// section. The `family` field lets consumers hide GPU panels when the
-// underlying cluster/job is CPU-only.
+// Telemetry panels — all live in the same skypilot-dcgm-gpu dashboard,
+// pre-scoped to a single SkyPilot cluster via var-cluster. The `family`
+// field lets consumers hide GPU panels when the underlying cluster/job
+// is CPU-only.
 const TELEMETRY_PANELS = [
-  {
-    id: '1',
-    title: 'GPU Utilization',
-    keyPrefix: 'gpu-util',
-    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
-    family: 'gpu',
-  },
+  { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util', family: 'gpu' },
   {
     id: '2',
     title: 'GPU Memory Utilization',
     keyPrefix: 'gpu-memory',
-    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
     family: 'gpu',
   },
-  {
-    id: '3',
-    title: 'GPU Temperature',
-    keyPrefix: 'gpu-temp',
-    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
-    family: 'gpu',
-  },
-  {
-    id: '4',
-    title: 'GPU Power Usage',
-    keyPrefix: 'gpu-power',
-    dashboardSlug: GRAFANA_GPU_DASHBOARD_SLUG,
-    family: 'gpu',
-  },
-  {
-    id: '22',
-    title: 'CPU Utilization',
-    keyPrefix: 'cpu-util',
-    dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
-    family: 'host',
-  },
-  {
-    id: '21',
-    title: 'Memory Utilization',
-    keyPrefix: 'mem-util',
-    dashboardSlug: GRAFANA_CLUSTER_DASHBOARD_SLUG,
-    family: 'host',
-  },
+  { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp', family: 'gpu' },
+  { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power', family: 'gpu' },
+  { id: '6', title: 'CPU Usage', keyPrefix: 'cpu-usage', family: 'host' },
+  { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
 ];
 
 /**
- * Build Grafana panel URL with filters.
- *
- * GPU panels filter by `var-cluster` set to SkyPilot's `cluster_name_on_cloud`
- * because DCGM is configured to label metrics with that name. Host CPU/Memory
- * panels (from node_exporter) need `var-cluster` set to the Kubernetes context
- * name instead — node_exporter is host-level and has no notion of Sky clusters,
- * so it falls back to the K8s cluster label. When the K8s context isn't known
- * we reuse the SkyPilot cluster name (legacy behavior); the dashboard will
- * render "no data" rather than misleading numbers.
+ * Build Grafana panel URL with filters. All panels live in the same
+ * SkyPilot cluster-filter dashboard and share var-cluster, so the same
+ * `cluster_name_on_cloud` filter scopes both GPU (DCGM) and per-pod
+ * CPU/Memory (cAdvisor) panels via the kube_pod_labels join in each
+ * panel's PromQL.
  */
-const buildGrafanaPanelUrl = (
-  panel,
-  clusterNameOnCloud,
-  kubernetesContext,
-  timeRange
-) => {
+const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
   const grafanaUrl = getGrafanaUrl();
-  const clusterFilter =
-    panel.family === 'host' && kubernetesContext
-      ? kubernetesContext
-      : clusterNameOnCloud;
   const params = new URLSearchParams({
     orgId: GRAFANA_ORG_ID,
     from: timeRange.from,
     to: timeRange.to,
     timezone: 'browser',
-    'var-datasource': 'prometheus',
-    'var-cluster': clusterFilter,
+    'var-cluster': clusterNameOnCloud,
     'var-node': '$__all',
-    'var-host': '$__all',
     'var-gpu': '$__all',
     theme: 'light',
     panelId: panel.id,
   });
-  return `${grafanaUrl}/d-solo/${panel.dashboardSlug}?${params.toString()}&__feature.dashboardSceneSolo`;
+  return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}&__feature.dashboardSceneSolo`;
 };
 
 /**
@@ -131,8 +70,7 @@ const buildGrafanaPanelUrl = (
  * (utilization, memory, temperature, power) and host-level CPU/Memory.
  *
  * @param {Object} props
- * @param {string} props.clusterNameOnCloud - The Sky cluster name (used as DCGM `cluster` label for GPU panels)
- * @param {string} props.kubernetesContext - The K8s context name (used as `cluster` label for node_exporter host panels)
+ * @param {string} props.clusterNameOnCloud - The SkyPilot cluster name (drives var-cluster on every panel)
  * @param {string} props.displayName - The name to show in the "Showing:" text
  * @param {number} props.refreshTrigger - Increment to trigger iframe refresh
  * @param {string} props.storageKey - LocalStorage key for expanded state
@@ -142,7 +80,6 @@ const buildGrafanaPanelUrl = (
  */
 export function TelemetrySection({
   clusterNameOnCloud,
-  kubernetesContext = null,
   displayName,
   refreshTrigger = 0,
   storageKey = 'skypilot-telemetry-expanded',
@@ -177,23 +114,18 @@ export function TelemetrySection({
     }
   };
 
-  // Open the cluster dashboard (which contains both GPU and host-level
-  // panels) so the user lands on the most comprehensive view.
   const openInGrafana = () => {
     const queryParams = new URLSearchParams({
       orgId: GRAFANA_ORG_ID,
       from: timeRange.from,
       to: timeRange.to,
       timezone: 'browser',
-      'var-datasource': 'prometheus',
       'var-cluster': clusterNameOnCloud,
-      'var-host': '$__all',
+      'var-node': '$__all',
       'var-gpu': '$__all',
     });
     window.open(
-      buildGrafanaUrl(
-        `/d/${GRAFANA_CLUSTER_DASHBOARD_SLUG}?${queryParams.toString()}`
-      ),
+      buildGrafanaUrl(`/d/${GRAFANA_DASHBOARD_SLUG}?${queryParams.toString()}`),
       '_blank'
     );
   };
@@ -265,7 +197,7 @@ export function TelemetrySection({
             </div>
 
             {clusterNameOnCloud ? (
-              <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {visiblePanels.map((panel) => (
                   <div
                     key={panel.id}
@@ -276,7 +208,6 @@ export function TelemetrySection({
                         src={buildGrafanaPanelUrl(
                           panel,
                           clusterNameOnCloud,
-                          kubernetesContext,
                           timeRange
                         )}
                         width="100%"
