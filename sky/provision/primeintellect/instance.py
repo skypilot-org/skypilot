@@ -378,7 +378,6 @@ def get_cluster_info(
             time.sleep(SSH_CONN_RETRY_INTERVAL_SECONDS)
             retry_count += 1
             instance = _get_instance_info(instance_id)
-            running_instances[instance_id] = instance
 
         if instance.get('sshConnection') is not None:
             print('SSH connection is ready!')
