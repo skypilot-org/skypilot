@@ -1858,7 +1858,8 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        event_type: Type of events to retrieve ('STATUS_CHANGE', 'DEBUG',
+            or 'TERMINAL').
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
         limit: If specified, returns at most this many events (most recent).

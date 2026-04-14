@@ -995,6 +995,8 @@ def _get_last_or_terminal_cluster_event_multiple(
     Priority: TERMINAL events first, then most recent by timestamp
     among STATUS_CHANGE and DEBUG events.
     """
+    if not cluster_hashes:
+        return {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)

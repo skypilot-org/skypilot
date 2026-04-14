@@ -1841,7 +1841,7 @@ def _show_single_cluster_events(cluster_name: str) -> None:
     events_limit = 20
     all_events: List[Dict[str, Any]] = []
 
-    for event_type in ['STATUS_CHANGE', 'DEBUG']:
+    for event_type in ['STATUS_CHANGE', 'DEBUG', 'TERMINAL']:
         try:
             request_id = sdk.get_cluster_events(
                 cluster_name=cluster_name,
@@ -2161,8 +2161,8 @@ def status(verbose: bool,
 
     # Show detailed event history when querying a single cluster
     if (query_clusters is not None and len(query_clusters) == 1 and
-            cluster_records):
-        _show_single_cluster_events(query_clusters[0])
+            len(cluster_records) == 1):
+        _show_single_cluster_events(cluster_records[0]['name'])
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
