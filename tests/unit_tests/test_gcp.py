@@ -294,6 +294,27 @@ def test_gcp_minimal_compute_permissions_skip_firewall_for_custom_subnet():
         assert permission not in permissions
 
 
+def test_gcp_minimal_compute_permissions_include_firewall_for_empty_subnets():
+
+    def get_effective_region_config_side_effect(cloud,
+                                                region,
+                                                keys,
+                                                default_value=None,
+                                                **kwargs):
+        del cloud, region, kwargs
+        if keys == ('subnet_names',):
+            return []
+        return default_value
+
+    with patch.object(skypilot_config,
+                      'get_effective_region_config',
+                      side_effect=get_effective_region_config_side_effect):
+        permissions = gcp_utils.get_minimal_compute_permissions()
+
+    for permission in gcp_constants.FIREWALL_PERMISSIONS:
+        assert permission in permissions
+
+
 def test_gcp_network_config_override_in_cluster_config(monkeypatch):
     """Test that GCP network overrides are passed through to the template."""
     monkeypatch.setattr(common_utils, 'make_cluster_name_on_cloud',
