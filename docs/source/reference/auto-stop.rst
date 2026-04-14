@@ -283,7 +283,7 @@ Common use cases for autostop hooks:
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
 
-.. _preemption-hooks:
+.. _termination-hooks:
 
 Termination hooks on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
