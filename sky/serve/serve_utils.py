@@ -27,6 +27,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
@@ -240,15 +241,30 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
 
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
-    # Use jobs config for pool consolidation mode.
-    controller = controller_utils.get_controller_for_pool(pool).value
-    consolidation_mode = skypilot_config.get_nested(
-        (controller.controller_type, 'controller', 'consolidation_mode'),
-        default_value=False)
     if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         # if we are in the job controller, we must always be in consolidation
         # mode.
         return True
+    if pool:
+        # INVARIANT: must return the same value as
+        # sky.jobs.utils.is_consolidation_mode() — pool operations run on the
+        # jobs controller, so pool and managed-jobs consolidation state cannot
+        # legitimately diverge. Both read JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+        # (see sky/jobs/constants.py). Reading config directly here diverges
+        # under deploy-mode auto-enable, where the signal file is written
+        # without touching config.
+        signal_file = pathlib.Path(
+            managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+        ).expanduser()
+        effective = signal_file.exists()
+        if os.environ.get(
+                skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+            _validate_consolidation_mode_config(effective, pool)
+        return effective
+    # Serve (pool=False) runs on its own controller cluster, independent of
+    # the jobs controller, and keeps a config-driven consolidation flag.
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.

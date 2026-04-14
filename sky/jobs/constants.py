@@ -23,8 +23,15 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
 
 # Signal file indicating the API server has been restarted after enabling
-# consolidation mode. Created by setup_consolidation_mode_on_startup() in
-# sky/jobs/utils.py.
+# consolidation mode. Written by setup_consolidation_mode_on_startup() in
+# sky/jobs/utils.py. It is the single source of truth for jobs-controller
+# consolidation state and MUST be the only source read by:
+#   - sky/jobs/utils.py::is_consolidation_mode() (managed jobs)
+#   - sky/serve/serve_utils.py::is_consolidation_mode(pool=True) (pools)
+#   - sky/utils/controller_utils.py::_is_consolidation_mode(pool=True) (sizing)
+# Pool operations share the jobs controller, so pool and managed-jobs readers
+# must agree. Reading config directly instead diverges under deploy-mode
+# auto-enable (config stays null while this file is written).
 JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 

@@ -289,6 +289,9 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 # The signal file is the source of truth, managed by
 # setup_consolidation_mode_on_startup() at server start. Config changes
 # (enabling or disabling) require a server restart to take effect.
+# INVARIANT: serve_utils.is_consolidation_mode(pool=True) must return the same
+# value as this function, because pool operations run on the jobs controller
+# (same cluster as managed jobs). Both read JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
