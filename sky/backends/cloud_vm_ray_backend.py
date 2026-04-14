@@ -3431,6 +3431,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
         config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         provider_config = config['provider']
+        cluster_config_overrides = (
+            handle.launched_resources.cluster_config_overrides)
+        if cluster_config_overrides:
+            provider_config['cluster_config_overrides'] = (
+                cluster_config_overrides)
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
                                  handle.launched_resources.ports,
                                  provider_config)
