@@ -440,6 +440,85 @@ def test_get_user_name_from_cluster_record():
     assert status_utils._get_user_name(mock_record_no_hash) == 'alice'
 
 
+def test_get_last_event():
+    """Test last event display with truncation."""
+    # Test with no event
+    record = {}
+    assert status_utils._get_last_event(record) == '-'
+
+    record = {'last_event': None}
+    assert status_utils._get_last_event(record) == '-'
+
+    # Test short event (no truncation needed)
+    record = {'last_event': 'All nodes up; runtime healthy.'}
+    assert status_utils._get_last_event(
+        record) == 'All nodes up; runtime healthy.'
+
+    # Test long event with truncation (default)
+    long_event = '[kubernetes pod my-gpu-0] FailedScheduling: 0/3 nodes available: insufficient nvidia.com/gpu'
+    result = status_utils._get_last_event({'last_event': long_event})
+    assert len(result) == 40
+    assert result.endswith('...')
+    assert result == long_event[:37] + '...'
+
+    # Test long event without truncation
+    result = status_utils._get_last_event({'last_event': long_event},
+                                          truncate=False)
+    assert result == long_event
+
+    # Test event exactly at boundary (40 chars)
+    exact_event = 'A' * 40
+    result = status_utils._get_last_event({'last_event': exact_event})
+    assert result == exact_event  # No truncation needed at exactly 40
+
+    # Test event just over boundary (41 chars)
+    over_event = 'A' * 41
+    result = status_utils._get_last_event({'last_event': over_event})
+    assert len(result) == 40
+    assert result == 'A' * 37 + '...'
+
+
+def test_show_cluster_events_table(capsys):
+    """Test the cluster events history table display."""
+    events = [
+        {
+            'reason': 'Provisioning on Kubernetes in us-central1',
+            'transitioned_at': 1713088883,
+            'type': 'STATUS_CHANGE',
+        },
+        {
+            'reason': '[kubernetes pod my-gpu-0] FailedScheduling: '
+                      '0/3 nodes available: insufficient nvidia.com/gpu',
+            'transitioned_at': 1713088903,
+            'type': 'DEBUG',
+        },
+    ]
+
+    status_utils.show_cluster_events_table(events)
+    captured = capsys.readouterr()
+
+    # Check header is present
+    assert 'Cluster Events' in captured.out
+    assert 'TIMESTAMP' in captured.out
+    assert 'TYPE' in captured.out
+    assert 'EVENT' in captured.out
+
+    # Check event content is present
+    assert 'STATUS_CHANGE' in captured.out
+    assert 'Provisioning on Kubernetes' in captured.out
+    assert 'DEBUG' in captured.out
+    assert 'FailedScheduling' in captured.out
+
+
+def test_show_cluster_events_table_empty(capsys):
+    """Test the cluster events table with no events."""
+    status_utils.show_cluster_events_table([])
+    captured = capsys.readouterr()
+
+    assert 'Cluster Events' in captured.out
+    assert 'No recorded events.' in captured.out
+
+
 def test_get_resources_fractional_values():
     """Test resources display for fractional CPU and memory values."""
     from sky.utils import resources_utils

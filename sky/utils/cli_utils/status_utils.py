@@ -1,4 +1,5 @@
 """Utilities for sky status."""
+import datetime
 import typing
 from typing import Any, Callable, Dict, List, Optional
 
@@ -70,6 +71,7 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
         StatusColumn('INFRA', _get_infra, truncate=not show_all),
         StatusColumn('RESOURCES', _get_resources, truncate=not show_all),
         StatusColumn('STATUS', _get_status_colored),
+        StatusColumn('LAST_EVENT', _get_last_event, truncate=not show_all),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('LAUNCHED', _get_launched),
     ]
@@ -80,7 +82,6 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
                          _get_command,
                          truncate=not show_all,
                          show_by_default=False),
-            StatusColumn('LAST_EVENT', _get_last_event, show_by_default=False),
         ]
 
     columns = []
@@ -116,6 +117,34 @@ def show_status_table(cluster_records: List[responses.StatusResponse],
     elif not cluster_records:
         click.echo('No existing clusters.')
     return num_pending_autostop
+
+
+def show_cluster_events_table(events: List[Dict[str, Any]],
+                              limit: int = 20) -> None:
+    """Display a table of cluster events with timestamps.
+
+    Args:
+        events: List of event dicts with 'reason', 'transitioned_at' (unix
+            timestamp), and 'type' fields. Should be sorted oldest to newest.
+        limit: Maximum number of events to display.
+    """
+    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Cluster Events (last {limit})'
+               f'{colorama.Style.RESET_ALL}')
+
+    if not events:
+        click.echo('No recorded events.')
+        return
+
+    columns = ['TIMESTAMP', 'TYPE', 'EVENT']
+    table = log_utils.create_table(columns)
+
+    for event in events[-limit:]:
+        timestamp = datetime.datetime.fromtimestamp(
+            event['transitioned_at']).strftime('%Y-%m-%d %H:%M:%S')
+        table.add_row([timestamp, event['type'], event['reason']])
+
+    click.echo(table)
 
 
 def get_total_cost_of_displayed_records(
@@ -335,12 +364,17 @@ def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     return handle.head_ip
 
 
+LAST_EVENT_TRUNC_LENGTH = 40
+
+
 def _get_last_event(cluster_record: _ClusterRecord,
                     truncate: bool = True) -> str:
-    del truncate
-    if cluster_record.get('last_event', None) is None:
-        return 'No recorded events.'
-    return cluster_record['last_event']
+    event = cluster_record.get('last_event', None)
+    if event is None:
+        return '-'
+    if truncate and len(event) > LAST_EVENT_TRUNC_LENGTH:
+        return event[:LAST_EVENT_TRUNC_LENGTH - 3] + '...'
+    return event
 
 
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
