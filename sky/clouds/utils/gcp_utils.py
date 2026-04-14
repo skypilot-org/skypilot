@@ -177,9 +177,13 @@ def _list_reservations_for_instance_type(
 
 def get_minimal_compute_permissions() -> List[str]:
     permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
-    if skypilot_config.get_effective_region_config(
-            cloud='gcp', region=None, keys=('vpc_name',),
-            default_value=None) is None:
+    custom_vpc_name = skypilot_config.get_effective_region_config(
+        cloud='gcp', region=None, keys=('vpc_name',), default_value=None)
+    custom_subnet_names = skypilot_config.get_effective_region_config(
+        cloud='gcp', region=None, keys=('subnet_names',), default_value=None)
+    has_custom_network = (custom_vpc_name is not None or
+                          custom_subnet_names is not None)
+    if not has_custom_network:
         # If custom VPC is not specified, permissions to modify network are
         # required to ensure SkyPilot to be able to setup the network, and
         # allow opening ports (e.g., via `resources.ports`).

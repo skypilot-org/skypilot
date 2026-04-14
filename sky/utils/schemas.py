@@ -1759,6 +1759,18 @@ def get_config_schema():
                         }
                     ],
                 },
+                'subnet_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
                 **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,

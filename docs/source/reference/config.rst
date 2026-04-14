@@ -183,6 +183,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
       my-label: my-value
     :ref:`vpc_name <config-yaml-gcp-vpc-name>`: skypilot-vpc
+    :ref:`subnet_names <config-yaml-gcp-subnet-names>`:
+      - skypilot-subnet
     :ref:`use_internal_ips <config-yaml-gcp-use-internal-ips>`: true
     :ref:`force_enable_external_ips <config-yaml-gcp-force-enable-external-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-gcp-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -1140,6 +1142,33 @@ To use a shared VPC from another GCP project, specify the name as ``<project ID>
 
   gcp:
     vpc-name: my-project-123456/default
+
+.. _config-yaml-gcp-subnet-names:
+
+``gcp.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use within the selected GCP VPC (optional).
+
+If set, SkyPilot will only consider subnets whose names match the provided
+string or list of strings. This can be used together with ``vpc_name`` to pick
+one specific subnet inside a custom VPC. If ``vpc_name`` is not set, SkyPilot
+will infer the VPC from the matching subnet. The matched subnets must belong to
+the same VPC.
+
+Because each GCP VM interface uses a single subnet, SkyPilot uses the first
+matching subnet in the order provided.
+
+Default: ``null`` (automatically select a subnet from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc_name: my-vpc
+    subnet_names:
+      - train-subnet-a
 
 .. _config-yaml-gcp-use-internal-ips:
 

@@ -640,6 +640,49 @@ class TestSSHSchema(unittest.TestCase):
             self.assertEqual(default_identity, 'LOCAL_CREDENTIALS')
 
 
+class TestGCPSchema(unittest.TestCase):
+    """Tests for the GCP config schema."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.gcp_schema = self.config_schema['properties']['gcp']
+
+    def test_gcp_subnet_names_single_string(self):
+        """Test that GCP accepts a single string for subnet_names."""
+        config = {'subnet_names': 'train-subnet'}
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_subnet_names_list(self):
+        """Test that GCP accepts a list of subnet_names."""
+        config = {'subnet_names': ['train-subnet-a', 'train-subnet-b']}
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_subnet_names_null(self):
+        """Test that GCP accepts null for subnet_names."""
+        config = {'subnet_names': None}
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_subnet_names_with_vpc_name(self):
+        """Test that GCP accepts both subnet_names and vpc_name together."""
+        config = {
+            'vpc_name': 'my-vpc',
+            'subnet_names': ['train-subnet-a'],
+        }
+        jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_subnet_names_rejects_integer(self):
+        """Test that GCP rejects non-string subnet_names."""
+        config = {'subnet_names': 123}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+    def test_gcp_subnet_names_rejects_list_of_integers(self):
+        """Test that GCP rejects list of non-string subnet_names."""
+        config = {'subnet_names': [123, 456]}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+
 class TestAzureSchema(unittest.TestCase):
     """Tests for the Azure config schema."""
 
