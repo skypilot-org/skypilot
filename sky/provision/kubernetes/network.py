@@ -63,10 +63,9 @@ def _open_ports_using_loadbalancer(
     )
 
     # Update metadata from config
-    kubernetes_utils.merge_custom_metadata(
-        content['service_spec']['metadata'],
-        context=context,
-        cluster_config_overrides=overrides)
+    kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'],
+                                           context=context,
+                                           cluster_config_overrides=overrides)
 
     network_utils.create_or_replace_namespaced_service(
         namespace=kubernetes_utils.get_namespace_from_config(provider_config),
@@ -135,10 +134,9 @@ def _open_ports_using_ingress(
             service_spec=service_spec,
         )
 
-    kubernetes_utils.merge_custom_metadata(
-        content['ingress_spec']['metadata'],
-        context=context,
-        cluster_config_overrides=overrides)
+    kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'],
+                                           context=context,
+                                           cluster_config_overrides=overrides)
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
         namespace=namespace,
