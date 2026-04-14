@@ -17,7 +17,7 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-DB_INIT_LOCK_TIMEOUT_SECONDS = 10
+DB_INIT_LOCK_TIMEOUT_SECONDS = 60
 
 # Serialize all Alembic migrations within a process. Alembic's
 # EnvironmentContext stores the active migration context in a module-level
