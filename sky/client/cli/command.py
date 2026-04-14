@@ -1836,6 +1836,35 @@ def _show_enabled_infra(
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
+def _show_single_cluster_events(cluster_name: str) -> None:
+    """Show detailed cluster event history for a single cluster."""
+    events_limit = 20
+    all_events: List[Dict[str, Any]] = []
+
+    for event_type in ['STATUS_CHANGE', 'DEBUG']:
+        try:
+            request_id = sdk.get_cluster_events(
+                cluster_name=cluster_name,
+                event_type=event_type,
+                include_timestamps=True,
+                limit=events_limit,
+            )
+            events: List[Dict[str, Any]] = sdk.get(
+                request_id)  # type: ignore[arg-type]
+            for event in events:
+                event['type'] = event_type
+            all_events.extend(events)
+        except Exception:  # pylint: disable=broad-except
+            # If event fetching fails (e.g., cluster was just removed),
+            # silently skip the events section
+            return
+
+    # Sort by timestamp (oldest first)
+    all_events.sort(key=lambda e: e['transitioned_at'])
+
+    status_utils.show_cluster_events_table(all_events, limit=events_limit)
+
+
 @cli.command()
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
@@ -2129,6 +2158,11 @@ def status(verbose: bool,
     num_pending_autostop += status_utils.show_status_table(
         normal_clusters + controllers, verbose, all_users, query_clusters,
         show_workspace)
+
+    # Show detailed event history when querying a single cluster
+    if (query_clusters is not None and len(query_clusters) == 1 and
+            cluster_records):
+        _show_single_cluster_events(query_clusters[0])
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:

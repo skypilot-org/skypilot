@@ -1841,6 +1841,50 @@ def cost_report(
     return server_common.get_request_id(response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def get_cluster_events(
+    cluster_name: Optional[str] = None,
+    cluster_hash: Optional[str] = None,
+    event_type: str = 'STATUS_CHANGE',
+    include_timestamps: bool = False,
+    limit: Optional[int] = None,
+) -> server_common.RequestId[Union[List[str], List[Dict[str, Any]]]]:
+    """Gets events for a cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        The request ID of the cluster events request.
+
+    Request Returns:
+        If include_timestamps is False: List of event reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    body = payloads.ClusterEventsBody(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        event_type=event_type,
+        include_timestamps=include_timestamps,
+        limit=limit,
+    )
+    response = server_common.make_authenticated_request(
+        'POST', '/cluster_events', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
 # === Storage APIs ===
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
