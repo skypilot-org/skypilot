@@ -76,8 +76,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=360
-                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
+                timeout=360 if generic_cloud
+                in ['azure', 'gcp', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -120,8 +120,8 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=360
-                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
+                timeout=360 if generic_cloud
+                in ['azure', 'gcp', 'kubernetes', 'nebius'] else 120),
             # Give time for log output to be flushed to disk on cluster.
             'sleep 10',
             f'sky jobs cancel -y -n {name}',
@@ -171,7 +171,7 @@ def test_pipeline_cancelled_logs(generic_cloud: str):
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.RUNNING],
                     timeout=360 if generic_cloud
-                    in ['azure', 'kubernetes', 'nebius'] else 120),
+                    in ['azure', 'gcp', 'kubernetes', 'nebius'] else 120),
                 # Give time for log output to be flushed to disk on cluster.
                 'sleep 10',
                 f'sky jobs cancel -y -n {name}',
