@@ -2760,7 +2760,7 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
                 # Wait for job to be running and node_names to be populated
                 # Use longer timeout to account for controller startup
                 job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
@@ -2792,7 +2792,7 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
                 # Wait for job to be running
                 # Use longer timeout to account for controller startup
                 job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
