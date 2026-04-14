@@ -990,7 +990,11 @@ def get_terminal_or_last_status_change_event(
 
 def _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes: Set[str]) -> Dict[str, str]:
-    """Returns the last or terminal cluster event for each cluster."""
+    """Returns the most recent cluster event for each cluster.
+
+    Priority: TERMINAL events first, then most recent by timestamp
+    among STATUS_CHANGE and DEBUG events.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
@@ -1012,9 +1016,8 @@ def _get_last_or_terminal_cluster_event_multiple(
         ranked_events = session.query(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
             row_number).filter(
-                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type !=
-                ClusterEventType.DEBUG.value).subquery()
+                cluster_event_table.c.cluster_hash.in_(
+                    cluster_hashes)).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(
