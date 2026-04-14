@@ -1257,6 +1257,35 @@ Download a debug dump from the server.
 **Returns:**
     Path to the downloaded file.
 
+### `sky.get_cluster_events`
+
+```python
+sky.get_cluster_events(cluster_name: Optional[str] = None, cluster_hash: Optional[str] = None, event_type: str = 'STATUS_CHANGE', include_timestamps: bool = False, limit: Optional[int] = None) -> server_common.RequestId[Union[List[str], List[Dict[str, Any]]]]
+```
+
+Gets events for a cluster.
+
+**Args:**
+    cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+        is specified.
+    cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+        is specified.
+    event_type: Type of events to retrieve ('STATUS_CHANGE', 'DEBUG',
+        or 'TERMINAL').
+    include_timestamps: If True, returns list of dicts with 'reason' and
+        'transitioned_at' fields. If False, returns list of reason strings.
+    limit: If specified, returns at most this many events (most recent).
+        If None, returns all events.
+
+**Returns:**
+    The request ID of the cluster events request.
+
+**Request Returns:**
+    If include_timestamps is False: List of event reason strings.
+    If include_timestamps is True: List of dicts with 'reason' and
+        'transitioned_at' (unix timestamp) fields.
+    Events are ordered from oldest to newest.
+
 ### `sky.kubernetes_label_gpus`
 
 ```python
