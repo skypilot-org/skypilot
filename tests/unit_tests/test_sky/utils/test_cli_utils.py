@@ -455,7 +455,8 @@ def test_get_last_event():
         record) == 'All nodes up; runtime healthy.'
 
     # Test long event with truncation (default)
-    long_event = '[kubernetes pod my-gpu-0] FailedScheduling: 0/3 nodes available: insufficient nvidia.com/gpu'
+    long_event = ('[kubernetes pod my-gpu-0] FailedScheduling: '
+                  '0/3 nodes available: insufficient nvidia.com/gpu')
     result = status_utils._get_last_event({'last_event': long_event})
     assert len(result) == 40
     assert result.endswith('...')
