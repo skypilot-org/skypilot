@@ -213,7 +213,7 @@ async def gpu_metrics_debug() -> dict:
     post_clear_contexts = core.get_all_contexts()
 
     # Check kubeconfig file existence
-    kubeconfig_paths = kubeconfig_env.split(':') if kubeconfig_env != 'NOT_SET' else [default_path]
+    kubeconfig_paths = kubeconfig_env.split(os.pathsep) if kubeconfig_env != 'NOT_SET' else [default_path]
     path_info = {}
     for p in kubeconfig_paths:
         expanded = os.path.expanduser(p)
