@@ -196,6 +196,57 @@ def metrics() -> fastapi.Response:
 # scrape target as down.
 _PER_CONTEXT_TIMEOUT_SECONDS = 8
 
+_CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
+    '/var/skypilot/credentials/kubeconfig/kubeconfig')
+
+
+@metrics_app.get('/debug-gpu-metrics')
+async def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues."""
+    kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
+    default_path = os.path.expanduser('~/.kube/config')
+
+    # Check what contexts are visible before and after cache clear
+    pre_clear_contexts = core.get_all_contexts()
+    annotations.clear_request_level_cache()
+    post_clear_contexts = core.get_all_contexts()
+
+    # Check kubeconfig file existence
+    kubeconfig_paths = kubeconfig_env.split(':') if kubeconfig_env != 'NOT_SET' else [default_path]
+    path_info = {}
+    for p in kubeconfig_paths:
+        expanded = os.path.expanduser(p)
+        path_info[p] = {
+            'exists': os.path.exists(expanded),
+            'size': os.path.getsize(expanded) if os.path.exists(expanded) else 0,
+        }
+
+    # Check credential manager kubeconfig separately
+    cred_mgr_exists = os.path.exists(_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
+    cred_mgr_contexts = []
+    if cred_mgr_exists:
+        try:
+            from kubernetes import config as k8s_config
+            ctxs, _ = k8s_config.list_kube_config_contexts(
+                config_file=_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
+            cred_mgr_contexts = [c['name'] for c in ctxs]
+        except Exception as e:  # pylint: disable=broad-except
+            cred_mgr_contexts = [f'error: {e}']
+
+    return {
+        'pid': os.getpid(),
+        'thread': threading.current_thread().name,
+        'KUBECONFIG': kubeconfig_env,
+        'kubeconfig_paths': path_info,
+        'credential_manager_kubeconfig': {
+            'path': _CREDENTIAL_MANAGER_KUBECONFIG_PATH,
+            'exists': cred_mgr_exists,
+            'contexts': cred_mgr_contexts,
+        },
+        'contexts_before_cache_clear': pre_clear_contexts,
+        'contexts_after_cache_clear': post_clear_contexts,
+    }
+
 
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
