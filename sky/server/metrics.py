@@ -217,10 +217,11 @@ async def gpu_metrics_debug() -> dict:
     path_info = {}
     for p in kubeconfig_paths:
         expanded = os.path.expanduser(p)
-        path_info[p] = {
-            'exists': os.path.exists(expanded),
-            'size': os.path.getsize(expanded) if os.path.exists(expanded) else 0,
-        }
+        try:
+            st = os.stat(expanded)
+            path_info[p] = {'exists': True, 'size': st.st_size}
+        except OSError:
+            path_info[p] = {'exists': False, 'size': 0}
 
     # Check credential manager kubeconfig separately
     cred_mgr_exists = os.path.exists(_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
