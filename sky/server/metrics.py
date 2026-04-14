@@ -19,6 +19,7 @@ import uvicorn
 from sky import core
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
 
@@ -252,9 +253,12 @@ async def gpu_metrics_debug() -> dict:
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
     # The metrics server runs as a daemon thread, not as a normal request
-    # handler, so request-scoped caches (e.g. kubernetes API clients,
-    # context names) are never cleared automatically. Clear them on each
-    # scrape so that newly uploaded kubeconfigs are discovered.
+    # handler, so:
+    # 1. The global config context (allowed_contexts, etc.) is a snapshot
+    #    from startup. Reload it from the DB to pick up config changes.
+    # 2. Request-scoped caches (kubernetes API clients, context names) are
+    #    never cleared automatically. Clear them to pick up new kubeconfigs.
+    skypilot_config.reload_config()
     annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
