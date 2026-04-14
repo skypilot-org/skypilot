@@ -2163,6 +2163,10 @@ def status(verbose: bool,
     if (query_clusters is not None and len(query_clusters) == 1 and
             len(cluster_records) == 1):
         _show_single_cluster_events(cluster_records[0]['name'])
+    elif cluster_records:
+        hints.append(f'* To see detailed cluster events: '
+                     f'{colorama.Style.BRIGHT}sky status '
+                     f'<cluster-name>{colorama.Style.RESET_ALL}')
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:

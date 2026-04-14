@@ -1908,9 +1908,10 @@ def get_clusters(
                              if current_user is not None else None)
 
     # get last cluster event for each row
-    cluster_hashes = {row.cluster_hash for row in rows}
-    last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
-        cluster_hashes)
+    if not summary_response:
+        cluster_hashes = {row.cluster_hash for row in rows}
+        last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+            cluster_hashes)
 
     for row in rows:
         handle = pickle.loads(row.handle)
@@ -1939,11 +1940,12 @@ def get_clusters(
             'is_managed': False
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
-            'last_event': last_cluster_event_dict.get(row.cluster_hash, None),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
+            record['last_event'] = last_cluster_event_dict.get(
+                row.cluster_hash, None)
             record['config_hash'] = row.config_hash
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
