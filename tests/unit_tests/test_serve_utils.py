@@ -171,11 +171,12 @@ class TestIsConsolidationMode:
                      clear=False)
     @pytest.mark.parametrize('pool', [True, False])
     def test_override_env_forces_true(self, pool):
-        """OVERRIDE_CONSOLIDATION_MODE forces True regardless of pool/serve."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            signal_file = pathlib.Path(tmpdir) / 'signal'
-            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)), \
-                    mock.patch('sky.serve.serve_utils.skypilot_config'
-                              ) as mock_config:
-                mock_config.get_nested.return_value = False
-                assert serve_utils.is_consolidation_mode(pool=pool) is True
+        """OVERRIDE_CONSOLIDATION_MODE forces True regardless of pool/serve.
+
+        The override short-circuits at the top of is_consolidation_mode, so
+        signal file and config are never consulted. Mock skypilot_config as a
+        defensive guard against a future regression that broke the short-circuit
+        and accidentally fell through to the config read.
+        """
+        with mock.patch('sky.serve.serve_utils.skypilot_config'):
+            assert serve_utils.is_consolidation_mode(pool=pool) is True
