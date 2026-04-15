@@ -2,8 +2,7 @@
 from typing import Optional
 from unittest import mock
 
-import pytest
-
+from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
@@ -52,6 +51,7 @@ def _make_pod(conditions, container_statuses=None):
 
 
 class TestGetPodHealthIssues:
+    """Tests for _get_pod_health_issues."""
 
     def test_healthy_pod_returns_none(self):
         pod = _make_pod(
@@ -157,6 +157,7 @@ def _make_k8s_node(name: str, ready: bool):
 
 
 class TestCheckNodesHealth:
+    """Tests for _check_nodes_health."""
 
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_node_info_source_detects_not_ready(self, mock_nis_get):
@@ -190,7 +191,7 @@ class TestCheckNodesHealth:
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
                 return_value=None)
-    def test_fallback_to_k8s_api(self, mock_nis_get, mock_core_api):
+    def test_fallback_to_k8s_api(self, mock_nis_get, mock_core_api):  # pylint: disable=unused-argument
         mock_core_api.return_value.read_node.side_effect = [
             _make_k8s_node('node-1', ready=True),
             _make_k8s_node('node-2', ready=False),
@@ -203,7 +204,7 @@ class TestCheckNodesHealth:
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.is_registered',
                 return_value=False)
-    def test_fallback_when_not_registered(self, mock_registered, mock_core_api):
+    def test_fallback_when_not_registered(self, mock_registered, mock_core_api):  # pylint: disable=unused-argument
         mock_core_api.return_value.read_node.return_value = _make_k8s_node(
             'node-1', ready=False)
         result = _check_nodes_health('ctx', {'node-1'})
@@ -212,8 +213,10 @@ class TestCheckNodesHealth:
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
                 return_value=None)
-    def test_fallback_read_node_exception_is_swallowed(self, mock_nis_get,
-                                                       mock_core_api):
+    def test_fallback_read_node_exception_is_swallowed(
+            self,
+            mock_nis_get,  # pylint: disable=unused-argument
+            mock_core_api):
         mock_core_api.return_value.read_node.side_effect = Exception('timeout')
         result = _check_nodes_health('ctx', {'node-1'})
         assert result == {}
@@ -228,9 +231,6 @@ class TestCheckNodesHealth:
         result = _check_nodes_health('ctx', {'node-1'})
         assert 'node-1' in result
         assert 'node-2' not in result
-
-
-from sky.provision.kubernetes import instance as k8s_instance
 
 
 def _make_full_pod(name: str,
@@ -261,6 +261,7 @@ def _make_full_pod(name: str,
 
 
 class TestQueryInstancesHealthIntegration:
+    """Integration tests for query_instances with health checks."""
 
     @mock.patch('sky.provision.kubernetes.instance._check_nodes_health')
     @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')

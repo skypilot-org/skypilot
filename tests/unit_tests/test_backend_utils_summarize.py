@@ -12,6 +12,7 @@ UP = status_lib.ClusterStatus.UP
 
 
 class TestSummarizePodReasons:
+    """Tests for _summarize_pod_reasons."""
 
     def test_no_reasons_returns_empty(self):
         statuses = [(UP, None), (UP, None)]
