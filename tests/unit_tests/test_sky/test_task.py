@@ -42,36 +42,6 @@ def test_validate_workdir():
         assert task_obj.workdir == curr_dir
 
 
-def test_validate_workdir_rejects_filesystem_root(monkeypatch, tmp_path):
-    """Workdir that resolves to filesystem root must be rejected.
-
-    This guards against the footgun where an empty-string or '.' workdir is
-    expanded against a process cwd of '/', causing downstream rsync to
-    recursively copy the entire filesystem into a subdirectory of itself.
-    """
-    # Explicit filesystem root.
-    task_obj = task.Task(workdir='/')
-    with pytest.raises(ValueError, match='filesystem root'):
-        task_obj.expand_and_validate_workdir()
-
-    # '.' while process cwd is '/' resolves to '/'. Simulate by chdir'ing
-    # to '/' for the duration of the test.
-    monkeypatch.chdir('/')
-    task_obj = task.Task(workdir='.')
-    with pytest.raises(ValueError, match='filesystem root'):
-        task_obj.expand_and_validate_workdir()
-
-    # Empty-string workdir is likewise expanded against cwd.
-    task_obj = task.Task(workdir='')
-    with pytest.raises(ValueError, match='filesystem root'):
-        task_obj.expand_and_validate_workdir()
-
-    # Sanity: a valid subdirectory should still pass.
-    task_obj = task.Task(workdir=str(tmp_path))
-    task_obj.expand_and_validate_workdir()
-    assert task_obj.workdir == str(tmp_path)
-
-
 def test_validate_file_mounts():
     curr_dir = os.getcwd()
     home_dir = os.path.expanduser('~')

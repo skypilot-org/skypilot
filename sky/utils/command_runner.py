@@ -498,8 +498,7 @@ class CommandRunner:
                 # Guard against a local rsync where the target is nested
                 # inside the source directory. Without this check, rsync
                 # would recursively copy the target into itself, causing
-                # unbounded disk growth. This is a defense-in-depth against
-                # misconfigured file mount sources (e.g. `.` or `/`).
+                # unbounded disk growth.
                 if resolved_source.is_dir():
                     try:
                         resolved_target_path.relative_to(resolved_source)

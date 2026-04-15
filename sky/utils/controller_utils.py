@@ -933,15 +933,12 @@ def translate_local_file_mounts_to_two_hop(
         file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
         task.workdir = None
 
-    # The first-hop staging dir lives under FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH
-    # (~/.sky/tmp/controller). When the API server and the jobs controller run
-    # on the same host (consolidation mode), rsync from `local_path` to this
-    # staging dir is a pure local copy. If `local_path` is `/` or any ancestor
-    # of the staging dir, rsync would recursively copy the staging dir into
-    # itself, resulting in unbounded disk growth. Guard against such inputs.
     resolved_staging_root = pathlib.Path(
         constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH).expanduser().resolve()
 
+    # If `local_path` is `/` or any ancestor of the staging dir, rsync would
+    # recursively copy the staging dir into itself, resulting in unbounded disk
+    # growth. Guard against such inputs.
     def _reject_unsafe_local_path(local_path: str, source: str) -> None:
         try:
             resolved_local = pathlib.Path(local_path).expanduser().resolve()
