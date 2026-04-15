@@ -186,7 +186,7 @@ function TaskDetails() {
 
             {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes tasks with cluster_name_on_cloud */}
             {isGrafanaAvailable &&
-              taskData.full_infra?.includes('Kubernetes') &&
+              taskData.full_infra?.toLowerCase().includes('kubernetes') &&
               !taskData.pool &&
               taskData.cluster_name_on_cloud && (
                 <TelemetrySection

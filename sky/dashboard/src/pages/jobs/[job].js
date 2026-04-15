@@ -228,7 +228,7 @@ function JobDetails() {
       index,
       task,
       hasMetrics:
-        task.full_infra?.includes('Kubernetes') &&
+        task.full_infra?.toLowerCase().includes('kubernetes') &&
         !task.pool &&
         task.cluster_name_on_cloud,
     }));
