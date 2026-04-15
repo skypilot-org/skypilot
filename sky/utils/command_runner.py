@@ -492,8 +492,34 @@ class CommandRunner:
             resolved_target = target
             if node_destination is None:
                 # Is a local rsync. Directly resolve the target.
-                resolved_target = str(
+                resolved_target_path = (
                     pathlib.Path(target).expanduser().resolve())
+                resolved_target = str(resolved_target_path)
+                # Guard against a local rsync where the target is nested
+                # inside the source directory. Without this check, rsync
+                # would recursively copy the target into itself, causing
+                # unbounded disk growth. This is a defense-in-depth against
+                # misconfigured file mount sources (e.g. `.` or `/`).
+                if resolved_source.is_dir():
+                    try:
+                        resolved_target_path.relative_to(resolved_source)
+                        target_in_source = True
+                    except ValueError:
+                        target_in_source = False
+                    if target_in_source and (resolved_target_path !=
+                                             resolved_source):
+                        raise exceptions.CommandError(
+                            returncode=1,
+                            command=f'rsync {source!r} -> {target!r}',
+                            error_msg=(
+                                f'Refusing to rsync: target {resolved_target!r}'
+                                f' is nested inside source '
+                                f'{str(resolved_source)!r}. This would cause '
+                                'rsync to recursively copy the target into '
+                                'itself. Please use a source path that does '
+                                'not contain the target.'),
+                            detailed_reason='',
+                        )
             else:
                 if target.startswith('~'):
                     remote_home_dir = self.get_remote_home_dir_with_retry(

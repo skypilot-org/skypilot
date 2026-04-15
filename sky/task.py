@@ -3,6 +3,7 @@ import collections
 import dataclasses
 import json
 import os
+import pathlib
 import re
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
@@ -589,6 +590,21 @@ class Task:
                 raise ValueError(
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
+
+        # Reject workdirs that resolve to the filesystem root. An empty-string
+        # or '.' workdir on a process whose cwd is '/' would otherwise be
+        # expanded to '/', and uploading the entire filesystem is never what
+        # the user wants. Other unsafe paths (e.g. home directory in
+        # consolidation mode) are caught at the file-mount staging layer.
+        resolved = pathlib.Path(self.workdir).resolve()
+        if resolved == pathlib.Path(resolved.anchor):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Workdir {user_workdir!r} resolves to the filesystem '
+                    f'root ({str(resolved)!r}). This typically happens when '
+                    "workdir is set to an empty string or '.' while the "
+                    'process has no usable working directory. Please specify '
+                    'a more specific workdir.')
 
         git_commit = common_utils.get_git_commit(self.workdir)
         # Always prefer the workdir's commit over any previously set value

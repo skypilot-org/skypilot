@@ -12,6 +12,7 @@ from unittest import mock
 import paramiko
 import pytest
 
+from sky import exceptions
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -723,3 +724,54 @@ class TestProxyJumpToProxyCommand:
                 port_forward=None,
                 connect_timeout=None,
             )
+
+
+class TestLocalRsyncSelfContainedTarget:
+    """Guard against a local rsync whose target is nested in the source.
+
+    This check prevents the unbounded-recursion footgun where e.g.
+    rsync '/' -> '/root/.sky/tmp/controller/<id>/0' would recursively copy
+    the staging dir into itself.
+    """
+
+    def _run(self, source, target, up=True):
+        runner = command_runner.LocalProcessCommandRunner()
+        # Patch log_lib.run_with_log so we don't actually exec rsync. If the
+        # guard fails to trigger, the test would otherwise shell out.
+        with mock.patch(
+                'sky.utils.command_runner.log_lib.run_with_log',
+                return_value=(0, '', ''),
+        ):
+            runner.rsync(source=source, target=target, up=up, max_retry=1)
+
+    def test_rejects_target_strictly_inside_source(self, tmp_path):
+        # source/ contains target/
+        source = tmp_path
+        target = tmp_path / 'nested' / 'dst'
+        target.mkdir(parents=True)
+        with pytest.raises(exceptions.CommandError,
+                           match='nested inside source'):
+            self._run(str(source), str(target))
+
+    def test_rejects_filesystem_root_as_source(self, tmp_path):
+        # Target lives under '/', so rsync '/' -> <target> would recurse.
+        target = tmp_path / 'dst'
+        target.mkdir()
+        with pytest.raises(exceptions.CommandError,
+                           match='nested inside source'):
+            self._run('/', str(target))
+
+    def test_allows_disjoint_paths(self, tmp_path):
+        # source and target are siblings — should not be rejected.
+        source = tmp_path / 'src'
+        source.mkdir()
+        target = tmp_path / 'dst'
+        target.mkdir()
+        # No exception; the patched run_with_log returns success.
+        self._run(str(source), str(target))
+
+    def test_allows_equal_source_and_target(self, tmp_path):
+        # rsync to the same directory is a no-op, not recursion.
+        src = tmp_path / 'same'
+        src.mkdir()
+        self._run(str(src), str(src))

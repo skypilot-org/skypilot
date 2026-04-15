@@ -820,3 +820,60 @@ def test_controller_cluster_name_client_side(controller_type: str):
     proc.start()
     proc.join()
     assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
+
+
+class _FakeTask:
+    """Minimal task stub for translate_local_file_mounts_to_two_hop tests."""
+
+    def __init__(self, workdir=None, file_mounts=None):
+        self.workdir = workdir
+        self.file_mounts = file_mounts
+
+    def set_file_mounts(self, file_mounts):
+        self.file_mounts = file_mounts
+
+
+def test_translate_two_hop_rejects_filesystem_root():
+    """Using '/' as a workdir src would rsync the whole FS and recurse."""
+    task_obj = _FakeTask(workdir='/')
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='filesystem root or an ancestor'):
+        controller_utils.translate_local_file_mounts_to_two_hop(task_obj)
+
+
+def test_translate_two_hop_rejects_staging_ancestor(tmp_path, monkeypatch):
+    """Using ~ (ancestor of ~/.sky/tmp/controller) would cause recursion."""
+    # Redirect HOME so '~' and the staging dir both fall under tmp_path.
+    monkeypatch.setenv('HOME', str(tmp_path))
+    # Workdir is the home dir, which is an ancestor of the staging dir.
+    task_obj = _FakeTask(workdir=str(tmp_path))
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='filesystem root or an ancestor'):
+        controller_utils.translate_local_file_mounts_to_two_hop(task_obj)
+
+
+def test_translate_two_hop_rejects_unsafe_file_mount_src(tmp_path, monkeypatch):
+    """file_mounts values are validated too (not just workdir)."""
+    monkeypatch.setenv('HOME', str(tmp_path))
+    task_obj = _FakeTask(file_mounts={'/remote/dst': str(tmp_path)})
+    with pytest.raises(exceptions.NotSupportedError,
+                       match="file_mounts\\['/remote/dst'\\]"):
+        controller_utils.translate_local_file_mounts_to_two_hop(task_obj)
+
+
+def test_translate_two_hop_accepts_safe_paths(tmp_path, monkeypatch):
+    """Well-scoped sources should produce valid first-hop mappings."""
+    monkeypatch.setenv('HOME', str(tmp_path))
+    # Use a nested subdirectory that is NOT an ancestor of the staging root.
+    safe_src = tmp_path / 'project'
+    safe_src.mkdir()
+    task_obj = _FakeTask(workdir=str(safe_src))
+    first_hop = controller_utils.translate_local_file_mounts_to_two_hop(
+        task_obj)
+    # One first-hop entry for the workdir, keyed on the staging path.
+    assert len(first_hop) == 1
+    (ctrl_path, local_path), = first_hop.items()
+    assert local_path == str(safe_src)
+    assert '/tmp/controller/' in ctrl_path
+    # Second hop is recorded on the task.
+    assert task_obj.file_mounts == {constants.SKY_REMOTE_WORKDIR: ctrl_path}

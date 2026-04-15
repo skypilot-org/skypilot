@@ -933,12 +933,51 @@ def translate_local_file_mounts_to_two_hop(
         file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
         task.workdir = None
 
+    # The first-hop staging dir lives under FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH
+    # (~/.sky/tmp/controller). When the API server and the jobs controller run
+    # on the same host (consolidation mode), rsync from `local_path` to this
+    # staging dir is a pure local copy. If `local_path` is `/` or any ancestor
+    # of the staging dir, rsync would recursively copy the staging dir into
+    # itself, resulting in unbounded disk growth. Guard against such inputs.
+    resolved_staging_root = pathlib.Path(
+        constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH).expanduser().resolve()
+
+    def _reject_unsafe_local_path(local_path: str, source: str) -> None:
+        try:
+            resolved_local = pathlib.Path(local_path).expanduser().resolve()
+        except (OSError, RuntimeError):
+            return
+        is_fs_root = resolved_local == pathlib.Path(resolved_local.anchor)
+        is_ancestor_of_staging = False
+        if resolved_staging_root == resolved_local:
+            is_ancestor_of_staging = True
+        else:
+            try:
+                # pathlib.Path.is_relative_to is 3.9+; use relative_to for 3.8.
+                resolved_staging_root.relative_to(resolved_local)
+                is_ancestor_of_staging = True
+            except ValueError:
+                pass
+        if is_fs_root or is_ancestor_of_staging:
+            raise exceptions.NotSupportedError(
+                f'{source} resolves to {str(resolved_local)!r}, which is the '
+                'filesystem root or an ancestor of the controller staging '
+                f'directory ({str(resolved_staging_root)!r}). Using such a '
+                'path as a file mount source would cause rsync to recursively '
+                'copy the staging directory into itself. Please specify a '
+                'more specific path.')
+
     for job_cluster_path, local_path in file_mounts_to_translate.items():
         if data_utils.is_cloud_store_url(
                 local_path) or data_utils.is_cloud_store_url(job_cluster_path):
             raise exceptions.NotSupportedError(
                 'Cloud-based file_mounts are specified, but no cloud storage '
                 'is available. Please specify local file_mounts only.')
+
+        source_desc = ('workdir'
+                       if job_cluster_path == constants.SKY_REMOTE_WORKDIR else
+                       f'file_mounts[{job_cluster_path!r}]')
+        _reject_unsafe_local_path(local_path, source_desc)
 
         controller_path = os.path.join(base_tmp_dir, f'{file_mount_id}')
         file_mount_id += 1
