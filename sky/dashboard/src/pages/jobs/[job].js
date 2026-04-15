@@ -61,7 +61,7 @@ import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import { TelemetrySection } from '@/components/TelemetrySection';
-import { resourcesHaveGpu } from '@/utils/gpuUtils';
+import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -530,10 +530,7 @@ function JobDetails() {
                       detailJobData.name
                 }
                 storageKey={TELEMETRY_EXPANDED_KEY}
-                hasGpu={resourcesHaveGpu(
-                  telemetryTask?.requested_resources ||
-                    telemetryTask?.resources_str
-                )}
+                hasGpu={hasAccelerator(telemetryTask?.accelerators)}
                 noMetricsMessage={
                   telemetryTask?.pool
                     ? 'Telemetry is not available for pool jobs.'

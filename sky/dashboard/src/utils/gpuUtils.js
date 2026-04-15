@@ -82,28 +82,36 @@ export function canonicalizeGpuName(rawName) {
 }
 
 /**
- * Heuristic: does a resources / requested-resources string mention any GPU?
+ * Check whether a cluster or managed-job task has any accelerator requested.
  *
- * Returns true if the string contains any canonical GPU model name as a word
- * (e.g. "1x(cpus=4, mem=16GB, A100:1)" → true, "1x(cpus=4, mem=16GB)" → false).
+ * Accepts the structured `accelerators` field SkyPilot exposes on both
+ * clusters and managed jobs. The value can be:
+ *   - An object: {"A100": 4}, {"H100-80GB": 8}, or {} for none
+ *   - A Python-repr string: "{'A100': 4}" or "None" or ""
+ *   - null / undefined
  *
- * Used to decide whether to render GPU telemetry panels for a cluster or job;
- * CPU-only resources should suppress GPU panels to avoid empty charts.
+ * Used to decide whether to render GPU telemetry panels; CPU-only resources
+ * should suppress GPU panels to avoid empty charts.
  *
- * @param {string} resourcesStr - A SkyPilot resources string
- * @returns {boolean} True if any GPU model name is detected.
+ * @param {Object|string|null} accelerators - The accelerators field
+ * @returns {boolean} True if any accelerator is requested.
  */
-export function resourcesHaveGpu(resourcesStr) {
-  if (!resourcesStr) return false;
-  for (const canonical of CANONICAL_GPU_NAMES) {
-    const re = new RegExp(
-      `\\b${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-      'i'
-    );
-    if (re.test(resourcesStr)) return true;
+export function hasAccelerator(accelerators) {
+  if (accelerators == null) return false;
+  let parsed = accelerators;
+  // Handle Python-repr strings like "{'A100': 4}" or "None".
+  if (typeof accelerators === 'string') {
+    const trimmed = accelerators.trim();
+    if (!trimmed || trimmed === 'None' || trimmed === 'null') return false;
+    try {
+      parsed = JSON.parse(trimmed.replace(/'/g, '"').replace(/None/g, 'null'));
+    } catch {
+      return false;
+    }
   }
-  // Generic fallbacks for accelerators not in CANONICAL_GPU_NAMES.
-  if (/\bgpu\b/i.test(resourcesStr)) return true;
-  if (/\bnvidia[\s-]/i.test(resourcesStr)) return true;
+  if (typeof parsed === 'object' && parsed !== null) {
+    // Any entry with a non-zero count means an accelerator is requested.
+    return Object.values(parsed).some((v) => Number(v) > 0);
+  }
   return false;
 }

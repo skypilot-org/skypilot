@@ -39,7 +39,7 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
-import { resourcesHaveGpu } from '@/utils/gpuUtils';
+import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
   Select,
@@ -665,9 +665,7 @@ function ActiveTab({
               displayName={clusterData?.cluster}
               refreshTrigger={telemetryRefreshTrigger}
               storageKey="skypilot-clusters-telemetry-expanded"
-              hasGpu={resourcesHaveGpu(
-                clusterData?.resources_str_full || clusterData?.resources_str
-              )}
+              hasGpu={hasAccelerator(clusterData?.gpus)}
             />
           </div>
         )}
