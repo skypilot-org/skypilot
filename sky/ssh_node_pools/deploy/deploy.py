@@ -455,14 +455,12 @@ def deploy_single_cluster(cluster_name,
         agent_worker_hosts = worker_hosts[2:] if worker_hosts else []
         agent_worker_use_ssh_config = worker_use_ssh_config[2:]
         if history_workers_info is not None:
-            ha_server_history = history_workers_info[:2]
             agent_history_workers_info = history_workers_info[2:]
         else:
-            ha_server_history = None
             agent_history_workers_info = None
         tls_sans = ' '.join(
             f'--tls-san={n}' for n in [head_node] + ha_server_nodes)
-        k3s_ha_exec = f"INSTALL_K3S_EXEC='server --cluster-init {tls_sans}'"
+        k3s_ha_exec = (f'INSTALL_K3S_EXEC=\'server --cluster-init {tls_sans}\'')
         progress_message(
             f'HA mode enabled: 3 servers + {len(agent_worker_nodes)} agents')
     else:
@@ -525,7 +523,7 @@ def deploy_single_cluster(cluster_name,
     # not hostname -I which may return a VPN or secondary interface first.
     master_addr = deploy_utils.run_remote(
         head_node,
-        "ip -4 route get 1 | awk '{for(i=1;i<=NF;i++)if($i==\"src\"){print $(i+1);exit}}'",
+        'ip -4 route get 1 | awk \'{for(i=1;i<=NF;i++)if($i=="src"){print $(i+1);exit}}\'',
         ssh_user,
         ssh_key,
         use_ssh_config=head_use_ssh_config)
@@ -538,20 +536,21 @@ def deploy_single_cluster(cluster_name,
     # Step 1.5: Join additional server nodes for HA
     if ha_enabled:
         for i, server_node in enumerate(ha_server_nodes):
-            server_host = ha_server_hosts[i] if ha_server_hosts else None
-            server_user = server_host[
-                'user'] if server_host else ssh_user
-            server_key = server_host[
-                'identity_file'] if server_host else ssh_key
-            server_password = server_host[
-                'password'] if server_host else None
+            if ha_server_hosts:
+                server_host = ha_server_hosts[i]
+                server_user = server_host['user']
+                server_key = server_host['identity_file']
+                server_password = server_host['password']
+            else:
+                server_user = ssh_user
+                server_key = ssh_key
+                server_password = None
             server_askpass = create_askpass_script(server_password)
-            server_ssh_config = ha_server_use_ssh_config[
-                i] if ha_server_use_ssh_config else False
+            server_ssh_config = (ha_server_use_ssh_config[i]
+                                 if ha_server_use_ssh_config else False)
 
-            force_update_status(
-                f'Joining HA server node ({server_node}) '
-                f'[{i + 2}/3]')
+            force_update_status(f'Joining HA server node ({server_node}) '
+                                f'[{i + 2}/3]')
             node, suc, has_gpu = start_server_node(
                 server_node,
                 master_addr,
@@ -572,28 +571,27 @@ def deploy_single_cluster(cluster_name,
 
     # Step 2: Install k3s on worker nodes and join them to the master node
     def deploy_worker(args):
-        (i, node, _worker_hosts, _history_workers_info, ssh_user, ssh_key,
-         askpass_block, _worker_use_ssh_config, master_addr,
-         k3s_token) = args
+        (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
+         askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
 
         # If using YAML config with specific worker info
-        if _worker_hosts and i < len(_worker_hosts):
-            if _history_workers_info is not None and _worker_hosts[
-                    i] in _history_workers_info:
+        if worker_hosts and i < len(worker_hosts):
+            if history_workers_info is not None and worker_hosts[
+                    i] in history_workers_info:
                 logger.info(
                     f'{colorama.Style.DIM}✔ SkyPilot runtime already deployed on worker node {node}. '
                     f'Skipping...{RESET_ALL}')
                 return node, True, False
-            worker_user = _worker_hosts[i]['user']
-            worker_key = _worker_hosts[i]['identity_file']
-            worker_password = _worker_hosts[i]['password']
+            worker_user = worker_hosts[i]['user']
+            worker_key = worker_hosts[i]['identity_file']
+            worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
-            worker_config = _worker_use_ssh_config[i]
+            worker_config = worker_use_ssh_config[i]
         else:
             worker_user = ssh_user
             worker_key = ssh_key
             worker_askpass = askpass_block
-            worker_config = _worker_use_ssh_config[i]
+            worker_config = worker_use_ssh_config[i]
 
         return start_agent_node(node,
                                 master_addr,
@@ -611,10 +609,9 @@ def deploy_single_cluster(cluster_name,
     with cf.ThreadPoolExecutor() as executor:
         futures = []
         for i, node in enumerate(agent_worker_nodes):
-            args = (i, node, agent_worker_hosts,
-                    agent_history_workers_info, ssh_user, ssh_key,
-                    askpass_block, agent_worker_use_ssh_config, master_addr,
-                    k3s_token)
+            args = (i, node, agent_worker_hosts, agent_history_workers_info,
+                    ssh_user, ssh_key, askpass_block,
+                    agent_worker_use_ssh_config, master_addr, k3s_token)
             futures.append(executor.submit(deploy_worker, args))
 
         # Check if worker node has a GPU
