@@ -94,9 +94,12 @@ class TestIsConsolidationMode:
         serve_utils.is_consolidation_mode.cache_clear()
 
     @pytest.mark.parametrize('delegated_result', [True, False])
-    def test_pool_delegates_to_managed_jobs(self, delegated_result):
+    def test_pool_delegates_to_managed_jobs(self, delegated_result,
+                                            monkeypatch):
         """pool=True delegates to managed_job_utils.is_consolidation_mode
         so the two readers are the same function, not two copies."""
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
         with mock.patch('sky.jobs.utils.is_consolidation_mode',
                         return_value=delegated_result) as mock_delegate, \
                 mock.patch('sky.serve.serve_utils.skypilot_config'
@@ -124,10 +127,12 @@ class TestIsConsolidationMode:
             (True, True, True, False),
         ])
     def test_pool_validator_runs_only_when_not_consolidated(
-            self, delegated_result, config_value, arg, should_validate):
+            self, delegated_result, config_value, arg, should_validate,
+            monkeypatch):
         """Pool validator only adds unique information when consolidation is
         off. In the on case, the jobs validator (run via delegation) already
         emits the leftover-controller-cluster warning."""
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
         validate_path = ('sky.serve.serve_utils.'
                          '_validate_consolidation_mode_config')
         with mock.patch('sky.jobs.utils.is_consolidation_mode',
@@ -147,8 +152,9 @@ class TestIsConsolidationMode:
 
     @pytest.mark.parametrize('config_value,expected', [(True, True),
                                                        (False, False)])
-    def test_serve_reads_config_only(self, config_value, expected):
+    def test_serve_reads_config_only(self, config_value, expected, monkeypatch):
         """pool=False: reads serve config key; signal file must not affect."""
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_file = pathlib.Path(tmpdir) / 'signal'
             signal_file.touch()  # signal file present should not matter
