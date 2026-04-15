@@ -255,17 +255,20 @@ def is_consolidation_mode(pool: bool = False) -> bool:
         # pylint: disable=import-outside-toplevel
         from sky.jobs import utils as managed_job_utils
         effective = managed_job_utils.is_consolidation_mode()
-        # Still run the pool-specific validator: the jobs validator (called
-        # inside the delegated function) warns about leftover managed jobs
-        # when consolidation is disabled, but not about leftover pools. Pool
-        # callers need both warnings to fully unblock a consolidation flip.
+        # When consolidation is off, also run the pool-specific validator:
+        # the jobs validator (called inside the delegated function) warns
+        # about leftover managed jobs but not about leftover pools. Skip it
+        # when consolidation is on — the jobs validator already warns about
+        # the shared controller cluster in that branch, so running the pool
+        # validator there would only duplicate that warning.
         if os.environ.get(
                 skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             config_value = skypilot_config.get_nested(
                 ('jobs', 'controller', 'consolidation_mode'),
                 default_value=None)
-            _validate_consolidation_mode_config(
-                config_value if config_value is not None else effective, pool)
+            arg = config_value if config_value is not None else effective
+            if not arg:
+                _validate_consolidation_mode_config(arg, pool)
         return effective
     # Serve (pool=False) runs on its own controller cluster, independent of
     # the jobs controller, and keeps a config-driven consolidation flag.

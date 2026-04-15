@@ -110,23 +110,24 @@ class TestIsConsolidationMode:
 
     @mock.patch.dict('os.environ', {'IS_SKYPILOT_SERVER': 'true'}, clear=False)
     @pytest.mark.parametrize(
-        'delegated_result,config_value,validator_arg',
+        'delegated_result,config_value,arg,should_validate',
         [
-            # Config unset: validator gets the delegated (effective) value.
-            (True, None, True),
-            (False, None, False),
-            # Config set: validator gets intended config value regardless of
-            # delegated result — warns about leftover state for the flip.
-            (True, False, False),
-            (False, True, True),
-            (True, True, True),
-            (False, False, False),
+            # Consolidation off → pool validator runs (warns about leftover
+            # pools, which the jobs validator doesn't cover).
+            (False, None, False, True),
+            (True, False, False, True),
+            (False, False, False, True),
+            # Consolidation on → pool validator skipped (the jobs validator
+            # already warns about the shared controller cluster).
+            (True, None, True, False),
+            (False, True, True, False),
+            (True, True, True, False),
         ])
-    def test_pool_runs_pool_validator_with_server_env(self, delegated_result,
-                                                      config_value,
-                                                      validator_arg):
-        """Pool still runs the pool-specific validator on top of delegation,
-        because the jobs validator does not warn about leftover pools."""
+    def test_pool_validator_runs_only_when_not_consolidated(
+            self, delegated_result, config_value, arg, should_validate):
+        """Pool validator only adds unique information when consolidation is
+        off. In the on case, the jobs validator (run via delegation) already
+        emits the leftover-controller-cluster warning."""
         validate_path = ('sky.serve.serve_utils.'
                          '_validate_consolidation_mode_config')
         with mock.patch('sky.jobs.utils.is_consolidation_mode',
@@ -136,10 +137,13 @@ class TestIsConsolidationMode:
                 mock.patch(validate_path) as mock_validate:
             mock_config.get_nested.return_value = config_value
             serve_utils.is_consolidation_mode(pool=True)
-            mock_config.get_nested.assert_called_with(
+            mock_config.get_nested.assert_called_once_with(
                 ('jobs', 'controller', 'consolidation_mode'),
                 default_value=None)
-            mock_validate.assert_called_once_with(validator_arg, True)
+            if should_validate:
+                mock_validate.assert_called_once_with(arg, True)
+            else:
+                mock_validate.assert_not_called()
 
     @pytest.mark.parametrize('config_value,expected', [(True, True),
                                                        (False, False)])
