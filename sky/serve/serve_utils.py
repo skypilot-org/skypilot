@@ -27,7 +27,6 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
@@ -249,37 +248,24 @@ def is_consolidation_mode(pool: bool = False) -> bool:
         # INVARIANT: must return the same value as
         # sky.jobs.utils.is_consolidation_mode() — pool operations run on the
         # jobs controller, so pool and managed-jobs consolidation state cannot
-        # legitimately diverge. Both readers check the same signal file (see
-        # JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE in sky/jobs/constants.py).
-        # Reading config directly here diverges under deploy-mode auto-enable,
-        # where the signal file is written without touching config. The warning
-        # + validation block below mirrors sky.jobs.utils.is_consolidation_mode
-        # so both readers give users identical guidance.
-        signal_file = pathlib.Path(
-            managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-        ).expanduser()
-        effective = signal_file.exists()
+        # legitimately diverge. Delegate for the signal-file read and the
+        # config-vs-signal restart warning (otherwise ~20 lines would be
+        # duplicated here). Function-local import avoids a circular dep:
+        # sky.jobs.utils -> sky.backends.backend_utils -> sky.serve.serve_utils.
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import utils as managed_job_utils
+        effective = managed_job_utils.is_consolidation_mode()
+        # Still run the pool-specific validator: the jobs validator (called
+        # inside the delegated function) warns about leftover managed jobs
+        # when consolidation is disabled, but not about leftover pools. Pool
+        # callers need both warnings to fully unblock a consolidation flip.
         if os.environ.get(
                 skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             config_value = skypilot_config.get_nested(
                 ('jobs', 'controller', 'consolidation_mode'),
                 default_value=None)
-            if config_value is not None and config_value != effective:
-                expected = 'enabled' if config_value else 'disabled'
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode for managed '
-                    f'jobs is {expected} in the server config, but the API '
-                    'server has not been restarted yet. Please restart the '
-                    f'API server to apply the change.{colorama.Style.RESET_ALL}'
-                )
-            # Validate against the intended (config) value when set so the
-            # user sees warnings that should be addressed before restarting.
-            # Fall back to the effective value when config is unset.
-            if config_value is not None:
-                assert isinstance(config_value, bool), config_value
-                _validate_consolidation_mode_config(config_value, pool)
-            else:
-                _validate_consolidation_mode_config(effective, pool)
+            _validate_consolidation_mode_config(
+                config_value if config_value is not None else effective, pool)
         return effective
     # Serve (pool=False) runs on its own controller cluster, independent of
     # the jobs controller, and keeps a config-driven consolidation flag.
