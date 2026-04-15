@@ -8,8 +8,9 @@ Preconditions are introduced so that:
 """
 import abc
 import asyncio
+import inspect
 import time
-from typing import Callable, Optional, Tuple
+from typing import Any, Awaitable, Callable, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -49,14 +50,22 @@ class Precondition(abc.ABC):
         return self._wait().__await__()
 
     def wait_async(
-            self,
-            on_condition_met: Optional[Callable[[], None]] = None) -> None:
-        """Wait precondition asynchronously and execute the callback on met."""
+        self,
+        on_condition_met: Optional[Callable[[], Union[None,
+                                                      Awaitable[Any]]]] = None
+    ) -> None:
+        """Wait precondition asynchronously and execute the callback on met.
+
+        The callback may be either a sync function or a coroutine function;
+        coroutines are awaited on the same event loop used for waiting.
+        """
 
         async def wait_with_callback():
             met = await self
             if met and on_condition_met is not None:
-                on_condition_met()
+                result = on_condition_met()
+                if inspect.isawaitable(result):
+                    await result
 
         event_loop.run(wait_with_callback())
 
