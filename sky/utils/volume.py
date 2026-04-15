@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import enum
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from sky import exceptions
 from sky import global_user_state
@@ -201,3 +201,117 @@ class VolumeMount:
                 f'\n\tis_ephemeral={self.is_ephemeral},'
                 f'\n\tsub_path={self.sub_path},'
                 f'\n\tvolume_config={self.volume_config})')
+
+
+class VolumeMountConflictChecker:
+    """Detects conflicts between volume mounts from different sources.
+
+    Three checks are performed as each volume mount is registered:
+    1. Mount path uniqueness — no two mounts can share the same path.
+    2. Volume name consistency — if two mounts share a volume name,
+       they must reference the same underlying volume (same PVC claim
+       or host directory).  Otherwise the template's name-based dedup
+       silently drops one volume definition.
+    3. Same PVC from different volume entries — different volume names
+       pointing to the same PVC is almost certainly a misconfiguration.
+       Refer to https://github.com/kubernetes/kubernetes/issues/127004.
+    """
+
+    def __init__(self):
+        # mount_path -> (source, volume_desc)
+        self._seen_mount_paths: Dict[str, Tuple[str, str]] = {}
+        # volume_name -> (source, volume_desc, vol_source_id)
+        self._seen_volume_names: Dict[str, Tuple[str, str, Optional[str]]] = {}
+        # volume_name_on_cloud -> (volume_name, source, volume_desc)
+        self._seen_pvcs: Dict[str, Tuple[str, str, str]] = {}
+
+    @staticmethod
+    def _get_vol_source_identity(
+            volume_type: Optional[str],
+            vol_name_on_cloud: Optional[str] = None,
+            vol_host_path: Optional[str] = None) -> Optional[str]:
+        """Return a type-aware volume source identity string.
+
+        Each volume type defines its own identity key. Returns None if
+        the type is unknown or the identity cannot be determined (e.g.,
+        ephemeral volumes before provisioning).
+        """
+        if volume_type == VolumeType.PVC.value and vol_name_on_cloud:
+            return f'pvc:{vol_name_on_cloud}'
+        if volume_type == VolumeType.HOSTPATH.value and vol_host_path:
+            return f'hostpath:{vol_host_path}'
+        return None
+
+    def check(self, vol: VolumeInfo, source: str, volume_desc: str) -> None:
+        """Check for volume mount conflicts and register the entry.
+
+        Args:
+            vol: Volume info to check.
+            source: Where the volume came from (e.g. 'task YAML volumes',
+                'auto_mounts config').
+            volume_desc: Human-readable description for error messages.
+
+        Raises ValueError on conflict with a message identifying both
+        conflicting volumes and their sources.
+        """
+        # Check 1: Mount path uniqueness
+        if vol.path in self._seen_mount_paths:
+            prev_source, prev_desc = self._seen_mount_paths[vol.path]
+            raise ValueError(
+                f'Volume mount path conflict: {vol.path!r} is '
+                f'mounted by {volume_desc} (from {source}) and also '
+                f'by {prev_desc} (from {prev_source}). '
+                f'Please remove the duplicate from your task YAML '
+                f'volumes config or auto_mounts config.')
+        self._seen_mount_paths[vol.path] = (source, volume_desc)
+
+        if not vol.name:
+            return
+
+        # Check 2: Volume name consistency.
+        # Volume definitions are deduplicated by name but volume mounts
+        # are not. If two entries share the same name but reference
+        # different volume sources, one volume definition is silently
+        # dropped.
+        vol_source_id = self._get_vol_source_identity(vol.volume_type,
+                                                      vol.volume_name_on_cloud,
+                                                      vol.host_path)
+        if vol.name in self._seen_volume_names:
+            prev_src, prev_desc, prev_vol_source_id = (
+                self._seen_volume_names[vol.name])
+            # If identity is None (unknown type or ephemeral), we
+            # cannot confirm they are the same volume, so treat same
+            # name as a conflict.
+            if (vol_source_id is None or prev_vol_source_id is None or
+                    vol_source_id != prev_vol_source_id):
+                raise ValueError(
+                    f'Volume name conflict: volume name '
+                    f'{vol.name!r} is used by {volume_desc} '
+                    f'(from {source}) and by {prev_desc} '
+                    f'(from {prev_src}), but they reference different '
+                    f'volumes. Please remove the duplicate from your task '
+                    f'YAML volumes config or auto_mounts config.')
+            # Same name, same volume source: OK (e.g. auto_mount with
+            # multiple mount_paths).
+            return
+        self._seen_volume_names[vol.name] = (source, volume_desc, vol_source_id)
+
+        # Check 3: Same PVC from different volume entries.
+        if (vol.volume_type == VolumeType.PVC.value and
+                vol.volume_name_on_cloud):
+            if vol.volume_name_on_cloud in self._seen_pvcs:
+                prev_vol_name, prev_src, prev_desc = (
+                    self._seen_pvcs[vol.volume_name_on_cloud])
+                if prev_vol_name != vol.name:
+                    raise ValueError(
+                        f'Volume PVC conflict: PVC '
+                        f'{vol.volume_name_on_cloud!r} is referenced '
+                        f'by {volume_desc} (from {source}) and also '
+                        f'by {prev_desc} (from {prev_src}). If you '
+                        f'need to mount different sub-paths of the '
+                        f'same PVC, use a single volume entry with '
+                        f'sub_path. Please remove the '
+                        f'duplicate from your task YAML volumes '
+                        f'config or auto_mounts config.')
+            self._seen_pvcs[vol.volume_name_on_cloud] = (vol.name, source,
+                                                         volume_desc)

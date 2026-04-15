@@ -1071,8 +1071,8 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                 job_dict['username'] = user.name if user is not None else None
                 jobs.append(job_dict)
             return jobs
-        except exceptions.SkyletMethodNotImplementedError:
-            pass
+        except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+            logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
     returncode, jobs_payload, stderr = backend.run_on_head(handle,
@@ -1461,6 +1461,9 @@ def enabled_clouds(workspace: Optional[str] = None,
                    expand: bool = False) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
+    else:
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(), workspace)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):

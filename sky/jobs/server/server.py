@@ -7,8 +7,8 @@ import fastapi
 from sky import sky_logging
 from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.server import core
-from sky.server import common as server_common
 from sky.server import stream_utils
+from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
@@ -157,8 +157,8 @@ async def download_logs(
         request: fastapi.Request,
         jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
     user_hash = jobs_download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = server_common.api_server_user_logs_dir_prefix(
-        user_hash)
+    logs_dir_on_api_server = pathlib.Path(
+        bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
@@ -254,9 +254,9 @@ async def pool_download_logs(
     user_hash = download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
     timestamp = sky_logging.get_run_timestamp()
     logs_dir_on_api_server = (
-        pathlib.Path(server_common.api_server_user_logs_dir_prefix(user_hash)) /
+        pathlib.Path(bs.get_blob_storage().download_tmp_dir(user_hash)) /
         'pool' / f'{download_logs_body.pool_name}_{timestamp}')
-    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     download_logs_body.local_dir = str(logs_dir_on_api_server)

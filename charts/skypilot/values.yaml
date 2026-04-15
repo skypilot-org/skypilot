@@ -197,10 +197,21 @@ apiService:
   # @schema type: [string, null]
   imagePullPolicy: Always
 
-  # Add scheduling constraints to the API server pod
+  # Add scheduling constraints to the API server pod. The same values are applied to
+  # oauth2-proxy and the bundled oauth2-proxy-redis Deployment when OAuth is enabled,
+  # so auth stays on the same node pool as the API. See
+  # https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+  # Spread API server pods across topology domains (e.g., zones).
+  # When set, a topologySpreadConstraints entry is rendered with
+  # maxSkew=1, whenUnsatisfiable=DoNotSchedule, and a labelSelector
+  # that matches the API server pods automatically.
+  # Example: "topology.kubernetes.io/zone"
+  # @schema type: [string, null]
+  topologySpreadTopologyKey: null
 
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.

@@ -164,6 +164,12 @@
                 "tolerations": {
                     "type": "array"
                 },
+                "topologySpreadTopologyKey": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "upgradeStrategy": {
                     "type": "string"
                 }
