@@ -289,10 +289,8 @@ class VolumeMountConflictChecker:
                     f'{vol.name!r} is used by {volume_desc} '
                     f'(from {source}) and by {prev_desc} '
                     f'(from {prev_src}), but they reference different '
-                    f'volumes. This would cause one volume definition '
-                    f'to be silently ignored. Please remove the '
-                    f'duplicate from your task YAML volumes config or '
-                    f'auto_mounts config.')
+                    f'volumes. Please remove the duplicate from your task '
+                    f'YAML volumes config or auto_mounts config.')
             # Same name, same volume source: OK (e.g. auto_mount with
             # multiple mount_paths).
             return
@@ -312,7 +310,7 @@ class VolumeMountConflictChecker:
                         f'by {prev_desc} (from {prev_src}). If you '
                         f'need to mount different sub-paths of the '
                         f'same PVC, use a single volume entry with '
-                        f'sub_path. Otherwise, please remove the '
+                        f'sub_path. Please remove the '
                         f'duplicate from your task YAML volumes '
                         f'config or auto_mounts config.')
             self._seen_pvcs[vol.volume_name_on_cloud] = (vol.name, source,

@@ -942,13 +942,12 @@ def write_cluster_config(
                 vol.volume_config.cloud = repr(cloud)
                 vol.volume_config.region = region.name
                 vol.volume_config.name = volume_name
-                conflict_checker.check(
-                    volume_utils.VolumeInfo(
-                        name=volume_name,
-                        path=vol.path,
-                        volume_type=volume_utils.VolumeType.PVC.value),
-                    source='task YAML volumes (ephemeral)',
-                    volume_desc=f'ephemeral volume {volume_name!r}')
+                conflict_checker.check(volume_utils.VolumeInfo(
+                    name=volume_name,
+                    path=vol.path,
+                    volume_type=volume_utils.VolumeType.PVC.value),
+                                       source='task YAML volumes (ephemeral)',
+                                       volume_desc='ephemeral volume')
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
                 volume_info = volume_utils.VolumeInfo(
