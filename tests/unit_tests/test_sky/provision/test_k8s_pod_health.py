@@ -228,3 +228,83 @@ class TestCheckNodesHealth:
         result = _check_nodes_health('ctx', {'node-1'})
         assert 'node-1' in result
         assert 'node-2' not in result
+
+
+from sky.provision.kubernetes import instance as k8s_instance
+
+
+def _make_full_pod(name: str,
+                   phase: str,
+                   node_name: str,
+                   ready: bool = True,
+                   waiting_reason: Optional[str] = None,
+                   deletion_timestamp=None):
+    """Create a pod object matching the Kubernetes API client format."""
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.metadata.deletion_timestamp = deletion_timestamp
+    pod.metadata.labels = {}
+    pod.status.phase = phase
+    pod.spec.node_name = node_name
+
+    ready_cond = _make_condition('Ready',
+                                 'True' if ready else 'False',
+                                 reason='' if ready else 'ContainersNotReady')
+    pod.status.conditions = [ready_cond]
+    pod.status.container_statuses = [
+        _make_container_status(
+            ready=ready,
+            waiting_reason=waiting_reason if not ready else None,
+        )
+    ]
+    return pod
+
+
+class TestQueryInstancesHealthIntegration:
+
+    @mock.patch('sky.provision.kubernetes.instance._check_nodes_health')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_running_unhealthy_pod_gets_reason(self, mock_list_pods,
+                                               mock_check_nodes):
+        mock_list_pods.return_value = [
+            _make_full_pod('head', 'Running', 'node-1', ready=True),
+            _make_full_pod('worker-0', 'Running', 'node-2', ready=False),
+        ]
+        mock_check_nodes.return_value = {'node-2': 'NotReady'}
+
+        result = k8s_instance.query_instances(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster',
+            provider_config={
+                'namespace': 'default',
+                'context': 'test-ctx',
+                'services': [],
+            },
+        )
+        # Head pod should have no reason
+        assert result['head'][1] is None
+        # Worker pod should have health reason with node info
+        assert result['worker-0'][1] is not None
+        assert 'ContainersNotReady' in result['worker-0'][1]
+        assert 'node-2' in result['worker-0'][1]
+        assert 'NotReady' in result['worker-0'][1]
+
+    @mock.patch('sky.provision.kubernetes.instance._check_nodes_health')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_healthy_pods_no_node_check(self, mock_list_pods, mock_check_nodes):
+        mock_list_pods.return_value = [
+            _make_full_pod('head', 'Running', 'node-1', ready=True),
+            _make_full_pod('worker-0', 'Running', 'node-2', ready=True),
+        ]
+        mock_check_nodes.return_value = {}
+
+        k8s_instance.query_instances(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster',
+            provider_config={
+                'namespace': 'default',
+                'context': 'test-ctx',
+                'services': [],
+            },
+        )
+        mock_check_nodes.assert_not_called()
