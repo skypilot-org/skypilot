@@ -525,7 +525,7 @@ def deploy_single_cluster(cluster_name,
     # not hostname -I which may return a VPN or secondary interface first.
     master_addr = deploy_utils.run_remote(
         head_node,
-        "ip -4 route get 1 | grep -oP 'src \\K\\S+'",
+        "ip -4 route get 1 | awk '{for(i=1;i<=NF;i++)if($i==\"src\"){print $(i+1);exit}}'",
         ssh_user,
         ssh_key,
         use_ssh_config=head_use_ssh_config)
