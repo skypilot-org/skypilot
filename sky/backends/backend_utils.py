@@ -989,7 +989,6 @@ def write_cluster_config(
                         f'ReadWriteMany PVC volumes are supported for '
                         f'auto_mounts. Skipping.')
                     continue
-                k8s_volume_name = f'auto-mount-{volume_name}'
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path
@@ -1004,7 +1003,7 @@ def write_cluster_config(
                         continue
                     volume_mount_vars.append(
                         volume_utils.VolumeInfo(
-                            name=k8s_volume_name,
+                            name=volume_name,
                             path=mount_path,
                             volume_name_on_cloud=(volume_config.name_on_cloud),
                             volume_id_on_cloud=(volume_config.id_on_cloud),
