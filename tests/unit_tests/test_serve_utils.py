@@ -115,6 +115,48 @@ class TestIsConsolidationMode:
                               ) as mock_config:
                 mock_config.get_nested.return_value = config_value
                 assert serve_utils.is_consolidation_mode(pool=True) is expected
+                # Without IS_SKYPILOT_SERVER set, the config read + validation
+                # block must be skipped. Proves the env-guard is effective.
+                mock_config.get_nested.assert_not_called()
+
+    @mock.patch.dict('os.environ', {'IS_SKYPILOT_SERVER': 'true'}, clear=False)
+    @pytest.mark.parametrize(
+        'signal_exists,config_value,expects_warning,validator_arg',
+        [
+            # Config unset: no warning, validator gets effective value.
+            (True, None, False, True),
+            (False, None, False, False),
+            # Config matches signal: no warning, validator gets intended config.
+            (True, True, False, True),
+            (False, False, False, False),
+            # Config mismatches signal: warning, validator gets intended config.
+            (True, False, True, False),
+            (False, True, True, True),
+        ])
+    def test_pool_warns_and_validates_with_server_env(self, signal_exists,
+                                                      config_value,
+                                                      expects_warning,
+                                                      validator_arg):
+        """With IS_SKYPILOT_SERVER set, pool branch reads jobs config key,
+        warns on config-vs-signal mismatch, and validates against intent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_file = pathlib.Path(tmpdir) / 'signal'
+            if signal_exists:
+                signal_file.touch()
+            validate_path = ('sky.serve.serve_utils.'
+                             '_validate_consolidation_mode_config')
+            with mock.patch(_SIGNAL_FILE_CONST, str(signal_file)), \
+                    mock.patch('sky.serve.serve_utils.skypilot_config'
+                              ) as mock_config, \
+                    mock.patch(validate_path) as mock_validate, \
+                    mock.patch('sky.serve.serve_utils.logger') as mock_logger:
+                mock_config.get_nested.return_value = config_value
+                serve_utils.is_consolidation_mode(pool=True)
+                mock_config.get_nested.assert_called_with(
+                    ('jobs', 'controller', 'consolidation_mode'),
+                    default_value=None)
+                mock_validate.assert_called_once_with(validator_arg, True)
+                assert mock_logger.warning.called is expects_warning
 
     @pytest.mark.parametrize('config_value,expected', [(True, True),
                                                        (False, False)])
