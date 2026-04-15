@@ -20,6 +20,7 @@ from sky import core
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
 
@@ -213,7 +214,10 @@ async def gpu_metrics_debug() -> dict:
     post_clear_contexts = core.get_all_contexts()
 
     # Check kubeconfig file existence
-    kubeconfig_paths = kubeconfig_env.split(os.pathsep) if kubeconfig_env != 'NOT_SET' else [default_path]
+    if kubeconfig_env != 'NOT_SET':
+        kubeconfig_paths = kubeconfig_env.split(os.pathsep)
+    else:
+        kubeconfig_paths = [default_path]
     path_info = {}
     for p in kubeconfig_paths:
         expanded = os.path.expanduser(p)
@@ -228,9 +232,9 @@ async def gpu_metrics_debug() -> dict:
     cred_mgr_contexts = []
     if cred_mgr_exists:
         try:
-            from kubernetes import config as k8s_config
-            ctxs, _ = k8s_config.list_kube_config_contexts(
-                config_file=_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
+            ctxs, _ = (
+                kubernetes_adaptor.kubernetes.config.list_kube_config_contexts(
+                    config_file=_CREDENTIAL_MANAGER_KUBECONFIG_PATH))
             cred_mgr_contexts = [c['name'] for c in ctxs]
         except Exception as e:  # pylint: disable=broad-except
             cred_mgr_contexts = [f'error: {e}']
