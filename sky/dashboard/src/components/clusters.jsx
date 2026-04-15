@@ -1564,7 +1564,7 @@ const FilterDropdown = ({
           </SelectContent>
         </Select>
       </div>
-      <div className="relative flex-1">
+      <div className="relative flex-1 sm:flex-none">
         <input
           type="text"
           ref={inputRef}
