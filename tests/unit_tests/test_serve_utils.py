@@ -157,7 +157,7 @@ class TestIsConsolidationMode:
                               ) as mock_config:
                 mock_config.get_nested.return_value = config_value
                 assert serve_utils.is_consolidation_mode(pool=False) is expected
-                mock_config.get_nested.assert_called_with(
+                mock_config.get_nested.assert_called_once_with(
                     ('serve', 'controller', 'consolidation_mode'),
                     default_value=False)
 
