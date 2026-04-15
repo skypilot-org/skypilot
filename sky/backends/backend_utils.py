@@ -3379,6 +3379,92 @@ def _get_glob_clusters(
     return list(set(glob_clusters))
 
 
+_MAX_NAMES_IN_SUMMARY = 3
+_NODE_ISSUE_PATTERN = re.compile(r'; node (\S+) is (.+)$')
+
+
+def _summarize_pod_reasons(
+    node_statuses: List[Tuple[status_lib.ClusterStatus, Optional[str]]],
+    total_nodes: int,
+) -> str:
+    """Summarize per-pod reasons into a concise grouped message.
+
+    Groups issues by root cause:
+    1. Node-level issues (deduplicated by node name, counted by pods affected)
+    2. Pod-level issues (grouped by reason)
+
+    Args:
+        node_statuses: List of (status, reason) tuples from query_instances.
+        total_nodes: Total number of nodes in the cluster (for "N/M pods").
+
+    Returns:
+        A summarized string, or '' if no reasons found.
+    """
+    # Separate node-level and pod-level issues
+    # Reason format: '{pod}: {pod_reason}; node {name} is {issue}'
+    node_issues: Dict[str, Dict[str, Any]] = {}  # node -> {issue, pods}
+    pod_issues: Dict[str, List[str]] = {}  # reason -> [pod_names]
+
+    for _, reason in node_statuses:
+        if reason is None:
+            continue
+
+        # Extract pod name (everything before the first ':')
+        pod_name = reason.split(':')[0].strip()
+
+        # Check for node-level issue suffix
+        node_match = _NODE_ISSUE_PATTERN.search(reason)
+        if node_match:
+            node_name = node_match.group(1)
+            node_issue = node_match.group(2)
+            if node_name not in node_issues:
+                node_issues[node_name] = {'issue': node_issue, 'pods': []}
+            node_issues[node_name]['pods'].append(pod_name)
+        else:
+            # Pod-level issue — extract the reason part after pod name
+            pod_reason = (reason.split(':', 1)[1].strip()
+                          if ':' in reason else reason)
+            pod_issues.setdefault(pod_reason, []).append(pod_name)
+
+    parts = []
+
+    # 1. Node-level summary
+    if node_issues:
+        # Group by issue type (e.g., all NotReady together)
+        by_issue: Dict[str, List[str]] = {}
+        total_affected = 0
+        for node_name, info in node_issues.items():
+            by_issue.setdefault(info['issue'], []).append(node_name)
+            total_affected += len(info['pods'])
+
+        for issue, nodes in by_issue.items():
+            names = sorted(nodes)
+            if len(names) == 1:
+                part = f'node {names[0]} is {issue}'
+            else:
+                shown = names[:_MAX_NAMES_IN_SUMMARY]
+                name_list = ', '.join(shown)
+                if len(names) > _MAX_NAMES_IN_SUMMARY:
+                    name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+                part = f'{len(names)} nodes are {issue} ({name_list})'
+            part += f', affecting {total_affected}/{total_nodes} pods'
+            parts.append(part)
+
+    # 2. Pod-level summary
+    for reason, pods in pod_issues.items():
+        names = sorted(pods)
+        if len(names) == 1:
+            parts.append(f'{names[0]} is not ready ({reason})')
+        else:
+            shown = names[:_MAX_NAMES_IN_SUMMARY]
+            name_list = ', '.join(shown)
+            if len(names) > _MAX_NAMES_IN_SUMMARY:
+                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+
+    return '; '.join(parts)
+
+
 def _refresh_cluster(
         cluster_name: str,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]],
