@@ -86,7 +86,7 @@ function JobDetails() {
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
 
-    // Telemetry state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   // Telemetry task selection for job groups
   const [telemetryTaskIndex, setTelemetryTaskIndex] = useState(0);
@@ -234,9 +234,7 @@ function JobDetails() {
     }));
   }, [allTasksForTelemetry]);
 
-  const hasAnyTaskWithTelemetry = tasksWithTelemetry.some(
-    (t) => t.hasMetrics
-  );
+  const hasAnyTaskWithTelemetry = tasksWithTelemetry.some((t) => t.hasMetrics);
 
   // Get the currently selected task for telemetry
   const telemetryTask =

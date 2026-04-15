@@ -7,7 +7,6 @@ import {
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
 
-
 // All Telemetry panels — GPU (DCGM) and per-pod CPU/Memory (cAdvisor) — live
 // in the same SkyPilot cluster-filter dashboard so a single var-cluster
 // (the SkyPilot cluster_name_on_cloud) filters all of them via the standard
