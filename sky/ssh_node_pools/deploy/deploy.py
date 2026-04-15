@@ -268,6 +268,11 @@ def deploy_single_cluster(cluster_name,
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(password)
 
+    # Determine HA mode: 3+ total nodes enables embedded etcd HA
+    # with 3 server nodes (head + first 2 workers) and remaining as agents
+    num_total_nodes = 1 + len(worker_nodes)
+    ha_enabled = num_total_nodes >= 3
+
     # Token for k3s
     # TODO (kyuds): make this configurable?
     k3s_token = constants.K3S_TOKEN
@@ -328,8 +333,10 @@ def deploy_single_cluster(cluster_name,
     if cleanup:
         # Pickup all nodes
         worker_nodes_to_cleanup.clear()
-        for node, info, use_ssh_config in zip(worker_nodes, worker_hosts,
-                                              worker_use_ssh_config):
+        for i, (node, info, use_ssh_config) in enumerate(
+                zip(worker_nodes, worker_hosts, worker_use_ssh_config)):
+            # In HA mode, first 2 workers are servers (need k3s-uninstall.sh)
+            is_ha_server = ha_enabled and i < 2
             worker_nodes_to_cleanup.append(
                 dict(
                     node=node,
@@ -338,6 +345,7 @@ def deploy_single_cluster(cluster_name,
                     askpass_block=(askpass_block if info is None else
                                    create_askpass_script(info['password'])),
                     use_ssh_config=use_ssh_config,
+                    is_worker=not is_ha_server,
                 ))
 
         # Clean up head node
@@ -438,13 +446,43 @@ def deploy_single_cluster(cluster_name,
         effective_master_ip = head_node
 
     # Step 1: Install k3s on the head node
+    # In HA mode, split workers into additional servers and agents
+    if ha_enabled:
+        ha_server_nodes = worker_nodes[:2]
+        ha_server_hosts = worker_hosts[:2] if worker_hosts else []
+        ha_server_use_ssh_config = worker_use_ssh_config[:2]
+        agent_worker_nodes = worker_nodes[2:]
+        agent_worker_hosts = worker_hosts[2:] if worker_hosts else []
+        agent_worker_use_ssh_config = worker_use_ssh_config[2:]
+        if history_workers_info is not None:
+            ha_server_history = history_workers_info[:2]
+            agent_history_workers_info = history_workers_info[2:]
+        else:
+            ha_server_history = None
+            agent_history_workers_info = None
+        tls_sans = ' '.join(
+            f'--tls-san={n}' for n in [head_node] + ha_server_nodes)
+        k3s_ha_exec = f"INSTALL_K3S_EXEC='server --cluster-init {tls_sans}'"
+        progress_message(
+            f'HA mode enabled: 3 servers + {len(agent_worker_nodes)} agents')
+    else:
+        ha_server_nodes = []
+        ha_server_hosts = []
+        ha_server_use_ssh_config = []
+        agent_worker_nodes = worker_nodes
+        agent_worker_hosts = worker_hosts
+        agent_worker_use_ssh_config = worker_use_ssh_config
+        agent_history_workers_info = history_workers_info
+        tls_sans = ''
+        k3s_ha_exec = ''
+
     # Check if head node has a GPU
     install_gpu = False
     force_update_status(
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} {k3s_ha_exec} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
@@ -482,41 +520,80 @@ def deploy_single_cluster(cluster_name,
                               is_head=True):
         install_gpu = True
 
-    # Fetch the head node's internal IP (this will be passed to worker nodes)
-    master_addr = deploy_utils.run_remote(head_node,
-                                          'hostname -I | awk \'{print $1}\'',
-                                          ssh_user,
-                                          ssh_key,
-                                          use_ssh_config=head_use_ssh_config)
+    # Fetch the head node's internal IP (this will be passed to worker nodes).
+    # Use the default route source IP to get the primary LAN address,
+    # not hostname -I which may return a VPN or secondary interface first.
+    master_addr = deploy_utils.run_remote(
+        head_node,
+        "ip -4 route get 1 | grep -oP 'src \\K\\S+'",
+        ssh_user,
+        ssh_key,
+        use_ssh_config=head_use_ssh_config)
     if master_addr is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
                                f'Please check the SSH configuration.')
     logger.debug(f'Master node internal IP: {master_addr}')
 
+    # Step 1.5: Join additional server nodes for HA
+    if ha_enabled:
+        for i, server_node in enumerate(ha_server_nodes):
+            server_host = ha_server_hosts[i] if ha_server_hosts else None
+            server_user = server_host[
+                'user'] if server_host else ssh_user
+            server_key = server_host[
+                'identity_file'] if server_host else ssh_key
+            server_password = server_host[
+                'password'] if server_host else None
+            server_askpass = create_askpass_script(server_password)
+            server_ssh_config = ha_server_use_ssh_config[
+                i] if ha_server_use_ssh_config else False
+
+            force_update_status(
+                f'Joining HA server node ({server_node}) '
+                f'[{i + 2}/3]')
+            node, suc, has_gpu = start_server_node(
+                server_node,
+                master_addr,
+                k3s_token,
+                server_user,
+                server_key,
+                server_askpass,
+                tls_sans,
+                use_ssh_config=server_ssh_config)
+            install_gpu = install_gpu or has_gpu
+            if not suc:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to join HA server node ({server_node}).')
+            success_message(
+                f'HA server node ({server_node}) joined successfully '
+                f'[{i + 2}/3].')
+
     # Step 2: Install k3s on worker nodes and join them to the master node
     def deploy_worker(args):
-        (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
-         askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
+        (i, node, _worker_hosts, _history_workers_info, ssh_user, ssh_key,
+         askpass_block, _worker_use_ssh_config, master_addr,
+         k3s_token) = args
 
         # If using YAML config with specific worker info
-        if worker_hosts and i < len(worker_hosts):
-            if history_workers_info is not None and worker_hosts[
-                    i] in history_workers_info:
+        if _worker_hosts and i < len(_worker_hosts):
+            if _history_workers_info is not None and _worker_hosts[
+                    i] in _history_workers_info:
                 logger.info(
                     f'{colorama.Style.DIM}✔ SkyPilot runtime already deployed on worker node {node}. '
                     f'Skipping...{RESET_ALL}')
                 return node, True, False
-            worker_user = worker_hosts[i]['user']
-            worker_key = worker_hosts[i]['identity_file']
-            worker_password = worker_hosts[i]['password']
+            worker_user = _worker_hosts[i]['user']
+            worker_key = _worker_hosts[i]['identity_file']
+            worker_password = _worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
-            worker_config = worker_use_ssh_config[i]
+            worker_config = _worker_use_ssh_config[i]
         else:
             worker_user = ssh_user
             worker_key = ssh_key
             worker_askpass = askpass_block
-            worker_config = worker_use_ssh_config[i]
+            worker_config = _worker_use_ssh_config[i]
 
         return start_agent_node(node,
                                 master_addr,
@@ -533,9 +610,10 @@ def deploy_single_cluster(cluster_name,
         f'Deploying SkyPilot runtime on worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
         futures = []
-        for i, node in enumerate(worker_nodes):
-            args = (i, node, worker_hosts, history_workers_info, ssh_user,
-                    ssh_key, askpass_block, worker_use_ssh_config, master_addr,
+        for i, node in enumerate(agent_worker_nodes):
+            args = (i, node, agent_worker_hosts,
+                    agent_history_workers_info, ssh_user, ssh_key,
+                    askpass_block, agent_worker_use_ssh_config, master_addr,
                     k3s_token)
             futures.append(executor.submit(deploy_worker, args))
 
@@ -1005,6 +1083,46 @@ def cleanup_node(node,
                      f'node ({node}).{RESET_ALL}')
     else:
         success_message(f'Node {node} cleaned up successfully.')
+
+
+def start_server_node(node,
+                      master_addr,
+                      k3s_token,
+                      user,
+                      ssh_key,
+                      askpass_block,
+                      tls_sans,
+                      use_ssh_config=False):
+    """Start a k3s server node for HA (joins existing cluster).
+
+    Returns: (node, success, has_gpu) tuple."""
+    logger.info(f'Joining HA server node ({node}).')
+    cmd = f"""
+            {askpass_block}
+            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} \
+                INSTALL_K3S_EXEC='server {tls_sans} --node-label skypilot-ip={node}' \
+                K3S_URL=https://{master_addr}:6443 \
+                K3S_TOKEN={k3s_token} sudo -E -A sh -
+        """
+    result = deploy_utils.run_remote(node,
+                                     cmd,
+                                     user,
+                                     ssh_key,
+                                     use_ssh_config=use_ssh_config)
+    if result is None:
+        logger.error(f'{colorama.Fore.RED}✗ Failed to join HA server '
+                     f'node ({node}).{RESET_ALL}')
+        return node, False, False
+    success_message(
+        f'SkyPilot runtime successfully deployed on HA server node ({node}).')
+    if deploy_utils.check_gpu(node,
+                              user,
+                              ssh_key,
+                              use_ssh_config=use_ssh_config):
+        logger.info(f'{colorama.Fore.YELLOW}GPU detected on HA server node '
+                    f'({node}).{RESET_ALL}')
+        return node, True, True
+    return node, True, False
 
 
 def start_agent_node(node,
