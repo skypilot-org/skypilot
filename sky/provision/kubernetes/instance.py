@@ -1792,6 +1792,52 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
+def _get_pod_health_issues(pod: Any) -> Optional[str]:
+    """Check a Running pod for health issues.
+
+    Examines pod conditions and container statuses to detect problems
+    that would explain why the pod is Running but not functioning
+    (e.g., Ready=False, CrashLoopBackOff).
+
+    Returns None if the pod appears healthy, or a descriptive reason string.
+    """
+    conditions = getattr(pod.status, 'conditions', None)
+    if not conditions:
+        return None
+
+    ready_condition = None
+    for condition in conditions:
+        if condition.type == 'Ready':
+            ready_condition = condition
+            break
+
+    if ready_condition is None or ready_condition.status == 'True':
+        return None
+
+    # Pod is not ready — build a reason string
+    ready_reason = ready_condition.reason or 'Unknown'
+    parts = [f'pod not ready ({ready_reason})']
+
+    # Check container statuses for more specific info
+    container_statuses = getattr(pod.status, 'container_statuses', None) or []
+    container_issues = []
+    for cs in container_statuses:
+        if cs.ready:
+            continue
+        waiting = getattr(cs.state, 'waiting', None)
+        terminated = getattr(cs.state, 'terminated', None)
+        if waiting and waiting.reason:
+            container_issues.append(waiting.reason)
+        elif terminated and terminated.exit_code != 0:
+            container_issues.append(f'{terminated.reason or "terminated"}'
+                                    f'(exit code {terminated.exit_code})')
+
+    if container_issues:
+        parts.append('; '.join(container_issues))
+
+    return '; '.join(parts)
+
+
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     """Get pod termination reason and write to cluster events.
 
