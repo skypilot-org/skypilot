@@ -2712,13 +2712,20 @@ def _update_cluster_status(
         # earlier. So if all_nodes_up is True and we are here, it means the ray
         # cluster must have been unhealthy.
         ray_cluster_unhealthy = all_nodes_up
-        status_reason = ', '.join(
-            [status[1] for status in node_statuses if status[1] is not None])
+        status_reason = _summarize_pod_reasons(node_statuses,
+                                               handle.launched_nodes)
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif ray_cluster_unhealthy:
-            init_reason = f'ray cluster is unhealthy ({ray_status_details})'
+            if status_reason:
+                # K8s diagnostics explain the issue — lead with that
+                # instead of the generic "ray cluster is unhealthy" message.
+                init_reason = status_reason
+                status_reason = ''  # already incorporated
+            else:
+                init_reason = (
+                    f'ray cluster is unhealthy ({ray_status_details})')
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '

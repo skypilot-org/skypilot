@@ -91,3 +91,36 @@ class TestSummarizePodReasons:
         result = _summarize_pod_reasons(statuses, 2)
         assert 'node-1' in result
         assert 'cordoned' in result
+
+
+class TestStatusReasonIntegration:
+    """Verify that _summarize_pod_reasons output is used correctly
+    when building the init_reason for ray_cluster_unhealthy."""
+
+    def test_status_reason_replaces_ray_message(self):
+        statuses = [
+            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
+            (UP, None),
+        ]
+        summary = _summarize_pod_reasons(statuses, 2)
+        ray_cluster_unhealthy = True
+        ray_status_details = '1/2 ready'
+        if ray_cluster_unhealthy:
+            if summary:
+                init_reason = summary
+            else:
+                init_reason = f'ray cluster is unhealthy ({ray_status_details})'
+        assert 'ray' not in init_reason
+        assert 'node-1' in init_reason
+
+    def test_empty_summary_falls_back_to_ray(self):
+        statuses = [(UP, None), (UP, None)]
+        summary = _summarize_pod_reasons(statuses, 2)
+        ray_cluster_unhealthy = True
+        ray_status_details = '1/2 ready'
+        if ray_cluster_unhealthy:
+            if summary:
+                init_reason = summary
+            else:
+                init_reason = f'ray cluster is unhealthy ({ray_status_details})'
+        assert 'ray cluster is unhealthy' in init_reason
