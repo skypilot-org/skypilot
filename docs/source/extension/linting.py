@@ -54,7 +54,6 @@ ALLOWED_TERMS = {
     'PrimeIntellect',
     # Framework names
     'vLLM',
-    'TGI',
     'RKE2',
     'DWS',
     'FAIR',

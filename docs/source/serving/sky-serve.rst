@@ -7,16 +7,16 @@ SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. warning::
-   
+
    SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
-   
+
    As we actively develop SkyServe, we welcome `feedback <https://slack.skypilot.co>`_ and `contributions <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md>`_.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
 Why SkyServe?
 
-* **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
+* **Bring any serving framework** (vLLM, FastAPI, ...) and scale it across regions/clouds
 * **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
 * Out-of-the-box **load-balancing** and **autoscaling** of service replicas
 * **Privacy and Control**: Everything is launched inside your cloud accounts and VPCs
@@ -46,7 +46,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM or :code:`lmsys/vicuna-13b-v1.5` on TGI):
+Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM):
 
 .. tab-set::
 
@@ -77,26 +77,6 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
                 --host 0.0.0.0 --port 8080 \
                 --model mistralai/Mixtral-8x7B-Instruct-v0.1
 
-    .. tab-item:: TGI
-        :sync: tgi-tab
-
-        .. code-block:: yaml
-
-            # service.yaml
-            service:
-              readiness_probe: /health
-              replicas: 2
-
-            # Fields below describe each replica.
-            resources:
-              ports: 8080
-              accelerators: A100
-
-            run: |
-              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
-                ghcr.io/huggingface/text-generation-inference \
-                --model-id lmsys/vicuna-13b-v1.5
-
 Run :code:`sky serve up service.yaml` to deploy the service with automatic price and capacity optimization. Once it is deployed, use :code:`sky serve status` to check the status of the service:
 
 .. tab-set::
@@ -108,14 +88,6 @@ Run :code:`sky serve up service.yaml` to deploy the service with automatic price
             :width: 800
             :align: center
             :alt: sky-serve-status-vllm
-
-    .. tab-item:: TGI
-        :sync: tgi-tab
-
-        .. image:: ../images/sky-serve-status-tgi.png
-            :width: 800
-            :align: center
-            :alt: sky-serve-status-tgi
 
 .. raw:: html
 
@@ -144,19 +116,6 @@ Simply ``curl`` the service endpoint, which automatically load-balances across t
 
             # Example output:
             {"id":"cmpl-80b2bfd6f60c4024884c337a7e0d859a","object":"chat.completion","created":1005,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful AI assistant designed to provide information, answer questions, and engage in conversation with users. I do not have personal experiences or emotions, but I am programmed to understand and process human language, and to provide helpful and accurate responses."},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":64,"completion_tokens":51}}
-
-    .. tab-item:: TGI
-        :sync: tgi-tab
-
-        .. code-block:: console
-
-            $ curl 44.211.131.51:30001/generate \
-                -X POST \
-                -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
-                -H 'Content-Type: application/json'
-
-            # Example output:
-            {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
 Tutorial: Hello, SkyServe!
 --------------------------

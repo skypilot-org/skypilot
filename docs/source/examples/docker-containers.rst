@@ -279,22 +279,6 @@ SkyPilot can run containerized applications directly as regular tasks. The defau
 
 To launch a containerized application, you can directly invoke :code:`docker run` in the :code:`run` section of your task.
 
-For example, to run a HuggingFace TGI serving container:
-
-.. code-block:: yaml
-
-  resources:
-    accelerators: A100:1
-
-  run: |
-    docker run --gpus all --shm-size 1g -v ~/data:/data \
-      ghcr.io/huggingface/text-generation-inference \
-      --model-id lmsys/vicuna-13b-v1.5
-
-    # NOTE: Uncommon to have any commands after the above.
-    # `docker run` is blocking, so any commands after it
-    # will NOT be run inside the container.
-
 Private registries
 ^^^^^^^^^^^^^^^^^^
 
