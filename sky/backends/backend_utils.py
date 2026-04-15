@@ -1002,17 +1002,12 @@ def write_cluster_config(
                         f'auto_mounts. Skipping.')
                     continue
                 for path in mount_paths:
-                    # Disable sub_path usage, which turns out to be confusing,
-                    # for now. See #9353.
                     if path.startswith('/'):
                         mount_path = path
-                        # sub_path = path.lstrip('/')
                     elif path.startswith('~/'):
                         mount_path = f'{home_dir}/{path[2:]}'
-                        # sub_path = path[2:]
                     elif path == '~':
                         mount_path = home_dir
-                        # sub_path = None
                     else:
                         logger.warning(f'Malformed automount path {path}')
                         continue
@@ -1021,7 +1016,6 @@ def write_cluster_config(
                         path=mount_path,
                         volume_name_on_cloud=volume_config.name_on_cloud,
                         volume_id_on_cloud=volume_config.id_on_cloud,
-                        # sub_path=sub_path if sub_path else None,
                         volume_type=volume_config.type,
                         host_path=volume_config.config.get('host_path'),
                     )
