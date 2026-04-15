@@ -249,12 +249,12 @@ def is_consolidation_mode(pool: bool = False) -> bool:
         # INVARIANT: must return the same value as
         # sky.jobs.utils.is_consolidation_mode() — pool operations run on the
         # jobs controller, so pool and managed-jobs consolidation state cannot
-        # legitimately diverge. Both read JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-        # (see sky/jobs/constants.py). Reading config directly here diverges
-        # under deploy-mode auto-enable, where the signal file is written
-        # without touching config. The warning + validation block below mirrors
-        # sky.jobs.utils.is_consolidation_mode() so both readers give users
-        # identical guidance.
+        # legitimately diverge. Both readers check the same signal file (see
+        # JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE in sky/jobs/constants.py).
+        # Reading config directly here diverges under deploy-mode auto-enable,
+        # where the signal file is written without touching config. The warning
+        # + validation block below mirrors sky.jobs.utils.is_consolidation_mode
+        # so both readers give users identical guidance.
         signal_file = pathlib.Path(
             managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
         ).expanduser()

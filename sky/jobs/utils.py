@@ -291,7 +291,8 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 # (enabling or disabling) require a server restart to take effect.
 # INVARIANT: serve_utils.is_consolidation_mode(pool=True) must return the same
 # value as this function, because pool operations run on the jobs controller
-# (same cluster as managed jobs). Both read JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE.
+# (same cluster as managed jobs). Both readers check the same signal file (see
+# JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE in sky/jobs/constants.py).
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
