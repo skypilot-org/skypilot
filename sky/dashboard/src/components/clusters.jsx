@@ -465,7 +465,7 @@ export function Clusters() {
             Sky Clusters
           </Link>
         </div>
-        <div className="w-full sm:w-auto max-w-[520px]">
+        <div className="w-full sm:w-auto max-w-lg">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={optionValues}
