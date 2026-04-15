@@ -100,13 +100,57 @@ def llm_inference():
 
         # Save results (order must match input batch)
         sky.batch.save_results([{"output": o.outputs[0].text} for o in outputs])
+```
 
+### Understanding `save_results` and Columns
 
+Think of `sky.batch.save_results()` as writing rows to a table. Each call writes one row per item in the list, and the **dict keys are the column names**.
+
+For example, if your mapper calls:
+
+```python
+sky.batch.save_results([
+    {"prompt": "hello", "output": "Hello! How can I help?", "score": 0.95},
+    {"prompt": "world", "output": "The world is vast.",     "score": 0.87},
+])
+```
+
+you are writing two rows to a table like this:
+
+| prompt | output | score |
+|--------|--------|-------|
+| hello | Hello! How can I help? | 0.95 |
+| world | The world is vast. | 0.87 |
+
+The `column` parameter on an output writer selects which columns to keep in the final output — like a SQL `SELECT`. If you omit `column`, all columns are written:
+
+```python
+# Writes all columns: prompt, output, score
+sky.batch.JsonWriter("s3://bucket/full.jsonl")
+
+# Writes only the "output" column
+sky.batch.JsonWriter("s3://bucket/outputs.jsonl", column="output")
+
+# Writes "prompt" and "score" columns
+sky.batch.JsonWriter("s3://bucket/meta.jsonl", column=["prompt", "score"])
+
+# Extracts the PIL Image from the "image" column and saves as PNG files
+sky.batch.ImageWriter("s3://bucket/images/", column="image")
+```
+
+This means you can call `save_results` with a rich dict containing everything, then use multiple output writers each selecting different columns from the same results:
+
+```python
+# save_results writes: {"prompt": ..., "image": ..., "score": ...}
+# Each writer picks the columns it needs:
 ds.map(
-    llm_inference,
+    my_mapper,
     pool_name=pool_name,
     batch_size=32,
-    output=sky.batch.JsonWriter("s3://my-bucket/output.jsonl"),
+    output=[
+        sky.batch.ImageWriter("s3://bucket/images/", column="image"),
+        sky.batch.JsonWriter("s3://bucket/meta.jsonl", column=["prompt", "score"]),
+    ],
 )
 ```
 
