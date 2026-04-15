@@ -365,6 +365,12 @@ ingress:
   # Custom annotations for the ingress
   # @schema type: [object, null]
   annotations: null
+  # Enable cookie-based session affinity (sticky sessions) on the ingress. Only takes effect
+  # when apiService.upgradeStrategy is RollingUpdate, where it ensures consistent routing to
+  # the same pod during rolling upgrades. Set to false to disable it, e.g., when using an
+  # ingress controller that does not support sticky sessions, or when stickiness is managed
+  # externally (e.g., at an upstream load balancer).
+  sessionAffinity: true
 
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # OAuth2 Proxy configuration for authentication

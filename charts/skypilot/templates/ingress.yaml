@@ -15,7 +15,7 @@ metadata:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName }}
     {{- end }}
-    {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+    {{- if and (eq .Values.apiService.upgradeStrategy "RollingUpdate") .Values.ingress.sessionAffinity }}
     # Enable session affinity and retry on 502 for RollingUpdate strategy
     nginx.ingress.kubernetes.io/affinity: "cookie"
     nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
