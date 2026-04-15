@@ -128,6 +128,14 @@ class RequestQueue:
         """
         self._backend.put(request)
 
+    async def put_async(self, request: Tuple[str, bool, bool]) -> None:
+        """Put a request to the queue, async.
+
+        Args:
+            request: A tuple of request_id, ignore_return_value, and retryable.
+        """
+        await self._backend.put_async(request)
+
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
 

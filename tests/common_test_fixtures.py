@@ -392,6 +392,9 @@ def mock_queue(monkeypatch):
             request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
+        async def put_async(self, item):
+            self.put(item)
+
         def get(self, request_id):
             # Retrieve ignore_return_value for a given request_id
             return self.queue_map.get(request_id)
