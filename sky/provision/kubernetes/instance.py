@@ -560,10 +560,9 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
     # be set. Negative timeout (indefinite wait) is left alone.
     if (autoscaler_is_set and
             0 <= timeout < _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS):
-        logger.debug(
+        logger.warning(
             f'Autoscaler is configured but provision_timeout ({timeout}s) '
-            f'is shorter than the minimum needed for the autoscaler to '
-            f'emit its first event; bumping initial timeout to '
+            f'is too short; bumping initial timeout to '
             f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
         timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
 
