@@ -23,6 +23,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import plugin_extensions
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -1836,6 +1837,58 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
         parts.append('; '.join(container_issues))
 
     return '; '.join(parts)
+
+
+def _check_nodes_health(
+    context: Optional[str],
+    node_names: set,
+) -> Dict[str, str]:
+    """Check health of specific Kubernetes nodes.
+
+    Tries the NodeInfoSource plugin first (fast, cached), then falls back
+    to direct Kubernetes API calls.
+
+    Args:
+        context: Kubernetes context name.
+        node_names: Set of node names to check.
+
+    Returns:
+        Dict mapping node_name -> issue description for unhealthy nodes.
+        Healthy nodes are omitted.
+    """
+    if not node_names:
+        return {}
+
+    issues: Dict[str, str] = {}
+
+    # Try NodeInfoSource plugin first (node-info-service sidecar).
+    # get() safely returns None when no provider is registered.
+    node_info = plugin_extensions.NodeInfoSource.get(
+        context) if context is not None else None
+    if node_info is not None:
+        for name in node_names:
+            info = node_info.node_info_dict.get(name)
+            if info is None:
+                continue
+            if not info.is_ready:
+                issues[name] = 'NotReady'
+            elif info.is_cordoned:
+                issues[name] = 'cordoned'
+        return issues
+
+    # Fallback: direct Kubernetes API
+    for name in sorted(node_names):
+        try:
+            node = kubernetes.core_api(context).read_node(
+                name, _request_timeout=kubernetes.API_TIMEOUT)
+            for condition in (node.status.conditions or []):
+                if condition.type == 'Ready' and condition.status != 'True':
+                    issues[name] = 'NotReady'
+                    break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+
+    return issues
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:

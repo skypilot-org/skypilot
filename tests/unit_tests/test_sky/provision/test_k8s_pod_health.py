@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+from sky.provision.kubernetes.instance import _check_nodes_health
 from sky.provision.kubernetes.instance import _get_pod_health_issues
 
 
@@ -124,3 +125,106 @@ class TestGetPodHealthIssues:
             ],
         )
         assert _get_pod_health_issues(pod) is None
+
+
+def _make_node_info(is_ready: bool, is_cordoned: bool = False):
+    """Create a mock KubernetesNodeInfo."""
+    info = mock.MagicMock()
+    info.is_ready = is_ready
+    info.is_cordoned = is_cordoned
+    return info
+
+
+def _make_nodes_info(node_dict):
+    """Create a mock KubernetesNodesInfo from {name: (ready, cordoned)}."""
+    info = mock.MagicMock()
+    info.node_info_dict = {
+        name: _make_node_info(ready, cordoned)
+        for name, (ready, cordoned) in node_dict.items()
+    }
+    return info
+
+
+def _make_k8s_node(name: str, ready: bool):
+    """Create a mock k8s V1Node for read_node fallback."""
+    node = mock.MagicMock()
+    node.metadata.name = name
+    cond = mock.MagicMock()
+    cond.type = 'Ready'
+    cond.status = 'True' if ready else 'False'
+    node.status.conditions = [cond]
+    return node
+
+
+class TestCheckNodesHealth:
+
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_node_info_source_detects_not_ready(self, mock_nis_get):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (True, False),
+            'node-2': (False, False),
+        })
+        result = _check_nodes_health('ctx', {'node-1', 'node-2'})
+        assert 'node-2' in result
+        assert 'NotReady' in result['node-2']
+        assert 'node-1' not in result
+
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_node_info_source_detects_cordoned(self, mock_nis_get):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (True, True),
+        })
+        result = _check_nodes_health('ctx', {'node-1'})
+        assert 'node-1' in result
+        assert 'cordoned' in result['node-1']
+
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_all_healthy_returns_empty(self, mock_nis_get):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (True, False),
+            'node-2': (True, False),
+        })
+        result = _check_nodes_health('ctx', {'node-1', 'node-2'})
+        assert result == {}
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
+                return_value=None)
+    def test_fallback_to_k8s_api(self, mock_nis_get, mock_core_api):
+        mock_core_api.return_value.read_node.side_effect = [
+            _make_k8s_node('node-1', ready=True),
+            _make_k8s_node('node-2', ready=False),
+        ]
+        result = _check_nodes_health('ctx', {'node-1', 'node-2'})
+        assert 'node-2' in result
+        assert 'NotReady' in result['node-2']
+        assert 'node-1' not in result
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.is_registered',
+                return_value=False)
+    def test_fallback_when_not_registered(self, mock_registered, mock_core_api):
+        mock_core_api.return_value.read_node.return_value = _make_k8s_node(
+            'node-1', ready=False)
+        result = _check_nodes_health('ctx', {'node-1'})
+        assert 'node-1' in result
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
+                return_value=None)
+    def test_fallback_read_node_exception_is_swallowed(self, mock_nis_get,
+                                                       mock_core_api):
+        mock_core_api.return_value.read_node.side_effect = Exception('timeout')
+        result = _check_nodes_health('ctx', {'node-1'})
+        assert result == {}
+
+    @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
+    def test_filters_to_requested_nodes(self, mock_nis_get):
+        mock_nis_get.return_value = _make_nodes_info({
+            'node-1': (False, False),
+            'node-2': (False, False),
+            'node-3': (True, False),
+        })
+        result = _check_nodes_health('ctx', {'node-1'})
+        assert 'node-1' in result
+        assert 'node-2' not in result
