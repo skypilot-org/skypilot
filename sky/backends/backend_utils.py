@@ -932,6 +932,8 @@ def write_cluster_config(
 
     volume_mount_vars = []
     ephemeral_volume_mount_vars = []
+    conflict_checker = volume_utils.VolumeMountConflictChecker()
+
     if volume_mounts is not None:
         for vol in volume_mounts:
             if vol.is_ephemeral:
@@ -940,6 +942,12 @@ def write_cluster_config(
                 vol.volume_config.cloud = repr(cloud)
                 vol.volume_config.region = region.name
                 vol.volume_config.name = volume_name
+                conflict_checker.check(volume_utils.VolumeInfo(
+                    name=volume_name,
+                    path=vol.path,
+                    volume_type=volume_utils.VolumeType.PVC.value),
+                                       source='task YAML volumes (ephemeral)',
+                                       volume_desc='ephemeral volume')
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
                 volume_info = volume_utils.VolumeInfo(
@@ -951,6 +959,10 @@ def write_cluster_config(
                     volume_type=vol.volume_config.type,
                     host_path=vol.volume_config.config.get('host_path'),
                 )
+                conflict_checker.check(
+                    volume_info,
+                    source='task YAML volumes',
+                    volume_desc=f'volume {vol.volume_name!r}')
                 volume_mount_vars.append(volume_info)
 
     # Resolve auto_mounts from config and add them to volume_mount_vars so
@@ -1001,16 +1013,20 @@ def write_cluster_config(
                         sub_path = None
                     else:
                         continue
-                    volume_mount_vars.append(
-                        volume_utils.VolumeInfo(
-                            name=volume_name,
-                            path=mount_path,
-                            volume_name_on_cloud=(volume_config.name_on_cloud),
-                            volume_id_on_cloud=(volume_config.id_on_cloud),
-                            sub_path=sub_path if sub_path else None,
-                            volume_type=volume_config.type,
-                            host_path=volume_config.config.get('host_path'),
-                        ))
+                    vol_info = volume_utils.VolumeInfo(
+                        name=volume_name,
+                        path=mount_path,
+                        volume_name_on_cloud=volume_config.name_on_cloud,
+                        volume_id_on_cloud=volume_config.id_on_cloud,
+                        sub_path=sub_path if sub_path else None,
+                        volume_type=volume_config.type,
+                        host_path=volume_config.config.get('host_path'),
+                    )
+                    conflict_checker.check(
+                        vol_info,
+                        source='auto_mounts config',
+                        volume_desc=f'auto-mount volume {volume_name!r}')
+                    volume_mount_vars.append(vol_info)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
