@@ -230,7 +230,9 @@ class JsonReader(InputReader):
                 f'JsonReader path must end with .jsonl: {self.path}')
 
     def __len__(self) -> int:
-        return len(utils.load_jsonl_from_cloud(self.path))
+        # S3/GCS APIs do not expose line counts, so we must download
+        # the file to count items.
+        return utils.count_jsonl_lines_from_cloud(self.path)
 
     def download_batch(self, start_idx: int, end_idx: int,
                        cache_dir: str) -> List[Dict[str, Any]]:

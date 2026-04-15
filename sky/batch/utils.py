@@ -6,6 +6,7 @@ import base64
 import inspect
 import json
 import os
+import subprocess
 import tempfile
 import textwrap
 import typing
@@ -195,6 +196,32 @@ def download_from_cloud(path: str, dest: str) -> None:
     """
     provider, bucket, key = parse_cloud_path(path)
     _download_file(provider, bucket, key, dest)
+
+
+def count_jsonl_lines_from_cloud(path: str) -> int:
+    """Count lines in a JSONL file on cloud storage.
+
+    Downloads the file and counts lines via ``wc -l`` so nothing is
+    loaded into Python memory. S3/GCS APIs do not expose line counts,
+    so a download is unavoidable.
+
+    Args:
+        path: Cloud storage path to the JSONL file.
+
+    Returns:
+        Number of lines in the file.
+    """
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.jsonl',
+                                     delete=False) as f:
+        temp_path = f.name
+
+    try:
+        download_from_cloud(path, temp_path)
+        output = subprocess.check_output(['wc', '-l', temp_path])
+        return int(output.split()[0])
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def load_jsonl_from_cloud(path: str) -> List[Dict[str, Any]]:

@@ -409,6 +409,29 @@ export function ManagedJobs() {
   );
 }
 
+function BatchProgressBar({ completed, total }) {
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+  return (
+    <NonCapitalizedTooltip
+      content={`Batch progress: ${completed}/${total} (${pct}%)`}
+      className="text-sm text-muted-foreground"
+    >
+      <div className="flex items-center gap-2">
+        <div className="w-20 bg-gray-200 rounded-full h-2">
+          <div
+            className={`${barColor} h-2 rounded-full transition-all`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="text-xs text-gray-600">
+          {completed}/{total}
+        </span>
+      </div>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
@@ -1346,29 +1369,12 @@ export function ManagedJobsTable({
           const isBatchRunning =
             item.status === 'RUNNING' && item.batch_total_batches != null;
           if (isBatchRunning) {
-            const completed = item.batch_completed_batches || 0;
-            const total = item.batch_total_batches;
-            const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-            const barColor =
-              completed >= total ? 'bg-green-500' : 'bg-blue-500';
             return (
               <TableCell>
-                <NonCapitalizedTooltip
-                  content={`Batch progress: ${completed}/${total} (${pct}%)`}
-                  className="text-sm text-muted-foreground"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-20 bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`${barColor} h-2 rounded-full transition-all`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-gray-600">
-                      {completed}/{total}
-                    </span>
-                  </div>
-                </NonCapitalizedTooltip>
+                <BatchProgressBar
+                  completed={item.batch_completed_batches || 0}
+                  total={item.batch_total_batches}
+                />
               </TableCell>
             );
           }

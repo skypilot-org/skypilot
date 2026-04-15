@@ -623,7 +623,7 @@ class BatchCoordinator:
             try:
                 self._worker_dispatch_loop(cname)
             except Exception as e:  # pylint: disable=broad-except
-                logger.info(f'Worker thread for {cname} failed: {e}')
+                logger.error(f'Worker thread for {cname} failed: {e}')
                 errors.append(e)
 
         def _start_worker_thread(cluster_name: str) -> None:
