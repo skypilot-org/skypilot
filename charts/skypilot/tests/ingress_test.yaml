@@ -303,7 +303,7 @@ tests:
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
 
-  - it: should not add session affinity annotations when sessionAffinity is disabled under RollingUpdate
+  - it: should not add session affinity annotations but keep retry annotations when sessionAffinity is disabled under RollingUpdate
     set:
       ingress.enabled: true
       ingress.sessionAffinity: false
@@ -319,7 +319,11 @@ tests:
           path: metadata.annotations["nginx.ingress.kubernetes.io/affinity-mode"]
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
-      - notExists:
+      # proxy-next-upstream retry annotations must remain so zero-downtime
+      # upgrades still work when session affinity is disabled.
+      - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
-      - notExists:
+          value: "http_502 non_idempotent"
+      - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
+          value: "3"
