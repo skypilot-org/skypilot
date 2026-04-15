@@ -17,12 +17,35 @@ import sky
 from sky import skypilot_config
 
 
+def _storage_cmds(generic_cloud: str, bucket: str):
+    """Return cloud-specific storage command fragments for batch tests.
+
+    Returns:
+        (url, create_cmd, delete_cmd, cp, rm, ls, rm_r) where url is the
+        bucket URL, create/delete_cmd are full shell commands, cp/rm/ls are
+        command prefixes, and rm_r(path) returns a recursive-remove command.
+    """
+    if generic_cloud == 'gcp':
+        url = f'gs://{bucket}'
+        return (url, f'gsutil mb {url}', f'gsutil rm -r {url}', 'gsutil cp',
+                'gsutil rm', 'gsutil ls', lambda p: f'gsutil rm -r {p}')
+    # Default to AWS
+    url = f's3://{bucket}'
+    return (url,
+            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            f'aws s3 rb {url} --force', 'aws s3 cp', 'aws s3 rm', 'aws s3 ls',
+            lambda p: f'aws s3 rm {p} --recursive')
+
+
 # ---------- Test simple batch (text doubling) ----------
 @pytest.mark.batch
 def test_batch_simple(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-smpl-{name}'
     pool_name = 'test-batch-pool'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
 
     test = smoke_tests_utils.Test(
         'batch_simple',
@@ -36,18 +59,15 @@ def test_batch_simple(generic_cloud: str):
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup (extracted from examples/batch/simple/run.sh) ---
-            # Create S3 bucket
-            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            create_bkt,
             # Generate test data: 50 items (batch_size 2 -> 25 batches)
             (f'for i in $(seq 1 50); do '
              f'echo "{{\\"text\\": \\"word_$i\\"}}"; '
              f'done > /tmp/batch-input-{name}.jsonl'),
-            (f'aws s3 cp /tmp/batch-input-{name}.jsonl '
-             f's3://{bucket}/test.jsonl'),
+            f'{cp} /tmp/batch-input-{name}.jsonl {url}/test.jsonl',
             # Clean previous output
-            f'aws s3 rm s3://{bucket}/output.jsonl 2>/dev/null || true',
-            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
-             f'--recursive 2>/dev/null || true'),
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
 
             # --- Run batch job (pool already created, blocks until done) ---
             f'python examples/batch/simple/double_text.py',
@@ -61,8 +81,7 @@ def test_batch_simple(generic_cloud: str):
             f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
 
             # --- Verify output results ---
-            (f'aws s3 cp s3://{bucket}/output.jsonl '
-             f'/tmp/batch-output-{name}.jsonl'),
+            f'{cp} {url}/output.jsonl /tmp/batch-output-{name}.jsonl',
             # Result count must match input count
             f'test $(wc -l < /tmp/batch-output-{name}.jsonl) -eq 50',
             # Check doubled text at boundaries and middle
@@ -97,23 +116,28 @@ def test_batch_simple(generic_cloud: str):
         # Teardown: remove pool, bucket, and temp files
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' aws s3 rb s3://{bucket} --force;'
+         f' {delete_bkt};'
          f' rm -f /tmp/batch-input-{name}.jsonl'
          f' /tmp/batch-output-{name}.jsonl'),
         timeout=30 * 60,
-        env={'SKY_BATCH_BUCKET': bucket},
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test diffusion batch (image generation) ----------
-@pytest.mark.aws
 @pytest.mark.batch
 @pytest.mark.resource_heavy
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
     pool_name = 'diffusion-pool'
+    url, create_bkt, delete_bkt, cp, rm, ls, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
 
     test = smoke_tests_utils.Test(
         'batch_diffusion',
@@ -127,20 +151,17 @@ def test_batch_diffusion(generic_cloud: str):
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup (extracted from examples/batch/diffusion/) ---
-            # Create S3 bucket
-            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            create_bkt,
             # Upload 3 prompts
             (f"cat > /tmp/batch-prompts-{name}.jsonl << 'EOF'\n"
              '{"prompt": "a cat sitting in a garden, digital art"}\n'
              '{"prompt": "a robot flying over a mountain, watercolor"}\n'
              '{"prompt": "an owl reading a book, oil painting"}\n'
              'EOF'),
-            (f'aws s3 cp /tmp/batch-prompts-{name}.jsonl '
-             f's3://{bucket}/prompts.jsonl'),
+            f'{cp} /tmp/batch-prompts-{name}.jsonl {url}/prompts.jsonl',
             # Clean previous output
-            (f'aws s3 rm "s3://{bucket}/generated_images/" '
-             f'--recursive 2>/dev/null || true'),
-            f'aws s3 rm s3://{bucket}/manifest.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/generated_images/")} 2>/dev/null || true',
+            f'{rm} {url}/manifest.jsonl 2>/dev/null || true',
 
             # --- Run batch job (pool already created, blocks until done) ---
             f'python examples/batch/diffusion/generate_images.py',
@@ -149,8 +170,7 @@ def test_batch_diffusion(generic_cloud: str):
             f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
 
             # --- Verify manifest content ---
-            (f'aws s3 cp s3://{bucket}/manifest.jsonl '
-             f'/tmp/batch-manifest-{name}.jsonl'),
+            f'{cp} {url}/manifest.jsonl /tmp/batch-manifest-{name}.jsonl',
             # Each prompt appears in the manifest
             f'grep "cat sitting" /tmp/batch-manifest-{name}.jsonl',
             f'grep "robot flying" /tmp/batch-manifest-{name}.jsonl',
@@ -169,24 +189,25 @@ def test_batch_diffusion(generic_cloud: str):
              "PYEOF"),
 
             # --- Verify generated images ---
-            f'aws s3 ls s3://{bucket}/generated_images/ | grep ".png"',
+            f'{ls} {url}/generated_images/ | grep ".png"',
             # Exactly 3 images (one per prompt)
-            (f'test $(aws s3 ls s3://{bucket}/generated_images/ '
+            (f'test $({ls} {url}/generated_images/ '
              f'| grep -c ".png") -eq 3'),
             # Check zero-padded naming: 00000000.png, 00000001.png, 00000002.png
-            (f'aws s3 ls s3://{bucket}/generated_images/ '
-             f'| grep "00000000.png"'),
-            (f'aws s3 ls s3://{bucket}/generated_images/ '
-             f'| grep "00000002.png"'),
+            f'{ls} {url}/generated_images/ | grep "00000000.png"',
+            f'{ls} {url}/generated_images/ | grep "00000002.png"',
         ],
         # Teardown: remove pool, bucket, and temp files
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' aws s3 rb s3://{bucket} --force;'
+         f' {delete_bkt};'
          f' rm -f /tmp/batch-prompts-{name}.jsonl'
          f' /tmp/batch-manifest-{name}.jsonl'),
         timeout=45 * 60,
-        env={'SKY_BATCH_BUCKET': bucket},
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -197,6 +218,9 @@ def test_batch_custom_formats(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cfmt-{name}'
     pool_name = 'custom-fmt-pool'
+    url, create_bkt, delete_bkt, cp, _, ls, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
 
     test = smoke_tests_utils.Test(
         'batch_custom_formats',
@@ -209,13 +233,11 @@ def test_batch_custom_formats(generic_cloud: str):
              f' examples/batch/custom_formats/pool.yaml -y); '
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
-            # --- Create S3 bucket (output only — no input data needed) ---
-            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            # --- Create bucket (output only — no input data needed) ---
+            create_bkt,
             # Clean previous output
-            (f'aws s3 rm "s3://{bucket}/output/" '
-             f'--recursive 2>/dev/null || true'),
-            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
-             f'--recursive 2>/dev/null || true'),
+            f'{rm_r(f"{url}/output/")} 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
 
             # --- Run batch job (RangeReader, TextWriter, YamlWriter) ---
             f'python examples/batch/custom_formats/process_range.py',
@@ -225,24 +247,24 @@ def test_batch_custom_formats(generic_cloud: str):
 
             # --- Verify text output files ---
             # 20 items -> 20 .txt files
-            (f'test $(aws s3 ls s3://{bucket}/output/texts/ '
+            (f'test $({ls} {url}/output/texts/ '
              f'| grep -c "\\.txt") -eq 20'),
             # Check zero-padded naming
-            f'aws s3 ls s3://{bucket}/output/texts/ | grep "00000000.txt"',
-            f'aws s3 ls s3://{bucket}/output/texts/ | grep "00000019.txt"',
+            f'{ls} {url}/output/texts/ | grep "00000000.txt"',
+            f'{ls} {url}/output/texts/ | grep "00000019.txt"',
             # Spot-check content of first text file
-            (f'aws s3 cp s3://{bucket}/output/texts/00000000.txt - '
+            (f'{cp} {url}/output/texts/00000000.txt - '
              f'| grep "Item 0"'),
 
             # --- Verify merged YAML metadata file ---
             # Single .yaml file with all 20 items
-            f'aws s3 ls s3://{bucket}/output/metadata.yaml',
+            f'{ls} {url}/output/metadata.yaml',
             # Validate YAML: parseable, correct count, expected keys
             (f"python3 << 'PYEOF'\n"
-             "import yaml, subprocess\n"
-             f"bucket = '{bucket}'\n"
+             "import subprocess\n"
+             "import yaml\n"
              "data = subprocess.check_output(\n"
-             "    ['aws', 's3', 'cp', f's3://{bucket}/output/metadata.yaml', '-'])\n"
+             f"    '{cp} {url}/output/metadata.yaml -', shell=True)\n"
              "items = yaml.safe_load(data)\n"
              "assert len(items) == 20, f'Expected 20 items, got {len(items)}'\n"
              "for item in items:\n"
@@ -258,9 +280,12 @@ def test_batch_custom_formats(generic_cloud: str):
         # Teardown: remove pool, bucket, and temp files
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' aws s3 rb s3://{bucket} --force'),
+         f' {delete_bkt}'),
         timeout=30 * 60,
-        env={'SKY_BATCH_BUCKET': bucket},
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -271,6 +296,9 @@ def test_batch_cancel(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cncl-{name}'
     pool_name = 'test-batch-pool'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
 
     test = smoke_tests_utils.Test(
         'batch_cancel',
@@ -284,16 +312,14 @@ def test_batch_cancel(generic_cloud: str):
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
             # --- Setup with large dataset so the job runs long enough ---
-            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            create_bkt,
             # 500 items / batch_size 2 = 250 batches -> plenty of time to cancel
             (f'for i in $(seq 0 499); do '
              f'echo "{{\\"text\\": \\"item_$i\\"}}"; '
              f'done > /tmp/batch-cancel-input-{name}.jsonl'),
-            (f'aws s3 cp /tmp/batch-cancel-input-{name}.jsonl '
-             f's3://{bucket}/test.jsonl'),
-            f'aws s3 rm s3://{bucket}/output.jsonl 2>/dev/null || true',
-            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
-             f'--recursive 2>/dev/null || true'),
+            f'{cp} /tmp/batch-cancel-input-{name}.jsonl {url}/test.jsonl',
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
 
             # --- Launch in background, wait for RUNNING, then cancel ---
             (f"python examples/batch/simple/double_text.py &\n"
@@ -318,10 +344,13 @@ def test_batch_cancel(generic_cloud: str):
         # Teardown: remove pool, bucket, and temp files
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' aws s3 rb s3://{bucket} --force;'
+         f' {delete_bkt};'
          f' rm -f /tmp/batch-cancel-input-{name}.jsonl'),
         timeout=30 * 60,
-        env={'SKY_BATCH_BUCKET': bucket},
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -347,6 +376,9 @@ def test_batch_ha_kill_running(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-ha-{name}'
     pool_name = 'test-batch-pool'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
 
     # HA config: run the jobs controller on k8s with high_availability.
     skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
@@ -378,15 +410,13 @@ def test_batch_ha_kill_running(generic_cloud: str):
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup: 60 items / batch_size 2 = 30 batches ---
-            f'aws s3api create-bucket --bucket {bucket} --region us-east-1',
+            create_bkt,
             (f'for i in $(seq 1 60); do '
              f'echo "{{\\"text\\": \\"word_$i\\"}}"; '
              f'done > /tmp/batch-ha-input-{name}.jsonl'),
-            (f'aws s3 cp /tmp/batch-ha-input-{name}.jsonl '
-             f's3://{bucket}/test.jsonl'),
-            f'aws s3 rm s3://{bucket}/output.jsonl 2>/dev/null || true',
-            (f'aws s3 rm "s3://{bucket}/.sky_batch_tmp/" '
-             f'--recursive 2>/dev/null || true'),
+            f'{cp} /tmp/batch-ha-input-{name}.jsonl {url}/test.jsonl',
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
 
             # --- Launch batch job in background, wait for RUNNING ---
             (f'nohup python examples/batch/simple/double_text.py '
@@ -518,8 +548,7 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'fi'),
 
             # --- Verify all 60 items processed correctly ---
-            (f'aws s3 cp s3://{bucket}/output.jsonl '
-             f'/tmp/batch-ha-output-{name}.jsonl'),
+            f'{cp} {url}/output.jsonl /tmp/batch-ha-output-{name}.jsonl',
             f'test $(wc -l < /tmp/batch-ha-output-{name}.jsonl) -eq 60',
             (f"python3 << 'PYEOF'\n"
              "import json\n"
@@ -540,7 +569,7 @@ def test_batch_ha_kill_running(generic_cloud: str):
         # Teardown: remove pool, bucket, temp files, cloud-cmd cluster.
         (f'sky jobs pool down {pool_name} -y;'
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
-         f' aws s3 rb s3://{bucket} --force;'
+         f' {delete_bkt};'
          f' rm -f /tmp/batch-ha-input-{name}.jsonl'
          f' /tmp/batch-ha-output-{name}.jsonl'
          f' /tmp/batch-ha-bg-{name}.log'
@@ -550,6 +579,7 @@ def test_batch_ha_kill_running(generic_cloud: str):
         timeout=60 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store,
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_path,
         },
     )

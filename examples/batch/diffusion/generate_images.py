@@ -90,12 +90,13 @@ def main():
     # to a default bucket name derived from the OS username.
     default_bucket = f'sky-batch-diffusion-{os.environ.get("USER", "default")}'
     bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
-    print(f'Using bucket: s3://{bucket}  '
+    store = os.environ.get('SKY_BATCH_STORE', 's3')
+    print(f'Using bucket: {store}://{bucket}  '
           f'(override with SKY_BATCH_BUCKET env var)')
 
-    input_path = f's3://{bucket}/prompts.jsonl'
-    output_path = f's3://{bucket}/generated_images/'
-    manifest_path = f's3://{bucket}/manifest.jsonl'
+    input_path = f'{store}://{bucket}/prompts.jsonl'
+    output_path = f'{store}://{bucket}/generated_images/'
+    manifest_path = f'{store}://{bucket}/manifest.jsonl'
     pool_name = 'diffusion-pool'
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 

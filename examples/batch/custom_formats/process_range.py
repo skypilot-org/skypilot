@@ -162,14 +162,15 @@ def main():
     default_bucket = (
         f'sky-batch-custom-fmt-{os.environ.get("USER", "default")}')
     bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
-    print(f'Using bucket: s3://{bucket}  '
+    store = os.environ.get('SKY_BATCH_STORE', 's3')
+    print(f'Using bucket: {store}://{bucket}  '
           f'(override with SKY_BATCH_BUCKET env var)')
 
     pool_name = 'custom-fmt-pool'
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
-    text_output_path = f's3://{bucket}/output/texts/'
-    meta_output_path = f's3://{bucket}/output/metadata.yaml'
+    text_output_path = f'{store}://{bucket}/output/texts/'
+    meta_output_path = f'{store}://{bucket}/output/metadata.yaml'
 
     ds = sky.batch.Dataset(RangeReader(path='', count=20))
 

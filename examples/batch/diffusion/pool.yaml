@@ -1,11 +1,10 @@
 # Pool configuration for Stable Diffusion batch image generation
-# Uses AWS L4 GPUs (24GB VRAM, good for SD v1.5 in fp16)
+# Uses L4 GPUs (24GB VRAM, good for SD v1.5 in fp16)
 
 pool:
   workers: 3  # Number of parallel workers
 
 resources:
-  cloud: aws
   accelerators: L4:1  # 1x L4 GPU per worker
 
 setup: |

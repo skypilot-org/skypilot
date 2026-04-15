@@ -74,11 +74,12 @@ def main():
     # Configuration — set SKY_BATCH_BUCKET env var or use the default.
     default_bucket = f'sky-batch-simple-{os.environ.get("USER", "default")}'
     bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
-    print(f'Using bucket: s3://{bucket}  '
+    store = os.environ.get('SKY_BATCH_STORE', 's3')
+    print(f'Using bucket: {store}://{bucket}  '
           f'(override with SKY_BATCH_BUCKET env var)')
 
-    input_path = f's3://{bucket}/test.jsonl'
-    output_path = f's3://{bucket}/output.jsonl'
+    input_path = f'{store}://{bucket}/test.jsonl'
+    output_path = f'{store}://{bucket}/output.jsonl'
     pool_name = 'test-batch-pool'
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
