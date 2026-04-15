@@ -596,6 +596,15 @@ class TestVolumeMountConflictChecker:
             checker.check(_pvc('vol-x', '/mnt/b', 'different-pvc'),
                           'task YAML volumes', 'volume vol-x')
 
+    def test_name_conflict_ephemeral_vs_ephemeral(self):
+        """Two ephemeral volumes with hash-colliding names."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_ephemeral('cluster-abc123', '/mnt/a'),
+                      'task YAML volumes (ephemeral)', 'ephemeral vol 1')
+        with pytest.raises(ValueError, match='Volume name conflict'):
+            checker.check(_ephemeral('cluster-abc123', '/mnt/b'),
+                          'task YAML volumes (ephemeral)', 'ephemeral vol 2')
+
     def test_name_same_pvc_ok(self):
         """Auto-mount multiple mount_paths: same name, same PVC."""
         checker = volume.VolumeMountConflictChecker()
@@ -677,4 +686,22 @@ class TestVolumeMountConflictChecker:
     def test_vol_source_identity_empty(self):
         identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
             '')
+        assert identity is None
+
+    def test_vol_source_identity_pvc_none_cloud_name(self):
+        """PVC type but vol_name_on_cloud is None should return None."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            PVC_TYPE, vol_name_on_cloud=None)
+        assert identity is None
+
+    def test_vol_source_identity_hostpath_none_path(self):
+        """hostPath type but vol_host_path is None should return None."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            HOSTPATH_TYPE, vol_host_path=None)
+        assert identity is None
+
+    def test_vol_source_identity_runpod_returns_none(self):
+        """RunPod network volume returns None (not supported yet)."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            'runpod-network-volume')
         assert identity is None

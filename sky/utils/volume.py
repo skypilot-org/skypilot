@@ -236,9 +236,9 @@ class VolumeMountConflictChecker:
         the type is unknown or the identity cannot be determined (e.g.,
         ephemeral volumes before provisioning).
         """
-        if volume_type == VolumeType.PVC.value:
+        if volume_type == VolumeType.PVC.value and vol_name_on_cloud:
             return f'pvc:{vol_name_on_cloud}'
-        if volume_type == VolumeType.HOSTPATH.value:
+        if volume_type == VolumeType.HOSTPATH.value and vol_host_path:
             return f'hostpath:{vol_host_path}'
         return None
 
