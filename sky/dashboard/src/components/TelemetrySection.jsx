@@ -37,7 +37,12 @@ const TELEMETRY_PANELS = [
   },
   { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp', family: 'gpu' },
   { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power', family: 'gpu' },
-  { id: '6', title: 'CPU Usage', keyPrefix: 'cpu-usage', family: 'host' },
+  {
+    id: '6',
+    title: 'CPU Usage (cores)',
+    keyPrefix: 'cpu-usage',
+    family: 'host',
+  },
   { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
 ];
 

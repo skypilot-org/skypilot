@@ -681,7 +681,7 @@
           "refId": "A"
         }
       ],
-      "title": "CPU Usage",
+      "title": "CPU Usage (cores)",
       "type": "timeseries"
     },
     {
