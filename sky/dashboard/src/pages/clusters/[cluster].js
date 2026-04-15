@@ -81,9 +81,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // Counter incremented on refresh to force telemetry iframes to reload.
   // When this value changes, the iframe key changes, causing React to remount the iframe.
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const {
     clusterData,
@@ -95,7 +95,7 @@ function ClusterDetails() {
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
 
   // Check Grafana availability on mount
@@ -147,8 +147,8 @@ function ClusterDetails() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await refreshData();
-    // Increment GPU metrics refresh trigger to force iframe reload
-    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+    // Increment telemetry refresh trigger to force iframe reload
+    setTelemetryRefreshTrigger((prev) => prev + 1);
     setIsRefreshing(false);
   };
 
@@ -239,7 +239,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={isVSCodeModalOpen}
             setIsVSCodeModalOpen={setIsVSCodeModalOpen}
             isGrafanaAvailable={isGrafanaAvailable}
-            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+            telemetryRefreshTrigger={telemetryRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -251,7 +251,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
             isGrafanaAvailable={false}
-            gpuMetricsRefreshTrigger={0}
+            telemetryRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -288,7 +288,7 @@ function ActiveTab({
   isVSCodeModalOpen,
   setIsVSCodeModalOpen,
   isGrafanaAvailable,
-  gpuMetricsRefreshTrigger,
+  telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -663,7 +663,7 @@ function ActiveTab({
             <TelemetrySection
               clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
               displayName={clusterData?.cluster}
-              refreshTrigger={gpuMetricsRefreshTrigger}
+              refreshTrigger={telemetryRefreshTrigger}
               storageKey="skypilot-clusters-telemetry-expanded"
               hasGpu={resourcesHaveGpu(
                 clusterData?.resources_str_full || clusterData?.resources_str

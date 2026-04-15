@@ -47,7 +47,7 @@ function TaskDetails() {
 
   // GPU metrics state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
 
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -85,7 +85,7 @@ function TaskDetails() {
     try {
       setRefreshTrigger((prev) => prev + 1);
       setRefreshLogsFlag((prev) => prev + 1);
-      setGpuMetricsRefreshTrigger((prev) => prev + 1);
+      setTelemetryRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -192,7 +192,7 @@ function TaskDetails() {
                 <TelemetrySection
                   clusterNameOnCloud={taskData.cluster_name_on_cloud}
                   displayName={taskData.task || `Task ${taskIndex}`}
-                  refreshTrigger={gpuMetricsRefreshTrigger}
+                  refreshTrigger={telemetryRefreshTrigger}
                   storageKey="skypilot-task-telemetry-expanded"
                   hasGpu={resourcesHaveGpu(
                     taskData.requested_resources || taskData.resources_str
