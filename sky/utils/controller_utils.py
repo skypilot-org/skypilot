@@ -945,16 +945,13 @@ def translate_local_file_mounts_to_two_hop(
         except (OSError, RuntimeError):
             return
         is_fs_root = resolved_local == pathlib.Path(resolved_local.anchor)
-        is_ancestor_of_staging = False
-        if resolved_staging_root == resolved_local:
+        try:
+            # pathlib.Path.is_relative_to is 3.9+; use relative_to for 3.8.
+            # relative_to also succeeds when the two paths are equal.
+            resolved_staging_root.relative_to(resolved_local)
             is_ancestor_of_staging = True
-        else:
-            try:
-                # pathlib.Path.is_relative_to is 3.9+; use relative_to for 3.8.
-                resolved_staging_root.relative_to(resolved_local)
-                is_ancestor_of_staging = True
-            except ValueError:
-                pass
+        except ValueError:
+            is_ancestor_of_staging = False
         if is_fs_root or is_ancestor_of_staging:
             raise exceptions.NotSupportedError(
                 f'{source} resolves to {str(resolved_local)!r}, which is the '
