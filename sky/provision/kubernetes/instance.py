@@ -1863,6 +1863,10 @@ def _check_nodes_health(
 
     # Try NodeInfoSource plugin first (node-info-service sidecar).
     # get() safely returns None when no provider is registered.
+    # Note: if a node is in node_names but not in the cache, it's silently
+    # skipped (we don't fall back to the k8s API for missing entries). This
+    # is acceptable since this is diagnostic-only and doesn't affect the
+    # cluster status transition.
     node_info = plugin_extensions.NodeInfoSource.get(
         context) if context is not None else None
     if node_info is not None:

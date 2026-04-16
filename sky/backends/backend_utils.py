@@ -3418,7 +3418,7 @@ _MAX_NAMES_IN_SUMMARY = 3
 
 def _summarize_pod_reasons(
     node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
-    total_nodes: int,
+    total_pods: int,
     node_health: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """Summarize per-pod reasons into a concise grouped message.
@@ -3430,7 +3430,7 @@ def _summarize_pod_reasons(
     Args:
         node_statuses: Dict mapping instance/pod name to (status, reason)
             as returned by _query_cluster_status_via_cloud_api.
-        total_nodes: Total number of nodes in the cluster.
+        total_pods: Total number of pods in the SkyPilot cluster.
         node_health: Optional structured node health data from
             get_node_health_for_cluster(). Maps node_name ->
             {'issue': str, 'pods': [pod_name, ...]}.
@@ -3463,7 +3463,7 @@ def _summarize_pod_reasons(
                     name_list += (
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
-            part += f', affecting {affected} out of {total_nodes} pods'
+            part += f', affecting {affected} out of {total_pods} pods'
             parts.append(part)
 
     # Collect pod names that are already explained by node issues
