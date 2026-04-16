@@ -158,11 +158,40 @@ def deploy_multiple_clusters(
                             f'Current value: {cluster_config.get(key)}')
                 history_hosts_info = ssh_utils.prepare_hosts_info(
                     cluster_name, history)
-                if not cleanup and history_hosts_info[0] != hosts_info[0]:
-                    raise ValueError(
-                        f'Cluster configuration has changed for master node. '
-                        f'Previous value: {history_hosts_info[0]}, '
-                        f'Current value: {hosts_info[0]}')
+
+                if not cleanup:
+                    # Determine HA state for both history and current config
+                    history_ha = len(history_hosts_info) >= 3
+                    current_ha = len(hosts_info) >= 3
+                    prev_ha = history.get('ha_enabled', history_ha)
+
+                    # Detect HA <-> non-HA transitions
+                    if prev_ha and not current_ha:
+                        raise ValueError(
+                            'Cannot switch from HA to non-HA mode. '
+                            'Run `sky ssh down` first, then redeploy.')
+                    if not prev_ha and current_ha:
+                        raise ValueError(
+                            'Cannot switch from non-HA to HA mode. '
+                            'Run `sky ssh down` first, then redeploy.')
+
+                    # Protect all server nodes from config changes
+                    # (first 3 in HA mode, first 1 in non-HA)
+                    num_protected = 3 if current_ha else 1
+                    for i in range(
+                            min(num_protected, len(history_hosts_info),
+                                len(hosts_info))):
+                        if history_hosts_info[i] != hosts_info[i]:
+                            role = ('server' if current_ha and i > 0
+                                    else 'head')
+                            raise ValueError(
+                                f'Cluster configuration has changed for '
+                                f'{role} node (host {i}). '
+                                f'Previous: {history_hosts_info[i]}, '
+                                f'Current: {hosts_info[i]}. '
+                                f'Run `sky ssh down` first to '
+                                f'reconfigure server nodes.')
+
                 history_workers_info = history_hosts_info[1:] if len(
                     history_hosts_info) > 1 else []
                 history_worker_nodes = [h['ip'] for h in history_workers_info]
@@ -212,6 +241,7 @@ def deploy_multiple_clusters(
                     if host_node not in unsuccessful_workers:
                         successful_hosts.append(host)
                 cluster_config['hosts'] = successful_hosts
+                cluster_config['ha_enabled'] = len(successful_hosts) >= 3
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
                     logger.debug(f'Writing history to {history_yaml_file}')
                     yaml.dump(cluster_config, f)
