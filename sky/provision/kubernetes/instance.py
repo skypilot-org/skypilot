@@ -1876,17 +1876,23 @@ def _check_nodes_health(
                 issues[name] = 'cordoned'
         return issues
 
-    # Fallback: direct Kubernetes API
-    for name in sorted(node_names):
+    # Fallback: direct Kubernetes API (parallelized)
+    def _check_single_node(name: str) -> Optional[Tuple[str, str]]:
         try:
             node = kubernetes.core_api(context).read_node(
                 name, _request_timeout=kubernetes.API_TIMEOUT)
             for condition in (node.status.conditions or []):
                 if condition.type == 'Ready' and condition.status != 'True':
-                    issues[name] = 'NotReady'
-                    break
+                    return (name, 'NotReady')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
+        return None
+
+    results = subprocess_utils.run_in_parallel(_check_single_node,
+                                               sorted(node_names))
+    for result in results:
+        if result is not None:
+            issues[result[0]] = result[1]
 
     return issues
 

@@ -186,16 +186,20 @@ class TestCheckNodesHealth:
             'node-2': (True, False),
         })
         result = _check_nodes_health('ctx', {'node-1', 'node-2'})
-        assert result == {}
+        assert not result
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get',
                 return_value=None)
     def test_fallback_to_k8s_api(self, mock_nis_get, mock_core_api):  # pylint: disable=unused-argument
-        mock_core_api.return_value.read_node.side_effect = [
-            _make_k8s_node('node-1', ready=True),
-            _make_k8s_node('node-2', ready=False),
-        ]
+        # Use a function for side_effect since run_in_parallel
+        # may call read_node in any order.
+        node_map = {
+            'node-1': _make_k8s_node('node-1', ready=True),
+            'node-2': _make_k8s_node('node-2', ready=False),
+        }
+        mock_core_api.return_value.read_node.side_effect = (
+            lambda name, **kw: node_map[name])
         result = _check_nodes_health('ctx', {'node-1', 'node-2'})
         assert 'node-2' in result
         assert 'NotReady' in result['node-2']
@@ -219,7 +223,7 @@ class TestCheckNodesHealth:
             mock_core_api):
         mock_core_api.return_value.read_node.side_effect = Exception('timeout')
         result = _check_nodes_health('ctx', {'node-1'})
-        assert result == {}
+        assert not result
 
     @mock.patch('sky.utils.plugin_extensions.NodeInfoSource.get')
     def test_filters_to_requested_nodes(self, mock_nis_get):

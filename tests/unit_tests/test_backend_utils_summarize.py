@@ -93,6 +93,17 @@ class TestSummarizePodReasons:
         assert 'node-1' in result
         assert 'cordoned' in result
 
+    def test_mixed_issue_types_per_issue_pod_count(self):
+        """Pod counts should be per issue type, not global."""
+        statuses = [
+            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
+            (UP, 'w-1: pod not ready; node node-1 is NotReady'),
+            (UP, 'w-2: pod not ready; node node-2 is cordoned'),
+        ]
+        result = _summarize_pod_reasons(statuses, 6)
+        assert '2/6 pods' in result  # NotReady affects 2 pods
+        assert '1/6 pods' in result  # cordoned affects 1 pod
+
 
 class TestStatusReasonIntegration:
     """Verify that _summarize_pod_reasons output is used correctly

@@ -3438,23 +3438,27 @@ def _summarize_pod_reasons(
     # 1. Node-level summary
     if node_issues:
         # Group by issue type (e.g., all NotReady together)
+        # Track affected pod count per issue type, not globally.
         by_issue: Dict[str, List[str]] = {}
-        total_affected = 0
+        affected_by_issue: Dict[str, int] = {}
         for node_name, info in node_issues.items():
             by_issue.setdefault(info['issue'], []).append(node_name)
-            total_affected += len(info['pods'])
+            affected_by_issue[info['issue']] = (
+                affected_by_issue.get(info['issue'], 0) + len(info['pods']))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
+            affected = affected_by_issue[issue]
             if len(names) == 1:
                 part = f'node {names[0]} is {issue}'
             else:
                 shown = names[:_MAX_NAMES_IN_SUMMARY]
                 name_list = ', '.join(shown)
                 if len(names) > _MAX_NAMES_IN_SUMMARY:
-                    name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+                    name_list += (
+                        f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
-            part += f', affecting {total_affected}/{total_nodes} pods'
+            part += f', affecting {affected}/{total_nodes} pods'
             parts.append(part)
 
     # 2. Pod-level summary
