@@ -2726,14 +2726,12 @@ def _update_cluster_status(
             if unhealthy_pods:
                 try:
                     # pylint: disable=import-outside-toplevel
-                    import importlib
-                    k8s_mod = importlib.import_module(
-                        'sky.provision.kubernetes.instance')
+                    from sky.provision.kubernetes import instance as k8s_instance  # isort: skip  # noqa: E501
                     ray_config = global_user_state.get_cluster_yaml_dict(
                         handle.cluster_yaml)
-                    node_health = (k8s_mod.get_node_health_for_cluster(
+                    node_health = k8s_instance.get_node_health_for_cluster(
                         handle.cluster_name_on_cloud, ray_config['provider'],
-                        unhealthy_pods))
+                        unhealthy_pods)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node health for '
                                  f'{cluster_name!r}: {e}')
