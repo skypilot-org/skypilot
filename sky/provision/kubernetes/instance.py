@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -1793,6 +1793,14 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
+class NodeHealthInfo:
+    """Health info for a single Kubernetes node."""
+
+    def __init__(self, issue: str, pods: List[str]):
+        self.issue = issue
+        self.pods = pods
+
+
 def _get_pod_health_issues(pod: Any) -> Optional[str]:
     """Check a Running pod for health issues.
 
@@ -1841,7 +1849,7 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
 
 def _check_nodes_health(
     context: Optional[str],
-    node_names: set,
+    node_names: Set[str],
 ) -> Dict[str, str]:
     """Check health of specific Kubernetes nodes.
 
@@ -1909,7 +1917,7 @@ def get_node_health_for_cluster(
     cluster_name_on_cloud: str,
     provider_config: Dict[str, Any],
     unhealthy_pod_names: List[str],
-) -> Dict[str, Dict[str, Any]]:
+) -> Dict[str, NodeHealthInfo]:
     """Check node health for specific unhealthy pods in a cluster.
 
     Fetches pods to determine which nodes they run on, then checks
@@ -1921,8 +1929,7 @@ def get_node_health_for_cluster(
         unhealthy_pod_names: Pod names that have health issues.
 
     Returns:
-        Dict mapping node_name -> {'issue': str, 'pods': [pod_name, ...]}.
-        Only unhealthy nodes are included.
+        Dict mapping node_name -> NodeHealthInfo for unhealthy nodes.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
@@ -1950,16 +1957,14 @@ def get_node_health_for_cluster(
     if not node_issues:
         return {}
 
-    # Build structured result: node -> {issue, pods}
-    result: Dict[str, Dict[str, Any]] = {}
+    # Build structured result: node -> NodeHealthInfo
+    result: Dict[str, NodeHealthInfo] = {}
     for pod_name, node_name in pod_node_map.items():
         if node_name and node_name in node_issues:
             if node_name not in result:
-                result[node_name] = {
-                    'issue': node_issues[node_name],
-                    'pods': []
-                }
-            result[node_name]['pods'].append(pod_name)
+                result[node_name] = NodeHealthInfo(issue=node_issues[node_name],
+                                                   pods=[])
+            result[node_name].pods.append(pod_name)
 
     return result
 

@@ -84,6 +84,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.provision.kubernetes.instance import NodeHealthInfo
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -2718,7 +2719,7 @@ def _update_cluster_status(
 
         # For Kubernetes clusters with unhealthy pods, check node health
         # to provide better diagnostics (e.g., "node X is NotReady").
-        node_health: Optional[Dict[str, Dict[str, Any]]] = None
+        node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
         if (ray_cluster_unhealthy and
                 repr(launched_resources.cloud) == 'Kubernetes'):
             unhealthy_pods = [
@@ -3419,7 +3420,7 @@ _MAX_NAMES_IN_SUMMARY = 3
 def _summarize_pod_reasons(
     node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
     total_pods: int,
-    node_health: Optional[Dict[str, Dict[str, Any]]] = None,
+    node_health: Optional[Dict[str, 'NodeHealthInfo']] = None,
 ) -> str:
     """Summarize per-pod reasons into a concise grouped message.
 
@@ -3433,7 +3434,7 @@ def _summarize_pod_reasons(
         total_pods: Total number of pods in the SkyPilot cluster.
         node_health: Optional structured node health data from
             get_node_health_for_cluster(). Maps node_name ->
-            {'issue': str, 'pods': [pod_name, ...]}.
+            NodeHealthInfo.
 
     Returns:
         A summarized string, or '' if no reasons found.
@@ -3446,10 +3447,9 @@ def _summarize_pod_reasons(
         by_issue: Dict[str, List[str]] = {}
         affected_by_issue: Dict[str, int] = {}
         for node_name, info in node_health.items():
-            issue = info['issue']
-            by_issue.setdefault(issue, []).append(node_name)
-            affected_by_issue[issue] = (affected_by_issue.get(issue, 0) +
-                                        len(info['pods']))
+            by_issue.setdefault(info.issue, []).append(node_name)
+            affected_by_issue[info.issue] = (
+                affected_by_issue.get(info.issue, 0) + len(info.pods))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
@@ -3467,10 +3467,10 @@ def _summarize_pod_reasons(
             parts.append(part)
 
     # Collect pod names that are already explained by node issues
-    node_explained_pods = set()
+    node_explained_pods: set = set()
     if node_health:
         for info in node_health.values():
-            node_explained_pods.update(info['pods'])
+            node_explained_pods.update(info.pods)
 
     # 2. Pod-level summary (pods not already explained by node issues)
     pod_issues: Dict[str, List[str]] = {}

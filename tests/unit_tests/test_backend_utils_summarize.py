@@ -1,8 +1,11 @@
 """Tests for _summarize_pod_reasons in backend_utils."""
 from sky.backends.backend_utils import _summarize_pod_reasons
+from sky.provision.kubernetes.instance import NodeHealthInfo
 from sky.utils import status_lib
 
 UP = status_lib.ClusterStatus.UP
+
+N = NodeHealthInfo  # Short alias for readability
 
 
 class TestSummarizePodReasons:
@@ -18,10 +21,7 @@ class TestSummarizePodReasons:
             'worker-0': (UP, 'pod not ready (ContainersNotReady)'),
         }
         node_health = {
-            'gke-node-1': {
-                'issue': 'NotReady',
-                'pods': ['worker-0']
-            },
+            'gke-node-1': N(issue='NotReady', pods=['worker-0']),
         }
         result = _summarize_pod_reasons(statuses, 2, node_health)
         assert 'gke-node-1' in result
@@ -34,10 +34,7 @@ class TestSummarizePodReasons:
             'worker-1': (UP, 'pod not ready'),
         }
         node_health = {
-            'gke-node-1': {
-                'issue': 'NotReady',
-                'pods': ['worker-0', 'worker-1']
-            },
+            'gke-node-1': N(issue='NotReady', pods=['worker-0', 'worker-1']),
         }
         result = _summarize_pod_reasons(statuses, 4, node_health)
         assert 'gke-node-1' in result
@@ -50,18 +47,9 @@ class TestSummarizePodReasons:
             'w-2': (UP, 'pod not ready'),
         }
         node_health = {
-            'node-1': {
-                'issue': 'NotReady',
-                'pods': ['w-0']
-            },
-            'node-2': {
-                'issue': 'NotReady',
-                'pods': ['w-1']
-            },
-            'node-3': {
-                'issue': 'NotReady',
-                'pods': ['w-2']
-            },
+            'node-1': N(issue='NotReady', pods=['w-0']),
+            'node-2': N(issue='NotReady', pods=['w-1']),
+            'node-3': N(issue='NotReady', pods=['w-2']),
         }
         result = _summarize_pod_reasons(statuses, 6, node_health)
         assert '3 nodes are NotReady' in result
@@ -69,10 +57,7 @@ class TestSummarizePodReasons:
     def test_node_names_capped_at_3(self):
         statuses = {f'w-{i}': (UP, 'pod not ready') for i in range(5)}
         node_health = {
-            f'node-{i}': {
-                'issue': 'NotReady',
-                'pods': [f'w-{i}']
-            } for i in range(5)
+            f'node-{i}': N(issue='NotReady', pods=[f'w-{i}']) for i in range(5)
         }
         result = _summarize_pod_reasons(statuses, 10, node_health)
         assert '5 nodes are NotReady' in result
@@ -104,10 +89,7 @@ class TestSummarizePodReasons:
             'w-2': (UP, 'pod not ready (CrashLoopBackOff)'),
         }
         node_health = {
-            'node-1': {
-                'issue': 'NotReady',
-                'pods': ['w-0', 'w-1']
-            },
+            'node-1': N(issue='NotReady', pods=['w-0', 'w-1']),
         }
         result = _summarize_pod_reasons(statuses, 6, node_health)
         assert 'node-1' in result
@@ -119,10 +101,7 @@ class TestSummarizePodReasons:
             'w-0': (UP, 'pod not ready'),
         }
         node_health = {
-            'node-1': {
-                'issue': 'cordoned',
-                'pods': ['w-0']
-            },
+            'node-1': N(issue='cordoned', pods=['w-0']),
         }
         result = _summarize_pod_reasons(statuses, 2, node_health)
         assert 'node-1' in result
@@ -136,14 +115,8 @@ class TestSummarizePodReasons:
             'w-2': (UP, 'pod not ready'),
         }
         node_health = {
-            'node-1': {
-                'issue': 'NotReady',
-                'pods': ['w-0', 'w-1']
-            },
-            'node-2': {
-                'issue': 'cordoned',
-                'pods': ['w-2']
-            },
+            'node-1': N(issue='NotReady', pods=['w-0', 'w-1']),
+            'node-2': N(issue='cordoned', pods=['w-2']),
         }
         result = _summarize_pod_reasons(statuses, 6, node_health)
         assert '2 out of 6 pods' in result
@@ -156,10 +129,7 @@ class TestSummarizePodReasons:
             'w-1': (UP, 'pod not ready (CrashLoopBackOff)'),
         }
         node_health = {
-            'node-1': {
-                'issue': 'NotReady',
-                'pods': ['w-0']
-            },
+            'node-1': N(issue='NotReady', pods=['w-0']),
         }
         result = _summarize_pod_reasons(statuses, 4, node_health)
         assert 'node-1' in result
@@ -178,10 +148,7 @@ class TestStatusReasonIntegration:
             'head': (UP, None),
         }
         node_health = {
-            'node-1': {
-                'issue': 'NotReady',
-                'pods': ['w-0']
-            },
+            'node-1': N(issue='NotReady', pods=['w-0']),
         }
         summary = _summarize_pod_reasons(statuses, 2, node_health)
         ray_cluster_unhealthy = True
