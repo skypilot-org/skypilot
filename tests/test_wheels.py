@@ -193,18 +193,21 @@ def test_wheel_build_reproducible():
 
     try:
         result1 = subprocess.run([sys.executable, '-c', build_script],
-                                 capture_output=True, text=True, check=True)
+                                 capture_output=True,
+                                 text=True,
+                                 check=True)
         hash1 = result1.stdout.strip().splitlines()[-1]
 
         result2 = subprocess.run([sys.executable, '-c', build_script],
-                                 capture_output=True, text=True, check=True)
+                                 capture_output=True,
+                                 text=True,
+                                 check=True)
         hash2 = result2.stdout.strip().splitlines()[-1]
 
         assert hash1 == hash2, (
             f'Wheel build is not reproducible across processes: '
             f'{hash1} != {hash2}. '
             'Check that SOURCE_DATE_EPOCH and PYTHONHASHSEED are set in the '
-            'pip wheel subprocess environment in _build_sky_wheel().'
-        )
+            'pip wheel subprocess environment in _build_sky_wheel().')
     finally:
         shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
