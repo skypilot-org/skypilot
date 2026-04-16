@@ -2373,7 +2373,6 @@ def query_instances(
                          f'non_terminated_only=True. Phase: {phase}')
             continue
         pod_name = pod.metadata.name
-        reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
 
     # Find the list of pod names that should be there
@@ -2394,8 +2393,6 @@ def query_instances(
             reason = _get_pod_missing_reason(context, namespace, cluster_name,
                                              target_pod_name, first_pod)
             first_pod = False
-            reason = (f'{target_pod_name}: {reason}'
-                      if reason is not None else None)
             if not non_terminated_only:
                 cluster_status[target_pod_name] = (None, reason)
 

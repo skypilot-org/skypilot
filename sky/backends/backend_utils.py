@@ -2144,9 +2144,11 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     retry_if_missing: bool,
-) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
-    """Returns the status of the cluster as a list of tuples corresponding
-    to the node status and an optional reason string for said status.
+) -> Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]]:
+    """Returns a dict mapping instance/pod name to (status, reason).
+
+    For the new provisioner API, keys are instance IDs (e.g., pod names
+    on Kubernetes). For the legacy query_status API, keys are str(index).
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -2178,7 +2180,6 @@ def _query_cluster_status_via_cloud_api(
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
-            node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
@@ -2193,11 +2194,13 @@ def _query_cluster_status_via_cloud_api(
         # TODO (kyuds): refactor cloud.query_status api to include reason.
         # Currently not refactoring as this API is actually supposed to be
         # deprecated soon.
-        node_statuses = cloud.query_status(
+        statuses = cloud.query_status(
             cluster_name_on_cloud,
             tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
-        node_statuses = [(status, None) for status in node_statuses]
-    return node_statuses
+        node_status_dict = {
+            str(i): (status, None) for i, status in enumerate(statuses)
+        }
+    return node_status_dict
 
 
 def _query_cluster_info_via_cloud_api(
@@ -2407,7 +2410,7 @@ def _update_cluster_status(
         handle, retry_if_missing=retry_if_missing)
 
     all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
-                        for status in node_statuses) and
+                        for status in node_statuses.values()) and
                     len(node_statuses) == handle.launched_nodes)
 
     external_cluster_failures = ExternalFailureSource.get(
@@ -2704,7 +2707,7 @@ def _update_cluster_status(
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
-                                 for status in node_statuses)
+                                 for status in node_statuses.values())
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
     if is_abnormal and not external_cluster_failures:
@@ -2719,9 +2722,8 @@ def _update_cluster_status(
         if (ray_cluster_unhealthy and
                 repr(launched_resources.cloud) == 'Kubernetes'):
             unhealthy_pods = [
-                status[1].split(':')[0].strip()
-                for status in node_statuses
-                if status[1] is not None
+                pod_name for pod_name, (_, reason) in node_statuses.items()
+                if reason is not None
             ]
             if unhealthy_pods:
                 try:
@@ -3415,7 +3417,7 @@ _MAX_NAMES_IN_SUMMARY = 3
 
 
 def _summarize_pod_reasons(
-    node_statuses: List[Tuple[status_lib.ClusterStatus, Optional[str]]],
+    node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
     total_nodes: int,
     node_health: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
@@ -3423,11 +3425,11 @@ def _summarize_pod_reasons(
 
     Groups issues by root cause:
     1. Node-level issues (from node_health dict, deduplicated by node)
-    2. Pod-level issues (from reason strings, grouped by reason)
+    2. Pod-level issues (grouped by reason, pod names from dict keys)
 
     Args:
-        node_statuses: List of (status, reason) tuples from query_instances.
-            Reason format: '{pod_name}: {pod_reason}'.
+        node_statuses: Dict mapping instance/pod name to (status, reason)
+            as returned by _query_cluster_status_via_cloud_api.
         total_nodes: Total number of nodes in the cluster.
         node_health: Optional structured node health data from
             get_node_health_for_cluster(). Maps node_name ->
@@ -3438,7 +3440,7 @@ def _summarize_pod_reasons(
     """
     parts = []
 
-    # 1. Node-level summary (from structured data — no string parsing)
+    # 1. Node-level summary (from structured data)
     if node_health:
         # Group by issue type (e.g., all NotReady together)
         by_issue: Dict[str, List[str]] = {}
@@ -3472,15 +3474,12 @@ def _summarize_pod_reasons(
 
     # 2. Pod-level summary (pods not already explained by node issues)
     pod_issues: Dict[str, List[str]] = {}
-    for _, reason in node_statuses:
+    for pod_name, (_, reason) in node_statuses.items():
         if reason is None:
             continue
-        pod_name = reason.split(':')[0].strip()
         if pod_name in node_explained_pods:
             continue
-        pod_reason = (reason.split(':', 1)[1].strip()
-                      if ':' in reason else reason)
-        pod_issues.setdefault(pod_reason, []).append(pod_name)
+        pod_issues.setdefault(reason, []).append(pod_name)
 
     for reason, pods in pod_issues.items():
         names = sorted(pods)
