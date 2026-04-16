@@ -366,7 +366,7 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-lg">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}

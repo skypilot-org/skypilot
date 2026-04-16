@@ -257,7 +257,7 @@ tests:
           value: "RELEASE-NAME-api-service"
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
-          value: 80 
+          value: 80
 
   # Test cases for upgradeStrategy-related annotations
   - it: should add session affinity annotations for RollingUpdate strategy
@@ -302,3 +302,28 @@ tests:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
+
+  - it: should not add session affinity annotations but keep retry annotations when sessionAffinity is disabled under RollingUpdate
+    set:
+      ingress.enabled: true
+      ingress.sessionAffinity: false
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity-mode"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
+      # proxy-next-upstream retry annotations must remain so zero-downtime
+      # upgrades still work when session affinity is disabled.
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+          value: "http_502 non_idempotent"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
+          value: "3"

@@ -60,7 +60,8 @@ import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { TelemetrySection } from '@/components/TelemetrySection';
+import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -85,11 +86,11 @@ function JobDetails() {
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
-  // GPU metrics task selection for job groups
-  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
-  const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
+  // Telemetry task selection for job groups
+  const [telemetryTaskIndex, setTelemetryTaskIndex] = useState(0);
+  const TELEMETRY_EXPANDED_KEY = 'skypilot-jobs-telemetry-expanded';
 
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -196,8 +197,8 @@ function JobDetails() {
       setRefreshLogsFlag((prev) => prev + 1);
       // Trigger controller logs refresh
       setRefreshControllerLogsFlag((prev) => prev + 1);
-      // Trigger GPU metrics refresh
-      setGpuMetricsRefreshTrigger((prev) => prev + 1);
+      // Trigger telemetry refresh
+      setTelemetryRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -214,37 +215,35 @@ function JobDetails() {
     setRefreshControllerLogsFlag((prev) => prev + 1);
   };
 
-  // Get all tasks for this job (supports multi-task jobs) - computed early for GPU metrics
-  const allTasksForGpuMetrics = useMemo(() => {
+  // Get all tasks for this job (supports multi-task jobs) - computed early for telemetry
+  const allTasksForTelemetry = useMemo(() => {
     return (
       jobData?.jobs?.filter((item) => String(item.id) === String(jobId)) || []
     );
   }, [jobData, jobId]);
 
-  // Determine which tasks have GPU metrics (Kubernetes, not pool, has cluster_name_on_cloud)
-  const tasksWithGpuMetrics = useMemo(() => {
-    return allTasksForGpuMetrics.map((task, index) => ({
+  // Determine which tasks have telemetry (Kubernetes, not pool, has cluster_name_on_cloud)
+  const tasksWithTelemetry = useMemo(() => {
+    return allTasksForTelemetry.map((task, index) => ({
       index,
       task,
       hasMetrics:
-        task.full_infra?.includes('Kubernetes') &&
+        task.full_infra?.toLowerCase().includes('kubernetes') &&
         !task.pool &&
         task.cluster_name_on_cloud,
     }));
-  }, [allTasksForGpuMetrics]);
+  }, [allTasksForTelemetry]);
 
-  const hasAnyTaskWithGpuMetrics = tasksWithGpuMetrics.some(
-    (t) => t.hasMetrics
-  );
+  const hasAnyTaskWithTelemetry = tasksWithTelemetry.some((t) => t.hasMetrics);
 
-  // Get the currently selected task for GPU metrics
-  const gpuMetricsTask =
-    allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+  // Get the currently selected task for telemetry
+  const telemetryTask =
+    allTasksForTelemetry[telemetryTaskIndex] || allTasksForTelemetry[0];
 
-  // Get cluster name for GPU metrics from selected task
-  const gpuMetricsClusterName =
-    gpuMetricsTask?.cluster_name_on_cloud ||
-    allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
+  // Get cluster name for telemetry from selected task
+  const telemetryClusterName =
+    telemetryTask?.cluster_name_on_cloud ||
+    allTasksForTelemetry[0]?.cluster_name_on_cloud;
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -519,32 +518,33 @@ function JobDetails() {
               </div>
             )}
 
-            {/* GPU Metrics Section - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
-            {isGrafanaAvailable && hasAnyTaskWithGpuMetrics && (
-              <GPUMetricsSection
-                clusterNameOnCloud={gpuMetricsClusterName}
+            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
+            {isGrafanaAvailable && hasAnyTaskWithTelemetry && (
+              <TelemetrySection
+                clusterNameOnCloud={telemetryClusterName}
                 displayName={
                   isMultiTask
-                    ? `${gpuMetricsTask?.task || gpuMetricsTask?.name || detailJobData.name} (Task ${gpuMetricsTaskIndex})`
-                    : gpuMetricsTask?.task ||
-                      gpuMetricsTask?.name ||
+                    ? `${telemetryTask?.task || telemetryTask?.name || detailJobData.name} (Task ${telemetryTaskIndex})`
+                    : telemetryTask?.task ||
+                      telemetryTask?.name ||
                       detailJobData.name
                 }
-                storageKey={GPU_METRICS_EXPANDED_KEY}
+                storageKey={TELEMETRY_EXPANDED_KEY}
+                hasGpu={hasAccelerator(telemetryTask?.accelerators)}
                 noMetricsMessage={
-                  gpuMetricsTask?.pool
-                    ? 'GPU metrics are not available for pool jobs.'
-                    : !gpuMetricsTask?.full_infra?.includes('Kubernetes')
-                      ? 'GPU metrics are only available for Kubernetes tasks.'
-                      : 'No GPU metrics available for this task.'
+                  telemetryTask?.pool
+                    ? 'Telemetry is not available for pool jobs.'
+                    : !telemetryTask?.full_infra?.includes('Kubernetes')
+                      ? 'Telemetry is only available for Kubernetes tasks.'
+                      : 'No telemetry available for this task.'
                 }
                 headerExtra={
                   isMultiTask && (
                     <Select
                       onValueChange={(value) =>
-                        setGpuMetricsTaskIndex(parseInt(value, 10))
+                        setTelemetryTaskIndex(parseInt(value, 10))
                       }
-                      value={String(gpuMetricsTaskIndex)}
+                      value={String(telemetryTaskIndex)}
                     >
                       <SelectTrigger
                         onClick={(e) => e.stopPropagation()}
@@ -554,7 +554,7 @@ function JobDetails() {
                         <SelectValue placeholder="Select Task" />
                       </SelectTrigger>
                       <SelectContent>
-                        {tasksWithGpuMetrics.map(
+                        {tasksWithTelemetry.map(
                           ({ index, task, hasMetrics }) => (
                             <SelectItem
                               key={index}
@@ -899,7 +899,16 @@ function JobDetailsContent({
   const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);
-  const isPreStart = PRE_START_STATUSES.includes(jobData.status);
+  // After priority-based scheduling (#5682), a job can be PENDING while its
+  // controller is already running. Show controller logs when schedule_state
+  // indicates the controller has been claimed (anything other than
+  // INACTIVE/WAITING/null).
+  const isControllerRunning =
+    jobData.schedule_state != null &&
+    jobData.schedule_state !== 'INACTIVE' &&
+    jobData.schedule_state !== 'WAITING';
+  const isPreStart =
+    PRE_START_STATUSES.includes(jobData.status) && !isControllerRunning;
   const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
   // Compute job group status based on primary tasks
@@ -1552,6 +1561,7 @@ JobDetailsContent.propTypes = {
     id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     name: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     status: PropTypes.string,
+    schedule_state: PropTypes.string,
     user: PropTypes.string,
     user_hash: PropTypes.string,
     workspace: PropTypes.string,

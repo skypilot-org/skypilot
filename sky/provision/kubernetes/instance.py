@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -23,6 +23,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import plugin_extensions
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -36,6 +37,25 @@ _MAX_RETRIES = 3
 _MAX_MISSING_PODS_RETRIES = 5
 _MAX_QUERY_INSTANCES_RETRIES = 5
 _QUERY_INSTANCES_RETRY_INTERVAL = .5
+# Once a definitive cluster autoscaling event (TriggeredScaleUp) is observed,
+# extend the pod scheduling deadline from the detection moment by this many
+# seconds. Node scale-up time is unpredictable (often 5-20 min) and the
+# user-configured provision_timeout is typically tuned for normal scheduling
+# latency; with positive evidence that the autoscaler is working on the
+# request, we give it a generous window to complete before failing over.
+#
+# Only TriggeredScaleUp is used as the trigger here — the FailedScheduling
+# heuristic (Karpenter fallback) is NOT reliable enough to extend a deadline
+# by 15 min, because FailedScheduling also fires for genuine resource
+# mismatches (oversized requests, taints, PVC issues, etc.) which would
+# otherwise be masked as "autoscaling in progress" and waste the full window.
+_AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
+# When an autoscaler is configured, ensure the initial wait is at least this
+# long so the Cluster Autoscaler has a chance to scan (default scan interval
+# is 10s) and emit the first TriggeredScaleUp event. Without this floor, a
+# short user-configured provision_timeout (e.g. the default 10s) would exit
+# the wait loop before any event is emitted, defeating the detection logic.
+_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 COMMON_NON_PENDING_EVENT_REASONS = {
@@ -525,12 +545,44 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                                not kubernetes_enums.KubernetesAutoscalerType(
                                    autoscaler_type).emits_autoscale_event())
     is_autoscaling = False
+    # When a definitive TriggeredScaleUp event is observed, this records the
+    # detection moment so that we can extend the deadline — node scale-up is
+    # unpredictable and the user-configured provision_timeout is usually
+    # tuned for normal scheduling latency rather than for waiting on
+    # autoscaler nodes. Heuristic FailedScheduling detection (Karpenter) does
+    # NOT set this — extending a deadline by 15 min based on FailedScheduling
+    # alone would mask real failures (oversized requests, taints, etc.).
+    autoscale_detected_time: Optional[float] = None
+
+    # If the user configured an autoscaler but left provision_timeout too
+    # short, bump the initial timeout up to the minimum so the Cluster
+    # Autoscaler has time to scan and emit its first event. Without this
+    # floor the loop would exit before autoscale_detected_time could ever
+    # be set. Negative timeout (indefinite wait) is left alone.
+    if (autoscaler_is_set and
+            0 <= timeout < _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS):
+        logger.warning(
+            f'Autoscaler is configured but provision_timeout ({timeout}s) '
+            f'is too short; bumping initial timeout to '
+            f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
+        timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
+
+    original_deadline = start_time + timeout
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
-        return time.time() - start_time < timeout
+        # If autoscaling has been detected, extend the deadline from the
+        # detection moment. Use max(...) so an explicitly long user timeout
+        # is never shortened by this extension.
+        if autoscale_detected_time is not None:
+            extended_deadline = (autoscale_detected_time +
+                                 _AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
+            deadline = max(original_deadline, extended_deadline)
+        else:
+            deadline = original_deadline
+        return time.time() < deadline
 
     iteration = 0
     while _evaluate_timeout():
@@ -580,6 +632,10 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 is_autoscaling = _cluster_had_autoscale_event(
                     namespace, context, create_pods_start)
                 msg = 'Kubernetes cluster is autoscaling'
+                if is_autoscaling:
+                    # Definitive TriggeredScaleUp observed — extend the
+                    # deadline from this moment in _evaluate_timeout().
+                    autoscale_detected_time = time.time()
 
             if is_autoscaling:
                 rich_utils.force_update_status(
@@ -1792,6 +1848,185 @@ def get_cluster_info(
         provider_config=provider_config)
 
 
+class NodeHealthInfo:
+    """Health info for a single Kubernetes node."""
+
+    def __init__(self, issue: str, pods: List[str]):
+        self.issue = issue
+        self.pods = pods
+
+
+def _get_pod_health_issues(pod: Any) -> Optional[str]:
+    """Check a Running pod for health issues.
+
+    Examines pod conditions and container statuses to detect problems
+    that would explain why the pod is Running but not functioning
+    (e.g., Ready=False, CrashLoopBackOff).
+
+    Returns None if the pod appears healthy, or a descriptive reason string.
+    """
+    pod_status = getattr(pod, 'status', None)
+    conditions = getattr(pod_status, 'conditions', None)
+    if not conditions:
+        return None
+
+    ready_condition = None
+    for condition in conditions:
+        if condition.type == 'Ready':
+            ready_condition = condition
+            break
+
+    if ready_condition is None or ready_condition.status == 'True':
+        return None
+
+    # Pod is not ready — build a reason string
+    ready_reason = ready_condition.reason or 'Unknown'
+    parts = [f'pod not ready ({ready_reason})']
+
+    # Check container statuses for more specific info
+    container_statuses = getattr(pod_status, 'container_statuses', None) or []
+    container_issues = []
+    for cs in container_statuses:
+        if cs.ready:
+            continue
+        waiting = getattr(cs.state, 'waiting', None)
+        terminated = getattr(cs.state, 'terminated', None)
+        if waiting and waiting.reason:
+            container_issues.append(waiting.reason)
+        elif terminated and terminated.exit_code != 0:
+            container_issues.append(f'{terminated.reason or "terminated"}'
+                                    f' (exit code {terminated.exit_code})')
+
+    if container_issues:
+        parts.append('; '.join(container_issues))
+
+    return '; '.join(parts)
+
+
+def _check_nodes_health(
+    context: Optional[str],
+    node_names: Set[str],
+) -> Dict[str, str]:
+    """Check health of specific Kubernetes nodes.
+
+    Tries the NodeInfoSource plugin first (fast, cached), then falls back
+    to direct Kubernetes API calls.
+
+    Args:
+        context: Kubernetes context name.
+        node_names: Set of node names to check.
+
+    Returns:
+        Dict mapping node_name -> issue description for unhealthy nodes.
+        Healthy nodes are omitted.
+    """
+    if not node_names:
+        return {}
+
+    issues: Dict[str, str] = {}
+
+    # Try NodeInfoSource plugin first (node-info-service sidecar).
+    # get() safely returns None when no provider is registered.
+    # Note: if a node is in node_names but not in the cache, it's silently
+    # skipped (we don't fall back to the k8s API for missing entries). This
+    # is acceptable since this is diagnostic-only and doesn't affect the
+    # cluster status transition.
+    node_info = plugin_extensions.NodeInfoSource.get(
+        context) if context is not None else None
+    if node_info is not None:
+        for name in node_names:
+            info = node_info.node_info_dict.get(name)
+            if info is None:
+                continue
+            if not info.is_ready:
+                issues[name] = 'NotReady'
+            elif info.is_cordoned:
+                issues[name] = 'cordoned'
+        return issues
+
+    # Fallback: direct Kubernetes API (parallelized)
+    def _check_single_node(name: str) -> Optional[Tuple[str, str]]:
+        try:
+            node = kubernetes.core_api(context).read_node(
+                name, _request_timeout=kubernetes.API_TIMEOUT)
+            # Check NotReady first (more severe than cordoned)
+            node_status = getattr(node, 'status', None)
+            for condition in (getattr(node_status, 'conditions', None) or []):
+                if condition.type == 'Ready' and condition.status != 'True':
+                    return (name, 'NotReady')
+            # Check if node is cordoned (unschedulable)
+            node_spec = getattr(node, 'spec', None)
+            if getattr(node_spec, 'unschedulable', False):
+                return (name, 'cordoned')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+        return None
+
+    results = subprocess_utils.run_in_parallel(_check_single_node,
+                                               sorted(node_names))
+    for result in results:
+        if result is not None:
+            issues[result[0]] = result[1]
+
+    return issues
+
+
+def get_node_health_for_cluster(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    unhealthy_pod_names: List[str],
+) -> Dict[str, NodeHealthInfo]:
+    """Check node health for specific unhealthy pods in a cluster.
+
+    Fetches pods to determine which nodes they run on, then checks
+    those nodes' health via NodeInfoSource or the Kubernetes API.
+
+    Args:
+        cluster_name_on_cloud: The cluster name as known to the cloud.
+        provider_config: The provider config from the cluster YAML.
+        unhealthy_pod_names: Pod names that have health issues.
+
+    Returns:
+        Dict mapping node_name -> NodeHealthInfo for unhealthy nodes.
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    is_ssh = context.startswith('ssh-') if context else False
+    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
+    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
+
+    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                               is_ssh, identity, label_selector)
+
+    # Build pod -> node mapping for unhealthy pods
+    unhealthy_set = set(unhealthy_pod_names)
+    pod_node_map: Dict[str, Optional[str]] = {}
+    for pod in pods:
+        name = pod.metadata.name
+        if name in unhealthy_set:
+            pod_node_map[name] = getattr(pod.spec, 'node_name', None)
+
+    unique_nodes = {n for n in pod_node_map.values() if n}
+    if not unique_nodes:
+        return {}
+
+    node_issues = _check_nodes_health(context, unique_nodes)
+    if not node_issues:
+        return {}
+
+    # Build structured result: node -> NodeHealthInfo
+    result: Dict[str, NodeHealthInfo] = {}
+    for pod_name, node_name in pod_node_map.items():
+        if node_name and node_name in node_issues:
+            if node_name not in result:
+                result[node_name] = NodeHealthInfo(issue=node_issues[node_name],
+                                                   pods=[])
+            result[node_name].pods.append(pod_name)
+
+    return result
+
+
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     """Get pod termination reason and write to cluster events.
 
@@ -2197,13 +2432,14 @@ def query_instances(
         if phase in ('Failed', 'Unknown') or is_terminating:
             reason = _get_pod_termination_reason(pod, cluster_name)
             logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
+        elif phase == 'Running':
+            reason = _get_pod_health_issues(pod)
         if non_terminated_only and pod_status is None:
             logger.debug(f'Pod {pod.metadata.name} is terminated, but '
                          'query_instances is called with '
                          f'non_terminated_only=True. Phase: {phase}')
             continue
         pod_name = pod.metadata.name
-        reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
 
     # Find the list of pod names that should be there
@@ -2224,8 +2460,6 @@ def query_instances(
             reason = _get_pod_missing_reason(context, namespace, cluster_name,
                                              target_pod_name, first_pod)
             first_pod = False
-            reason = (f'{target_pod_name}: {reason}'
-                      if reason is not None else None)
             if not non_terminated_only:
                 cluster_status[target_pod_name] = (None, reason)
 
