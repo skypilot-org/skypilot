@@ -128,6 +128,14 @@ class RequestQueue:
         """
         self._backend.put(request)
 
+    async def put_async(self, request: Tuple[str, bool, bool]) -> None:
+        """Put a request to the queue, async.
+
+        Args:
+            request: A tuple of request_id, ignore_return_value, and retryable.
+        """
+        await self._backend.put_async(request)
+
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
 
@@ -823,15 +831,15 @@ async def schedule_request_async(
                                                schedule_type,
                                                is_skypilot_system,
                                                auth_user=auth_user)
-    schedule_prepared_request(request_task, ignore_return_value, precondition,
-                              retryable)
+    await schedule_prepared_request(request_task, ignore_return_value,
+                                    precondition, retryable)
 
 
-def schedule_prepared_request(request_task: api_requests.Request,
-                              ignore_return_value: bool = False,
-                              precondition: Optional[
-                                  preconditions.Precondition] = None,
-                              retryable: bool = False) -> None:
+async def schedule_prepared_request(request_task: api_requests.Request,
+                                    ignore_return_value: bool = False,
+                                    precondition: Optional[
+                                        preconditions.Precondition] = None,
+                                    retryable: bool = False) -> None:
     """Enqueue a request to the request queue
 
     Args:
@@ -845,16 +853,16 @@ def schedule_prepared_request(request_task: api_requests.Request,
         retryable: Whether the request should be retried if it fails.
     """
 
-    def enqueue():
+    async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        _get_queue(request_task.schedule_type).put(input_tuple)
+        await _get_queue(request_task.schedule_type).put_async(input_tuple)
 
     if precondition is not None:
         # Wait async to avoid blocking caller.
         precondition.wait_async(on_condition_met=enqueue)
     else:
-        enqueue()
+        await enqueue()
 
 
 def start(

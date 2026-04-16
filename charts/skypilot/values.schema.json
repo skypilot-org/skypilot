@@ -493,6 +493,9 @@
                 "path": {
                     "type": "string"
                 },
+                "sessionAffinity": {
+                    "type": "boolean"
+                },
                 "tls": {
                     "type": "object",
                     "properties": {
