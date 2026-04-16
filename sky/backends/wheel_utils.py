@@ -154,10 +154,10 @@ def _build_sky_wheel() -> pathlib.Path:
         # SOURCE_DATE_EPOCH is a standardized env var for reproducible builds
         # (https://reproducible-builds.org/docs/source-date-epoch/). Forces
         # pip to use a fixed timestamp in zip entries instead of file mtimes.
-        # env['SOURCE_DATE_EPOCH'] = '0'
+        env['SOURCE_DATE_EPOCH'] = '0'
         # PYTHONHASHSEED=0 makes pip emit Requires-Dist metadata in
         # deterministic order (dict/set iteration depends on hash seed).
-        # env['PYTHONHASHSEED'] = '0'
+        env['PYTHONHASHSEED'] = '0'
         try:
             subprocess.run([
                 sys.executable, '-m', 'pip', 'wheel', '--no-deps', norm_path,
