@@ -4,12 +4,6 @@ from sky.utils import status_lib
 
 UP = status_lib.ClusterStatus.UP
 
-# _summarize_pod_reasons takes:
-#   node_statuses: List[Tuple[ClusterStatus, Optional[str]]]
-#   total_nodes: int
-# The reason strings follow the format from query_instances:
-#   '{pod_name}: {reason}; node {node_name} is {issue}'
-
 
 class TestSummarizePodReasons:
     """Tests for _summarize_pod_reasons."""
@@ -21,40 +15,71 @@ class TestSummarizePodReasons:
     def test_single_node_issue(self):
         statuses = [
             (UP, None),
-            (UP, 'worker-0: pod not ready (ContainersNotReady); '
-             'node gke-node-1 is NotReady'),
+            (UP, 'worker-0: pod not ready (ContainersNotReady)'),
         ]
-        result = _summarize_pod_reasons(statuses, 2)
+        node_health = {
+            'gke-node-1': {
+                'issue': 'NotReady',
+                'pods': ['worker-0']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 2, node_health)
         assert 'gke-node-1' in result
         assert 'NotReady' in result
         assert '1 out of 2 pods' in result
 
     def test_multiple_pods_same_node(self):
         statuses = [
-            (UP, 'worker-0: pod not ready; node gke-node-1 is NotReady'),
-            (UP, 'worker-1: pod not ready; node gke-node-1 is NotReady'),
+            (UP, 'worker-0: pod not ready'),
+            (UP, 'worker-1: pod not ready'),
         ]
-        result = _summarize_pod_reasons(statuses, 4)
+        node_health = {
+            'gke-node-1': {
+                'issue': 'NotReady',
+                'pods': ['worker-0', 'worker-1']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 4, node_health)
         assert 'gke-node-1' in result
         assert '2 out of 4 pods' in result
 
     def test_multiple_nodes_down(self):
         statuses = [
-            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
-            (UP, 'w-1: pod not ready; node node-2 is NotReady'),
-            (UP, 'w-2: pod not ready; node node-3 is NotReady'),
+            (UP, 'w-0: pod not ready'),
+            (UP, 'w-1: pod not ready'),
+            (UP, 'w-2: pod not ready'),
         ]
-        result = _summarize_pod_reasons(statuses, 6)
+        node_health = {
+            'node-1': {
+                'issue': 'NotReady',
+                'pods': ['w-0']
+            },
+            'node-2': {
+                'issue': 'NotReady',
+                'pods': ['w-1']
+            },
+            'node-3': {
+                'issue': 'NotReady',
+                'pods': ['w-2']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 6, node_health)
         assert '3 nodes are NotReady' in result
 
     def test_node_names_capped_at_3(self):
-        statuses = [(UP, f'w-{i}: pod not ready; node node-{i} is NotReady')
-                    for i in range(5)]
-        result = _summarize_pod_reasons(statuses, 10)
+        statuses = [(UP, f'w-{i}: pod not ready') for i in range(5)]
+        node_health = {
+            f'node-{i}': {
+                'issue': 'NotReady',
+                'pods': [f'w-{i}']
+            } for i in range(5)
+        }
+        result = _summarize_pod_reasons(statuses, 10, node_health)
         assert '5 nodes are NotReady' in result
         assert '+ 2 more' in result
 
     def test_pod_only_issue_single(self):
+        """Pod issue with no node health data."""
         statuses = [
             (UP, None),
             (UP, 'worker-0: pod not ready (CrashLoopBackOff)'),
@@ -75,34 +100,79 @@ class TestSummarizePodReasons:
         assert 'CrashLoopBackOff' in result
 
     def test_mixed_node_and_pod_issues(self):
+        """Node issues + pod-only issues in same cluster."""
         statuses = [
-            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
-            (UP, 'w-1: pod not ready; node node-1 is NotReady'),
+            (UP, 'w-0: pod not ready'),
+            (UP, 'w-1: pod not ready'),
             (UP, 'w-2: pod not ready (CrashLoopBackOff)'),
         ]
-        result = _summarize_pod_reasons(statuses, 6)
+        node_health = {
+            'node-1': {
+                'issue': 'NotReady',
+                'pods': ['w-0', 'w-1']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 6, node_health)
         assert 'node-1' in result
         assert 'NotReady' in result
         assert 'CrashLoopBackOff' in result
+        # w-0 and w-1 should NOT appear in pod-level section
+        # (they're explained by node-1)
 
     def test_cordoned_node(self):
         statuses = [
-            (UP, 'w-0: pod not ready; node node-1 is cordoned'),
+            (UP, 'w-0: pod not ready'),
         ]
-        result = _summarize_pod_reasons(statuses, 2)
+        node_health = {
+            'node-1': {
+                'issue': 'cordoned',
+                'pods': ['w-0']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 2, node_health)
         assert 'node-1' in result
         assert 'cordoned' in result
 
     def test_mixed_issue_types_per_issue_pod_count(self):
         """Pod counts should be per issue type, not global."""
         statuses = [
-            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
-            (UP, 'w-1: pod not ready; node node-1 is NotReady'),
-            (UP, 'w-2: pod not ready; node node-2 is cordoned'),
+            (UP, 'w-0: pod not ready'),
+            (UP, 'w-1: pod not ready'),
+            (UP, 'w-2: pod not ready'),
         ]
-        result = _summarize_pod_reasons(statuses, 6)
+        node_health = {
+            'node-1': {
+                'issue': 'NotReady',
+                'pods': ['w-0', 'w-1']
+            },
+            'node-2': {
+                'issue': 'cordoned',
+                'pods': ['w-2']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 6, node_health)
         assert '2 out of 6 pods' in result  # NotReady affects 2 pods
         assert '1 out of 6 pods' in result  # cordoned affects 1 pod
+
+    def test_node_explained_pods_excluded_from_pod_summary(self):
+        """Pods explained by node issues should not appear in pod section."""
+        statuses = [
+            (UP, 'w-0: pod not ready (ContainersNotReady)'),
+            (UP, 'w-1: pod not ready (CrashLoopBackOff)'),
+        ]
+        node_health = {
+            'node-1': {
+                'issue': 'NotReady',
+                'pods': ['w-0']
+            },
+        }
+        result = _summarize_pod_reasons(statuses, 4, node_health)
+        # w-0 is explained by node-1, w-1 is pod-level
+        assert 'node-1' in result
+        assert 'CrashLoopBackOff' in result
+        # w-0 should only appear in the node section, not the pod section
+        parts = result.split('; ')
+        assert len(parts) == 2
 
 
 class TestStatusReasonIntegration:
@@ -111,10 +181,16 @@ class TestStatusReasonIntegration:
 
     def test_status_reason_replaces_ray_message(self):
         statuses = [
-            (UP, 'w-0: pod not ready; node node-1 is NotReady'),
+            (UP, 'w-0: pod not ready (ContainersNotReady)'),
             (UP, None),
         ]
-        summary = _summarize_pod_reasons(statuses, 2)
+        node_health = {
+            'node-1': {
+                'issue': 'NotReady',
+                'pods': ['w-0']
+            },
+        }
+        summary = _summarize_pod_reasons(statuses, 2, node_health)
         ray_cluster_unhealthy = True
         ray_status_details = '1/2 ready'
         if ray_cluster_unhealthy:

@@ -1901,6 +1901,65 @@ def _check_nodes_health(
     return issues
 
 
+def get_node_health_for_cluster(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    unhealthy_pod_names: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Check node health for specific unhealthy pods in a cluster.
+
+    Fetches pods to determine which nodes they run on, then checks
+    those nodes' health via NodeInfoSource or the Kubernetes API.
+
+    Args:
+        cluster_name_on_cloud: The cluster name as known to the cloud.
+        provider_config: The provider config from the cluster YAML.
+        unhealthy_pod_names: Pod names that have health issues.
+
+    Returns:
+        Dict mapping node_name -> {'issue': str, 'pods': [pod_name, ...]}.
+        Only unhealthy nodes are included.
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    is_ssh = context.startswith('ssh-') if context else False
+    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
+    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
+
+    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                               is_ssh, identity, label_selector)
+
+    # Build pod -> node mapping for unhealthy pods
+    unhealthy_set = set(unhealthy_pod_names)
+    pod_node_map: Dict[str, Optional[str]] = {}
+    for pod in pods:
+        name = pod.metadata.name
+        if name in unhealthy_set:
+            pod_node_map[name] = getattr(pod.spec, 'node_name', None)
+
+    unique_nodes = {n for n in pod_node_map.values() if n}
+    if not unique_nodes:
+        return {}
+
+    node_issues = _check_nodes_health(context, unique_nodes)
+    if not node_issues:
+        return {}
+
+    # Build structured result: node -> {issue, pods}
+    result: Dict[str, Dict[str, Any]] = {}
+    for pod_name, node_name in pod_node_map.items():
+        if node_name and node_name in node_issues:
+            if node_name not in result:
+                result[node_name] = {
+                    'issue': node_issues[node_name],
+                    'pods': []
+                }
+            result[node_name]['pods'].append(pod_name)
+
+    return result
+
+
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     """Get pod termination reason and write to cluster events.
 
@@ -2298,7 +2357,6 @@ def query_instances(
     # Check if the pods are running or pending
     cluster_status: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                                     Optional[str]]] = {}
-    pod_node_map: Dict[str, Optional[str]] = {}  # pod_name -> node_name
     for pod in pods:
         phase = pod.status.phase
         is_terminating = pod.metadata.deletion_timestamp is not None
@@ -2315,7 +2373,6 @@ def query_instances(
                          f'non_terminated_only=True. Phase: {phase}')
             continue
         pod_name = pod.metadata.name
-        pod_node_map[pod_name] = getattr(pod.spec, 'node_name', None)
         reason = f'{pod_name}: {reason}' if reason is not None else None
         cluster_status[pod_name] = (pod_status, reason)
 
@@ -2341,26 +2398,6 @@ def query_instances(
                       if reason is not None else None)
             if not non_terminated_only:
                 cluster_status[target_pod_name] = (None, reason)
-
-    # Check node health for Running pods that have issues.
-    # This is conditional — only triggered when a pod reports a problem,
-    # so healthy clusters pay zero overhead.
-    unhealthy_pod_nodes = {
-        pod_name: pod_node_map.get(pod_name)
-        for pod_name, (pod_status, pod_reason) in cluster_status.items()
-        if (pod_reason is not None and pod_status == status_lib.ClusterStatus.UP
-           )
-    }
-    if unhealthy_pod_nodes:
-        unique_nodes = {n for n in unhealthy_pod_nodes.values() if n}
-        if unique_nodes:
-            node_issues = _check_nodes_health(context, unique_nodes)
-            for pod_name, node_name in unhealthy_pod_nodes.items():
-                if node_name and node_name in node_issues:
-                    existing_reason = cluster_status[pod_name][1]
-                    cluster_status[pod_name] = (
-                        cluster_status[pod_name][0], f'{existing_reason}; '
-                        f'node {node_name} is {node_issues[node_name]}')
 
     return cluster_status
 

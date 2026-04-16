@@ -278,17 +278,15 @@ def _make_full_pod(name: str,
 
 
 class TestQueryInstancesHealthIntegration:
-    """Integration tests for query_instances with health checks."""
+    """Integration tests for query_instances with pod health checks."""
 
-    @mock.patch('sky.provision.kubernetes.instance._check_nodes_health')
     @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
-    def test_running_unhealthy_pod_gets_reason(self, mock_list_pods,
-                                               mock_check_nodes):
+    def test_running_unhealthy_pod_gets_reason(self, mock_list_pods):
+        """query_instances sets reason for Running pods with Ready=False."""
         mock_list_pods.return_value = [
             _make_full_pod('head', 'Running', 'node-1', ready=True),
             _make_full_pod('worker-0', 'Running', 'node-2', ready=False),
         ]
-        mock_check_nodes.return_value = {'node-2': 'NotReady'}
 
         result = k8s_instance.query_instances(
             cluster_name='test-cluster',
@@ -301,22 +299,19 @@ class TestQueryInstancesHealthIntegration:
         )
         # Head pod should have no reason
         assert result['head'][1] is None
-        # Worker pod should have health reason with node info
+        # Worker pod should have pod-level health reason
         assert result['worker-0'][1] is not None
         assert 'ContainersNotReady' in result['worker-0'][1]
-        assert 'node-2' in result['worker-0'][1]
-        assert 'NotReady' in result['worker-0'][1]
 
-    @mock.patch('sky.provision.kubernetes.instance._check_nodes_health')
     @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
-    def test_healthy_pods_no_node_check(self, mock_list_pods, mock_check_nodes):
+    def test_healthy_pods_no_reason(self, mock_list_pods):
+        """All healthy pods should have None reason."""
         mock_list_pods.return_value = [
             _make_full_pod('head', 'Running', 'node-1', ready=True),
             _make_full_pod('worker-0', 'Running', 'node-2', ready=True),
         ]
-        mock_check_nodes.return_value = {}
 
-        k8s_instance.query_instances(
+        result = k8s_instance.query_instances(
             cluster_name='test-cluster',
             cluster_name_on_cloud='test-cluster',
             provider_config={
@@ -325,4 +320,5 @@ class TestQueryInstancesHealthIntegration:
                 'services': [],
             },
         )
-        mock_check_nodes.assert_not_called()
+        assert result['head'][1] is None
+        assert result['worker-0'][1] is None

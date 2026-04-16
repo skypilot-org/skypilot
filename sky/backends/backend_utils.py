@@ -2712,8 +2712,35 @@ def _update_cluster_status(
         # earlier. So if all_nodes_up is True and we are here, it means the ray
         # cluster must have been unhealthy.
         ray_cluster_unhealthy = all_nodes_up
+
+        # For Kubernetes clusters with unhealthy pods, check node health
+        # to provide better diagnostics (e.g., "node X is NotReady").
+        node_health: Optional[Dict[str, Dict[str, Any]]] = None
+        if (ray_cluster_unhealthy and
+                repr(launched_resources.cloud) == 'Kubernetes'):
+            unhealthy_pods = [
+                status[1].split(':')[0].strip()
+                for status in node_statuses
+                if status[1] is not None
+            ]
+            if unhealthy_pods:
+                try:
+                    # pylint: disable=import-outside-toplevel
+                    import importlib
+                    k8s_mod = importlib.import_module(
+                        'sky.provision.kubernetes.instance')
+                    ray_config = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
+                    node_health = (k8s_mod.get_node_health_for_cluster(
+                        handle.cluster_name_on_cloud, ray_config['provider'],
+                        unhealthy_pods))
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to get node health for '
+                                 f'{cluster_name!r}: {e}')
+
         status_reason = _summarize_pod_reasons(node_statuses,
-                                               handle.launched_nodes)
+                                               handle.launched_nodes,
+                                               node_health)
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
@@ -3387,69 +3414,42 @@ def _get_glob_clusters(
 
 
 _MAX_NAMES_IN_SUMMARY = 3
-# Separator used by query_instances to append node info to pod reasons.
-# Format: '{pod}: {pod_reason}; node {name} is {issue}'
-_NODE_ISSUE_SEPARATOR = '; node '
 
 
 def _summarize_pod_reasons(
     node_statuses: List[Tuple[status_lib.ClusterStatus, Optional[str]]],
     total_nodes: int,
+    node_health: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """Summarize per-pod reasons into a concise grouped message.
 
     Groups issues by root cause:
-    1. Node-level issues (deduplicated by node name, counted by pods affected)
-    2. Pod-level issues (grouped by reason)
+    1. Node-level issues (from node_health dict, deduplicated by node)
+    2. Pod-level issues (from reason strings, grouped by reason)
 
     Args:
         node_statuses: List of (status, reason) tuples from query_instances.
-        total_nodes: Total number of nodes in the cluster (for "N/M pods").
+            Reason format: '{pod_name}: {pod_reason}'.
+        total_nodes: Total number of nodes in the cluster.
+        node_health: Optional structured node health data from
+            get_node_health_for_cluster(). Maps node_name ->
+            {'issue': str, 'pods': [pod_name, ...]}.
 
     Returns:
         A summarized string, or '' if no reasons found.
     """
-    # Separate node-level and pod-level issues.
-    # Reason format: '{pod}: {pod_reason}; node {name} is {issue}'
-    # We split on _NODE_ISSUE_SEPARATOR to extract node info rather than
-    # using regex, since the format is fully controlled by query_instances.
-    node_issues: Dict[str, Dict[str, Any]] = {}  # node -> {issue, pods}
-    pod_issues: Dict[str, List[str]] = {}  # reason -> [pod_names]
-
-    for _, reason in node_statuses:
-        if reason is None:
-            continue
-
-        # Extract pod name (everything before the first ':')
-        pod_name = reason.split(':')[0].strip()
-
-        # Check for node-level issue suffix
-        if _NODE_ISSUE_SEPARATOR in reason:
-            # Split: 'pod: reason; node X is Y' -> 'node X is Y'
-            node_part = reason.rsplit(_NODE_ISSUE_SEPARATOR, 1)[1]
-            # Split: 'X is Y' -> node_name='X', node_issue='Y'
-            node_name, node_issue = node_part.split(' is ', 1)
-            if node_name not in node_issues:
-                node_issues[node_name] = {'issue': node_issue, 'pods': []}
-            node_issues[node_name]['pods'].append(pod_name)
-        else:
-            # Pod-level issue — extract the reason part after pod name
-            pod_reason = (reason.split(':', 1)[1].strip()
-                          if ':' in reason else reason)
-            pod_issues.setdefault(pod_reason, []).append(pod_name)
-
     parts = []
 
-    # 1. Node-level summary
-    if node_issues:
+    # 1. Node-level summary (from structured data — no string parsing)
+    if node_health:
         # Group by issue type (e.g., all NotReady together)
-        # Track affected pod count per issue type, not globally.
         by_issue: Dict[str, List[str]] = {}
         affected_by_issue: Dict[str, int] = {}
-        for node_name, info in node_issues.items():
-            by_issue.setdefault(info['issue'], []).append(node_name)
-            affected_by_issue[info['issue']] = (
-                affected_by_issue.get(info['issue'], 0) + len(info['pods']))
+        for node_name, info in node_health.items():
+            issue = info['issue']
+            by_issue.setdefault(issue, []).append(node_name)
+            affected_by_issue[issue] = (affected_by_issue.get(issue, 0) +
+                                        len(info['pods']))
 
         for issue, nodes in by_issue.items():
             names = sorted(nodes)
@@ -3466,7 +3466,24 @@ def _summarize_pod_reasons(
             part += f', affecting {affected} out of {total_nodes} pods'
             parts.append(part)
 
-    # 2. Pod-level summary
+    # Collect pod names that are already explained by node issues
+    node_explained_pods = set()
+    if node_health:
+        for info in node_health.values():
+            node_explained_pods.update(info['pods'])
+
+    # 2. Pod-level summary (pods not already explained by node issues)
+    pod_issues: Dict[str, List[str]] = {}
+    for _, reason in node_statuses:
+        if reason is None:
+            continue
+        pod_name = reason.split(':')[0].strip()
+        if pod_name in node_explained_pods:
+            continue
+        pod_reason = (reason.split(':', 1)[1].strip()
+                      if ':' in reason else reason)
+        pod_issues.setdefault(pod_reason, []).append(pod_name)
+
     for reason, pods in pod_issues.items():
         names = sorted(pods)
         if len(names) == 1:
