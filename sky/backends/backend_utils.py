@@ -3387,7 +3387,9 @@ def _get_glob_clusters(
 
 
 _MAX_NAMES_IN_SUMMARY = 3
-_NODE_ISSUE_PATTERN = re.compile(r'; node (\S+) is (.+)$')
+# Separator used by query_instances to append node info to pod reasons.
+# Format: '{pod}: {pod_reason}; node {name} is {issue}'
+_NODE_ISSUE_SEPARATOR = '; node '
 
 
 def _summarize_pod_reasons(
@@ -3407,8 +3409,10 @@ def _summarize_pod_reasons(
     Returns:
         A summarized string, or '' if no reasons found.
     """
-    # Separate node-level and pod-level issues
+    # Separate node-level and pod-level issues.
     # Reason format: '{pod}: {pod_reason}; node {name} is {issue}'
+    # We split on _NODE_ISSUE_SEPARATOR to extract node info rather than
+    # using regex, since the format is fully controlled by query_instances.
     node_issues: Dict[str, Dict[str, Any]] = {}  # node -> {issue, pods}
     pod_issues: Dict[str, List[str]] = {}  # reason -> [pod_names]
 
@@ -3420,10 +3424,11 @@ def _summarize_pod_reasons(
         pod_name = reason.split(':')[0].strip()
 
         # Check for node-level issue suffix
-        node_match = _NODE_ISSUE_PATTERN.search(reason)
-        if node_match:
-            node_name = node_match.group(1)
-            node_issue = node_match.group(2)
+        if _NODE_ISSUE_SEPARATOR in reason:
+            # Split: 'pod: reason; node X is Y' -> 'node X is Y'
+            node_part = reason.rsplit(_NODE_ISSUE_SEPARATOR, 1)[1]
+            # Split: 'X is Y' -> node_name='X', node_issue='Y'
+            node_name, node_issue = node_part.split(' is ', 1)
             if node_name not in node_issues:
                 node_issues[node_name] = {'issue': node_issue, 'pods': []}
             node_issues[node_name]['pods'].append(pod_name)
@@ -3458,7 +3463,7 @@ def _summarize_pod_reasons(
                     name_list += (
                         f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
                 part = f'{len(names)} nodes are {issue} ({name_list})'
-            part += f', affecting {affected}/{total_nodes} pods'
+            part += f', affecting {affected} out of {total_nodes} pods'
             parts.append(part)
 
     # 2. Pod-level summary

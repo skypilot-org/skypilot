@@ -27,7 +27,7 @@ class TestSummarizePodReasons:
         result = _summarize_pod_reasons(statuses, 2)
         assert 'gke-node-1' in result
         assert 'NotReady' in result
-        assert '1/2 pods' in result
+        assert '1 out of 2 pods' in result
 
     def test_multiple_pods_same_node(self):
         statuses = [
@@ -36,7 +36,7 @@ class TestSummarizePodReasons:
         ]
         result = _summarize_pod_reasons(statuses, 4)
         assert 'gke-node-1' in result
-        assert '2/4 pods' in result
+        assert '2 out of 4 pods' in result
 
     def test_multiple_nodes_down(self):
         statuses = [
@@ -101,8 +101,8 @@ class TestSummarizePodReasons:
             (UP, 'w-2: pod not ready; node node-2 is cordoned'),
         ]
         result = _summarize_pod_reasons(statuses, 6)
-        assert '2/6 pods' in result  # NotReady affects 2 pods
-        assert '1/6 pods' in result  # cordoned affects 1 pod
+        assert '2 out of 6 pods' in result  # NotReady affects 2 pods
+        assert '1 out of 6 pods' in result  # cordoned affects 1 pod
 
 
 class TestStatusReasonIntegration:
