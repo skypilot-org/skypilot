@@ -42,6 +42,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
+from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
@@ -2728,8 +2729,6 @@ def _update_cluster_status(
             ]
             if unhealthy_pods:
                 try:
-                    # pylint: disable=import-outside-toplevel
-                    from sky.provision.kubernetes import instance as k8s_instance  # isort: skip  # noqa: E501
                     ray_config = global_user_state.get_cluster_yaml_dict(
                         handle.cluster_yaml)
                     node_health = k8s_instance.get_node_health_for_cluster(
