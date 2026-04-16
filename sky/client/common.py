@@ -52,7 +52,7 @@ _DOWNLOAD_CHUNK_BYTES = 8192
 # can be caused by NGINX's client_max_body_size or Cloudflare's upload limit.
 # As of 09/25/2025, the upload limit for Cloudflare's free plan is 100MiB:
 # https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/
-_UPLOAD_CHUNK_BYTES = 100 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 150 * 1024 * 1024
 
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
