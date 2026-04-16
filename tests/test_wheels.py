@@ -180,8 +180,9 @@ def test_wheel_build_reproducible():
     separate processes building the same source can produce different wheel
     hashes due to non-deterministic metadata ordering and zip timestamps.
 
-    We simulate this by running each build in a separate subprocess with a
-    different PYTHONHASHSEED, just like different API server replicas would.
+    We simulate this by running each build in a separate subprocess,
+    just like different API server replicas would. Each subprocess gets
+    a naturally randomized PYTHONHASHSEED.
     """
     build_script = (
         'import shutil, os; '

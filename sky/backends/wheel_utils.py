@@ -148,8 +148,8 @@ def _build_sky_wheel() -> pathlib.Path:
         # Ensure reproducible wheel builds across processes and machines:
         # Without these, API server replicas produce wheels with different
         # hashes for identical source, which may cause unnecessary wheel
-        # reinstallations on sky clusters, as SKYPILOT_WHEEL_INSTALLATION_COMMANDS
-        # check for the sky wheel hash.
+        # reinstallations on sky clusters, as
+        # SKYPILOT_WHEEL_INSTALLATION_COMMANDS check for the wheel hash.
         env = os.environ.copy()
         # SOURCE_DATE_EPOCH is a standardized env var for reproducible builds
         # (https://reproducible-builds.org/docs/source-date-epoch/). Forces
