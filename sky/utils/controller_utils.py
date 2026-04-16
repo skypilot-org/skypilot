@@ -6,7 +6,7 @@ import os
 import pathlib
 import tempfile
 import typing
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -1430,7 +1430,7 @@ def warn_jobs_consolidation_mode_intent(enabled: bool) -> None:
 
 @annotations.lru_cache(scope='request', maxsize=1)
 def _effective_jobs_consolidation_with_warnings(
-) -> ('tuple[bool, Optional[bool]]'):
+) -> Tuple[bool, Optional[bool]]:
     """Compute effective jobs consolidation and emit warnings once per request.
 
     Returns (effective, intent_arg). intent_arg is None when not on the API
@@ -1464,7 +1464,7 @@ def _effective_jobs_consolidation_with_warnings(
 
 
 def is_jobs_consolidation_mode(
-    extra_validator: Optional[Callable[[bool], None]] = None,) -> bool:
+        extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
     """Return effective jobs-controller consolidation state.
 
     Single source of truth for whether the jobs controller is running in
