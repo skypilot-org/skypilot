@@ -1,0 +1,11 @@
+project:
+  name: "skypilot"
+  description: "Framework for running ML and batch jobs on any cloud (AWS, GCP, Azure, Lambda, etc.)"
+context:
+  exposure: "internet"
+  data_sensitivity: "medium"
+  business_criticality: "high"
+  notes: >-
+    The Docker image is the SkyPilot API server. It bundles cloud CLIs
+    (gcloud, aws, az, kubectl), Python 3.10, and SkyPilot itself.
+    Handles cloud credentials and cluster orchestration at runtime.
