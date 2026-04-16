@@ -5,7 +5,6 @@ to remote clusters.
 """
 import os
 import pathlib
-import re
 import shlex
 from typing import Dict, List, Optional, Tuple
 
@@ -33,13 +32,8 @@ def _wheel_name_prefix(wheel_filename: str) -> str:
 
     PEP 427 wheel filenames are ``{name}-{version}(-{build})?-{py}-{abi}-
     {platform}.whl`` with hyphens in the distribution name replaced by
-    underscores, so the name portion is whatever precedes the first
-    ``-<digit>``.
+    underscores, so the name portion is whatever precedes the first hyphen.
     """
-    match = re.match(r'^(.+?)-\d', wheel_filename)
-    if match:
-        return f'{match.group(1)}-'
-    # Fallback: first hyphen-delimited token. Shouldn't normally trigger.
     return wheel_filename.split('-', 1)[0] + '-'
 
 
@@ -70,7 +64,7 @@ def _build_guarded_install_script(entries: List[Tuple[str, str, str]]) -> str:
   else
     echo "Installing plugin wheel {wheel_name}..."
     {constants.SKY_UV_PIP_CMD} install {remote_wheel}
-    _sky_tmp=$(mktemp)
+    _sky_tmp=$(mktemp "$_sky_stamp.XXXXXX")
     grep -v "^"{q_prefix} "$_sky_stamp" > "$_sky_tmp" || true
     echo {q_wheel} >> "$_sky_tmp"
     mv "$_sky_tmp" "$_sky_stamp"
