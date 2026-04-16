@@ -55,12 +55,8 @@ class Precondition(abc.ABC):
     ) -> None:
         """Wait precondition asynchronously and execute the callback on met.
 
-        The waiting is scheduled as a task on the caller's event loop so that
-        async queue backends (e.g. asyncpg) can be used in the callback
-        without event-loop binding issues.
-
-        The callback may be either a sync function or a coroutine function;
-        coroutines are awaited on the same event loop.
+        The waiting is scheduled as a task on the caller's event loop to avoid
+        running another event loop.
         """
 
         async def wait_with_callback():
