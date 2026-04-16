@@ -16,14 +16,8 @@ logger = sky_logging.init_logger(__name__)
 
 # Remote directory for plugin wheels
 _REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
-# Stamp file listing wheel filenames already installed on the controller.
 _REMOTE_STAMP_FILE = '~/.sky/plugins/.installed_wheels'
-# Lock serializing concurrent plugin installs across parallel launches on the
-# same controller. Without this, two `sky jobs launch` invocations racing
-# through the run phase can half-rewrite site-packages while other plugin
-# imports are in flight, producing transient ImportError.
 _REMOTE_INSTALL_LOCK = '~/.sky/plugins/.install.lock'
-# Timeout (seconds) to wait for the install lock before giving up.
 _INSTALL_LOCK_TIMEOUT = 600
 
 
@@ -37,7 +31,7 @@ def _wheel_name_prefix(wheel_filename: str) -> str:
     return wheel_filename.split('-', 1)[0] + '-'
 
 
-def _build_guarded_install_script(entries: List[Tuple[str, str, str]]) -> str:
+def _build_guarded_install_script(wheels: List[Tuple[str, str]]) -> str:
     """Build a shell script that installs each wheel at most once.
 
     For each wheel, the script:
@@ -48,13 +42,12 @@ def _build_guarded_install_script(entries: List[Tuple[str, str, str]]) -> str:
        stamp file and prunes stale wheel files for that package.
 
     Args:
-        entries: list of ``(wheel_filename, package_prefix, remote_path)``.
+        wheels: list of ``(wheel_filename, remote_path)`` pairs.
     """
     install_blocks = []
-    for wheel_name, pkg_prefix, remote_wheel in entries:
+    for wheel_name, remote_wheel in wheels:
         q_wheel = shlex.quote(wheel_name)
-        q_prefix = shlex.quote(pkg_prefix)
-        q_prefix_glob = shlex.quote(f'{pkg_prefix}*.whl')
+        q_prefix = shlex.quote(_wheel_name_prefix(wheel_name))
         # remote_wheel starts with '~' which must be left unquoted so the
         # shell expands it; the filename portion cannot contain shell
         # metacharacters by PEP 427.
@@ -64,12 +57,7 @@ def _build_guarded_install_script(entries: List[Tuple[str, str, str]]) -> str:
   else
     echo "Installing plugin wheel {wheel_name}..."
     {constants.SKY_UV_PIP_CMD} install {remote_wheel}
-    _sky_tmp=$(mktemp "$_sky_stamp.XXXXXX")
-    grep -v "^"{q_prefix} "$_sky_stamp" > "$_sky_tmp" || true
-    echo {q_wheel} >> "$_sky_tmp"
-    mv "$_sky_tmp" "$_sky_stamp"
-    find {_REMOTE_PLUGINS_WHEEL_DIR} -maxdepth 1 \\
-      -name {q_prefix_glob} ! -name {q_wheel} -delete 2>/dev/null || true
+    _sky_record {q_prefix} {q_wheel}
   fi""")
 
     body = '\n'.join(install_blocks)
@@ -84,6 +72,15 @@ def _build_guarded_install_script(entries: List[Tuple[str, str, str]]) -> str:
   }}
   _sky_stamp={_REMOTE_STAMP_FILE}
   touch "$_sky_stamp"
+  _sky_record() {{
+    local _t
+    _t=$(mktemp "$_sky_stamp.XXXXXX")
+    grep -v "^$1" "$_sky_stamp" > "$_t" || true
+    echo "$2" >> "$_t"
+    mv "$_t" "$_sky_stamp"
+    find {_REMOTE_PLUGINS_WHEEL_DIR} -maxdepth 1 \\
+      -name "$1*.whl" ! -name "$2" -delete 2>/dev/null || true
+  }}
 {body}
 )"""
 
@@ -141,7 +138,7 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         return {}, ''
 
     file_mounts: Dict[str, str] = {}
-    entries: List[Tuple[str, str, str]] = []
+    wheels: List[Tuple[str, str]] = []
 
     for wheel_path in wheel_files:
         # File mount: upload the wheel file directly to the remote cluster
@@ -149,10 +146,9 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         remote_wheel_path = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
                              f'{wheel_path.name}')
         file_mounts[remote_wheel_path] = str(wheel_path)
-        entries.append((wheel_path.name, _wheel_name_prefix(wheel_path.name),
-                        remote_wheel_path))
+        wheels.append((wheel_path.name, remote_wheel_path))
 
-    return file_mounts, _build_guarded_install_script(entries)
+    return file_mounts, _build_guarded_install_script(wheels)
 
 
 def get_filtered_plugins_config_path() -> Optional[str]:
