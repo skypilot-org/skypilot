@@ -668,6 +668,19 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
         if pvc_storage_class:
             config.config['storage_class_name'] = pvc_storage_class
 
+    # Populate access_mode from PVC (immutable, so PVC is source of truth)
+    pvc_access_modes = getattr(pvc_obj.spec, 'access_modes', None)
+    if pvc_access_modes:
+        pvc_access_mode = pvc_access_modes[0]
+        current_access_mode = config.config.get('access_mode')
+        if current_access_mode != pvc_access_mode:
+            if current_access_mode is not None:
+                logger.debug(
+                    f'PVC {pvc_name} has access mode {pvc_access_mode} '
+                    f'but config access_mode is {current_access_mode}, '
+                    f'overriding with the PVC access mode.')
+            config.config['access_mode'] = pvc_access_mode
+
     # Populate size if not set (prefer bound capacity, fallback to requested)
     pvc_size = None
     size_quantity = None
