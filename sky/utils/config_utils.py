@@ -22,7 +22,7 @@ _PATCH_MERGE_KEYS = {
     'initContainers': 'name',
     'ephemeralContainers': 'name',
     'volumes': 'name',
-    'volumeMounts': 'name',
+    'volumeMounts': 'mountPath',
     'resourceClaims': 'name',
     'env': 'name',
     'hostAliases': 'ip',
