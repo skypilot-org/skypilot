@@ -243,14 +243,18 @@ class BatchCoordinator:
     def _shutdown_stale_workers(self) -> None:
         """Shut down any stale worker services on discovered workers.
 
-        After a crash, old worker processes may still hold port 8290.
-        Send /shutdown to each worker before launching fresh services.
+        After a controller crash the old worker SkyPilot jobs are still
+        running and hold port 8290.  We cancel **all** jobs on each
+        worker cluster so the port is guaranteed to be free before we
+        launch fresh services.
         """
         for cluster_name in self._workers:
             try:
-                self._shutdown_worker(cluster_name)
+                cancel_req_id = sdk.cancel(cluster_name, all=True)
+                sdk.get(cancel_req_id)
+                logger.info(f'Cancelled all stale jobs on {cluster_name}')
             except Exception:  # pylint: disable=broad-except
-                logger.debug(f'No stale worker to shut down on '
+                logger.debug(f'No stale jobs to cancel on '
                              f'{cluster_name}')
 
     # ------------------------------------------------------------------

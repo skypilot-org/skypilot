@@ -13,7 +13,6 @@ import tempfile
 import pytest
 from smoke_tests import smoke_tests_utils
 
-import sky
 from sky import skypilot_config
 
 
@@ -131,6 +130,7 @@ def test_batch_simple(generic_cloud: str):
 # ---------- Test diffusion batch (image generation) ----------
 @pytest.mark.batch
 @pytest.mark.resource_heavy
+@pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
@@ -485,6 +485,11 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'| grep "{pool_name}" | head -1)\n'
                 # Check progress once the job is back to RUNNING,
                 # WINDING_DOWN, or SUCCEEDED.
+                f'  if echo "$LINE" | grep -qE "FAILED"; then\n'
+                f'    echo "ERROR: Batch job FAILED after recovery"\n'
+                f'    echo "Job line: $LINE"\n'
+                f'    exit 1\n'
+                f'  fi\n'
                 f'  if echo "$LINE" | grep -qE "RUNNING|WINDING_DOWN|SUCCEEDED"; then\n'
                 f'    if [ "$VERIFIED" -eq 0 ]; then\n'
                 f'      PROGRESS_AFTER=$(echo "$LINE" '
