@@ -744,3 +744,149 @@ def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
     # Verify sidecar is added
     sidecar = next(c for c in containers if c['name'] == 'sidecar')
     assert sidecar['image'] == 'busybox:latest'
+
+
+def test_merge_k8s_configs_args_replaced_not_extended():
+    """Test that container args are replaced, not extended, when merging.
+
+    This is a regression test for a bug where merging two containers with
+    the same name would extend (concatenate) the args list instead of
+    replacing it. For example, args: ["echo", "hello"] would become
+    args: ["echo", "hello", "echo", "hello"] after merge.
+    """
+    base_config = {
+        'spec': {
+            'initContainers': [{
+                'name': 'my-init',
+                'image': 'busybox:latest',
+                'args': ['echo', 'hello']
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'initContainers': [{
+                'name': 'my-init',
+                'image': 'busybox:latest',
+                'args': ['echo', 'hello']
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Args should be replaced, not extended
+    init_container = base_config['spec']['initContainers'][0]
+    assert init_container['args'] == [
+        'echo', 'hello'
+    ], (f"Expected args to be replaced, not extended. Got: {init_container['args']}"
+       )
+
+
+def test_merge_k8s_configs_command_replaced_not_extended():
+    """Test that container command is replaced, not extended, when merging.
+
+    Similar to test_merge_k8s_configs_args_replaced_not_extended but for
+    the command field.
+    """
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'image': 'nginx:latest',
+                'command': ['/bin/sh', '-c']
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'image': 'nginx:latest',
+                'command': ['/bin/sh', '-c']
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Command should be replaced, not extended
+    container = base_config['spec']['containers'][0]
+    assert container['command'] == [
+        '/bin/sh', '-c'
+    ], (f"Expected command to be replaced, not extended. Got: {container['command']}"
+       )
+
+
+def test_merge_k8s_configs_args_override_replaces():
+    """Test that args from override completely replace base args."""
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'args': ['--old-flag', '--old-value']
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'args': ['--new-flag', '--new-value']
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    container = base_config['spec']['containers'][0]
+    assert container['args'] == [
+        '--new-flag', '--new-value'
+    ], (f"Expected args to be replaced with override. Got: {container['args']}")
+
+
+def test_merge_k8s_configs_env_still_merged_by_name():
+    """Test that env vars are still merged by name (existing behavior preserved)."""
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'env': [{
+                    'name': 'FOO',
+                    'value': '1'
+                }, {
+                    'name': 'BAR',
+                    'value': '2'
+                }]
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [{
+                'name': 'main',
+                'env': [{
+                    'name': 'FOO',
+                    'value': 'updated'
+                }, {
+                    'name': 'BAZ',
+                    'value': '3'
+                }]
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    container = base_config['spec']['containers'][0]
+    env_names = [e['name'] for e in container['env']]
+
+    # All three env vars should exist (merged by name)
+    assert len(container['env']) == 3
+    assert 'FOO' in env_names
+    assert 'BAR' in env_names
+    assert 'BAZ' in env_names
+
+    # FOO should be updated
+    foo = next(e for e in container['env'] if e['name'] == 'FOO')
+    assert foo['value'] == 'updated'

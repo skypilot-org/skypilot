@@ -11,9 +11,12 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # Kubernetes API use list to represent dictionary fields with patch strategy
 # merge and each item is indexed by the patch merge key. The following map
 # maps the field name to the patch merge key.
-# pylint: disable=line-too-long
-# Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
-# NOTE: field imagePullSecrets are not included deliberately for backward compatibility
+# - If the value is a string, items are merged by that key (e.g., 'name')
+# - If the value is None, the list is replaced atomically (e.g., args, command)
+# Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/
+#      #podspec-v1-core
+# NOTE: field imagePullSecrets are not included deliberately for backward
+# compatibility
 _PATCH_MERGE_KEYS = {
     'containers': 'name',
     'initContainers': 'name',
@@ -26,6 +29,9 @@ _PATCH_MERGE_KEYS = {
     'topologySpreadConstraints': 'topologyKey',
     'ports': 'containerPort',
     'volumeDevices': 'devicePath',
+    # Atomic list fields - replaced entirely, not merged item-by-item
+    'args': None,
+    'command': None,
 }
 
 
@@ -240,39 +246,46 @@ def merge_k8s_configs(
             # by the patch merge key.
             elif key in _PATCH_MERGE_KEYS:
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
-                for override_item in value:
-                    override_item_name = override_item.get(patch_merge_key)
-                    if override_item_name is not None:
-                        # Item has a name - use patch merge by name
-                        existing_base_item = next(
-                            (v for v in base_config[key]
-                             if v.get(patch_merge_key) == override_item_name),
-                            None)
-                        if existing_base_item is not None:
-                            merge_k8s_configs(existing_base_item, override_item)
+                if patch_merge_key is None:
+                    # Atomic list field (e.g., args, command) - replace entirely
+                    base_config[key] = value
+                else:
+                    for override_item in value:
+                        override_item_name = override_item.get(patch_merge_key)
+                        if override_item_name is not None:
+                            # Item has a name - use patch merge by name
+                            existing_base_item = next(
+                                (v for v in base_config[key]
+                                 if v.get(patch_merge_key) == override_item_name
+                                ), None)
+                            if existing_base_item is not None:
+                                merge_k8s_configs(existing_base_item,
+                                                  override_item)
+                            else:
+                                base_config[key].append(override_item)
+                        elif key == 'containers' and base_config[key]:
+                            # Backward compatibility for containers: if no name
+                            # is specified, merge into the first container
+                            merge_k8s_configs(base_config[key][0],
+                                              override_item,
+                                              next_allowed_override_keys,
+                                              next_disallowed_override_keys)
                         else:
                             base_config[key].append(override_item)
-                    elif key == 'containers' and base_config[key]:
-                        # Backward compatibility for containers: if no name is
-                        # specified, merge into the first container (index 0)
-                        merge_k8s_configs(base_config[key][0], override_item,
-                                          next_allowed_override_keys,
-                                          next_disallowed_override_keys)
-                    else:
-                        base_config[key].append(override_item)
             else:
                 base_config[key].extend(value)
         else:
             base_config[key] = value
 
 
-def get_cloud_config_value_from_dict(
-        dict_config: Dict[str, Any],
-        cloud: str,
-        keys: Tuple[str, ...],
-        region: Optional[str] = None,
-        default_value: Optional[Any] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+def get_cloud_config_value_from_dict(dict_config: Dict[str, Any],
+                                     cloud: str,
+                                     keys: Tuple[str, ...],
+                                     region: Optional[str] = None,
+                                     default_value: Optional[Any] = None,
+                                     override_configs: Optional[Dict[
+                                         str, Any]] = None,
+                                     merge_dicts: bool = False) -> Any:
     """Returns the nested key value by reading from config
     Order to get the property_name value:
     1. if region is specified,
@@ -281,6 +294,9 @@ def get_cloud_config_value_from_dict(
        try to get it at the cloud level <cloud>/keys
     3. if not found at cloud level,
        return either default_value if specified or None
+
+    If merge_dicts is True and both levels return dicts, the region-level
+    dict is shallow-merged into the cloud-level dict (region keys override).
     """
     input_config = Config(dict_config)
     region_key = None
@@ -306,6 +322,9 @@ def get_cloud_config_value_from_dict(
             isinstance(per_context_config, dict)):
         merge_k8s_configs(general_config, per_context_config)
         return general_config
+    elif (merge_dicts and isinstance(general_config, dict) and
+          isinstance(per_context_config, dict)):
+        return {**general_config, **per_context_config}
     else:
         return (general_config
                 if per_context_config is None else per_context_config)

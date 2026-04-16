@@ -140,12 +140,18 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         V100: 2.50     # $/accelerator/hr
+    :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
+      H100: h100-partition
+    :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
+        gpu_partition_map:
+          H100: h100-custom
+        cpu_partition: cpu-only
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -373,6 +379,9 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
+.. note::
+  For :ref:`remote API servers <sky-api-server-remote>`, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default, which means the API server manages jobs directly. In this mode, ``controller.resources`` and ``controller.autostop`` settings are ignored.
+
 For more information about managed jobs, see :ref:`managed-jobs`.
 
 
@@ -423,9 +432,9 @@ Example:
 ``jobs.controller.consolidation_mode``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the API server, rather than on a :ref:`remote controller cluster <jobs-controller-remote>`. Don't enable unless you are using a remotely-deployed API server.
 
-Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``). Otherwise disabled. Changes require an API server restart to take effect.
+Default: when unset, automatically enabled for :ref:`remote API servers <sky-api-server-remote>`. Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 
@@ -441,7 +450,7 @@ Example:
 ``jobs.controller.resources``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure resources for the managed jobs controller.
+Configure resources for the remote managed jobs controller. Ignored when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers); in that case, tune the API server's resources instead (see :ref:`sky-api-server-resources-tuning`).
 
 For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
 
@@ -464,7 +473,7 @@ Example:
 ``jobs.controller.autostop``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+Configure :ref:`autostop <auto-stop>` for the remote managed jobs controller. Not applicable when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers), since the controller lifecycle is tied to the API server.
 
 By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
 
@@ -2089,6 +2098,72 @@ Example:
 Pricing can also be set per-cluster and per-partition using
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
 
+.. _config-yaml-slurm-gpu-partition-map:
+
+``slurm.gpu_partition_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Mapping of GPU types to Slurm partition names (optional).
+
+Some Slurm clusters configure
+`GRES <https://slurm.schedmd.com/gres.html>`_ without a GPU type
+(e.g., ``--gres=gpu:8`` instead of ``--gres=gpu:h100:8``), and rely on
+partitions to select the correct node type. By default, SkyPilot generates
+typed GRES directives (``--gres=gpu:<type>:<count>``), which will fail on
+these clusters.
+
+``gpu_partition_map`` tells SkyPilot which partitions correspond to which GPU
+types. When a GPU type is found in the map, SkyPilot will:
+
+1. Narrow the list of candidate partitions to those in the map.
+2. Generate GRES **without** a GPU type (``--gres=gpu:<count>``).
+
+Each key is a GPU type (case-insensitive) and each value is either a single
+partition name or a list of partition names.
+
+Default: not set.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    gpu_partition_map:
+      H100: h100-partition
+      A100:
+        - a100-train
+        - a100-dev
+
+``gpu_partition_map`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Per-cluster
+values override global values for the same GPU type.
+
+.. _config-yaml-slurm-cpu-partition:
+
+``slurm.cpu_partition``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Slurm partition to use for CPU-only tasks (optional).
+
+When ``--gpus`` is not provided (i.e., no accelerators are requested),
+SkyPilot will use this partition instead of the cluster's default partition.
+This is useful when your Slurm cluster has separate partitions for CPU-only
+and GPU workloads.
+
+Default: not set (uses the cluster's default partition).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    cpu_partition: cpu-batch
+
+``cpu_partition`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, or per-task
+using the ``config:`` block in a task YAML. Per-cluster values override
+global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2112,6 +2187,15 @@ Supported fields:
   accelerators are inherited. The merge order is::
 
       cloud-level  <  cluster-level  <  partition-level
+
+- ``gpu_partition_map``:
+  :ref:`GPU partition map <config-yaml-slurm-gpu-partition-map>` overrides at
+  the cluster level. Per-cluster values override global values for the same
+  GPU type.
+
+- ``cpu_partition``:
+  :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
+  cluster level. Per-cluster values override the global value.
 
 Example:
 
@@ -2143,6 +2227,13 @@ Example:
         workdir: /home/$USER
         pricing:
           cpu: 0.03
+        # Map GPU types to partitions for clusters with GRES
+        # without a GPU type.
+        gpu_partition_map:
+          H100: h100-partition
+          A100:
+            - a100-train
+            - a100-dev
         partition_configs:
           gpu-partition:
             # Override accelerator rate for this partition; other values

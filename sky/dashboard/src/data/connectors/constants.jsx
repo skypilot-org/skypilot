@@ -43,6 +43,12 @@ export const BASE_PATH = getBasePath();
 export const TIMEOUT = 10000;
 export const API_URL = '/api/v1';
 export const WS_API_URL = API_URL.replace(/^http/, 'ws');
+// Custom events used to coordinate plugin loading with the layout shell.
+// layout.jsx listens for these to avoid flashing the fallback top bar before
+// a navigation plugin (e.g. sidebar) has had a chance to register.
+export const EVENT_NAVIGATION_READY = 'skydashboard:navigation-ready';
+export const EVENT_PLUGINS_LOADED = 'skydashboard:plugins-loaded';
+
 export const CLUSTER_DOES_NOT_EXIST = 'ClusterDoesNotExist';
 export const NOT_SUPPORTED_ERROR = 'NotSupportedError';
 export const CLUSTER_NOT_UP_ERROR = 'ClusterNotUpError';

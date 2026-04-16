@@ -8,14 +8,15 @@
 
 This script is useful for users who do not have local Kubernetes credentials.
 """
+
 import asyncio
+import json
 import os
 import struct
 import sys
 import time
 from typing import Dict, Optional
 
-import requests
 import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
@@ -24,7 +25,7 @@ from sky import exceptions
 from sky.client import service_account_auth
 from sky.server import common as server_common
 from sky.server import constants
-from sky.server.server import SSHMessageType
+from sky.server.websocket_utils import SSHMessageType
 from sky.skylet import constants as skylet_constants
 
 BUFFER_SIZE = 2**16  # 64KB
@@ -36,10 +37,18 @@ MAX_UNANSWERED_PINGS = 100
 OPEN_TIMEOUT_SECONDS = 60
 
 
-async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
+async def main(
+    url: str,
+    timestamps_supported: bool,
+    login_url: str,
+    override_headers: Optional[Dict[str, str]] = None,
+) -> None:
     headers = {}
-    headers.update(server_common.get_cookie_header_for_url(url))
-    headers.update(service_account_auth.get_service_account_headers())
+    if override_headers:
+        headers.update(override_headers)
+    else:
+        headers.update(server_common.get_cookie_header_for_url(url))
+        headers.update(service_account_auth.get_service_account_headers())
     try:
         async with connect(url,
                            ping_interval=None,
@@ -56,7 +65,8 @@ async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
 
 
 async def run_websocket_proxy(websocket: ClientConnection,
-                              timestamps_supported: bool) -> None:
+                              timestamps_supported: bool,
+                              first_message: Optional[bytes] = None) -> None:
     if os.isatty(sys.stdin.fileno()):
         # pylint: disable=import-outside-toplevel
         import termios
@@ -91,7 +101,7 @@ async def run_websocket_proxy(websocket: ClientConnection,
                                websocket_closed_event, websocket_lock),
             websocket_to_stdout(websocket, stdout_writer, timestamps_supported,
                                 last_ping_time_dict, websocket_closed_event,
-                                websocket_lock),
+                                websocket_lock, first_message),
             latency_monitor(websocket, last_ping_time_dict,
                             websocket_closed_event, websocket_lock),
             return_exceptions=True)
@@ -172,10 +182,18 @@ async def websocket_to_stdout(websocket: ClientConnection,
                               timestamps_supported: bool,
                               last_ping_time_dict: Optional[dict],
                               websocket_closed_event: asyncio.Event,
-                              websocket_lock: asyncio.Lock):
+                              websocket_lock: asyncio.Lock,
+                              first_message: Optional[bytes] = None):
     try:
+        # If we already received a first message (e.g. from redirect check),
+        # process it before entering the recv loop.
+        pending_message = first_message
         while not websocket_closed_event.is_set():
-            message = await websocket.recv()
+            if pending_message is not None:
+                message = pending_message
+                pending_message = None
+            else:
+                message = await websocket.recv()
             if (timestamps_supported and len(message) > 0 and
                     last_ping_time_dict is not None):
                 message_type = struct.unpack('!B', message[:1])[0]
@@ -221,21 +239,74 @@ async def websocket_to_stdout(websocket: ClientConnection,
         websocket_closed_event.set()
 
 
+async def _connect_with_redirect(ws_url: str, timestamps_supported: bool,
+                                 login_url: str) -> None:
+    """Connect to WebSocket, handle REDIRECT frame if server sends one."""
+    headers: Dict[str, str] = {}
+    headers.update(server_common.get_cookie_header_for_url(ws_url))
+    headers.update(service_account_auth.get_service_account_headers())
+    try:
+        async with connect(ws_url,
+                           ping_interval=None,
+                           open_timeout=OPEN_TIMEOUT_SECONDS,
+                           additional_headers=headers) as websocket:
+            # Read the first frame to check for REDIRECT.
+            first_msg = await websocket.recv()
+            if (len(first_msg) > 0 and struct.unpack('!B', first_msg[:1])[0]
+                    == SSHMessageType.REDIRECT):
+                redirect_info = json.loads(first_msg[1:].decode())
+                await websocket.close()
+                await _handle_redirect(redirect_info,
+                                       timestamps_supported,
+                                       login_url,
+                                       original_url=ws_url)
+                return
+            await run_websocket_proxy(websocket,
+                                      timestamps_supported,
+                                      first_message=first_msg)
+    except websockets.exceptions.InvalidStatus as e:
+        if e.response.status_code == 403:
+            print(str(exceptions.ApiServerAuthenticationError(login_url)),
+                  file=sys.stderr)
+        else:
+            print(f'Error ssh into cluster: {e}', file=sys.stderr)
+        sys.exit(1)
+
+
+async def _handle_redirect(redirect_info: dict,
+                           timestamps_supported: bool,
+                           login_url: str,
+                           original_url: str = '') -> None:
+    """Reconnect after receiving a REDIRECT frame.
+
+    The redirect_info dict is opaque to this module — it contains a ready-to-use
+    ``url`` (full WebSocket URL) and ``headers`` (e.g. authorization) provided
+    by the server-side redirect hook.
+    """
+    url = redirect_info['url']
+    headers = redirect_info.get('headers', {})
+    try:
+        await main(
+            url,
+            timestamps_supported,
+            login_url,
+            override_headers=headers,
+        )
+    except (OSError, websockets.exceptions.InvalidURI,
+            websockets.exceptions.InvalidHandshake, asyncio.TimeoutError):
+        # The redirect target is unreachable, fallback to the API server
+        if not original_url:
+            raise
+        separator = '&' if '?' in original_url else '?'
+        fallback_url = f'{original_url}{separator}no_redirect=1'
+        await main(fallback_url, timestamps_supported, login_url)
+
+
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
 
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    if disable_latency_measurement:
-        timestamps_are_supported = False
-    else:
-        # TODO(aylei): remove the separate /api/health call and use the header
-        # during websocket handshake to determine the server version.
-        health_url = f'{server_url}/api/health'
-        cookie_hdr = server_common.get_cookie_header_for_url(health_url)
-        health_response = requests.get(health_url, headers=cookie_hdr)
-        health_data = health_response.json()
-        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
 
     # Capture the original API server URL for login hint if authentication
     # is required.
@@ -245,9 +316,7 @@ if __name__ == '__main__':
     if server_proto == 'https':
         websocket_proto = 'wss'
     server_url = f'{websocket_proto}://{server_fqdn}'
-
-    client_version_str = (f'&client_version={constants.API_VERSION}'
-                          if timestamps_are_supported else '')
+    client_version_str = f'&client_version={constants.API_VERSION}'
 
     # For backwards compatibility, fallback to kubernetes-pod-ssh-proxy if
     # no endpoint is provided.
@@ -258,4 +327,7 @@ if __name__ == '__main__':
                      f'?cluster_name={sys.argv[2]}'
                      f'&worker={worker_idx}'
                      f'{client_version_str}')
-    asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))
+
+    asyncio.run(
+        _connect_with_redirect(websocket_url, not disable_latency_measurement,
+                               _login_url))

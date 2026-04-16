@@ -154,6 +154,18 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
 T = TypeVar('T')
 
 
+def _get_ws_proxy_command() -> str:
+    """Returns the ws-proxy command string.
+
+    Defaults to the Python websocket_proxy.py script. Plugins can
+    replace this function to prefer a native binary.
+    """
+    escaped_executable_path = shlex.quote(sys.executable)
+    escaped_websocket_proxy_path = shlex.quote(
+        f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+    return f'{escaped_executable_path} {escaped_websocket_proxy_path}'
+
+
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -179,6 +191,8 @@ def _get_cluster_records_and_set_ssh_config(
                             _include_credentials=True,
                             _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
+    # Cache the ws-proxy command (constant across clusters).
+    ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -206,9 +220,6 @@ def _get_cluster_records_and_set_ssh_config(
             escaped_key_path = shlex.quote(
                 (cluster_utils.SSHConfigHelper.generate_local_key_file(
                     handle.cluster_name, credentials)))
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -223,8 +234,7 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\"{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
+                f'\"{ws_proxy_cmd} '
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name} '
                 f'kubernetes-pod-ssh-proxy\"')
@@ -232,13 +242,9 @@ def _get_cluster_records_and_set_ssh_config(
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # %w is a placeholder for the node index, substituted per-node
             # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (f'{escaped_executable_path} '
-                             f'{escaped_websocket_proxy_path} '
+            proxy_command = (f'{ws_proxy_cmd} '
                              f'{server_common.get_server_url()} '
                              f'{handle.cluster_name} '
                              f'slurm-job-ssh-proxy %w')
@@ -920,6 +926,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored '
                     'for JobGroup YAML.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
 
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
@@ -934,6 +943,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -1315,14 +1327,9 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'cluster',
-                'operator': ':',
-                'value': handle.get_cluster_name(),
-            })
             cluster_dashboard_url = server_common.get_dashboard_url(
                 server_common.get_server_url(),
-                starting_page=f'clusters?{query}')
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -5600,28 +5607,22 @@ def jobs_launch(
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
+        returncode = None
         if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
+        job_dashboard_url = None
+        if not server_common.is_api_server_local():
+            job_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
+        if returncode is not None:
             sys.exit(returncode)
-        else:
-            job_dashboard_url = None
-            if not server_common.is_api_server_local():
-                query = urllib.parse.urlencode({
-                    'property': 'id',
-                    'operator': '=',
-                    'value': job_id,
-                })
-                job_dashboard_url = server_common.get_dashboard_url(
-                    server_common.get_server_url(),
-                    starting_page=f'jobs?{query}')
-            click.secho(
-                ux_utils.command_hint_messages(
-                    ux_utils.CommandHintType.MANAGED_JOB,
-                    job_id=str(job_id),
-                    dashboard_url=job_dashboard_url))
     else:
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
@@ -7726,6 +7727,104 @@ def ssh_down(infra, async_call):
         print(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
+
+
+@cli.command('debug-dump', cls=_DocumentedCodeCommand)
+@click.option('--request-ids',
+              '-r',
+              multiple=True,
+              help='Request IDs or prefixes to include in the dump.')
+@click.option('--cluster-names',
+              '-c',
+              multiple=True,
+              help='Cluster names to include in the dump.')
+@click.option('--job-ids',
+              '-j',
+              multiple=True,
+              type=int,
+              help='Managed job IDs to include in the dump.')
+@click.option('--recent-minutes',
+              type=float,
+              default=None,
+              help='Include resources active within the last N minutes.')
+@click.option('--output', default=None, help='Output path for the dump file.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+@usage_lib.entrypoint
+def debug_dump(
+    request_ids: Tuple[str, ...],
+    cluster_names: Tuple[str, ...],
+    job_ids: Tuple[int, ...],
+    recent_minutes: Optional[float],
+    output: Optional[str],
+    async_call: bool,
+):
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+    Example usage:
+
+    \b
+    # Dump info for a specific cluster
+    $ sky debug-dump -c my-cluster
+
+    \b
+    # Dump info for a managed job
+    $ sky debug-dump -j 123
+
+    \b
+    # Dump info for a specific request
+    $ sky debug-dump -r abc123-def456
+
+    \b
+    # Dump resources from the last 60 minutes
+    $ sky debug-dump --recent-minutes 60
+
+    \b
+    # Combine multiple resources
+    $ sky debug-dump -c cluster1 -j 123 -r request-id
+
+    \b
+    # Save to a specific file
+    $ sky debug-dump -c my-cluster --output my-dump.zip
+    """
+    if (not request_ids and not cluster_names and not job_ids and
+            recent_minutes is None):
+        raise click.UsageError(
+            'At least one of --request-ids, --cluster-names, --job-ids, '
+            'or --recent-minutes must be provided.')
+    if recent_minutes is not None and recent_minutes <= 0:
+        raise click.UsageError('--recent-minutes must be a positive number.')
+
+    # Create the dump on the server
+    request_id = sdk.create_debug_dump(
+        request_ids=list(request_ids) if request_ids else None,
+        cluster_names=list(cluster_names) if cluster_names else None,
+        managed_job_ids=list(job_ids) if job_ids else None,
+        recent_minutes=recent_minutes,
+    )
+
+    if async_call:
+        click.echo(f'Request submitted with ID: {request_id}')
+        return
+
+    # Wait for the dump to be created
+    with rich_utils.client_status(
+            ux_utils.spinner_message('Creating debug dump')):
+        result = sdk.stream_and_get(request_id)
+
+    # Download the dump
+    dump_filename = pathlib.Path(result).name
+    local_path = output or dump_filename
+
+    click.echo(f'Downloading debug dump to {local_path}...')
+    sdk.download_debug_dump(dump_filename, local_path)
+    click.echo(f'Debug dump saved to: {local_path}')
 
 
 def main():

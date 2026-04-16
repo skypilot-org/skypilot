@@ -373,7 +373,7 @@ Tail or sync down the log of a managed job.
 
 ### `sky jobs pool apply`
 
-Either apply a config to a pool for managed jobs submission     or update the number of workers in the pool. One of POOL_YAML or --workers     must be provided.
+Either apply a config to a pool for managed jobs submission or update the number of workers in the pool. One of POOL_YAML or --workers must be provided.
 
 **Options:**
 
@@ -737,10 +737,25 @@ Clean up a cluster set up with 'sky ssh up'.
 
 ### `sky ssh up`
 
-Set up a cluster using SSH targets from a file. If not specified,     ~/.sky/ssh_node_pools.yaml will be used.
+Set up a cluster using SSH targets from a file. If not specified, ~/.sky/ssh_node_pools.yaml will be used.
 
 **Options:**
 
 - `--infra` — Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.
 - `--async` — Run the command asynchronously.
 - `--file`, `-f` — The file containing the SSH targets.
+
+## Other Commands
+
+### `sky debug-dump`
+
+Create a debug dump for troubleshooting. Creates a zip file containing logs, state, and configuration for the specified requests, clusters, and/or managed jobs. At least one of the filter options (--request-ids, --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+**Options:**
+
+- `--request-ids`, `-r` — Request IDs or prefixes to include in the dump.
+- `--cluster-names`, `-c` — Cluster names to include in the dump.
+- `--job-ids`, `-j` — Managed job IDs to include in the dump.
+- `--recent-minutes` — Include resources active within the last N minutes.
+- `--output` — Output path for the dump file.
+- `--async` — Run the command asynchronously.

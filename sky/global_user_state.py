@@ -874,8 +874,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
-                cluster_history_table.c.cluster_name_on_cloud:
-                    cluster_name_on_cloud,
+                cluster_history_table.c.cluster_name_on_cloud: cluster_name_on_cloud,
                 **creation_info,
             })
         session.execute(do_update_stmt)

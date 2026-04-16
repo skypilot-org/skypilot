@@ -76,7 +76,12 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     # list the submodules and run `ls-files` within the root and each submodule.
     # Print the submodule paths relative to expand_src_dir_path, separated by
     # null chars.
-    submodules_cmd = (f'git -C {shlex.quote(expand_src_dir_path)} '
+    # Use safe.directory=* to avoid "dubious ownership" errors when the
+    # workdir is on a shared filesystem (e.g. EFS) where the UID on disk
+    # may differ from the running process.  See:
+    # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/577
+    submodules_cmd = (f'git -c safe.directory="*" '
+                      f'-C {shlex.quote(expand_src_dir_path)} '
                       'submodule foreach -q "printf \\$displaypath\\\\\\0"')
 
     try:
@@ -140,7 +145,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
         #              entry rather than listing every single file
         # Since we are using --others instead of --cached, this will not show
         # files that are tracked but also present in .gitignore.
-        filter_cmd = (f'git -C {shlex.quote(repo_path)} ls-files -z '
+        filter_cmd = (f'git -c safe.directory="*" '
+                      f'-C {shlex.quote(repo_path)} ls-files -z '
                       '--others --ignore --exclude-standard --directory')
         output = subprocess.run(filter_cmd,
                                 shell=True,

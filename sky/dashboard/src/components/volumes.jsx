@@ -34,14 +34,18 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { PluginSlot } from '@/plugins/PluginSlot';
+import { usePluginComponents } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 export function Volumes() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
   const isMobile = useMobile();
@@ -51,6 +55,26 @@ export function Volumes() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
+  const [activeTab, setActiveTab] = useState('volumes');
+  const pluginTabs = usePluginComponents('volumes.tabs');
+
+  const handleTabChange = useCallback(
+    (tab) => {
+      setActiveTab(tab);
+      const query = tab === 'volumes' ? {} : { tab };
+      router.replace({ pathname: router.pathname, query }, undefined, {
+        shallow: true,
+      });
+    },
+    [router]
+  );
+
+  // Sync tab from URL query on mount
+  useEffect(() => {
+    if (router.isReady && router.query.tab) {
+      setActiveTab(router.query.tab);
+    }
+  }, [router.isReady, router.query.tab]);
 
   const handleRefresh = () => {
     dashboardCache.invalidate(getVolumes);
@@ -116,83 +140,116 @@ export function Volumes() {
     preloadData();
   }, []);
 
+  const hasPluginTabs = pluginTabs.length > 0;
+
   return (
     <>
       <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
-          <Link
-            href="/volumes"
-            className="text-sky-blue hover:underline leading-none"
-          >
-            Volumes
-          </Link>
-        </div>
-        <div className="flex items-center gap-3">
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
+        <div className="text-base flex items-center">
+          {hasPluginTabs ? (
+            <>
+              <button
+                className={`leading-none mr-6 pb-2 px-1 border-b-2 ${
+                  activeTab === 'volumes'
+                    ? 'text-sky-blue border-sky-500'
+                    : 'text-gray-500 hover:text-gray-700 border-transparent'
+                }`}
+                onClick={() => handleTabChange('volumes')}
+              >
+                Volumes
+              </button>
+              <PluginSlot
+                name="volumes.tabs"
+                context={{ activeTab, onTabChange: handleTabChange }}
+                wrapperClassName="contents"
+              />
+            </>
+          ) : (
+            <Link
+              href="/volumes"
+              className="text-sky-blue hover:underline leading-none"
+            >
+              Volumes
+            </Link>
           )}
-          {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
         </div>
+        {activeTab === 'volumes' && (
+          <div className="flex items-center gap-3">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              </div>
+            )}
+            {!loading && lastFetchedTime && (
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+          </div>
+        )}
       </div>
 
-      <VolumesTable
-        key="volumes"
-        refreshInterval={REFRESH_INTERVAL}
-        setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        onDeleteVolume={handleDeleteVolumeClick}
-        preloadingComplete={preloadingComplete}
-      />
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteConfirmDialog} onOpenChange={handleCancelDelete}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete Volume</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete volume &quot;
-              {volumeToDelete?.name || 'this volume'}&quot;? This action cannot
-              be undone.
-            </DialogDescription>
-          </DialogHeader>
-
-          <ErrorDisplay
-            error={deleteError}
-            title="Deletion Failed"
-            onDismiss={() => setDeleteError(null)}
+      {activeTab === 'volumes' ? (
+        <>
+          <VolumesTable
+            key="volumes"
+            refreshInterval={REFRESH_INTERVAL}
+            setLoading={setLoading}
+            refreshDataRef={refreshDataRef}
+            onDeleteVolume={handleDeleteVolumeClick}
+            preloadingComplete={preloadingComplete}
           />
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={handleCancelDelete}
-              disabled={deleteLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteVolumeConfirm}
-              disabled={deleteLoading}
-            >
-              {deleteLoading ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {/* Delete Confirmation Dialog */}
+          <Dialog
+            open={showDeleteConfirmDialog}
+            onOpenChange={handleCancelDelete}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Delete Volume</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete volume &quot;
+                  {volumeToDelete?.name || 'this volume'}&quot;? This action
+                  cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+
+              <ErrorDisplay
+                error={deleteError}
+                title="Deletion Failed"
+                onDismiss={() => setDeleteError(null)}
+              />
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={handleCancelDelete}
+                  disabled={deleteLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleDeleteVolumeConfirm}
+                  disabled={deleteLoading}
+                >
+                  {deleteLoading ? 'Deleting...' : 'Delete'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      ) : (
+        <PluginSlot name="volumes.tab-content" context={{ activeTab }} />
+      )}
     </>
   );
 }

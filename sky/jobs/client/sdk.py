@@ -459,12 +459,12 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is 0, thus can resume previous
-    # streaming point on retry.
+    # Log request is idempotent when tail is None or 0 (both stream from
+    # the beginning), thus can resume previous streaming point on retry.
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0),
+                               resumable=(tail is None or tail == 0),
                                get_result=follow)
 
 

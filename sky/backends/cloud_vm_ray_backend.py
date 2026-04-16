@@ -1712,6 +1712,11 @@ class RetryingVmProvisioner(object):
 
                 if dryrun:
                     cloud_user = None
+                elif isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # Region is guaranteed to be set by optimizer.
+                    assert to_provision.region is not None
+                    cloud_user = clouds.Kubernetes.get_identity_from_context_name(  # pylint: disable=line-too-long
+                        to_provision.region)
                 else:
                     cloud_user = to_provision.cloud.get_active_user_identity()
 
@@ -1887,6 +1892,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     # Bump if any fields get added/removed/changed, and add backward
     # compatibility logic in __setstate__ and/or __getstate__.
     _VERSION = 12
+
+    # Set by from_dict() since cached_cluster_info is not available
+    # when reconstructing from a dict.
+    _ssh_user: Optional[str] = None
 
     def __init__(
             self,
@@ -2488,7 +2497,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # container image used. For those clusters launched with ray
             # autoscaler, we directly use the ssh_user in yaml config.
             return self.cached_cluster_info.ssh_user
-        return None
+        return getattr(self, '_ssh_user', None)
 
     @property
     def head_ip(self):
@@ -2520,6 +2529,51 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return (env_options.Options.ENABLE_GRPC.get() and
                 self.is_grpc_enabled and
                 not isinstance(self.launched_resources.cloud, clouds.Slurm))
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
+        return {
+            'cluster_name': self.cluster_name,
+            'cluster_name_on_cloud': self.cluster_name_on_cloud,
+            'cluster_yaml': self._cluster_yaml,
+            'launched_nodes': self.launched_nodes,
+            'launched_resources':
+                (self.launched_resources.to_yaml_config()
+                 if self.launched_resources is not None else None),
+            'stable_internal_external_ips': self.stable_internal_external_ips,
+            'stable_ssh_ports': self.stable_ssh_ports,
+            'docker_user': self.docker_user,
+            'is_grpc_enabled': self.is_grpc_enabled,
+            'ssh_user': self.ssh_user,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'CloudVmRayResourceHandle':
+        """Reconstruct from a dict produced by to_dict()."""
+        resources_dict = d.get('launched_resources')
+        launched_resources: Optional[resources_lib.Resources]
+        if resources_dict is not None:
+            launched_resources = (
+                resources_lib.Resources._from_yaml_config_single(  # pylint: disable=protected-access
+                    resources_dict.copy()))
+        else:
+            launched_resources = None
+
+        handle = cls.__new__(cls)
+        handle._version = cls._VERSION
+        handle.cluster_name = d['cluster_name']
+        handle.cluster_name_on_cloud = d.get('cluster_name_on_cloud', '')
+        handle._cluster_yaml = d.get('cluster_yaml')
+        handle.launched_nodes = d.get('launched_nodes', 0)
+        handle.launched_resources = launched_resources  # type: ignore
+        handle.stable_internal_external_ips = d.get(
+            'stable_internal_external_ips')
+        handle.stable_ssh_ports = d.get('stable_ssh_ports')
+        handle.docker_user = d.get('docker_user')
+        handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
+        handle.cached_cluster_info = None
+        handle._ssh_user = d.get('ssh_user')
+        return handle
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -3377,6 +3431,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
         config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         provider_config = config['provider']
+        cluster_config_overrides = (
+            handle.launched_resources.cluster_config_overrides)
+        if cluster_config_overrides:
+            provider_config['cluster_config_overrides'] = (
+                cluster_config_overrides)
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
                                  handle.launched_resources.ports,
                                  provider_config)
@@ -3409,7 +3468,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         backend_utils.invoke_skylet_with_retries(
                             lambda: SkyletClient(handle.get_grpc_channel()
                                                 ).update_status(request))
-                    except exceptions.SkyletMethodNotImplementedError:
+                    except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                        logger.debug(f'gRPC failed, falling back to SSH: {e}')
                         use_legacy = True
 
                 if use_legacy:
@@ -3433,7 +3493,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     backend_utils.invoke_skylet_with_retries(
                         lambda: SkyletClient(handle.get_grpc_channel(
                         )).fail_all_in_progress_jobs(fail_request))
-                except exceptions.SkyletMethodNotImplementedError:
+                except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
@@ -3929,7 +3990,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).queue_job(queue_job_request))
-            except exceptions.SkyletMethodNotImplementedError:
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4002,7 +4064,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_id = response.job_id
                 log_dir = response.log_dir
                 return job_id, log_dir
-            except exceptions.SkyletMethodNotImplementedError:
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4090,7 +4153,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).set_job_info_without_job_id(request))
                 return list(response.job_ids)
-            except exceptions.SkyletMethodNotImplementedError:
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4322,8 +4386,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for job_id, proto_status in response.job_statuses.items()
                 }
                 return statuses
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -4356,7 +4420,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()).cancel_jobs(
                         request))
                 cancelled_ids = response.cancelled_job_ids
-            except exceptions.SkyletMethodNotImplementedError:
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4411,7 +4476,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 for job_id, log_dir in job_log_dirs.items():
                     # Convert to string for backwards compatibility
                     job_to_dir[str(job_id)] = log_dir
-            except exceptions.SkyletMethodNotImplementedError:
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
                 use_legacy = True
 
         if use_legacy:
@@ -4533,8 +4599,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         print(resp.log_line, end='', flush=True)
                     last_exit_code = resp.exit_code
                 return last_exit_code
-            except exceptions.SkyletMethodNotImplementedError:
-                pass
+            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                logger.debug(f'gRPC failed, falling back to SSH: {e}')
             except grpc.RpcError as e:
                 if e.code() == grpc.StatusCode.CANCELLED:
                     return last_exit_code
@@ -4687,7 +4753,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         lambda: SkyletClient(handle.get_grpc_channel(
                         )).get_all_managed_job_ids_by_name(request))
                     job_ids = list(response.job_ids)
-                except exceptions.SkyletMethodNotImplementedError:
+                except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
@@ -4745,7 +4812,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_timestamps = {}
                     for jid, log_dir in job_log_dirs.items():
                         run_timestamps[int(jid)] = log_dir
-                except exceptions.SkyletMethodNotImplementedError:
+                except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+                    logger.debug(f'gRPC failed, falling back to SSH: {e}')
                     use_legacy = True
 
             if use_legacy:
@@ -6017,7 +6085,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             store = list(storage_obj.stores.values())[0]
             assert store is not None, storage_obj
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
-                mount_cmd = store.mount_command(dst)
+                read_only = bool(storage_obj.mount_config and
+                                 storage_obj.mount_config.read_only)
+                mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED

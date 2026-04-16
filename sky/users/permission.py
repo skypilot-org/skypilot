@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from typing import Generator, List, Optional, Set
 
 import casbin
@@ -15,10 +16,10 @@ from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
-from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import kv_cache
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -31,6 +32,12 @@ POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
 _enforcer_instance: Optional['PermissionService'] = None
+
+# KV cache constants for workspace permission checks.
+_WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
+_WORKSPACE_PERM_CACHE_KEY_SEP = ':'
+# Long TTL as safety net; primary freshness is explicit invalidation on update.
+_WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
 
 
 class PermissionService:
@@ -251,6 +258,7 @@ class PermissionService:
                 return
             enforcer.remove_grouping_policy(user_id, current_roles[0])
             enforcer.save_policy()
+            self.invalidate_user_permission_cache(user_id)
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
@@ -271,6 +279,9 @@ class PermissionService:
             # Update user role
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
+            # Always invalidate: even a first role assignment can grant
+            # workspace access that was previously denied and cached.
+            self.invalidate_user_permission_cache(user_id)
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get all roles for a user.
@@ -345,15 +356,35 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    # Allow many cached (user, workspace) pairs so hot paths with many
-    # workspaces stay fast when batch get_accessible_workspace_names isn't used.
-    @annotations.lru_cache(scope='request', maxsize=256)
+    def _workspace_perm_cache_key(self, workspace_name: str,
+                                  user_id: str) -> str:
+        """Build a KV cache key for a workspace permission entry."""
+        return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
+                f'{workspace_name}'
+                f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
+                f'{user_id}')
+
+    def invalidate_workspace_permission_cache(self,
+                                              workspace_name: str) -> None:
+        """Invalidate all cached permission entries for a workspace."""
+        prefix = (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
+                  f'{workspace_name}'
+                  f'{_WORKSPACE_PERM_CACHE_KEY_SEP}')
+        kv_cache.delete_cache_entries_by_prefix(prefix)
+
+    def invalidate_user_permission_cache(self, user_id: str) -> None:
+        """Invalidate all cached permission entries for a user."""
+        kv_cache.delete_cache_entries_by_prefix_suffix(
+            prefix=_WORKSPACE_PERM_CACHE_PREFIX,
+            suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
+
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
-        workspace.
+        workspace.  Results are cached in a DB-backed KV cache so that all
+        server/executor processes share the same view.
 
         For private workspaces, the user must have explicit permission.
 
@@ -364,18 +395,38 @@ class PermissionService:
             # When it is not on API server, we allow all users to access all
             # workspaces, as the workspace check has been done on API server.
             return True
+
+        # Check DB-backed KV cache (covers both admin and non-admin results).
+        cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
+        cached = kv_cache.get_cache_entry(cache_key)
+        if cached is not None:
+            return cached == '1'
+
+        # Cache miss — compute the permission.
+        # Admin users have access to all workspaces.
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
-            return True
-        # The Casbin model matcher already handles the wildcard '*' case:
-        # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
-        # r.act == p.act
-        # This means if there's a policy ('*', workspace_name, '*'), it will
-        # match any user
-        enforcer = self._ensure_enforcer()
-        result = enforcer.enforce(user_id, workspace_name, '*')
+            result = True
+        else:
+            # The Casbin model matcher already handles the wildcard '*' case:
+            # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
+            # r.act == p.act
+            # This means if there's a policy ('*', workspace_name, '*'), it
+            # will match any user
+            enforcer = self._ensure_enforcer()
+            result = enforcer.enforce(user_id, workspace_name, '*')
+
         logger.debug(f'Workspace permission check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
+
+        # Cache the result; failures are non-critical.
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, '1' if result else '0',
+                time.time() + _WORKSPACE_PERM_CACHE_TTL_SECONDS)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache workspace permission: {e}')
+
         return result
 
     def check_service_account_token_permission(self, user_id: str,
@@ -424,6 +475,9 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
+            # Invalidate stale cached denials (e.g. from checks between a
+            # workspace deletion and its re-creation with the same name).
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -446,6 +500,10 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
@@ -453,6 +511,10 @@ class PermissionService:
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
             enforcer.save_policy()
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
 
 @contextlib.contextmanager

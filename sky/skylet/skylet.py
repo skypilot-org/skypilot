@@ -64,7 +64,7 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     managed_jobsv1_pb2_grpc.add_ManagedJobsServiceServicer_to_server(
         services.ManagedJobsServiceImpl(), server)
 
-    listen_addr = f'127.0.0.1:{port}'
+    listen_addr = f'0.0.0.0:{port}'
     server.add_insecure_port(listen_addr)
 
     server.start()

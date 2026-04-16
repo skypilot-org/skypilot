@@ -247,3 +247,8 @@ Utils: ``check``/``cost-report``/``show-gpus``
 .. click:: sky.client.cli.command:cost_report
    :prog: sky cost-report
    :nested: full
+
+.. _sky-debug-dump:
+.. click:: sky.client.cli.command:debug_dump
+   :prog: sky debug-dump
+   :nested: full

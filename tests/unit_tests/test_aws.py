@@ -344,6 +344,37 @@ def test_subnet_names_wrong_vpc(monkeypatch):
     assert 'No candidate subnets found in specified VPC' in error_message
 
 
+def test_security_group_tagged_on_create():
+    """Test that create_security_group is called with skypilot tag."""
+    mock_ec2 = MagicMock()
+
+    # No existing security group found
+    mock_ec2.SecurityGroup.return_value = None
+    mock_ec2.security_groups = MagicMock()
+    mock_ec2.security_groups.filter.return_value = []
+
+    # After creation, return a mock security group
+    created_sg = MagicMock(id='sg-new', group_name='test-sg')
+    with patch.object(config,
+                      'get_security_group_from_vpc_id',
+                      side_effect=[None, created_sg]):
+        config._get_or_create_vpc_security_group(ec2=mock_ec2,
+                                                 vpc_id='vpc-123',
+                                                 expected_sg_name='test-sg')
+
+    mock_ec2.meta.client.create_security_group.assert_called_once()
+    call_kwargs = mock_ec2.meta.client.create_security_group.call_args[1]
+    assert 'TagSpecifications' in call_kwargs
+    tag_specs = call_kwargs['TagSpecifications']
+    assert tag_specs == [{
+        'ResourceType': 'security-group',
+        'Tags': [{
+            'Key': 'skypilot',
+            'Value': 'true',
+        }],
+    }]
+
+
 def test_ssm_default(monkeypatch):
     """Test that SSM is explicitly set to true if use_internal_ips is true
     and ssh_proxy_command is not set.
