@@ -182,8 +182,8 @@ def deploy_multiple_clusters(
                             min(num_protected, len(history_hosts_info),
                                 len(hosts_info))):
                         if history_hosts_info[i] != hosts_info[i]:
-                            role = ('server' if current_ha and i > 0
-                                    else 'head')
+                            role = ('server'
+                                    if current_ha and i > 0 else 'head')
                             raise ValueError(
                                 f'Cluster configuration has changed for '
                                 f'{role} node (host {i}). '
