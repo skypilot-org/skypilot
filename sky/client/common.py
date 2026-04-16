@@ -182,6 +182,7 @@ class UploadChunkParams:
     file_path: str
     upload_logger: logging.Logger
     log_file: str
+    zip_file_size: int = 0
     # For backward compatibility
     # TODO(aylei): remove this and always use /upload_v2 after 0.14.0
     endpoint: str = '/upload'
@@ -200,6 +201,15 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
     server_url = server_common.get_server_url()
     max_attempts = 3
     sa_headers = service_account_auth.get_service_account_headers()
+    # Calculate actual content length for this chunk so that proxies
+    # (e.g. Cloudflare) can enforce body-size limits upfront instead of
+    # silently dropping the connection mid-stream.
+    if params.zip_file_size > 0:
+        chunk_start = params.chunk_index * _UPLOAD_CHUNK_BYTES
+        content_length = min(_UPLOAD_CHUNK_BYTES,
+                             params.zip_file_size - chunk_start)
+    else:
+        content_length = _UPLOAD_CHUNK_BYTES
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
@@ -214,6 +224,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                                           params.chunk_index),
                 headers={
                     'Content-Type': 'application/octet-stream',
+                    'Content-Length': str(content_length),
                     **sa_headers,
                 },
                 cookies=server_common.get_api_cookie_jar())
@@ -425,6 +436,7 @@ def upload_mounts_to_api_server(
                                           zip_file_path,
                                           upload_logger,
                                           log_file,
+                                          zip_file_size=zip_file_size,
                                           endpoint=endpoint)
                         for chunk_index in range(total_chunks)
                     ]
