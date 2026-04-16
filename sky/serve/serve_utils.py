@@ -238,40 +238,34 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
                 f'those {noun}s first.{colorama.Style.RESET_ALL}')
 
 
+def _pool_consolidation_extra_validator(arg: bool) -> None:
+    """Warn about leftover pools when switching to non-consolidated mode.
+
+    Passed as extra_validator to controller_utils.is_jobs_consolidation_mode
+    from the pool branch of is_consolidation_mode. Skipped when consolidation
+    is on because the jobs validator already warns about the shared
+    controller cluster in that case.
+    """
+    if not arg:
+        _validate_consolidation_mode_config(arg, pool=True)
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
-    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        # if we are in the job controller, we must always be in consolidation
-        # mode.
-        return True
     if pool:
-        # INVARIANT: must return the same value as
-        # sky.jobs.utils.is_consolidation_mode() — pool operations run on the
-        # jobs controller, so pool and managed-jobs consolidation state cannot
-        # legitimately diverge. Delegate for the signal-file read and the
-        # config-vs-signal restart warning (otherwise ~20 lines would be
-        # duplicated here). Function-local import avoids a circular dep:
-        # sky.jobs.utils -> sky.backends.backend_utils -> sky.serve.serve_utils.
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs import utils as managed_job_utils
-        effective = managed_job_utils.is_consolidation_mode()
-        # When consolidation is off, also run the pool-specific validator:
-        # the jobs validator (called inside the delegated function) warns
-        # about leftover managed jobs but not about leftover pools. Skip it
-        # when consolidation is on — the jobs validator already warns about
-        # the shared controller cluster in that branch, so running the pool
-        # validator there would only duplicate that warning.
-        if os.environ.get(
-                skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-            config_value = skypilot_config.get_nested(
-                ('jobs', 'controller', 'consolidation_mode'),
-                default_value=None)
-            arg = config_value if config_value is not None else effective
-            if not arg:
-                _validate_consolidation_mode_config(arg, pool)
-        return effective
+        # INVARIANT: pool consolidation state must match managed jobs —
+        # pool operations run on the jobs controller. Route both readers
+        # through controller_utils.is_jobs_consolidation_mode so they
+        # cannot diverge. Pool adds one extra validator (leftover pools)
+        # because the jobs validator only knows about leftover jobs.
+        return controller_utils.is_jobs_consolidation_mode(
+            extra_validator=_pool_consolidation_extra_validator)
     # Serve (pool=False) runs on its own controller cluster, independent of
     # the jobs controller, and keeps a config-driven consolidation flag.
+    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # if we are in the serve controller, we must always be in
+        # consolidation mode.
+        return True
     consolidation_mode = skypilot_config.get_nested(
         ('serve', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not

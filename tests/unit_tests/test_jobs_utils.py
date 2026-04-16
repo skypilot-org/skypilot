@@ -139,15 +139,21 @@ async def test_get_job_status_returns_error_reason_on_failure(
     assert mock_logger.info.call_count == 1
 
 
-@mock.patch('sky.jobs.utils._validate_consolidation_mode_config')
-@mock.patch('sky.jobs.utils.logger')
-@mock.patch('sky.jobs.utils.skypilot_config')
+@mock.patch('sky.utils.controller_utils.warn_jobs_consolidation_mode_intent')
+@mock.patch('sky.utils.controller_utils.logger')
+@mock.patch('sky.utils.controller_utils.skypilot_config')
 def test_consolidation_mode_warning_without_restart(mock_config, mock_logger,
                                                     mock_validate):
     """Test that a warning is printed when consolidation mode is enabled
-    in config but the signal file doesn't exist (server not restarted)."""
-    # Clear the LRU cache to ensure fresh test
+    in config but the signal file doesn't exist (server not restarted).
+
+    Signal-read + config-vs-signal warning now live in controller_utils
+    (since both managed-jobs and pool readers share the same helper).
+    """
+    # Clear the LRU caches on both the wrapper and the shared helper.
     utils.is_consolidation_mode.cache_clear()
+    import sky.utils.controller_utils as controller_utils
+    controller_utils._effective_jobs_consolidation_with_warnings.cache_clear()
 
     # Mock config to return True for consolidation mode
     mock_config.get_nested.return_value = True

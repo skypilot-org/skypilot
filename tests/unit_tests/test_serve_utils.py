@@ -93,60 +93,34 @@ class TestIsConsolidationMode:
     def setup_method(self):
         serve_utils.is_consolidation_mode.cache_clear()
 
-    @pytest.mark.parametrize('delegated_result', [True, False])
-    def test_pool_delegates_to_managed_jobs(self, delegated_result,
-                                            monkeypatch):
-        """pool=True delegates to managed_job_utils.is_consolidation_mode
-        so the two readers are the same function, not two copies."""
+    @pytest.mark.parametrize('helper_result', [True, False])
+    def test_pool_delegates_to_controller_utils_helper(self, helper_result,
+                                                       monkeypatch):
+        """pool=True routes through controller_utils.is_jobs_consolidation_mode
+        with the pool extra validator, so the two readers share one source."""
         monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
         monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
-        with mock.patch('sky.jobs.utils.is_consolidation_mode',
-                        return_value=delegated_result) as mock_delegate, \
-                mock.patch('sky.serve.serve_utils.skypilot_config'
-                          ) as mock_config:
-            assert serve_utils.is_consolidation_mode(
-                pool=True) is delegated_result
-            mock_delegate.assert_called_once_with()
-            # Without IS_SKYPILOT_SERVER, the pool-specific validator block
-            # is skipped entirely, so config must not be read.
-            mock_config.get_nested.assert_not_called()
+        with mock.patch('sky.utils.controller_utils.is_jobs_consolidation_mode',
+                        return_value=helper_result) as mock_helper:
+            assert serve_utils.is_consolidation_mode(pool=True) is helper_result
+            mock_helper.assert_called_once_with(
+                extra_validator=serve_utils._pool_consolidation_extra_validator)
 
-    @mock.patch.dict('os.environ', {'IS_SKYPILOT_SERVER': 'true'}, clear=False)
-    @pytest.mark.parametrize(
-        'delegated_result,config_value,arg,should_validate',
-        [
-            # Consolidation off → pool validator runs (warns about leftover
-            # pools, which the jobs validator doesn't cover).
-            (False, None, False, True),
-            (True, False, False, True),
-            (False, False, False, True),
-            # Consolidation on → pool validator skipped (the jobs validator
-            # already warns about the shared controller cluster).
-            (True, None, True, False),
-            (False, True, True, False),
-            (True, True, True, False),
-        ])
-    def test_pool_validator_runs_only_when_not_consolidated(
-            self, delegated_result, config_value, arg, should_validate,
-            monkeypatch):
-        """Pool validator only adds unique information when consolidation is
-        off. In the on case, the jobs validator (run via delegation) already
-        emits the leftover-controller-cluster warning."""
-        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+    @pytest.mark.parametrize('arg,should_validate', [
+        (False, True),
+        (True, False),
+    ])
+    def test_pool_extra_validator_runs_pool_validator_only_when_off(
+            self, arg, should_validate):
+        """The extra validator supplied to the helper fires the pool-specific
+        validator only when consolidation is off. The consolidated case is
+        already covered by the jobs validator inside the helper."""
         validate_path = ('sky.serve.serve_utils.'
                          '_validate_consolidation_mode_config')
-        with mock.patch('sky.jobs.utils.is_consolidation_mode',
-                        return_value=delegated_result), \
-                mock.patch('sky.serve.serve_utils.skypilot_config'
-                          ) as mock_config, \
-                mock.patch(validate_path) as mock_validate:
-            mock_config.get_nested.return_value = config_value
-            serve_utils.is_consolidation_mode(pool=True)
-            mock_config.get_nested.assert_called_once_with(
-                ('jobs', 'controller', 'consolidation_mode'),
-                default_value=None)
+        with mock.patch(validate_path) as mock_validate:
+            serve_utils._pool_consolidation_extra_validator(arg)
             if should_validate:
-                mock_validate.assert_called_once_with(arg, True)
+                mock_validate.assert_called_once_with(arg, pool=True)
             else:
                 mock_validate.assert_not_called()
 
@@ -169,14 +143,9 @@ class TestIsConsolidationMode:
 
     @mock.patch.dict('os.environ', {'IS_SKYPILOT_JOB_CONTROLLER': '1'},
                      clear=False)
-    @pytest.mark.parametrize('pool', [True, False])
-    def test_override_env_forces_true(self, pool):
-        """OVERRIDE_CONSOLIDATION_MODE forces True regardless of pool/serve.
-
-        The override short-circuits at the top of is_consolidation_mode, so
-        signal file and config are never consulted. Mock skypilot_config as a
-        defensive guard against a future regression that broke the short-circuit
-        and accidentally fell through to the config read.
-        """
+    def test_override_env_forces_true_for_serve(self):
+        """OVERRIDE_CONSOLIDATION_MODE forces True in the serve (pool=False)
+        branch. Pool case goes through the helper which has its own OVERRIDE
+        short-circuit tested in controller_utils."""
         with mock.patch('sky.serve.serve_utils.skypilot_config'):
-            assert serve_utils.is_consolidation_mode(pool=pool) is True
+            assert serve_utils.is_consolidation_mode(pool=False) is True
