@@ -1831,7 +1831,7 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
             container_issues.append(waiting.reason)
         elif terminated and terminated.exit_code != 0:
             container_issues.append(f'{terminated.reason or "terminated"}'
-                                    f'(exit code {terminated.exit_code})')
+                                    f' (exit code {terminated.exit_code})')
 
     if container_issues:
         parts.append('; '.join(container_issues))
@@ -1881,9 +1881,13 @@ def _check_nodes_health(
         try:
             node = kubernetes.core_api(context).read_node(
                 name, _request_timeout=kubernetes.API_TIMEOUT)
+            # Check NotReady first (more severe than cordoned)
             for condition in (node.status.conditions or []):
                 if condition.type == 'Ready' and condition.status != 'True':
                     return (name, 'NotReady')
+            # Check if node is cordoned (unschedulable)
+            if getattr(node.spec, 'unschedulable', False):
+                return (name, 'cordoned')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
         return None
