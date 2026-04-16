@@ -15,7 +15,6 @@ from typing import Any, Awaitable, Callable, Optional, Tuple, Union
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky.server.requests import event_loop
 from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -49,15 +48,19 @@ class Precondition(abc.ABC):
         """Make Precondition awaitable."""
         return self._wait().__await__()
 
-    def wait_async(
+    async def wait_async(
         self,
         on_condition_met: Optional[Callable[[], Union[None,
                                                       Awaitable[Any]]]] = None
     ) -> None:
         """Wait precondition asynchronously and execute the callback on met.
 
+        The waiting is scheduled as a task on the caller's event loop so that
+        async queue backends (e.g. asyncpg) can be used in the callback
+        without event-loop binding issues.
+
         The callback may be either a sync function or a coroutine function;
-        coroutines are awaited on the same event loop used for waiting.
+        coroutines are awaited on the same event loop.
         """
 
         async def wait_with_callback():
@@ -67,7 +70,7 @@ class Precondition(abc.ABC):
                 if inspect.isawaitable(result):
                     await result
 
-        event_loop.run(wait_with_callback())
+        asyncio.create_task(wait_with_callback())
 
     @abc.abstractmethod
     async def check(self) -> Tuple[bool, Optional[str]]:

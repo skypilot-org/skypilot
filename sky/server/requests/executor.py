@@ -860,7 +860,7 @@ async def schedule_prepared_request(request_task: api_requests.Request,
 
     if precondition is not None:
         # Wait async to avoid blocking caller.
-        precondition.wait_async(on_condition_met=enqueue)
+        await precondition.wait_async(on_condition_met=enqueue)
     else:
         await enqueue()
 
