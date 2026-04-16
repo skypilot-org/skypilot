@@ -132,10 +132,14 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     # are unnecessary and would outlive the TestClient event loop.
     original_schedule = executor.schedule_prepared_request
 
-    async def _schedule_no_precondition(request_task, ignore_return_value=False,
-                                        precondition=None, retryable=False):
-        await original_schedule(request_task, ignore_return_value,
-                                precondition=None, retryable=retryable)
+    async def _schedule_no_precondition(request_task,
+                                        ignore_return_value=False,
+                                        precondition=None,
+                                        retryable=False):
+        await original_schedule(request_task,
+                                ignore_return_value,
+                                precondition=None,
+                                retryable=retryable)
 
     monkeypatch.setattr(executor, 'schedule_prepared_request',
                         _schedule_no_precondition)
