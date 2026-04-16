@@ -907,27 +907,33 @@ def prepare_env_file(request):
     # local ~/.sky/user_hash with the server-side SA identity.  We back up
     # the original file so that it can be restored after the session.
     user_hash_file = common_utils.USER_HASH_FILE
-    user_hash_backup = user_hash_file + '.bak'
+    # Use a PID-stamped backup name to avoid clashing with parallel workers.
+    user_hash_backup = f'{user_hash_file}.bak.{os.getpid()}'
+    user_hash_existed = os.path.exists(user_hash_file)
     config = skypilot_config.parse_and_validate_config_file(local_file_path)
     sa_token = config.get_nested(('api_server', 'service_account_token'),
                                  default_value=None)
     if sa_token:
         endpoint = config.get_nested(('api_server', 'endpoint'),
                                      default_value=None)
-        # Back up the existing user_hash file
-        if os.path.exists(user_hash_file):
-            shutil.move(user_hash_file, user_hash_backup)
-            logger.info(f'Backed up {user_hash_file} -> {user_hash_backup}')
-        try:
-            from sky.client import sdk  # pylint: disable=import-outside-toplevel
-            sdk.api_login(endpoint, service_account_token=sa_token)
-            logger.info(
-                'SA token detected; ran api_login to sync user_hash '
-                f'(now: {common_utils.get_user_hash()})')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'api_login with SA token failed: {e}. '
-                           'Tests computing name_on_cloud may use the '
-                           'wrong user hash.')
+        if endpoint is None:
+            logger.warning('SA token detected but no endpoint found in config. '
+                           'Skipping api_login to avoid interactive prompt.')
+        else:
+            # Back up the existing user_hash file
+            if user_hash_existed:
+                shutil.move(user_hash_file, user_hash_backup)
+                logger.info(f'Backed up {user_hash_file} -> {user_hash_backup}')
+            try:
+                import sky.client.sdk as sdk  # pylint: disable=import-outside-toplevel
+                sdk.api_login(endpoint, service_account_token=sa_token)
+                logger.info(
+                    'SA token detected; ran api_login to sync user_hash '
+                    f'(now: {common_utils.get_user_hash()})')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'api_login with SA token failed: {e}. '
+                               'Tests computing name_on_cloud may use the '
+                               'wrong user hash.')
 
     yield local_file_path
 
@@ -936,3 +942,7 @@ def prepare_env_file(request):
     if os.path.exists(user_hash_backup):
         shutil.move(user_hash_backup, user_hash_file)
         logger.info(f'Restored {user_hash_backup} -> {user_hash_file}')
+    elif not user_hash_existed and os.path.exists(user_hash_file):
+        # api_login created the file; remove it to avoid polluting the env.
+        os.remove(user_hash_file)
+        logger.info(f'Removed {user_hash_file} (created during test session)')
