@@ -838,7 +838,7 @@ function ProvisionLogs({ clusterName, numNodes }) {
               <span>No provision logs available.</span>
             </div>
           ) : (
-            <div className="max-h-96 overflow-y-auto">
+            <div className="max-h-[50vh] min-h-[200px] overflow-y-auto">
               <LogFilter logs={displayLines} />
             </div>
           )}
