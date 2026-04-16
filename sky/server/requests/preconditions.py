@@ -26,6 +26,11 @@ _PRECONDITION_TIMEOUT = 60 * 60
 
 logger = sky_logging.init_logger(__name__)
 
+# Strong references to background precondition tasks to prevent GC.
+# asyncio only keeps weak references to tasks, so without this set a
+# long-running precondition wait (up to 1 hour) could be collected.
+background_tasks: set = set()
+
 
 class Precondition(abc.ABC):
     """Abstract base class for a precondition for a request to be executed.
@@ -53,20 +58,17 @@ class Precondition(abc.ABC):
         on_condition_met: Optional[Callable[[], Union[None,
                                                       Awaitable[Any]]]] = None
     ) -> None:
-        """Wait precondition asynchronously and execute the callback on met.
+        """Wait for the precondition and execute the callback when met.
 
-        The waiting is scheduled as a task on the caller's event loop to avoid
-        running another event loop.
+        This coroutine blocks until the precondition is met (or times out).
+        Use ``create_task(precondition.wait_async(...))`` to run it in the
+        background without blocking the caller.
         """
-
-        async def wait_with_callback():
-            met = await self
-            if met and on_condition_met is not None:
-                result = on_condition_met()
-                if inspect.isawaitable(result):
-                    await result
-
-        asyncio.create_task(wait_with_callback())
+        met = await self
+        if met and on_condition_met is not None:
+            result = on_condition_met()
+            if inspect.isawaitable(result):
+                await result
 
     @abc.abstractmethod
     async def check(self) -> Tuple[bool, Optional[str]]:
