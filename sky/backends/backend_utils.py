@@ -2721,7 +2721,7 @@ def _update_cluster_status(
         # to provide better diagnostics (e.g., "node X is NotReady").
         node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
         if (ray_cluster_unhealthy and
-                repr(launched_resources.cloud) == 'Kubernetes'):
+                isinstance(launched_resources.cloud, clouds.Kubernetes)):
             unhealthy_pods = [
                 pod_name for pod_name, (_, reason) in node_statuses.items()
                 if reason is not None
@@ -3467,7 +3467,7 @@ def _summarize_pod_reasons(
             parts.append(part)
 
     # Collect pod names that are already explained by node issues
-    node_explained_pods: set = set()
+    node_explained_pods = set()
     if node_health:
         for info in node_health.values():
             node_explained_pods.update(info.pods)

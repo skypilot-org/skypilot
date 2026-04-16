@@ -1810,7 +1810,8 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
 
     Returns None if the pod appears healthy, or a descriptive reason string.
     """
-    conditions = getattr(pod.status, 'conditions', None)
+    pod_status = getattr(pod, 'status', None)
+    conditions = getattr(pod_status, 'conditions', None)
     if not conditions:
         return None
 
@@ -1828,7 +1829,7 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
     parts = [f'pod not ready ({ready_reason})']
 
     # Check container statuses for more specific info
-    container_statuses = getattr(pod.status, 'container_statuses', None) or []
+    container_statuses = getattr(pod_status, 'container_statuses', None) or []
     container_issues = []
     for cs in container_statuses:
         if cs.ready:
@@ -1894,11 +1895,13 @@ def _check_nodes_health(
             node = kubernetes.core_api(context).read_node(
                 name, _request_timeout=kubernetes.API_TIMEOUT)
             # Check NotReady first (more severe than cordoned)
-            for condition in (node.status.conditions or []):
+            node_status = getattr(node, 'status', None)
+            for condition in (getattr(node_status, 'conditions', None) or []):
                 if condition.type == 'Ready' and condition.status != 'True':
                     return (name, 'NotReady')
             # Check if node is cordoned (unschedulable)
-            if getattr(node.spec, 'unschedulable', False):
+            node_spec = getattr(node, 'spec', None)
+            if getattr(node_spec, 'unschedulable', False):
                 return (name, 'cordoned')
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read node {name}: {e}')
