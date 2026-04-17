@@ -839,7 +839,8 @@ function ControllerLogsSection({
 // Patterns use ^ and $ anchors for exact token matching
 const URL_PATTERNS = {
   // Matches W&B SaaS (wandb.ai) and Dedicated Cloud tenants (<tenant>.wandb.io).
-  'W&B Run': /^https:\/\/(?:wandb\.ai|[^/]+\.wandb\.io)\/[^/]+\/[^/]+\/runs\/[^/]+$/,
+  'W&B Run':
+    /^https:\/\/(?:wandb\.ai|[^/]+\.wandb\.io)\/[^/]+\/[^/]+\/runs\/[^/]+$/,
 };
 
 function JobDetailsContent({
