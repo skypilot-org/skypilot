@@ -753,8 +753,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
                             raise config_lib.KubernetesError(
-                                'Failed to create container while launching '
-                                f'the node. Error details: {msg}.')
+                                f'{waiting.reason}: {msg}')
         return False, reason
 
     missing_pods_retry = 0
