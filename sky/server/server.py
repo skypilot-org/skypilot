@@ -1368,6 +1368,7 @@ async def _receive_and_assemble_chunks(
     request: fastapi.Request,
     chunk_index: int,
     total_chunks: int,
+    extract: bool = True,
 ) -> Optional[payloads.UploadZipFileResponse]:
     """Receive chunks, assemble into a zip file, and extract.
 
@@ -1444,7 +1445,8 @@ async def _receive_and_assemble_chunks(
                             break
                         await zip_file.write(data)
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, base_dir)
+    if extract:
+        await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return None
@@ -1548,11 +1550,13 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
 
         # Receive chunks, assemble, and extract into staging dir.
         staging_dir = storage.get_staging_dir(user_id, upload_id)
-        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
-                                                    zip_name='staging',
-                                                    request=request,
-                                                    chunk_index=chunk_index,
-                                                    total_chunks=total_chunks)
+        result = await _receive_and_assemble_chunks(
+            base_dir=staging_dir,
+            zip_name='staging',
+            request=request,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            extract=storage.extract_on_upload())
         if result is not None:
             return result
         # Atomic rename of the extracted staging dir to the final
