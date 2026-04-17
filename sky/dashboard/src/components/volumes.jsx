@@ -21,7 +21,7 @@ import {
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { RotateCwIcon, Trash2Icon } from 'lucide-react';
+import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import {
@@ -53,6 +53,9 @@ export function Volumes() {
   const [volumeToDelete, setVolumeToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showPurgeUI, setShowPurgeUI] = useState(false);
+  const [purgeConfirmed, setPurgeConfirmed] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
@@ -95,6 +98,8 @@ export function Volumes() {
     setVolumeToDelete(volume);
     setShowDeleteConfirmDialog(true);
     setDeleteError(null);
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
   };
 
   const handleDeleteVolumeConfirm = async () => {
@@ -110,6 +115,8 @@ export function Volumes() {
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
+      setShowPurgeUI(false);
+      setPurgeConfirmed(false);
       handleRefresh();
     } catch (error) {
       setDeleteError(error);
@@ -118,10 +125,35 @@ export function Volumes() {
     }
   };
 
+  const handlePurgeVolumeConfirm = async () => {
+    if (!volumeToDelete) return;
+
+    setPurgeLoading(true);
+    setDeleteError(null);
+
+    try {
+      const result = await deleteVolume(volumeToDelete.name, { purge: true });
+      if (!result.success) {
+        throw new Error(result.msg);
+      }
+      setShowDeleteConfirmDialog(false);
+      setVolumeToDelete(null);
+      setShowPurgeUI(false);
+      setPurgeConfirmed(false);
+      handleRefresh();
+    } catch (error) {
+      setDeleteError(error);
+    } finally {
+      setPurgeLoading(false);
+    }
+  };
+
   const handleCancelDelete = () => {
     setShowDeleteConfirmDialog(false);
     setVolumeToDelete(null);
     setDeleteError(null);
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
   };
 
   useEffect(() => {
@@ -233,21 +265,111 @@ export function Volumes() {
                 onDismiss={() => setDeleteError(null)}
               />
 
+              {deleteError && !showPurgeUI && (
+                <button
+                  type="button"
+                  onClick={() => setShowPurgeUI(true)}
+                  className="text-sm text-amber-700 hover:text-amber-800 underline self-start bg-transparent border-0 p-0 cursor-pointer"
+                >
+                  Force remove from SkyPilot records
+                </button>
+              )}
+
+              {showPurgeUI && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 flex items-start gap-2 mb-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800 space-y-2">
+                    <p className="m-0">
+                      <strong>Force remove won&apos;t delete the underlying volume.</strong>{' '}
+                      Removing the SkyPilot entry means this volume will no
+                      longer appear here, but{' '}
+                      {volumeToDelete?.type === 'k8s-pvc' &&
+                      volumeToDelete?.name_on_cloud ? (
+                        <>
+                          the Kubernetes PVC{' '}
+                          <code className="bg-amber-100 px-1 rounded">
+                            {volumeToDelete.name_on_cloud}
+                          </code>
+                          {volumeToDelete.namespace &&
+                            volumeToDelete.namespace !== '-' && (
+                              <>
+                                {' '}in namespace{' '}
+                                <code className="bg-amber-100 px-1 rounded">
+                                  {volumeToDelete.namespace}
+                                </code>
+                              </>
+                            )}{' '}
+                          may still exist and continue consuming resources.
+                          Delete it manually with{' '}
+                          <code className="bg-amber-100 px-1 rounded">
+                            kubectl delete pvc
+                            {volumeToDelete.namespace &&
+                            volumeToDelete.namespace !== '-'
+                              ? ` -n ${volumeToDelete.namespace}`
+                              : ''}{' '}
+                            {volumeToDelete.name_on_cloud}
+                          </code>{' '}
+                          once it&apos;s no longer in use.
+                        </>
+                      ) : (
+                        <>
+                          the underlying cloud resource may still exist and
+                          continue consuming resources. Clean it up manually
+                          once it&apos;s no longer in use.
+                        </>
+                      )}
+                    </p>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={purgeConfirmed}
+                        onChange={(e) => setPurgeConfirmed(e.target.checked)}
+                        disabled={purgeLoading}
+                        className="cursor-pointer"
+                      />
+                      <span>
+                        I understand this may not delete the underlying volume
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <DialogFooter>
                 <Button
                   variant="outline"
                   onClick={handleCancelDelete}
-                  disabled={deleteLoading}
+                  disabled={deleteLoading || purgeLoading}
                 >
                   Cancel
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDeleteVolumeConfirm}
-                  disabled={deleteLoading}
-                >
-                  {deleteLoading ? 'Deleting...' : 'Delete'}
-                </Button>
+                {!showPurgeUI && (
+                  <Button
+                    variant="destructive"
+                    onClick={handleDeleteVolumeConfirm}
+                    disabled={deleteLoading}
+                  >
+                    {deleteLoading ? 'Deleting...' : 'Delete'}
+                  </Button>
+                )}
+                {showPurgeUI && (
+                  <>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDeleteVolumeConfirm}
+                      disabled={deleteLoading || purgeLoading}
+                    >
+                      {deleteLoading ? 'Deleting...' : 'Retry Delete'}
+                    </Button>
+                    <Button
+                      onClick={handlePurgeVolumeConfirm}
+                      disabled={!purgeConfirmed || deleteLoading || purgeLoading}
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                    >
+                      {purgeLoading ? 'Removing...' : 'Force Remove'}
+                    </Button>
+                  </>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
