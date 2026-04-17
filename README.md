@@ -14,7 +14,7 @@
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
 
-  <a href="http://slack.skypilot.co">
+  <a href="https://slack.skypilot.co">
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
 
@@ -191,7 +191,7 @@ SkyPilot adopters: [Testimonials and Case Studies](https://blog.skypilot.co/case
 Partners and integrations: [Community Spotlights](https://blog.skypilot.co/community/)
 
 Follow updates:
-- [Slack](http://slack.skypilot.co)
+- [Slack](https://slack.skypilot.co)
 - [X / Twitter](https://twitter.com/skypilot_org)
 - [LinkedIn](https://www.linkedin.com/company/skypilot-oss/)
 - [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
@@ -210,7 +210,7 @@ We are excited to hear your feedback:
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
-For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.co).
+For general discussions, join us on the [SkyPilot Slack](https://slack.skypilot.co).
 
 ## Contributing
 We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
