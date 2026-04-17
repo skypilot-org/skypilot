@@ -1687,3 +1687,44 @@ class TestCondensedPodReason:
                              container_statuses=[])
         result = instance._condensed_pod_reason(pod)
         assert 'Terminated unexpectedly' in result
+
+
+class TestInsufficientResourcesMsg:
+    """Tests for _insufficient_resources_msg with last_error_reason."""
+
+    def _make_provisioner(self):
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        return provisioner
+
+    def test_includes_error_reason_for_k8s(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(
+            k8s_resource,
+            requested,
+            None,
+            last_error_reason='OOMKilled (exit code 137)')
+        assert 'OOMKilled (exit code 137)' in msg
+        assert 'my-context' in msg
+
+    def test_no_error_reason_falls_back(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(k8s_resource,
+                                                      requested,
+                                                      None,
+                                                      last_error_reason=None)
+        assert 'Failed to acquire resources' in msg
+        assert 'my-context' in msg
+        assert 'OOMKilled' not in msg

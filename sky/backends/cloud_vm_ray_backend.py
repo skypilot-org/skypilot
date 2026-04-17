@@ -914,6 +914,7 @@ class RetryingVmProvisioner(object):
         to_provision: resources_lib.Resources,
         requested_resources: Set[resources_lib.Resources],
         insufficient_resources: Optional[List[str]],
+        last_error_reason: Optional[str] = None,
     ) -> str:
         insufficent_resource_msg = ('' if insufficient_resources is None else
                                     f' ({", ".join(insufficient_resources)})')
@@ -937,6 +938,8 @@ class RetryingVmProvisioner(object):
                             f'{requested_resources}. ')
         else:
             message += (f'{to_provision.cloud} for {requested_resources}. ')
+        if last_error_reason:
+            message += f'Reason: {last_error_reason}'
         return message
 
     def _retry_zones(  # pylint: disable=line-too-long
@@ -1018,6 +1021,7 @@ class RetryingVmProvisioner(object):
                 f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.')
 
         insufficient_resources = None
+        last_error_reason: Optional[str] = None
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1245,6 +1249,7 @@ class RetryingVmProvisioner(object):
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
+                        last_error_reason = str(e)
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node.
@@ -1392,9 +1397,11 @@ class RetryingVmProvisioner(object):
                 CloudVmRayBackend().teardown_no_lock(
                     handle, terminate=terminate_or_stop, remove_from_db=False)
 
-        message = self._insufficient_resources_msg(to_provision,
-                                                   requested_resources,
-                                                   insufficient_resources)
+        message = self._insufficient_resources_msg(
+            to_provision,
+            requested_resources,
+            insufficient_resources,
+            last_error_reason=last_error_reason)
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
