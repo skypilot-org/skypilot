@@ -2104,6 +2104,51 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     return pod_reason
 
 
+def _condensed_pod_reason(pod: Any) -> str:
+    """Condense pod failure into a single-line user-facing summary.
+
+    Checks pod conditions and container statuses to produce a concise
+    reason string suitable for display in the provision failure output.
+    """
+    # Check pod conditions for preemption/disruption (highest priority).
+    if pod.status.conditions:
+        for condition in pod.status.conditions:
+            reason = condition.reason or 'Unknown reason'
+            message = condition.message or ''
+            if condition.type == 'TerminationTarget':
+                summary = f'Preempted by Kueue: {reason}'
+                if message:
+                    summary += f' ({message})'
+                return summary
+            if condition.type == 'DisruptionTarget':
+                summary = f'Disrupted: {reason}'
+                if message:
+                    summary += f' ({message})'
+                return summary
+
+    # Check container statuses for waiting states (ImagePullBackOff, etc.).
+    if pod.status.container_statuses:
+        for cs in pod.status.container_statuses:
+            if cs.state.waiting is not None:
+                waiting = cs.state.waiting
+                if waiting.reason and waiting.reason not in (
+                        'ContainerCreating', 'PodInitializing'):
+                    msg = waiting.message or ''
+                    return f'{waiting.reason}: {msg}'.rstrip(': ')
+
+    # Check container statuses for terminated states (OOMKilled, Error, etc.).
+    if pod.status.container_statuses:
+        for cs in pod.status.container_statuses:
+            if cs.state.terminated is not None:
+                terminated = cs.state.terminated
+                if terminated.exit_code != 0:
+                    reason = (terminated.reason or
+                              f'exit({terminated.exit_code})')
+                    return f'{reason} (exit code {terminated.exit_code})'
+
+    return 'Terminated unexpectedly'
+
+
 def _get_pod_events(context: Optional[str], namespace: str,
                     pod_name: str) -> List[Any]:
     """Get the events for a pod, sorted by timestamp, most recent first."""

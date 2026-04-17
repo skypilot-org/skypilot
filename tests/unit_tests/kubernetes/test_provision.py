@@ -1556,3 +1556,122 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         assert clock.now < instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
             f'No autoscaler configured → short user timeout must not be '
             f'bumped, but loop ran for {clock.now}s.')
+
+
+# ---------------------------------------------------------------------------
+# Helpers and tests for _condensed_pod_reason()
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_pod(phase='Failed',
+                   deletion_timestamp=None,
+                   conditions=None,
+                   container_statuses=None,
+                   init_container_statuses=None):
+    """Helper to build a mock pod with the given status fields."""
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.metadata.deletion_timestamp = deletion_timestamp
+    pod.status.phase = phase
+    pod.status.start_time = None
+    pod.status.conditions = conditions or []
+    pod.status.container_statuses = container_statuses or []
+    pod.status.init_container_statuses = init_container_statuses or []
+    return pod
+
+
+def _make_condition(type_,
+                    reason,
+                    message='',
+                    status='True',
+                    last_transition_time=None):
+    cond = mock.MagicMock()
+    cond.type = type_
+    cond.reason = reason
+    cond.message = message
+    cond.status = status
+    cond.last_transition_time = last_transition_time
+    return cond
+
+
+def _make_container_status(name='main',
+                           terminated_reason=None,
+                           terminated_exit_code=None,
+                           terminated_finished_at=None,
+                           waiting_reason=None,
+                           waiting_message=None):
+    cs = mock.MagicMock()
+    cs.name = name
+    cs.state.terminated = None
+    cs.state.waiting = None
+    if terminated_reason is not None:
+        cs.state.terminated = mock.MagicMock()
+        cs.state.terminated.reason = terminated_reason
+        cs.state.terminated.exit_code = terminated_exit_code or 1
+        cs.state.terminated.finished_at = terminated_finished_at
+        cs.state.terminated.message = None
+    if waiting_reason is not None:
+        cs.state.waiting = mock.MagicMock()
+        cs.state.waiting.reason = waiting_reason
+        cs.state.waiting.message = waiting_message
+    return cs
+
+
+class TestCondensedPodReason:
+    """Tests for _condensed_pod_reason()."""
+
+    def test_oom_killed(self):
+        container = _make_container_status(terminated_reason='OOMKilled',
+                                           terminated_exit_code=137)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'OOMKilled' in result
+        assert '137' in result
+
+    def test_kueue_preemption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('TerminationTarget', 'PreemptedByWorkloadPriority',
+                            'Higher priority workload scheduled'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Preempted by Kueue' in result
+        assert 'PreemptedByWorkloadPriority' in result
+
+    def test_disruption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('DisruptionTarget', 'EvictionByKueue',
+                            'Preempted to accommodate a higher priority'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Disrupted' in result
+
+    def test_image_pull_backoff_from_waiting(self):
+        container = _make_container_status(
+            waiting_reason='ImagePullBackOff',
+            waiting_message='Back-off pulling image "nvcr.io/foo:bad"')
+        pod = _make_mock_pod(phase='Failed',
+                             conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'ImagePullBackOff' in result
+        assert 'nvcr.io/foo:bad' in result
+
+    def test_crash_loop_from_terminated(self):
+        container = _make_container_status(terminated_reason='Error',
+                                           terminated_exit_code=1)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Error' in result
+        assert 'exit code 1' in result
+
+    def test_unknown_fallback(self):
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Terminated unexpectedly' in result
