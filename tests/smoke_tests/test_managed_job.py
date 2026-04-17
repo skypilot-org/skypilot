@@ -515,13 +515,20 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    user_hash = common_utils.get_user_hash()
+    # Use a short stable prefix plus user_hash anchor. When the user
+    # hash is long (e.g., 19 chars for service accounts),
+    # make_cluster_name_on_cloud truncates the display name to fit
+    # within K8s's 42-char limit, so name_on_cloud is no longer a
+    # prefix of the actual pod name.
+    stable_prefix = name_on_cloud[:10]
     terminate_head_cmd = (
         f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{name_on_cloud}-[0-9]*-{common_utils.get_user_hash()}-head" | '
+        f'grep -- "{stable_prefix}" | grep -- "{user_hash}-head" | '
         f'xargs kubectl delete pod')
     terminate_worker_cmd = (
         f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{name_on_cloud}-[0-9]*-{common_utils.get_user_hash()}-worker" | '
+        f'grep -- "{stable_prefix}" | grep -- "{user_hash}-worker" | '
         f'xargs kubectl delete pod')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
