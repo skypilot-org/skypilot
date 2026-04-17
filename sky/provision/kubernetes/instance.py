@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -30,6 +30,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+
+if TYPE_CHECKING:
+    from kubernetes.client import V1Pod
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -2105,7 +2108,7 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     return pod_reason
 
 
-def _condensed_pod_reason(pod: Any) -> str:
+def _condensed_pod_reason(pod: 'V1Pod') -> str:
     """Condense pod failure into a single-line user-facing summary.
 
     Checks pod conditions and container statuses to produce a concise
