@@ -478,7 +478,8 @@ export function ManagedJobsTable({
 
   // Convert sortConfig to API format
   const sortBy = React.useMemo(
-    () => sortConfig.key || 'job_id',
+    () =>
+      sortConfig.key === 'id' || !sortConfig.key ? 'job_id' : sortConfig.key,
     [sortConfig.key]
   );
   const sortOrder = React.useMemo(() => {
