@@ -734,7 +734,7 @@ available_node_types:
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators.
                     local output
-                    output=$(timeout $APT_CMD_TIMEOUT env DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update $APT_OPTS 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
                     if [ $rc -eq 124 ]; then
@@ -759,8 +759,8 @@ available_node_types:
                   local i
                   for i in $(seq 1 $tries); do
                     timeout $APT_INSTALL_CMD_TIMEOUT \
-                      env DEBIAN_FRONTEND=noninteractive \
-                      $(prefix_cmd) apt-get install $APT_OPTS -y \
+                      $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive \
+                      apt-get install $APT_OPTS -y \
                       -o Dpkg::Options::="--force-confdef" \
                       -o Dpkg::Options::="--force-confold" $packages
                     local rc=$?
