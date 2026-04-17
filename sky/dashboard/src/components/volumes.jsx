@@ -184,6 +184,11 @@ export function Volumes() {
             {!loading && lastFetchedTime && (
               <LastUpdatedTimestamp timestamp={lastFetchedTime} />
             )}
+            <PluginSlot
+              name="volumes.header-actions"
+              context={{ onVolumeChange: handleRefresh }}
+              wrapperClassName="contents"
+            />
             <button
               onClick={handleRefresh}
               disabled={loading}
@@ -248,7 +253,10 @@ export function Volumes() {
           </Dialog>
         </>
       ) : (
-        <PluginSlot name="volumes.tab-content" context={{ activeTab }} />
+        <PluginSlot
+          name="volumes.tab-content"
+          context={{ activeTab, onTabChange: handleTabChange }}
+        />
       )}
     </>
   );
