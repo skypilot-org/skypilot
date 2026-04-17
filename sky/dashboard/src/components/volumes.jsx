@@ -216,11 +216,6 @@ export function Volumes() {
             {!loading && lastFetchedTime && (
               <LastUpdatedTimestamp timestamp={lastFetchedTime} />
             )}
-            <PluginSlot
-              name="volumes.header-actions"
-              context={{ onVolumeChange: handleRefresh }}
-              wrapperClassName="contents"
-            />
             <button
               onClick={handleRefresh}
               disabled={loading}
@@ -229,6 +224,11 @@ export function Volumes() {
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
               {!isMobile && <span>Refresh</span>}
             </button>
+            <PluginSlot
+              name="volumes.header-actions"
+              context={{ onVolumeChange: handleRefresh }}
+              wrapperClassName="contents"
+            />
           </div>
         )}
       </div>
