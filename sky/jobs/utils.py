@@ -324,6 +324,15 @@ def is_consolidation_mode() -> bool:
     return effective
 
 
+def is_ha_enabled() -> bool:
+    """Return True if HA is enabled.
+
+    HA mode is signaled by the HA feature plugin writing a sentinel file at
+    ``constants.HA_MODE_SENTINEL_FILE`` during its install().
+    """
+    return pathlib.Path(constants.HA_MODE_SENTINEL_FILE).expanduser().exists()
+
+
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
 
@@ -1107,7 +1116,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 cancelled_job_ids.append(job_id)
                 continue
 
-        update_managed_jobs_statuses(job_id)
+        # In HA consolidation mode, cancel can run on any replica but the
+        # controller process only exists on the leader. A local psutil check
+        # here would give a false FAILED_CONTROLLER for a controller that is
+        # actually alive on a different pod. The canonical liveness detector
+        # in HA is ha_recovery_for_consolidation_mode() (runs on the leader
+        # daemon, resurrects dead controllers), so skip the pre-check here.
+        if not (is_consolidation_mode() and is_ha_enabled()):
+            update_managed_jobs_statuses(job_id)
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:

@@ -561,6 +561,33 @@ PERSISTENT_RUN_RESTARTING_SIGNAL_FILE = (
 
 HA_PERSISTENT_RECOVERY_LOG_PATH = '/tmp/{}ha_recovery.log'
 
+# Sentinel file that indicates the HA feature plugin is loaded and this API
+# server deployment should be treated as HA enabled. The HA plugin
+# touches this file during install(). See sky/jobs/utils.py::is_ha_enabled.
+#
+# Lifecycle is intentionally "sticky": the file is never unlinked by normal
+# operation, because the sentinel lives on shared PVC and any unlink path
+# (in plugin.shutdown() or on API server startup) would race against
+# concurrent install() touches on other pods during rolling updates / scale
+# events, temporarily flipping is_ha_enabled() to False on still-running
+# pods and reintroducing the exact bug this sentinel exists to prevent.
+#
+# A stale sentinel (plugin uninstalled, file persists on PVC) is benign:
+# is_ha_enabled() returns True, which in single-replica mode only adds at
+# most a daemon poll-interval of latency to submit/cancel — all paths
+# remain correct. Admins who need to toggle HA mode off without keeping
+# an HA-plugin-equipped server must manually remove the file.
+#
+# Note: path contains ~; every consumer must call expanduser() before use.
+HA_MODE_SENTINEL_FILE = '~/.sky/.ha_mode_enabled'
+
+# Wake-up signal for the managed-job-status-refresh-daemon. Written by
+# submit_jobs() on any replica in HA consolidation mode to tell the leader
+# daemon to stop sleeping and start controllers immediately. Lives on the
+# shared PVC so non-leader replicas can signal the leader across pods.
+# Note: path contains ~; every consumer must call expanduser() before use.
+CONTROLLER_START_SIGNAL_FILE = '~/.sky/signals/.controller_start_needed'
+
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'

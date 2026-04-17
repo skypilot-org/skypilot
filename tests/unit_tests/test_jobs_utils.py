@@ -558,6 +558,99 @@ class TestIsConsolidationMode:
                 assert utils.is_consolidation_mode() is True
 
 
+_HA_SENTINEL_CONST = 'sky.skylet.constants.HA_MODE_SENTINEL_FILE'
+
+
+class TestIsHaEnabled:
+    """Tests for is_ha_enabled() — HA mode sentinel file detection."""
+
+    def test_no_sentinel_returns_false(self):
+        """No sentinel file => False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sentinel = pathlib.Path(tmpdir) / '.ha_mode_enabled'
+            with mock.patch(_HA_SENTINEL_CONST, str(sentinel)):
+                assert utils.is_ha_enabled() is False
+
+    def test_sentinel_exists_returns_true(self):
+        """Sentinel file created by plugin => True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sentinel = pathlib.Path(tmpdir) / '.ha_mode_enabled'
+            sentinel.touch()
+            with mock.patch(_HA_SENTINEL_CONST, str(sentinel)):
+                assert utils.is_ha_enabled() is True
+
+    def test_sentinel_removal_flips_back(self):
+        """Removing the sentinel (plugin shutdown) returns False again."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sentinel = pathlib.Path(tmpdir) / '.ha_mode_enabled'
+            sentinel.touch()
+            with mock.patch(_HA_SENTINEL_CONST, str(sentinel)):
+                assert utils.is_ha_enabled() is True
+                sentinel.unlink()
+                assert utils.is_ha_enabled() is False
+
+
+def _make_cancel_mocks(is_consolidation: bool, is_ha: bool):
+    """Build the mock stack used by cancel_jobs_by_id HA-gating tests."""
+    return [
+        mock.patch('sky.jobs.state.is_legacy_controller_process',
+                   return_value=False),
+        mock.patch('sky.jobs.state.get_status',
+                   return_value=mock.MagicMock(
+                       is_terminal=mock.MagicMock(return_value=False),
+                       __eq__=mock.MagicMock(return_value=False))),
+        mock.patch('sky.jobs.state.get_workspace', return_value='default'),
+        mock.patch('sky.jobs.utils.is_consolidation_mode',
+                   return_value=is_consolidation),
+        mock.patch('sky.jobs.utils.is_ha_enabled', return_value=is_ha),
+    ]
+
+
+def test_cancel_jobs_skips_status_update_in_ha_consolidation():
+    """In HA+consolidation, update_managed_jobs_statuses must NOT run."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            mocks = _make_cancel_mocks(is_consolidation=True, is_ha=True)
+            with mocks[0], mocks[1], mocks[2], mocks[3], mocks[4], \
+                 mock.patch('sky.jobs.utils.update_managed_jobs_statuses'
+                           ) as mock_update:
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=False)
+                mock_update.assert_not_called()
+                # Cancel signal file MUST still be written (the controller
+                # on the leader polls this directory).
+                assert (pathlib.Path(tmpdir) / '42').exists()
+
+
+def test_cancel_jobs_calls_status_update_in_single_replica_consolidation():
+    """Consolidation + non-HA: keep today's pre-check behavior."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            mocks = _make_cancel_mocks(is_consolidation=True, is_ha=False)
+            with mocks[0], mocks[1], mocks[2], mocks[3], mocks[4], \
+                 mock.patch('sky.jobs.utils.update_managed_jobs_statuses'
+                           ) as mock_update:
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=False)
+                mock_update.assert_called_once_with(42)
+
+
+def test_cancel_jobs_calls_status_update_in_non_consolidation():
+    """Traditional controller VM: always run the pre-check."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            mocks = _make_cancel_mocks(is_consolidation=False, is_ha=False)
+            with mocks[0], mocks[1], mocks[2], mocks[3], mocks[4], \
+                 mock.patch('sky.jobs.utils.update_managed_jobs_statuses'
+                           ) as mock_update:
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=False)
+                mock_update.assert_called_once_with(42)
+
+
 class TestSetupConsolidationModeOnStartup:
     """Tests for setup_consolidation_mode_on_startup()."""
 

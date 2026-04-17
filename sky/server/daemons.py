@@ -195,6 +195,40 @@ def _release_managed_job_consolidation_mode_lock() -> None:
 
 atexit.register(_release_managed_job_consolidation_mode_lock)
 
+# Poll interval for _interruptible_sleep. Smaller values reduce job-launch
+# latency in HA consolidation mode at the cost of slightly more file-stat
+# syscalls while idle.
+_WAKE_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _interruptible_sleep(total_seconds: float) -> None:
+    """Sleep up to total_seconds, waking early if a wake signal is received.
+
+    The wake signal is the existence of the file at
+    ``constants.CONTROLLER_START_SIGNAL_FILE`` (shared PVC in HA
+    consolidation mode). On wake, the signal file is consumed (unlinked)
+    before returning so the next sleep starts clean.
+
+    Signals that arrive while the daemon is busy running recovery / status
+    refresh are preserved as file presence and consumed on the next sleep
+    entry — no lost wake-ups under concurrent submits.
+    """
+    signal_path = pathlib.Path(
+        constants.CONTROLLER_START_SIGNAL_FILE).expanduser()
+    elapsed = 0.0
+    while elapsed < total_seconds:
+        if signal_path.exists():
+            try:
+                signal_path.unlink(missing_ok=True)
+            except OSError:
+                # If we can't unlink, the file will be seen again on the
+                # next poll and we will try to consume it then. Harmless.
+                pass
+            logger.debug('Controller start signal detected, waking up early.')
+            return
+        time.sleep(_WAKE_POLL_INTERVAL_SECONDS)
+        elapsed += _WAKE_POLL_INTERVAL_SECONDS
+
 
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
@@ -250,7 +284,9 @@ def managed_job_status_refresh_event():
     refresh_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
-    time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+    # Wake early if submit_jobs() on any replica signals that new jobs need
+    # controllers (see sky/jobs/scheduler.py::_signal_controller_start_needed).
+    _interruptible_sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
 def should_skip_managed_job_status_refresh():

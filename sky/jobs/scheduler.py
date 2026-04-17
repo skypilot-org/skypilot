@@ -265,6 +265,28 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         pass
 
 
+def _signal_controller_start_needed() -> None:
+    """Wake the managed-job-status-refresh-daemon on the leader replica.
+
+    Writes a sentinel file on the shared PVC. The leader daemon's
+    _interruptible_sleep() (see sky/server/daemons.py) polls for this file
+    and exits its sleep early, immediately running ha_recovery (which calls
+    maybe_start_controllers) to launch controllers for newly-submitted jobs.
+
+    Touch is idempotent; concurrent submitters coalesce to a single wake.
+    Failure is non-fatal — the daemon's next natural cycle will still pick
+    up the new jobs within EVENT_CHECKING_INTERVAL_SECONDS.
+    """
+    try:
+        pathlib.Path(
+            constants.CONTROLLER_START_SIGNAL_FILE).expanduser().touch()
+    except OSError:
+        logger.warning(
+            'Failed to create managed-job daemon wake signal file — '
+            'controller start may be delayed up to one daemon cycle.',
+            exc_info=True)
+
+
 def submit_jobs(job_ids: List[int],
                 dag_yaml_path: str,
                 original_user_yaml_path: str,
@@ -279,20 +301,34 @@ def submit_jobs(job_ids: List[int],
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    job_ids_without_controller_process = []
-    for job_id in job_ids:
-        controller_process = state.get_job_controller_process(job_id)
-        if controller_process is not None:
-            # why? TODO(cooperc): figure out why this is needed, fix it, and
-            # remove
-            if managed_job_utils.controller_process_alive(
-                    controller_process, job_id):
-                # This can happen when HA recovery runs for some reason but the
-                # job controller is still alive.
-                logger.warning(f'Job {job_id} is still alive with controller '
-                               f'{controller_process}, skipping submission')
-                continue
-        job_ids_without_controller_process.append(job_id)
+    ha_consolidation = (managed_job_utils.is_consolidation_mode() and
+                        managed_job_utils.is_ha_enabled())
+
+    if ha_consolidation:
+        # In HA consolidation mode, submit_jobs() may run on any replica, but
+        # the referenced controller_process pid lives on the leader pod where
+        # controllers are spawned. A local psutil lookup would either fail
+        # (pid not present on this pod) or, worst case, match an unrelated
+        # local process with the same pid and cause us to incorrectly skip
+        # submission. Trust scheduler_set_waiting idempotency and defer the
+        # actual controller-liveness check to ha_recovery on the leader.
+        job_ids_without_controller_process = list(job_ids)
+    else:
+        job_ids_without_controller_process = []
+        for job_id in job_ids:
+            controller_process = state.get_job_controller_process(job_id)
+            if controller_process is not None:
+                # why? TODO(cooperc): figure out why this is needed, fix it,
+                # and remove
+                if managed_job_utils.controller_process_alive(
+                        controller_process, job_id):
+                    # This can happen when HA recovery runs for some reason
+                    # but the job controller is still alive.
+                    logger.warning(
+                        f'Job {job_id} is still alive with controller '
+                        f'{controller_process}, skipping submission')
+                    continue
+            job_ids_without_controller_process.append(job_id)
     job_ids = job_ids_without_controller_process
 
     with open(dag_yaml_path, 'r', encoding='utf-8') as dag_file:
@@ -323,7 +359,12 @@ def submit_jobs(job_ids: List[int],
     state.scheduler_set_waiting(job_ids, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
                                 config_file_content, priority, priority_class)
-    maybe_start_controllers(from_scheduler=True)
+    if ha_consolidation:
+        # Only the leader replica may start controller processes. Signal the
+        # leader daemon to wake up and start them.
+        _signal_controller_start_needed()
+    else:
+        maybe_start_controllers(from_scheduler=True)
 
 
 @contextlib.asynccontextmanager
