@@ -442,12 +442,37 @@ def _translate_srun_line(
 
     if tasks_per_node is not None and tasks_per_node > 1:
         warnings.append(
-            f'`srun --ntasks-per-node={tasks_per_node}` in line {stripped!r} '
-            'needs manual translation: SkyPilot runs the `run:` block once '
-            'per node, so use a distributed launcher (e.g. `torchrun '
-            f'--nproc_per_node={tasks_per_node}`, `mpirun`, or similar) to '
-            'spawn the per-node tasks.')
-        # Fall through: the command is emitted once; the user must wrap it.
+            f'`srun --ntasks-per-node={tasks_per_node}` needs a distributed '
+            'launcher; commented `torchrun` and `mpirun` templates were '
+            'emitted next to the command in the generated YAML.')
+        # Emit concrete launcher templates next to the command so the user
+        # has a copy-pasteable starting point.
+        template: List[str] = [
+            indent + f'# TODO: `srun --ntasks-per-node={tasks_per_node}` has',
+            indent + '# no direct SkyPilot equivalent. Replace the command',
+            indent + '# below with one of these launchers:',
+            indent + '#',
+            indent + '# PyTorch DDP (torchrun):',
+            indent + '#   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)',
+            indent + '#   torchrun \\',
+            indent + '#     --nnodes=$SKYPILOT_NUM_NODES \\',
+            indent + f'#     --nproc_per_node={tasks_per_node} \\',
+            indent + '#     --node_rank=$SKYPILOT_NODE_RANK \\',
+            indent + '#     --master_addr=$MASTER_ADDR --master_port=29500 \\',
+            indent + '#     ' + command,
+            indent + '#',
+            indent + '# MPI (run once, on the head node only):',
+            indent + '#   if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then',
+            indent + '#     echo "$SKYPILOT_NODE_IPS" > /tmp/hostfile',
+            indent + f'#     mpirun -np $(($SKYPILOT_NUM_NODES * '
+            f'{tasks_per_node})) \\',
+            indent + '#       --hostfile /tmp/hostfile \\',
+            indent + f'#       --map-by ppr:{tasks_per_node}:node \\',
+            indent + '#       ' + command,
+            indent + '#   fi',
+            indent + command,
+        ]
+        return template, warnings
     elif (total_tasks is not None and num_nodes and num_nodes > 1 and
           total_tasks != num_nodes):
         warnings.append(
@@ -464,13 +489,23 @@ def _translate_mpi_launcher_line(indent: str,
     """Translate a leading ``mpirun``/``mpiexec`` invocation.
 
     SkyPilot does not manage the MPI universe for you, but the hostfile
-    should come from ``$SKYPILOT_NODE_IPS``. We leave the command intact and
-    emit a warning pointing the user at that env var.
+    should come from ``$SKYPILOT_NODE_IPS`` and the launcher should only run
+    on the head node. We prepend a commented snippet showing the typical
+    setup and leave the original command intact for the user to edit.
     """
-    return [indent + stripped], [
-        f'Left MPI launcher unchanged on line: {stripped!r}. Generate the '
-        'hostfile from $SKYPILOT_NODE_IPS, e.g. '
-        '`echo "$SKYPILOT_NODE_IPS" > /tmp/hostfile`.'
+    template = [
+        indent + '# TODO: mpirun/mpiexec needs a hostfile from SkyPilot and',
+        indent + '# should only be launched from the head node. Typical setup:',
+        indent + '#   if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then',
+        indent + '#     echo "$SKYPILOT_NODE_IPS" > /tmp/hostfile',
+        indent + '#     ' + stripped + ' --hostfile /tmp/hostfile',
+        indent + '#   fi',
+        indent + stripped,
+    ]
+    return template, [
+        f'Left MPI launcher unchanged on line: {stripped!r}. See the '
+        'commented template in the generated YAML for the hostfile and '
+        'head-node-only setup.'
     ]
 
 

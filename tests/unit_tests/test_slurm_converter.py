@@ -138,7 +138,7 @@ def test_srun_single_task_gates_on_rank_zero():
     assert warnings == []
 
 
-def test_srun_multi_tasks_per_node_emits_warning():
+def test_srun_multi_tasks_per_node_emits_launcher_templates():
     script = """\
         #!/bin/bash
         #SBATCH --nodes=2
@@ -146,11 +146,35 @@ def test_srun_multi_tasks_per_node_emits_warning():
         srun --ntasks-per-node=8 python train.py
         """
     yaml_text, warnings = _convert(script)
-    # srun itself is stripped; a warning is emitted telling the user to use
-    # a distributed launcher.
-    assert 'srun' not in yaml_text
+    # The executable command loses the srun wrapper; only comments should
+    # still mention srun (as part of the TODO note explaining why).
+    code_lines = [
+        line for line in yaml_text.splitlines()
+        if not line.lstrip().startswith(('#', '//')) and 'srun' in line
+    ]
+    assert code_lines == [], code_lines
     assert 'python train.py' in yaml_text
-    assert any('torchrun' in w or 'ntasks-per-node' in w for w in warnings)
+    # Both launcher templates should be present.
+    assert '--nproc_per_node=8' in yaml_text
+    assert '$SKYPILOT_NODE_RANK' in yaml_text
+    assert 'mpirun' in yaml_text
+    assert 'ppr:8:node' in yaml_text
+    assert any('torchrun' in w or 'launcher' in w for w in warnings)
+
+
+def test_mpirun_gets_hostfile_template():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        mpirun -n 16 python app.py
+        """
+    yaml_text, warnings = _convert(script)
+    # Original command is preserved and a commented template is inserted.
+    assert 'mpirun -n 16 python app.py' in yaml_text
+    assert '/tmp/hostfile' in yaml_text
+    assert '$SKYPILOT_NODE_IPS' in yaml_text
+    assert any('hostfile' in w.lower() for w in warnings)
 
 
 def test_srun_drops_harmless_flags():
@@ -190,19 +214,6 @@ def test_srun_unknown_flag_warns():
         """
     _, warnings = _convert(script)
     assert any('some-new-flag' in w for w in warnings)
-
-
-def test_mpirun_left_alone_with_warning():
-    script = """\
-        #!/bin/bash
-        #SBATCH --nodes=2
-
-        mpirun -n 16 python app.py
-        """
-    yaml_text, warnings = _convert(script)
-    assert 'mpirun -n 16 python app.py' in yaml_text
-    assert any(
-        'hostfile' in w.lower() or 'SKYPILOT_NODE_IPS' in w for w in warnings)
 
 
 def test_unsupported_directives_preserved_as_comments():
