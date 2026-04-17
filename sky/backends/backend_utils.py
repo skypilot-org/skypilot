@@ -1003,6 +1003,14 @@ def write_cluster_config(
                         f'ReadWriteMany PVC volumes are supported for '
                         f'auto_mounts. Skipping.')
                     continue
+                # Mirror the explicit `volume_mounts` path (see
+                # `VolumeMount.pre_mount`): record the attachment timestamp
+                # and IN_USE status so the Volumes dashboard surfaces the
+                # "Last Use" column correctly for auto-mounted volumes.
+                global_user_state.update_volume(
+                    volume_name,
+                    last_attached_at=int(time.time()),
+                    status=status_lib.VolumeStatus.IN_USE)
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path
