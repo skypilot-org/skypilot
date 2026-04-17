@@ -195,6 +195,50 @@ def _normalize_gpu_type(gpu_type: str) -> str:
     return upper
 
 
+def _parse_slurm_time(value: str) -> Optional[int]:
+    """Parse a Slurm ``--time`` value into whole minutes.
+
+    Slurm accepts ``MM``, ``MM:SS``, ``HH:MM:SS``, ``DD-HH``, ``DD-HH:MM`` and
+    ``DD-HH:MM:SS``. Returns minutes rounded up, or ``None`` on parse failure.
+    """
+    value = value.strip()
+    if not value:
+        return None
+    days = 0
+    rest = value
+    if '-' in value:
+        day_str, rest = value.split('-', 1)
+        try:
+            days = int(day_str)
+        except ValueError:
+            return None
+    parts = rest.split(':') if rest else []
+    try:
+        nums = [int(p) for p in parts] if parts else [0]
+    except ValueError:
+        return None
+
+    if '-' in value:
+        # DD-HH / DD-HH:MM / DD-HH:MM:SS
+        while len(nums) < 3:
+            nums.append(0)
+        hours, minutes, seconds = nums[0], nums[1], nums[2]
+    elif len(nums) == 1:
+        # Bare minutes.
+        hours, minutes, seconds = 0, nums[0], 0
+    elif len(nums) == 2:
+        # MM:SS.
+        hours, minutes, seconds = 0, nums[0], nums[1]
+    elif len(nums) == 3:
+        hours, minutes, seconds = nums
+    else:
+        return None
+    total_minutes = days * 24 * 60 + hours * 60 + minutes
+    if seconds > 0:
+        total_minutes += 1  # Round up to capture the partial minute.
+    return total_minutes if total_minutes > 0 else None
+
+
 def _parse_memory(value: str) -> Optional[int]:
     """Parse a Slurm memory string (e.g. ``16G``, ``1024M``) to GB (int)."""
     if not value:
@@ -645,6 +689,32 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
             '`accelerators` in the generated YAML to set one '
             '(e.g. H100, A100, V100).')
 
+    # ``--time``: Slurm's wall-clock limit translates to SkyPilot's autostop,
+    # which tears the cluster down once idle (and so once the job finishes).
+    # See
+    # https://docs.skypilot.co/en/latest/reference/slurm/slurm-getting-started.html
+    autostop_minutes: Optional[int] = None
+    time_val = directives.pop('time', None)
+    if time_val is not None:
+        autostop_minutes = _parse_slurm_time(time_val)
+        if autostop_minutes is None:
+            warnings.append(
+                f'Could not parse --time={time_val!r}; skipping autostop.')
+
+    # ``--partition``: a Slurm partition maps to SkyPilot's
+    # ``infra: slurm/<cluster>/<partition>`` selector. We don't know the
+    # cluster name from the script, so leave a ``<cluster>`` placeholder for
+    # the user to fill in.
+    infra_value: Optional[str] = None
+    partition_val = directives.pop('partition', None)
+    if partition_val:
+        infra_value = f'slurm/<cluster>/{partition_val}'
+        warnings.append(
+            f'--partition={partition_val} was mapped to '
+            f'`resources.infra: {infra_value}`. Replace `<cluster>` with '
+            'the name of your configured Slurm cluster from '
+            '`~/.sky/config.yaml`.')
+
     # Directives that SkyPilot does not map directly.
     unsupported_notes: List[Tuple[str, str]] = []
 
@@ -655,14 +725,6 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         label = f'--{flag}={value}' if value else f'--{flag}'
         unsupported_notes.append((label, msg))
 
-    _note(
-        'time',
-        'SkyPilot does not enforce a wall-clock time limit. Use `autostop` '
-        'to release idle clusters, or use managed jobs for retries.')
-    _note(
-        'partition',
-        'Slurm partitions do not map directly. Use `resources.infra` to '
-        'target a specific cloud/region or Kubernetes context.')
     _note(
         'account', 'SkyPilot does not have accounts. Use workspaces/quotas '
         'in `~/.sky/config.yaml` if needed.')
@@ -741,6 +803,8 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         lines.append('')
 
     resources: List[str] = []
+    if infra_value:
+        resources.append(f'  infra: {infra_value}')
     if gpu_count:
         if gpu_type:
             type_str = _normalize_gpu_type(gpu_type)
@@ -754,6 +818,13 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
     if resources:
         lines.append('resources:')
         lines.extend(resources)
+        lines.append('')
+
+    if autostop_minutes is not None:
+        lines.append('autostop:')
+        lines.append(f'  idle_minutes: {autostop_minutes}')
+        lines.append('  down: true')
+        lines.append('  wait_for: none')
         lines.append('')
 
     if body.strip():

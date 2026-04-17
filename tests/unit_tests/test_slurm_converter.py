@@ -219,8 +219,6 @@ def test_srun_unknown_flag_warns():
 def test_unsupported_directives_preserved_as_comments():
     script = """\
         #!/bin/bash
-        #SBATCH --time=24:00:00
-        #SBATCH --partition=gpu
         #SBATCH --account=myaccount
         #SBATCH --output=out.log
         #SBATCH --array=1-10
@@ -228,9 +226,55 @@ def test_unsupported_directives_preserved_as_comments():
         echo hi
         """
     yaml_text, _ = _convert(script)
-    for label in ('--time=24:00:00', '--partition=gpu', '--account=myaccount',
-                  '--output=out.log', '--array=1-10'):
+    for label in ('--account=myaccount', '--output=out.log', '--array=1-10'):
         assert label in yaml_text
+
+
+def test_time_maps_to_autostop():
+    for time_spec, expected_min in [
+        ('--time=24:00:00', 24 * 60),  # HH:MM:SS
+        ('--time=30', 30),  # bare minutes
+        ('--time=90:00', 90),  # MM:SS = 90 minutes + 0 seconds
+        ('--time=1-12:00:00', 36 * 60),  # 1d 12h
+        ('--time=2-00', 48 * 60),  # 2d
+    ]:
+        script = f"""\
+            #!/bin/bash
+            #SBATCH {time_spec}
+            echo hi
+            """
+        yaml_text, _ = _convert(script)
+        assert 'autostop:' in yaml_text, time_spec
+        assert f'idle_minutes: {expected_min}' in yaml_text, time_spec
+        assert 'down: true' in yaml_text, time_spec
+        assert 'wait_for: none' in yaml_text, time_spec
+        # --time should no longer appear in the unsupported-notes comments.
+        assert '--time=' not in yaml_text, time_spec
+
+
+def test_partition_maps_to_infra():
+    script = """\
+        #!/bin/bash
+        #SBATCH --partition=gpu-a100
+        echo hi
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'infra: slurm/<cluster>/gpu-a100' in yaml_text
+    # --partition should no longer appear in the unsupported-notes comments.
+    assert '--partition=' not in yaml_text
+    # A warning should remind the user to fill in the cluster name.
+    assert any('<cluster>' in w for w in warnings)
+
+
+def test_invalid_time_emits_warning():
+    script = """\
+        #!/bin/bash
+        #SBATCH --time=not-a-time
+        echo hi
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'autostop:' not in yaml_text
+    assert any('--time' in w for w in warnings)
 
 
 def test_missing_gpu_type_adds_warning_and_placeholder():
