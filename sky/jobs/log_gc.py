@@ -85,11 +85,11 @@ def gc_task_logs_for_job():
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error GC task logs for job: {e}', exc_info=True)
         else:
-            logger.info('Controller logs GC is disabled')
+            logger.info('Task logs GC is disabled')
 
         interval = _next_gc_interval(task_logs_retention)
         logger.info(f'Next task logs GC is scheduled after {interval} seconds')
-        time.sleep(_next_gc_interval(task_logs_retention))
+        time.sleep(interval)
 
 
 def _clean_controller_logs_with_retention(retention_seconds: int,
