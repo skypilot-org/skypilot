@@ -2504,9 +2504,18 @@ class Resources:
         infra = self.infra.to_str()
         add_if_not_none('infra', infra)
 
+        # NOTE: prefer raw `self._<field>` attributes over the derived
+        # properties (`self.<field>`) when serializing. Several properties
+        # (e.g. `memory`, `accelerators`, `cpus`) fall back to deriving
+        # values from the instance-type catalog, which reads CSVs via
+        # pandas and requires cloud-specific deps. That work is
+        # unnecessary at serialization time -- any consumer that needs
+        # the derived value can re-derive it from `instance_type` -- and
+        # it pulls heavy imports into client-only code paths (e.g. the
+        # SDK's pre-flight `validate()` on a thin client without pandas).
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
-        add_if_not_none('memory', self.memory)
+        add_if_not_none('memory', self._memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
