@@ -1798,3 +1798,60 @@ class TestProvisionFailureBlocks:
         })
         assert '\u2717 Kubernetes (in-cluster)' in result
         assert '\u2717 AWS (us-east-1)' in result
+
+
+class TestFullPipeline:
+    """Integration test: KubernetesError message → retry loop → block output."""
+
+    def test_oom_reason_reaches_block_output(self, mock_format_resource):
+        """Verify OOMKilled flows from exception through to block rendering."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: OOMKilled (exit code 137). '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'OOMKilled' in blocks
+        assert 'exit code 137' in blocks
+        assert 'Hint:' in blocks
+        assert 'memory' in blocks.lower()
+
+    def test_image_pull_reason_reaches_block_output(self, mock_format_resource):
+        """Verify ImagePullBackOff flows end-to-end."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: ImagePullBackOff: '
+            'Back-off pulling image "nvcr.io/nvidia/pytorch:bad-tag". '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'ImagePullBackOff' in blocks
+        assert 'nvcr.io/nvidia/pytorch:bad-tag' in blocks
+        assert 'Hint:' in blocks
+        assert 'image' in blocks.lower() or 'registry' in blocks.lower()
