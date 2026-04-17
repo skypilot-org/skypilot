@@ -134,6 +134,47 @@ Example usage in a distributed training script:
 Porting sbatch scripts to SkyPilot YAML
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+For an existing Slurm script, the easiest first step is to use the
+``sky utils convert-slurm`` CLI to auto-generate a starting point:
+
+.. code-block:: bash
+
+   # Print the converted YAML to stdout.
+   sky utils convert-slurm train.slurm
+
+   # Or write it to a file.
+   sky utils convert-slurm train.slurm train.sky.yaml
+
+The converter applies the directive mapping documented in this guide:
+
+- ``--job-name``, ``--nodes``, ``--cpus-per-task``, ``--mem``,
+  ``--gpus-per-node`` / ``--gres=gpu`` / ``--gpus`` map to top-level fields
+  (``name``, ``num_nodes``, ``resources.cpus``, ``resources.memory``,
+  ``resources.accelerators``).
+- ``--time=DD-HH:MM:SS`` maps to :ref:`autostop <auto-stop>`.
+- ``--partition`` maps to ``resources.infra: slurm/<cluster>/<partition>``
+  (the converter leaves a ``<cluster>`` placeholder for you to fill in).
+- Other ``#SBATCH`` directives (``--account``, ``--qos``, ``--constraint``,
+  ``--mail-*``, ``--exclusive``, ``--reservation``, ``--dependency``, ...)
+  pass through to ``config.slurm.sbatch_options`` so they round-trip to
+  Slurm at submission time.
+- Common ``SLURM_*`` environment variables in the body are rewritten to
+  their ``SKYPILOT_*`` equivalents (see the table above).
+- ``srun`` wrappers are translated based on Slurm semantics: a bare
+  ``srun cmd`` becomes ``cmd`` (SkyPilot's ``run`` block already executes
+  on every node); ``srun -N1 -n1 cmd`` is wrapped in a
+  ``$SKYPILOT_NODE_RANK == 0`` guard; for ``srun --ntasks-per-node=N`` with
+  N > 1 the converter emits ready-to-copy ``torchrun`` and ``mpirun``
+  templates next to the original line.
+- Directives without a direct equivalent (``--output``, ``--error``,
+  ``--array``) are preserved as comments at the top of the YAML for review.
+
+The output is a starting point: always read through the generated YAML and
+adjust before launching.
+
+Side-by-side comparison
+^^^^^^^^^^^^^^^^^^^^^^^
+
 Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equivalent:
 
 .. raw:: html
