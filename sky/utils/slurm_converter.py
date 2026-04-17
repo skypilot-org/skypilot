@@ -576,6 +576,24 @@ def _translate_body(body: str,
     return '\n'.join(out_lines), warnings
 
 
+def _yaml_scalar(value: str) -> str:
+    """Render ``value`` as a safe YAML scalar.
+
+    Values that are ambiguous or contain YAML special characters are wrapped
+    in single quotes; simple strings are emitted unquoted.
+    """
+    if not value:
+        return "''"
+    needs_quoting = (any(c in value for c in ':#&*!|>\'"%@`,[]{}') or
+                     value[0] in ' -?' or value != value.strip() or
+                     value.lower()
+                     in {'true', 'false', 'yes', 'no', 'null', '~'})
+    if needs_quoting:
+        escaped = value.replace("'", "''")
+        return f"'{escaped}'"
+    return value
+
+
 def _format_yaml_block(key: str, value: str) -> str:
     """Format a multi-line string value as a YAML block scalar."""
     value = value.rstrip('\n')
@@ -725,14 +743,9 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         label = f'--{flag}={value}' if value else f'--{flag}'
         unsupported_notes.append((label, msg))
 
-    _note(
-        'account', 'SkyPilot does not have accounts. Use workspaces/quotas '
-        'in `~/.sky/config.yaml` if needed.')
-    _note('qos', 'No direct QoS equivalent in SkyPilot.')
-    _note(
-        'constraint', 'No direct equivalent; use `resources.instance_type` or '
-        '`resources.labels` to constrain placement.')
-    _note('reservation', 'Reservations are configured per-cloud in SkyPilot.')
+    # These directives are managed by SkyPilot itself or don't make sense as
+    # per-task sbatch options. Kept as review comments instead of being passed
+    # through as ``config.slurm.sbatch_options``.
     _note(
         'output', 'SkyPilot captures stdout/stderr automatically; view with '
         '`sky logs` or `sky jobs logs`.')
@@ -741,30 +754,42 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
     _note(
         'array', 'Slurm job arrays have no direct equivalent. Launch with a '
         'shell loop over `sky jobs launch --env TASK_ID=$i ...`.')
-    _note(
-        'dependency',
-        'Job dependencies can be modeled with SkyPilot pipelines/DAGs or by '
-        'chaining `sky jobs launch` calls.')
-    _note('mail-user', 'SkyPilot does not send email notifications.')
-    _note('mail-type', 'SkyPilot does not send email notifications.')
-    _note('begin', 'Scheduled start times are not supported by SkyPilot.')
-    _note('chdir',
-          'Set the working directory inside `setup`/`run` or with `workdir:`.')
-    _note('exclusive',
-          'SkyPilot clusters are allocated exclusively by default.')
-    _note(
-        'nodelist',
-        'Specific node targeting is not supported; use `resources.infra` '
-        'or labels instead.')
-    _note('exclude', 'Node exclusion is not supported.')
-    _note('ntasks',
-          'Maps loosely to `num_nodes * ntasks-per-node`; reviewed manually.')
 
-    # Anything still in ``directives`` is unknown / unhandled.
+    # The sbatch options that the Slurm provisioner controls. Passing these
+    # through ``sbatch_options`` just triggers a warning at provision time, so
+    # we skip them here. Mirrors ``_SBATCH_PROTECTED_OPTIONS`` in
+    # sky/provision/slurm/instance.py.
+    _PROTECTED = {
+        'job-name',
+        'output',
+        'error',
+        'nodes',
+        'time',
+        'wait-all-nodes',
+        'no-requeue',
+        'cpus-per-task',
+        'mem',
+        'gres',
+        'partition',
+    }
+
+    # Any remaining directive that isn't protected is a valid per-task sbatch
+    # option and can be pushed into ``config.slurm.sbatch_options`` to round-
+    # trip faithfully through the Slurm backend.
+    # https://docs.skypilot.co/en/latest/reference/slurm/slurm-getting-started.html
+    sbatch_passthrough: Dict[str, str] = {}
     for flag, value in list(directives.items()):
-        label = f'--{flag}={value}' if value else f'--{flag}'
-        unsupported_notes.append(
-            (label, 'No direct SkyPilot equivalent; please review.'))
+        if flag in _PROTECTED:
+            label = f'--{flag}={value}' if value else f'--{flag}'
+            unsupported_notes.append((
+                label,
+                'Protected by SkyPilot; cannot be set via `config.slurm.'
+                'sbatch_options`. Please review.',
+            ))
+            directives.pop(flag, None)
+            continue
+        sbatch_passthrough[flag] = value
+        directives.pop(flag, None)
 
     # Body handling: substitute env vars and translate srun/mpirun lines.
     body = '\n'.join(parsed.body_lines).strip('\n')
@@ -825,6 +850,21 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         lines.append(f'  idle_minutes: {autostop_minutes}')
         lines.append('  down: true')
         lines.append('  wait_for: none')
+        lines.append('')
+
+    if sbatch_passthrough:
+        lines.append('config:')
+        lines.append('  slurm:')
+        lines.append('    sbatch_options:')
+        for flag in sorted(sbatch_passthrough):
+            value = sbatch_passthrough[flag]
+            if value == '':
+                # Flag with no value -- emit as a boolean true.
+                lines.append(f'      {flag}: true')
+            else:
+                # Quote strings to keep YAML happy for values with
+                # characters like ``:`` (e.g. ``--mail-type=END:FAIL``).
+                lines.append(f'      {flag}: {_yaml_scalar(value)}')
         lines.append('')
 
     if body.strip():

@@ -217,17 +217,62 @@ def test_srun_unknown_flag_warns():
 
 
 def test_unsupported_directives_preserved_as_comments():
+    """Protected / non-passthrough directives stay as review comments."""
     script = """\
         #!/bin/bash
-        #SBATCH --account=myaccount
         #SBATCH --output=out.log
         #SBATCH --array=1-10
 
         echo hi
         """
     yaml_text, _ = _convert(script)
-    for label in ('--account=myaccount', '--output=out.log', '--array=1-10'):
+    # These should not go into sbatch_options (output is protected, array
+    # needs a different execution model).
+    assert 'sbatch_options' not in yaml_text
+    for label in ('--output=out.log', '--array=1-10'):
         assert label in yaml_text
+
+
+def test_non_protected_directives_pass_through_as_sbatch_options():
+    """Non-protected directives go into config.slurm.sbatch_options."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --account=myaccount
+        #SBATCH --qos=high
+        #SBATCH --constraint=gpu80gb
+        #SBATCH --mail-user=me@example.com
+        #SBATCH --mail-type=END
+        #SBATCH --exclusive
+
+        echo hi
+        """
+    yaml_text, _ = _convert(script)
+    assert 'config:' in yaml_text
+    assert '  slurm:' in yaml_text
+    assert '    sbatch_options:' in yaml_text
+    assert 'account: myaccount' in yaml_text
+    assert 'qos: high' in yaml_text
+    assert 'constraint: gpu80gb' in yaml_text
+    # Values containing ':' or '@' should get quoted.
+    assert "mail-user: 'me@example.com'" in yaml_text
+    assert 'mail-type: END' in yaml_text
+    # Flags without a value become boolean true.
+    assert 'exclusive: true' in yaml_text
+
+
+def test_protected_directives_not_passed_through():
+    """Protected sbatch options never end up in sbatch_options."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --output=out.log
+        #SBATCH --error=err.log
+
+        echo hi
+        """
+    yaml_text, _ = _convert(script)
+    # The converter already consumes --output/--error as comments rather than
+    # sbatch_options, so config should not appear at all.
+    assert 'sbatch_options' not in yaml_text
 
 
 def test_time_maps_to_autostop():
