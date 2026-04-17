@@ -680,8 +680,8 @@ def get_usable_vpc_and_subnet(
                     f'No subnet with name(s) {subnet_names!r} found in '
                     f'region {region} for specified VPC '
                     f'{specific_vpc_to_use!r}.')
-            logger.info('Using user-specified subnet %r in VPC %r.',
-                        subnets[0]['name'], specific_vpc_to_use)
+            logger.info(f'Using user-specified subnet {subnets[0]["name"]!r} '
+                        f'in VPC {specific_vpc_to_use!r}.')
             return specific_vpc_to_use, subnets[0]
 
         if not subnets:
@@ -712,8 +712,8 @@ def get_usable_vpc_and_subnet(
                 f'to multiple VPCs {sorted(vpc_names)!r}. To fix: specify '
                 'subnet_names from a single VPC, or also set gcp.vpc_name.')
         vpc_name = next(iter(vpc_names))
-        logger.info('Using user-specified subnet %r in VPC %r.',
-                    subnets[0]['name'], vpc_name)
+        logger.info(f'Using user-specified subnet {subnets[0]["name"]!r} '
+                    f'in VPC {vpc_name!r}.')
         return vpc_name, subnets[0]
 
     subnets_all = _list_subnets(project_id, region, compute)

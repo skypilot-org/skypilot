@@ -178,21 +178,16 @@ def test_gcp_get_user_identities_workspace_cache_bypass():
         mock_get_workspace_cloud.assert_any_call('gcp')
 
 
-def _make_subnet(name: str, vpc_name: str):
+def _make_subnet(name: str, vpc_name: str, project_id: str = 'test-project'):
     return {
         'name': name,
-        'network': f'projects/test-project/global/networks/{vpc_name}',
+        'network': f'projects/{project_id}/global/networks/{vpc_name}',
         'selfLink': f'https://example.com/{name}',
     }
 
 
-def test_gcp_get_usable_vpc_and_subnet_uses_specified_subnet(monkeypatch):
-    provider_config = {
-        'project_id': 'test-project',
-        'vpc_name': 'train-vpc',
-        'subnet_names': ['train-subnet-b', 'train-subnet-a'],
-    }
-    provision_config = common.ProvisionConfig(
+def _make_provision_config(provider_config):
+    return common.ProvisionConfig(
         provider_config=provider_config,
         authentication_config={},
         docker_config={},
@@ -202,6 +197,15 @@ def test_gcp_get_usable_vpc_and_subnet_uses_specified_subnet(monkeypatch):
         resume_stopped_nodes=False,
         ports_to_open_on_launch=None,
     )
+
+
+def test_gcp_get_usable_vpc_and_subnet_uses_specified_subnet(monkeypatch):
+    provider_config = {
+        'project_id': 'test-project',
+        'vpc_name': 'train-vpc',
+        'subnet_names': ['train-subnet-b', 'train-subnet-a'],
+    }
+    provision_config = _make_provision_config(provider_config)
     monkeypatch.setattr(gcp_config, '_list_vpcnets', lambda *args, **kwargs: [{
         'name': 'train-vpc'
     }])
@@ -223,16 +227,7 @@ def test_gcp_get_usable_vpc_and_subnet_infers_vpc_from_subnet(monkeypatch):
         'project_id': 'test-project',
         'subnet_names': 'train-subnet',
     }
-    provision_config = common.ProvisionConfig(
-        provider_config=provider_config,
-        authentication_config={},
-        docker_config={},
-        node_config={},
-        count=1,
-        tags={},
-        resume_stopped_nodes=False,
-        ports_to_open_on_launch=None,
-    )
+    provision_config = _make_provision_config(provider_config)
     monkeypatch.setattr(
         gcp_config, '_list_subnets', lambda *args, **kwargs: [
             _make_subnet('train-subnet', 'train-vpc'),
@@ -250,16 +245,7 @@ def test_gcp_get_usable_vpc_and_subnet_rejects_multiple_vpcs(monkeypatch):
         'project_id': 'test-project',
         'subnet_names': ['train-subnet-a', 'train-subnet-b'],
     }
-    provision_config = common.ProvisionConfig(
-        provider_config=provider_config,
-        authentication_config={},
-        docker_config={},
-        node_config={},
-        count=1,
-        tags={},
-        resume_stopped_nodes=False,
-        ports_to_open_on_launch=None,
-    )
+    provision_config = _make_provision_config(provider_config)
     monkeypatch.setattr(
         gcp_config, '_list_subnets', lambda *args, **kwargs: [
             _make_subnet('train-subnet-a', 'train-vpc-a'),
@@ -271,6 +257,90 @@ def test_gcp_get_usable_vpc_and_subnet_rejects_multiple_vpcs(monkeypatch):
                                              provision_config, MagicMock())
 
     assert 'multiple VPCs' in str(exc_info.value)
+
+
+def test_gcp_get_usable_vpc_and_subnet_partial_name_match(monkeypatch):
+    provider_config = {
+        'project_id': 'test-project',
+        'vpc_name': 'train-vpc',
+        'subnet_names': ['missing-subnet', 'train-subnet-b'],
+    }
+    provision_config = _make_provision_config(provider_config)
+    monkeypatch.setattr(gcp_config, '_list_vpcnets', lambda *args, **kwargs: [{
+        'name': 'train-vpc'
+    }])
+    monkeypatch.setattr(
+        gcp_config, '_list_subnets', lambda *args, **kwargs: [
+            _make_subnet('train-subnet-a', 'train-vpc'),
+            _make_subnet('train-subnet-b', 'train-vpc'),
+        ])
+
+    vpc_name, subnet = gcp_config.get_usable_vpc_and_subnet(
+        'cluster', 'us-central1', provision_config, MagicMock())
+
+    assert vpc_name == 'train-vpc'
+    assert subnet['name'] == 'train-subnet-b'
+
+
+def test_gcp_get_usable_vpc_and_subnet_empty_subnet_names(monkeypatch):
+    provider_config = {
+        'project_id': 'test-project',
+        'vpc_name': 'train-vpc',
+        'subnet_names': [],
+    }
+    provision_config = _make_provision_config(provider_config)
+    monkeypatch.setattr(gcp_config, '_list_vpcnets', lambda *args, **kwargs: [{
+        'name': 'train-vpc'
+    }])
+    monkeypatch.setattr(
+        gcp_config, '_list_subnets', lambda *args, **kwargs: [
+            _make_subnet('train-subnet-a', 'train-vpc'),
+            _make_subnet('train-subnet-b', 'train-vpc'),
+        ])
+
+    vpc_name, subnet = gcp_config.get_usable_vpc_and_subnet(
+        'cluster', 'us-central1', provision_config, MagicMock())
+
+    assert vpc_name == 'train-vpc'
+    assert subnet['name'] == 'train-subnet-a'
+
+
+def test_gcp_get_usable_vpc_and_subnet_shared_vpc_with_subnet_names(
+        monkeypatch):
+    provider_config = {
+        'project_id': 'service-project',
+        'vpc_name': 'host-project/train-vpc',
+        'subnet_names': ['train-subnet-b'],
+    }
+    provision_config = _make_provision_config(provider_config)
+    seen_projects = []
+
+    def list_vpcnets(project_id, *args, **kwargs):
+        seen_projects.append(project_id)
+        return [{'name': 'train-vpc'}]
+
+    def list_subnets(project_id, *args, **kwargs):
+        seen_projects.append(project_id)
+        return [
+            _make_subnet('train-subnet-a',
+                         'train-vpc',
+                         project_id='host-project'),
+            _make_subnet('train-subnet-b',
+                         'train-vpc',
+                         project_id='host-project'),
+        ]
+
+    monkeypatch.setattr(gcp_config, '_list_vpcnets', list_vpcnets)
+    monkeypatch.setattr(gcp_config, '_list_subnets', list_subnets)
+
+    vpc_name, subnet = gcp_config.get_usable_vpc_and_subnet(
+        'cluster', 'us-central1', provision_config, MagicMock())
+
+    assert seen_projects == ['host-project', 'host-project']
+    assert vpc_name == 'train-vpc'
+    assert subnet['name'] == 'train-subnet-b'
+    assert subnet['network'] == (
+        'projects/host-project/global/networks/train-vpc')
 
 
 def test_gcp_minimal_compute_permissions_skip_firewall_for_custom_subnet():
