@@ -64,11 +64,11 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
 
     def items(self):
         with self._lock:
-            return self._dict.items()
+            return list(self._dict.items())
 
     def values(self):
         with self._lock:
-            return self._dict.values()
+            return list(self._dict.values())
 
     @overload
     def get(self, key: KeyType, default: ValueType) -> ValueType:
