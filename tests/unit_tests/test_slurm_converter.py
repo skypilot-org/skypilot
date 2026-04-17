@@ -103,7 +103,8 @@ def test_strip_bare_srun():
     assert warnings == []
 
 
-def test_srun_with_flags_emits_warning():
+def test_srun_single_task_per_node_on_multi_node_job():
+    """`srun --ntasks-per-node=1 cmd` on a 2-node job = run once per node."""
     script = """\
         #!/bin/bash
         #SBATCH --nodes=2
@@ -111,9 +112,97 @@ def test_srun_with_flags_emits_warning():
         srun --ntasks-per-node=1 python train.py
         """
     yaml_text, warnings = _convert(script)
-    # The line should be preserved unchanged.
-    assert 'srun --ntasks-per-node=1 python train.py' in yaml_text
-    assert any('srun' in w for w in warnings)
+    # Tasks-per-node==1 on a multi-node job = bare command on each node.
+    assert 'python train.py' in yaml_text
+    assert 'srun' not in yaml_text
+    assert 'SKYPILOT_NODE_RANK' not in yaml_text
+    assert warnings == []
+
+
+def test_srun_single_task_gates_on_rank_zero():
+    """`srun -N1 -n1 cmd` in a multi-node job runs on one node only."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=4
+
+        srun -N1 -n1 python preprocess.py
+        python train.py
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then' in yaml_text
+    assert '  python preprocess.py' in yaml_text
+    assert 'fi' in yaml_text
+    # The unwrapped line still runs on every node.
+    assert '\n  python train.py\n' in yaml_text or '\n  python train.py' in (
+        yaml_text)
+    assert warnings == []
+
+
+def test_srun_multi_tasks_per_node_emits_warning():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun --ntasks-per-node=8 python train.py
+        """
+    yaml_text, warnings = _convert(script)
+    # srun itself is stripped; a warning is emitted telling the user to use
+    # a distributed launcher.
+    assert 'srun' not in yaml_text
+    assert 'python train.py' in yaml_text
+    assert any('torchrun' in w or 'ntasks-per-node' in w for w in warnings)
+
+
+def test_srun_drops_harmless_flags():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun --cpu-bind=cores --mpi=pmix --gres=gpu:1 python app.py
+        """
+    yaml_text, warnings = _convert(script)
+    # All the flags are in the drop-list; command runs on every node.
+    assert 'srun' not in yaml_text
+    assert 'python app.py' in yaml_text
+    assert warnings == []
+
+
+def test_srun_single_node_job_keeps_command_bare():
+    """On a single-node job, `srun -N1 -n1 cmd` is just `cmd`."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=1
+
+        srun -N1 -n1 python app.py
+        """
+    yaml_text, _ = _convert(script)
+    # No multi-node fan-out, so no rank guard needed.
+    assert 'SKYPILOT_NODE_RANK' not in yaml_text
+    assert 'python app.py' in yaml_text
+
+
+def test_srun_unknown_flag_warns():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun --some-new-flag=foo python app.py
+        """
+    _, warnings = _convert(script)
+    assert any('some-new-flag' in w for w in warnings)
+
+
+def test_mpirun_left_alone_with_warning():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        mpirun -n 16 python app.py
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'mpirun -n 16 python app.py' in yaml_text
+    assert any(
+        'hostfile' in w.lower() or 'SKYPILOT_NODE_IPS' in w for w in warnings)
 
 
 def test_unsupported_directives_preserved_as_comments():

@@ -226,36 +226,272 @@ def _substitute_env_vars(text: str) -> str:
     return text
 
 
-def _strip_srun(body: str) -> Tuple[str, List[str]]:
-    """Remove leading ``srun`` invocations from body lines.
+# srun flags that do not affect the translated command (they either describe
+# resources SkyPilot already allocates at the cluster level, or they are
+# launcher-specific behaviors that are a no-op once we drop ``srun`` itself).
+_SRUN_FLAGS_TO_DROP = {
+    # Resource / placement selectors -- already expressed by the cluster spec.
+    'gres',
+    'gpus',
+    'gpus-per-task',
+    'gpus-per-node',
+    'gpu-bind',
+    'cpus-per-task',
+    'cpu-bind',
+    'threads-per-core',
+    'hint',
+    'mem',
+    'mem-per-cpu',
+    'mem-per-gpu',
+    'mem-bind',
+    # Slurm launcher / MPI behaviors.
+    'mpi',
+    'label',
+    'unbuffered',
+    'kill-on-bad-exit',
+    'propagate',
+    'pty',
+    'multi-prog',
+    'preserve-env',
+    'resv-ports',
+    'distribution',
+    'exclusive',
+    'oversubscribe',
+    'overlap',
+    'overcommit',
+    'exact',
+    # Routing / scheduling -- doesn't apply under SkyPilot.
+    'partition',
+    'account',
+    'qos',
+    'constraint',
+    'reservation',
+    'cluster',
+    'time',
+    'time-min',
+    'deadline',
+    'begin',
+    'dependency',
+    'priority',
+    'nice',
+    'hold',
+    'no-requeue',
+    'requeue',
+    'wait',
+    # Node targeting -- SkyPilot chooses the nodes.
+    'nodelist',
+    'nodefile',
+    'exclude',
+    'relative',
+    'switches',
+    # I/O and env.
+    'output',
+    'error',
+    'input',
+    'open-mode',
+    'chdir',
+    'export',
+    'export-file',
+    'job-name',
+    'comment',
+    'network',
+    'quiet',
+    'slurmd-debug',
+    'verbose',
+}
 
-    SkyPilot handles multi-node launch itself (via ``SKYPILOT_NODE_IPS`` and
-    ``SKYPILOT_NODE_RANK``), so the common pattern ``srun python train.py``
-    becomes just ``python train.py``. If the ``srun`` invocation has any flags
-    we leave the line unchanged and emit a warning asking the user to review
-    it, since translating arbitrary ``srun`` flags is error-prone.
+# Short option -> long option for the flags srun shares with sbatch.
+_SRUN_SHORT_TO_LONG: Dict[str, str] = {
+    'n': 'ntasks',
+    'N': 'nodes',
+    'c': 'cpus-per-task',
+    'G': 'gpus',
+    'o': 'output',
+    'e': 'error',
+    'i': 'input',
+    'l': 'label',
+    'J': 'job-name',
+    'D': 'chdir',
+    'p': 'partition',
+    'A': 'account',
+    't': 'time',
+    'w': 'nodelist',
+    'x': 'exclude',
+    'r': 'relative',
+    'q': 'qos',
+    'd': 'dependency',
+    'v': 'verbose',
+    'Q': 'quiet',
+    'm': 'distribution',
+    'Z': 'no-allocate',
+    'X': 'disable-status',
+    'K': 'kill-on-bad-exit',
+    'O': 'overcommit',
+    's': 'oversubscribe',
+    'T': 'threads',
+    'W': 'wait',
+}
+
+
+def _parse_srun_flags(tokens: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """Split ``srun``'s tokens into a dict of flags and the command tokens.
+
+    Returns ``(flags, command_tokens)``. Flags without a value get the empty
+    string. Stops at the first positional argument or ``--`` terminator.
     """
+    flags: Dict[str, str] = {}
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == '--':
+            i += 1
+            break
+        if tok.startswith('--'):
+            body = tok[2:]
+            if '=' in body:
+                key, value = body.split('=', 1)
+                flags[key] = value
+                i += 1
+            elif (i + 1 < len(tokens) and not tokens[i + 1].startswith('-')):
+                flags[body] = tokens[i + 1]
+                i += 2
+            else:
+                flags[body] = ''
+                i += 1
+        elif tok.startswith('-') and len(tok) >= 2:
+            short = tok[1]
+            rest = tok[2:]
+            key = _SRUN_SHORT_TO_LONG.get(short, short)
+            if rest:
+                flags[key] = rest
+                i += 1
+            elif (i + 1 < len(tokens) and not tokens[i + 1].startswith('-')):
+                flags[key] = tokens[i + 1]
+                i += 2
+            else:
+                flags[key] = ''
+                i += 1
+        else:
+            break
+    return flags, tokens[i:]
+
+
+def _translate_srun_line(
+        indent: str, stripped: str,
+        num_nodes: Optional[int]) -> Tuple[List[str], List[str]]:
+    """Translate a single ``srun ...`` line.
+
+    Returns ``(new_lines, warnings)``. ``new_lines`` is the list of output
+    lines that should replace the original line (already indented).
+    """
+    try:
+        tokens = shlex.split(stripped)
+    except ValueError:
+        return [indent + stripped], []
+    assert tokens and tokens[0] == 'srun', tokens
+    flags, command_tokens = _parse_srun_flags(tokens[1:])
+
+    if not command_tokens:
+        # ``srun`` with no positional command -- nothing useful we can do.
+        return [indent + stripped], [
+            f'Could not find a command after `srun` in line: {stripped!r}.'
+        ]
+
+    command = ' '.join(shlex.quote(t) for t in command_tokens)
+    warnings: List[str] = []
+
+    # Figure out how many tasks per node this srun asks for.
+    def _as_int(v: Optional[str]) -> Optional[int]:
+        if v is None or v == '':
+            return None
+        try:
+            return int(v)
+        except ValueError:
+            return None
+
+    tasks_per_node = _as_int(flags.get('ntasks-per-node'))
+    total_tasks = _as_int(flags.get('ntasks'))
+    srun_nodes = _as_int(flags.get('nodes'))
+
+    # Single-task invocation in an otherwise multi-node job -- gate on rank 0.
+    # Slurm semantics: ``--ntasks-per-node=1`` alone means "one task per node"
+    # which still runs on every node; only explicit ``--nodes=1`` or
+    # ``--ntasks=1`` (without a per-node multiplier) forces a single node.
+    is_single_task = False
+    if srun_nodes == 1 and (tasks_per_node is None or tasks_per_node == 1):
+        is_single_task = True
+    elif (total_tasks == 1 and srun_nodes is None and tasks_per_node is None):
+        is_single_task = True
+
+    # Detect unrecognized flags (i.e. ones that we cannot safely drop).
+    handled = {'ntasks', 'nodes', 'ntasks-per-node'}
+    unknown = sorted(
+        k for k in flags if k not in _SRUN_FLAGS_TO_DROP and k not in handled)
+    if unknown:
+        warnings.append(
+            f'Dropped unrecognized srun flag(s) {unknown} from line: '
+            f'{stripped!r}. Please verify the translated command.')
+
+    if is_single_task and num_nodes and num_nodes > 1:
+        # Only run on the head node; Slurm's -N1 -n1 semantics.
+        return ([
+            indent + 'if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then',
+            indent + '  ' + command,
+            indent + 'fi',
+        ], warnings)
+
+    if tasks_per_node is not None and tasks_per_node > 1:
+        warnings.append(
+            f'`srun --ntasks-per-node={tasks_per_node}` in line {stripped!r} '
+            'needs manual translation: SkyPilot runs the `run:` block once '
+            'per node, so use a distributed launcher (e.g. `torchrun '
+            f'--nproc_per_node={tasks_per_node}`, `mpirun`, or similar) to '
+            'spawn the per-node tasks.')
+        # Fall through: the command is emitted once; the user must wrap it.
+    elif (total_tasks is not None and num_nodes and num_nodes > 1 and
+          total_tasks != num_nodes):
+        warnings.append(
+            f'`srun --ntasks={total_tasks}` with {num_nodes} nodes in line '
+            f'{stripped!r}: SkyPilot runs the `run:` block on every node '
+            f'({num_nodes} tasks total). Adjust if you need a different '
+            'layout.')
+
+    return [indent + command], warnings
+
+
+def _translate_mpi_launcher_line(indent: str,
+                                 stripped: str) -> Tuple[List[str], List[str]]:
+    """Translate a leading ``mpirun``/``mpiexec`` invocation.
+
+    SkyPilot does not manage the MPI universe for you, but the hostfile
+    should come from ``$SKYPILOT_NODE_IPS``. We leave the command intact and
+    emit a warning pointing the user at that env var.
+    """
+    return [indent + stripped], [
+        f'Left MPI launcher unchanged on line: {stripped!r}. Generate the '
+        'hostfile from $SKYPILOT_NODE_IPS, e.g. '
+        '`echo "$SKYPILOT_NODE_IPS" > /tmp/hostfile`.'
+    ]
+
+
+def _translate_body(body: str,
+                    num_nodes: Optional[int]) -> Tuple[str, List[str]]:
+    """Rewrite the script body: translate ``srun``/``mpirun`` invocations."""
     warnings: List[str] = []
     out_lines: List[str] = []
     for line in body.splitlines():
         stripped = line.lstrip()
         indent = line[:len(line) - len(stripped)]
         if stripped == 'srun' or stripped.startswith('srun '):
-            after = stripped[len('srun'):].lstrip()
-            if after.startswith('-'):
-                warnings.append(
-                    f'Left `srun` flags unchanged on line: {stripped!r}. '
-                    'SkyPilot distributes work via $SKYPILOT_NODE_IPS and '
-                    '$SKYPILOT_NODE_RANK; please translate the flags by '
-                    'hand.')
-                out_lines.append(line)
-            else:
-                out_lines.append(indent + after)
-        elif stripped.startswith('mpirun ') or stripped.startswith('mpiexec '):
-            warnings.append(
-                f'Left MPI launcher unchanged on line: {stripped!r}. Make '
-                'sure the hostfile uses $SKYPILOT_NODE_IPS.')
-            out_lines.append(line)
+            new_lines, ws = _translate_srun_line(indent, stripped, num_nodes)
+            out_lines.extend(new_lines)
+            warnings.extend(ws)
+        elif (stripped.startswith('mpirun ') or
+              stripped.startswith('mpiexec ') or stripped == 'mpirun' or
+              stripped == 'mpiexec'):
+            new_lines, ws = _translate_mpi_launcher_line(indent, stripped)
+            out_lines.extend(new_lines)
+            warnings.extend(ws)
         else:
             out_lines.append(line)
     return '\n'.join(out_lines), warnings
@@ -433,11 +669,11 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         unsupported_notes.append(
             (label, 'No direct SkyPilot equivalent; please review.'))
 
-    # Body handling: substitute env vars and strip srun wrappers.
+    # Body handling: substitute env vars and translate srun/mpirun lines.
     body = '\n'.join(parsed.body_lines).strip('\n')
     body = _substitute_env_vars(body)
-    body, srun_warnings = _strip_srun(body)
-    warnings.extend(srun_warnings)
+    body, body_warnings = _translate_body(body, num_nodes)
+    warnings.extend(body_warnings)
 
     # Assemble the YAML text. We format it manually so that we can interleave
     # comments for unsupported directives.
