@@ -7827,6 +7827,81 @@ def debug_dump(
     click.echo(f'Debug dump saved to: {local_path}')
 
 
+@cli.group(cls=_NaturalOrderGroup)
+def utils():
+    """SkyPilot utility commands."""
+    pass
+
+
+@utils.command('convert-slurm', cls=_DocumentedCodeCommand)
+@click.argument('slurm_script',
+                required=True,
+                type=click.Path(exists=True, dir_okay=False, readable=True))
+@click.argument('output_yaml', required=False, type=click.Path(dir_okay=False))
+@click.option('--force',
+              '-f',
+              is_flag=True,
+              default=False,
+              help='Overwrite the output YAML file if it already exists.')
+@click.option('--quiet',
+              '-q',
+              is_flag=True,
+              default=False,
+              help='Do not print warnings about unmapped directives.')
+def utils_convert_slurm(slurm_script: str, output_yaml: Optional[str],
+                        force: bool, quiet: bool):
+    """Convert a Slurm batch script to a SkyPilot task YAML.
+
+    Parses ``#SBATCH`` directives from the given Slurm script and emits an
+    equivalent SkyPilot task YAML. Directives without a direct SkyPilot
+    equivalent (e.g. ``--time``, ``--partition``, ``--account``, ``--array``)
+    are preserved as comments so they can be reviewed manually.
+
+    See https://docs.skypilot.co/en/latest/reference/slurm-migration.html for
+    the full mapping reference.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Convert train.slurm and write to stdout.
+        sky utils convert-slurm train.slurm
+        \b
+        # Convert train.slurm and write to train.sky.yaml.
+        sky utils convert-slurm train.slurm train.sky.yaml
+        \b
+        # Overwrite an existing output file.
+        sky utils convert-slurm train.slurm train.sky.yaml --force
+    """
+    # Import locally to keep CLI startup fast.
+    from sky.utils import (
+        slurm_converter)  # pylint: disable=import-outside-toplevel
+
+    with open(slurm_script, 'r', encoding='utf-8') as f:
+        script_content = f.read()
+
+    yaml_text, warnings = slurm_converter.convert_slurm_script(script_content)
+
+    if output_yaml is None:
+        click.echo(yaml_text, nl=False)
+    else:
+        if os.path.exists(output_yaml) and not force:
+            raise click.UsageError(
+                f'Output file {output_yaml!r} already exists. Pass --force '
+                'to overwrite.')
+        with open(output_yaml, 'w', encoding='utf-8') as f:
+            f.write(yaml_text)
+        click.secho(f'Wrote SkyPilot task YAML to {output_yaml}',
+                    fg='green',
+                    err=True)
+
+    if warnings and not quiet:
+        click.echo('', err=True)
+        click.secho('Warnings:', fg='yellow', bold=True, err=True)
+        for w in warnings:
+            click.secho(f'  - {w}', fg='yellow', err=True)
+
+
 def main():
     return cli()
 
