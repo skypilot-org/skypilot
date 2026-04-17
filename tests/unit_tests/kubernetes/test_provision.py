@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky import exceptions as sky_exceptions
 from sky import resources
 from sky.backends import cloud_vm_ray_backend
 from sky.provision.kubernetes import config as config_lib
@@ -1728,3 +1729,72 @@ class TestInsufficientResourcesMsg:
         assert 'Failed to acquire resources' in msg
         assert 'my-context' in msg
         assert 'OOMKilled' not in msg
+
+
+@pytest.fixture()
+def mock_format_resource(monkeypatch):
+    """Mock format_resource to avoid needing real Resources objects."""
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.resources_utils.format_resource',
+        lambda resource, simplified_only=False:
+        ('H100:1, cpus=4, mem=16', None))
+
+
+class TestProvisionFailureBlocks:
+    """Tests for _format_provision_failure_blocks."""
+
+    def test_single_failure_block(self, mock_format_resource):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Failed to acquire resources in context in-cluster. '
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert 'OOMKilled' in result
+
+    def test_hint_for_image_pull(self, mock_format_resource):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: ImagePullBackOff: nvcr.io/foo:bad - manifest unknown')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'image' in result.lower() or 'registry' in result.lower()
+
+    def test_hint_for_oom(self, mock_format_resource):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'memory' in result.lower()
+
+    def test_no_hint_for_unknown(self, mock_format_resource):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = 'AWS (us-east-1)'
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Failed to acquire resources in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+
+    def test_multiple_failures(self, mock_format_resource):
+        r1 = mock.MagicMock()
+        r1.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        r2 = mock.MagicMock()
+        r2.infra.formatted_str.return_value = 'AWS (us-east-1)'
+        exc1 = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        exc2 = sky_exceptions.ResourcesUnavailableError(
+            'No capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks({
+            r1: exc1,
+            r2: exc2
+        })
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert '\u2717 AWS (us-east-1)' in result

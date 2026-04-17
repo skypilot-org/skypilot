@@ -207,6 +207,43 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
+_PROVISION_FAILURE_HINTS = [
+    (['ImagePullBackOff', 'ErrImagePull'],
+     'Verify the image tag exists and registry credentials are configured.'),
+    (['OOMKilled'], 'The container ran out of memory. '
+     'Try requesting more with `memory: <size>` in resources.'),
+    (['Insufficient'], 'The cluster does not have enough free resources. '
+     'Check node allocations with `kubectl describe nodes`.'),
+]
+
+
+def _get_provision_hint(reason: str) -> Optional[str]:
+    """Return a hint for the given provision failure reason, or None."""
+    for substrings, hint in _PROVISION_FAILURE_HINTS:
+        if any(s in reason for s in substrings):
+            return hint
+    return None
+
+
+def _format_provision_failure_blocks(
+    resource_exceptions: Dict['resources_lib.Resources', Exception],) -> str:
+    """Format provision failures as blocks instead of a table."""
+    num_infra = len(resource_exceptions)
+    lines = [f'Provision failures (tried {num_infra} infra):\n']
+    for resource, exception in resource_exceptions.items():
+        infra = resource.infra.formatted_str()
+        resource_str = resources_utils.format_resource(resource,
+                                                       simplified_only=True)[0]
+        reason = str(exception)
+        lines.append(f'\u2717 {infra} \u2014 {resource_str}')
+        lines.append(f'  {reason}')
+        hint = _get_provision_hint(reason)
+        if hint:
+            lines.append(f'  Hint: {hint}')
+        lines.append('')
+    return '\n'.join(lines)
+
+
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
@@ -1836,19 +1873,9 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
-                for (resource, exception) in resource_exceptions.items():
-                    table.add_row([
-                        resource.infra.formatted_str(),
-                        resources_utils.format_resource(
-                            resource, simplified_only=True)[0], exception
-                    ])
-                # Set the max width of REASON column to 80 to avoid the table
-                # being wrapped in a unreadable way.
-                # pylint: disable=protected-access
-                table._max_width = {'REASON': 80}
+                blocks = _format_provision_failure_blocks(resource_exceptions)
                 raise exceptions.ResourcesUnavailableError(
-                    _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' + blocks,
                     failover_history=failover_history)
             best_resources = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
