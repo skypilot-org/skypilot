@@ -1670,6 +1670,18 @@ class TestCondensedPodReason:
         assert 'Error' in result
         assert 'exit code 1' in result
 
+    def test_terminated_no_reason(self):
+        """When terminated.reason is None, should show exit code cleanly."""
+        container = mock.MagicMock()
+        container.state.waiting = None
+        container.state.terminated = mock.MagicMock()
+        container.state.terminated.reason = None
+        container.state.terminated.exit_code = 137
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert result == 'Terminated with exit code 137'
+
     def test_unknown_fallback(self):
         pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
                              container_statuses=[])

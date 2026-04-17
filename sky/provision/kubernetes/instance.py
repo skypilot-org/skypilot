@@ -2142,9 +2142,11 @@ def _condensed_pod_reason(pod: Any) -> str:
             if cs.state.terminated is not None:
                 terminated = cs.state.terminated
                 if terminated.exit_code != 0:
-                    reason = (terminated.reason or
-                              f'exit({terminated.exit_code})')
-                    return f'{reason} (exit code {terminated.exit_code})'
+                    if terminated.reason:
+                        return (f'{terminated.reason} '
+                                f'(exit code {terminated.exit_code})')
+                    return (f'Terminated with exit code '
+                            f'{terminated.exit_code}')
 
     return 'Terminated unexpectedly'
 
