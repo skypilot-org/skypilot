@@ -127,7 +127,7 @@ def _delete_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     pvc_name = config.name_on_cloud
     if config.config.get('use_existing'):
         logger.info(f'Leaving PVC {pvc_name} in namespace {namespace} intact '
-                    f'(use_existing=True)')
+                    f'since volume was imported from an existing PVC.')
         return config
     kubernetes_utils.delete_k8s_resource_with_retry(
         delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
