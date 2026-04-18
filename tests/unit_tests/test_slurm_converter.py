@@ -521,3 +521,90 @@ def test_multi_line_srun_continuation_is_translated():
     assert 'srun' not in yaml_text
     assert 'python train.py' in yaml_text
     assert 'SKYPILOT_NODE_RANK' not in yaml_text
+
+
+# --- Regression tests for bugs found during audit ---
+
+
+def test_srun_command_preserves_env_var_refs():
+    """`shlex.quote` used to single-quote ``$FOO`` and break expansion."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun -N1 -n1 python train.py $FOO ${BAR}
+        """
+    yaml_text, _ = _convert(script)
+    # Env vars must stay unquoted so the shell expands them.
+    assert '$FOO' in yaml_text
+    assert '${BAR}' in yaml_text
+    assert "'$FOO'" not in yaml_text
+
+
+def test_srun_command_quotes_args_with_spaces():
+    """Tokens containing whitespace must still be quoted."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun python train.py --name 'has spaces'
+        """
+    yaml_text, _ = _convert(script)
+    assert "'has spaces'" in yaml_text
+
+
+def test_env_var_substitution_uses_word_boundary():
+    """`$SLURM_JOB_IDX` must not match `SLURM_JOB_ID` as a prefix."""
+    from sky.utils import slurm_converter
+    out = slurm_converter._substitute_env_vars(
+        '$SLURM_JOB_IDX $SLURM_JOB_ID ${SLURM_JOB_ID}')
+    assert out == '$SLURM_JOB_IDX $SKYPILOT_TASK_ID $SKYPILOT_TASK_ID'
+
+
+def test_srun_boolean_short_flag_does_not_eat_command():
+    """`srun -l python x.py` must keep `python x.py` as the command."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun -l python train.py
+        srun -v --label python other.py
+        """
+    yaml_text, _ = _convert(script)
+    assert 'python train.py' in yaml_text
+    assert 'python other.py' in yaml_text
+
+
+def test_mem_zero_means_all_memory_is_skipped():
+    """`--mem=0` in Slurm = all memory; has no SkyPilot equivalent."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --mem=0
+        echo hi
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'memory' not in yaml_text
+    assert any('all memory' in w for w in warnings)
+
+
+def test_salloc_in_body_emits_warning():
+    script = """\
+        #!/bin/bash
+
+        salloc --gpus=8 python
+        """
+    _, warnings = _convert(script)
+    assert any('Slurm-only' in w for w in warnings)
+
+
+def test_sbatch_boolean_directive_does_not_eat_next_directive():
+    """`#SBATCH --exclusive` on its own must not swallow the next directive."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --exclusive
+        #SBATCH --account=myacct
+        echo hi
+        """
+    yaml_text, _ = _convert(script)
+    assert 'exclusive: true' in yaml_text
+    assert 'account: myacct' in yaml_text

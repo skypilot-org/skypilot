@@ -74,11 +74,37 @@ class _ParsedScript:
     unknown_directives: List[str]
 
 
+# SBATCH boolean flags that take no value. Without this, ``#SBATCH --exclusive
+# user`` would parse ``user`` as the value of ``--exclusive``.
+_SBATCH_BOOLEAN_FLAGS = frozenset({
+    'exclusive',
+    'verbose',
+    'quiet',
+    'hold',
+    'requeue',
+    'no-requeue',
+    'spread-job',
+    'test-only',
+    'use-min-nodes',
+    'wait-all-nodes',
+    'contiguous',
+    'no-kill',
+    'kill-on-invalid-dep',
+    'parsable',
+    'overcommit',
+    'oversubscribe',
+    'reboot',
+    'get-user-env',
+})
+
+
 def _parse_sbatch_tokens(tokens: List[str]) -> List[Tuple[str, str]]:
     """Parse the tokens after ``#SBATCH`` into (key, value) pairs.
 
     Slurm accepts many forms, e.g. ``--nodes=2``, ``--nodes 2``, ``-N2``,
-    ``-N 2``. Flags without values (e.g. ``--exclusive``) get an empty value.
+    ``-N 2``. Flags listed in ``_SBATCH_BOOLEAN_FLAGS`` take no value (so the
+    next token isn't consumed); other flags without ``=`` take the next token
+    as their value.
     """
     pairs: List[Tuple[str, str]] = []
     i = 0
@@ -89,6 +115,9 @@ def _parse_sbatch_tokens(tokens: List[str]) -> List[Tuple[str, str]]:
             if '=' in body:
                 key, value = body.split('=', 1)
                 pairs.append((key, value))
+                i += 1
+            elif body in _SBATCH_BOOLEAN_FLAGS:
+                pairs.append((body, ''))
                 i += 1
             else:
                 # Value may be in the next token, or the flag may be boolean.
@@ -104,6 +133,9 @@ def _parse_sbatch_tokens(tokens: List[str]) -> List[Tuple[str, str]]:
             key = _SHORT_TO_LONG.get(short, short)
             if rest:
                 pairs.append((key, rest))
+                i += 1
+            elif key in _SBATCH_BOOLEAN_FLAGS:
+                pairs.append((key, ''))
                 i += 1
             elif i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
                 pairs.append((key, tokens[i + 1]))
@@ -305,10 +337,29 @@ def _parse_memory(value: str) -> Optional[int]:
 
 def _substitute_env_vars(text: str) -> str:
     for slurm_var, sky_var in _ENV_VAR_MAPPING.items():
-        text = re.sub(r'\$\{?' + slurm_var + r'\}?',
-                      lambda m, v=sky_var: '$' + v,
-                      text)
+        # Match ``$VAR`` only when not followed by another word char (so
+        # ``$SLURM_JOB_IDX`` doesn't silently become ``$SKYPILOT_TASK_IDX``),
+        # and ``${VAR}`` as a full brace-delimited ref.
+        pattern = (r'\$' + re.escape(slurm_var) + r'(?!\w)|\$\{' +
+                   re.escape(slurm_var) + r'\}')
+        text = re.sub(pattern, lambda m, v=sky_var: '$' + v, text)
     return text
+
+
+def _shell_safe_quote(token: str) -> str:
+    """Quote ``token`` for the shell only if it contains whitespace or
+    metacharacters that would break reparsing.
+
+    Unlike ``shlex.quote``, leaves ``$VAR``/``~``/globs/etc. untouched so the
+    shell still expands them when the translated line runs.
+    """
+    if not token:
+        return "''"
+    # If the token contains whitespace, quotes, backticks, subshells, redirects
+    # or pipes, we must quote it.
+    if re.search(r'[\s<>|&;\'"`\\()]', token):
+        return shlex.quote(token)
+    return token
 
 
 # srun flags that do not affect the translated command (they either describe
@@ -385,6 +436,34 @@ _SRUN_FLAGS_TO_DROP = {
     'verbose',
 }
 
+# Flags that take no value. Without this set, a boolean short flag like ``-l``
+# or ``-v`` followed by the command (``srun -l python x.py``) would greedily
+# consume ``python`` as the flag's value and drop it from the command.
+_SRUN_BOOLEAN_FLAGS = frozenset({
+    'label',
+    'unbuffered',
+    'quiet',
+    'verbose',
+    'disable-status',
+    'kill-on-bad-exit',
+    'no-allocate',
+    'overcommit',
+    'oversubscribe',
+    'exclusive',
+    'overlap',
+    'exact',
+    'pty',
+    'preserve-env',
+    'test-only',
+    'use-min-nodes',
+    'wait-all-nodes',
+    'multi-prog',
+    'requeue',
+    'no-requeue',
+    'hold',
+    'spread-job',
+})
+
 # Short option -> long option for the flags srun shares with sbatch.
 _SRUN_SHORT_TO_LONG: Dict[str, str] = {
     'n': 'ntasks',
@@ -423,6 +502,10 @@ def _parse_srun_flags(tokens: List[str]) -> Tuple[Dict[str, str], List[str]]:
 
     Returns ``(flags, command_tokens)``. Flags without a value get the empty
     string. Stops at the first positional argument or ``--`` terminator.
+
+    Boolean flags listed in ``_SRUN_BOOLEAN_FLAGS`` are recognised as taking
+    no value, so ``srun -l python x.py`` parses ``python`` as the command
+    rather than as the value of ``--label``.
     """
     flags: Dict[str, str] = {}
     i = 0
@@ -437,6 +520,9 @@ def _parse_srun_flags(tokens: List[str]) -> Tuple[Dict[str, str], List[str]]:
                 key, value = body.split('=', 1)
                 flags[key] = value
                 i += 1
+            elif body in _SRUN_BOOLEAN_FLAGS:
+                flags[body] = ''
+                i += 1
             elif (i + 1 < len(tokens) and not tokens[i + 1].startswith('-')):
                 flags[body] = tokens[i + 1]
                 i += 2
@@ -449,6 +535,9 @@ def _parse_srun_flags(tokens: List[str]) -> Tuple[Dict[str, str], List[str]]:
             key = _SRUN_SHORT_TO_LONG.get(short, short)
             if rest:
                 flags[key] = rest
+                i += 1
+            elif key in _SRUN_BOOLEAN_FLAGS:
+                flags[key] = ''
                 i += 1
             elif (i + 1 < len(tokens) and not tokens[i + 1].startswith('-')):
                 flags[key] = tokens[i + 1]
@@ -482,7 +571,7 @@ def _translate_srun_line(
             f'Could not find a command after `srun` in line: {stripped!r}.'
         ]
 
-    command = ' '.join(shlex.quote(t) for t in command_tokens)
+    command = ' '.join(_shell_safe_quote(t) for t in command_tokens)
     warnings: List[str] = []
 
     # Figure out how many tasks per node this srun asks for.
@@ -597,7 +686,8 @@ def _translate_mpi_launcher_line(indent: str,
 # Slurm-only commands that won't work outside a Slurm allocation.
 _SLURM_ONLY_COMMAND_RE = re.compile(
     r'(^|[\s;&|`(])(sbcast|sgather|sattach|squeue|sacct|sinfo|scontrol|'
-    r'srun_cr|smap|sshare|sprio|sstat|sreport|sdiag|sbatch)\b')
+    r'salloc|srun_cr|smap|sshare|sprio|sstat|sreport|sdiag|sbatch|scancel)'
+    r'\b')
 
 # Heuristics for commands that *work* in a SkyPilot ``run:`` block but really
 # belong in ``setup:`` so they don't re-run on every launch.
@@ -762,9 +852,16 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
     memory_gb: Optional[int] = None
     mem_val = directives.pop('mem', None)
     if mem_val is not None:
-        memory_gb = _parse_memory(mem_val)
-        if memory_gb is None:
-            warnings.append(f'Could not parse --mem={mem_val!r}.')
+        # Slurm treats ``--mem=0`` as "give me all the memory on the node";
+        # there's no SkyPilot equivalent, so skip and warn.
+        if mem_val.strip().rstrip('BbKkMmGgTt') == '0':
+            warnings.append(
+                '--mem=0 means "all memory" in Slurm; SkyPilot has no '
+                'equivalent. Skipping memory constraint.')
+        else:
+            memory_gb = _parse_memory(mem_val)
+            if memory_gb is None:
+                warnings.append(f'Could not parse --mem={mem_val!r}.')
     elif 'mem-per-cpu' in directives and cpus is not None:
         per_cpu = _parse_memory(directives.pop('mem-per-cpu'))
         if per_cpu is not None:
