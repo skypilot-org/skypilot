@@ -15,7 +15,6 @@ from typing import Any, Awaitable, Callable, Optional, Tuple, Union
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky.server.requests import event_loop
 from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -26,6 +25,11 @@ _PRECONDITION_CHECK_INTERVAL = 1
 _PRECONDITION_TIMEOUT = 60 * 60
 
 logger = sky_logging.init_logger(__name__)
+
+# Strong references to background precondition tasks to prevent GC.
+# asyncio only keeps weak references to tasks, so without this set a
+# long-running precondition wait (up to 1 hour) could be collected.
+background_tasks: set = set()
 
 
 class Precondition(abc.ABC):
@@ -49,25 +53,22 @@ class Precondition(abc.ABC):
         """Make Precondition awaitable."""
         return self._wait().__await__()
 
-    def wait_async(
+    async def wait_async(
         self,
         on_condition_met: Optional[Callable[[], Union[None,
                                                       Awaitable[Any]]]] = None
     ) -> None:
-        """Wait precondition asynchronously and execute the callback on met.
+        """Wait for the precondition and execute the callback when met.
 
-        The callback may be either a sync function or a coroutine function;
-        coroutines are awaited on the same event loop used for waiting.
+        This coroutine blocks until the precondition is met (or times out).
+        Use ``create_task(precondition.wait_async(...))`` to run it in the
+        background without blocking the caller.
         """
-
-        async def wait_with_callback():
-            met = await self
-            if met and on_condition_met is not None:
-                result = on_condition_met()
-                if inspect.isawaitable(result):
-                    await result
-
-        event_loop.run(wait_with_callback())
+        met = await self
+        if met and on_condition_met is not None:
+            result = on_condition_met()
+            if inspect.isawaitable(result):
+                await result
 
     @abc.abstractmethod
     async def check(self) -> Tuple[bool, Optional[str]]:

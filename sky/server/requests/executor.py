@@ -859,8 +859,13 @@ async def schedule_prepared_request(request_task: api_requests.Request,
         await _get_queue(request_task.schedule_type).put_async(input_tuple)
 
     if precondition is not None:
-        # Wait async to avoid blocking caller.
-        precondition.wait_async(on_condition_met=enqueue)
+        # Schedule precondition wait as a background task so the caller
+        # returns immediately.  The task reference is stored in a
+        # module-level set to prevent garbage collection.
+        task = asyncio.create_task(
+            precondition.wait_async(on_condition_met=enqueue))
+        preconditions.background_tasks.add(task)
+        task.add_done_callback(preconditions.background_tasks.discard)
     else:
         await enqueue()
 

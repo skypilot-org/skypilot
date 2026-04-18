@@ -368,7 +368,7 @@ export function JobDetailPage() {
                       <span>Loading...</span>
                     </div>
                   ) : (
-                    <div className="max-h-96 overflow-y-auto">
+                    <div className="max-h-[max(200px,calc(100vh_-_572px))] overflow-y-auto">
                       <LogFilter logs={displayLines} />
                     </div>
                   )}

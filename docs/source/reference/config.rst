@@ -183,6 +183,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
       my-label: my-value
     :ref:`vpc_name <config-yaml-gcp-vpc-name>`: skypilot-vpc
+    :ref:`subnet_names <config-yaml-gcp-subnet-names>`:
+      - skypilot-subnet
     :ref:`use_internal_ips <config-yaml-gcp-use-internal-ips>`: true
     :ref:`force_enable_external_ips <config-yaml-gcp-force-enable-external-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-gcp-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -1132,14 +1134,49 @@ By default, only VPCs from the current project are used.
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-vpc
+    vpc_name: my-vpc
 
 To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
 
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-project-123456/default
+    vpc_name: my-project-123456/default
+
+.. _config-yaml-gcp-subnet-names:
+
+``gcp.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use within the selected GCP VPC (optional).
+
+If set, SkyPilot will only consider subnets whose names match the provided
+string or list of strings. This can be used together with ``vpc_name`` to pick
+one specific subnet inside a custom VPC. If ``vpc_name`` is not set, SkyPilot
+will infer the VPC from the matching subnet. The matched subnets must belong to
+the same VPC.
+
+For shared VPCs, ``vpc_name`` must be set to ``<project ID>/<vpc name>`` when
+using ``subnet_names``. The subnet-only inference path only searches the
+current project and will not find subnets in a shared VPC host project.
+
+When ``subnet_names`` is set, SkyPilot uses the selected VPC/subnet as-is.
+Make sure the chosen VPC already has the
+:ref:`necessary firewall rules <gcp-minimum-firewall-rules>`.
+
+Because each GCP VM interface uses a single subnet, SkyPilot uses the first
+matching subnet in the order provided.
+
+Default: ``null`` (automatically select a subnet from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc_name: my-vpc
+    subnet_names:
+      - train-subnet-a
 
 .. _config-yaml-gcp-use-internal-ips:
 

@@ -714,6 +714,14 @@ available_node_types:
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
+                # Timeout (seconds) for each individual apt-get invocation.
+                # The default Acquire::http::Timeout is 120s which is too slow
+                # when mirrors are degraded but not fully down.
+                APT_ACQUIRE_TIMEOUT=30
+                APT_CMD_TIMEOUT=60
+                APT_INSTALL_CMD_TIMEOUT=90
+                APT_OPTS="-o Acquire::http::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::https::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::Retries=0"
+
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -726,13 +734,16 @@ available_node_types:
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators.
                     local output
-                    output=$(DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
-                    if [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
+                    if [ $rc -eq 124 ]; then
+                      echo "apt-get update timed out after ${APT_CMD_TIMEOUT}s (attempt $i/$tries)" >> "$log"
+                    elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
                       set -e; return 0
+                    else
+                      echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
                     fi
-                    echo "apt-get update attempt $i/$tries failed" >> "$log"
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
                   set -e
@@ -747,8 +758,19 @@ available_node_types:
                   local delay=1
                   local i
                   for i in $(seq 1 $tries); do
-                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages && { set -e; return 0; }
-                    echo "apt-get install failed for: $packages (attempt $i/$tries). Running -f install and retrying..." >> "$log"
+                    timeout $APT_INSTALL_CMD_TIMEOUT \
+                      $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive \
+                      apt-get install $APT_OPTS -y \
+                      -o Dpkg::Options::="--force-confdef" \
+                      -o Dpkg::Options::="--force-confold" $packages
+                    local rc=$?
+                    if [ $rc -eq 0 ]; then
+                      set -e; return 0
+                    elif [ $rc -eq 124 ]; then
+                      echo "apt-get install timed out after ${APT_INSTALL_CMD_TIMEOUT}s for: $packages (attempt $i/$tries)" >> "$log"
+                    else
+                      echo "apt-get install failed for: $packages (attempt $i/$tries, rc=$rc). Running -f install and retrying..." >> "$log"
+                    fi
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
