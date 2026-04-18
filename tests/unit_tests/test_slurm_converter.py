@@ -383,3 +383,141 @@ def test_preserves_body_after_first_real_command():
     assert 'num_nodes' not in yaml_text
     # The line is part of the body (as an inline comment).
     assert 'module load cuda/12.1' in yaml_text
+
+
+def test_container_image_maps_to_image_id():
+    for container, expected in [
+        ('nvidia/cuda:12.1.1', 'docker:nvidia/cuda:12.1.1'),
+        ('docker://nvidia/cuda:12.1.1', 'docker:nvidia/cuda:12.1.1'),
+        ('docker:nvidia/cuda:12.1.1', 'docker:nvidia/cuda:12.1.1'),
+    ]:
+        script = f"""\
+            #!/bin/bash
+            #SBATCH --container-image={container}
+            python train.py
+            """
+        yaml_text, _ = _convert(script)
+        assert f"image_id: '{expected}'" in yaml_text, container
+
+
+def test_pyxis_container_options_dropped_with_warning():
+    script = """\
+        #!/bin/bash
+        #SBATCH --container-image=nvidia/cuda:12.1.1
+        #SBATCH --container-mounts=/data:/data
+        python train.py
+        """
+    _, warnings = _convert(script)
+    # container-mounts should not silently slip into sbatch_options.
+    assert any('container-mounts' in w for w in warnings)
+
+
+def test_ntasks_directive_warns_and_drops():
+    script = """\
+        #!/bin/bash
+        #SBATCH --ntasks=16
+        python train.py
+        """
+    yaml_text, warnings = _convert(script)
+    # --ntasks should not be passed through to sbatch_options.
+    assert 'ntasks' not in yaml_text
+    assert any('--ntasks=16' in w for w in warnings)
+
+
+def test_nodes_range_warns():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2-8
+        python train.py
+        """
+    yaml_text, warnings = _convert(script)
+    assert 'num_nodes: 2' in yaml_text
+    assert any('range' in w.lower() for w in warnings)
+
+
+def test_gres_gpu_no_count_defaults_to_one():
+    script = """\
+        #!/bin/bash
+        #SBATCH --gres=gpu
+        echo hi
+        """
+    yaml_text, _ = _convert(script)
+    # Bare ``--gres=gpu`` should still produce an accelerators line.
+    assert 'accelerators: <GPU_TYPE>:1' in yaml_text
+
+
+def test_array_task_id_env_var_translated():
+    script = """\
+        #!/bin/bash
+
+        echo "running task $SLURM_ARRAY_TASK_ID"
+        """
+    yaml_text, _ = _convert(script)
+    assert '$TASK_ID' in yaml_text
+    assert 'SLURM_ARRAY_TASK_ID' not in yaml_text
+
+
+def test_module_load_emits_warning():
+    script = """\
+        #!/bin/bash
+
+        module load cuda/12.1
+        python train.py
+        """
+    _, warnings = _convert(script)
+    assert any('module load' in w for w in warnings)
+
+
+def test_pip_install_in_body_emits_setup_hint():
+    script = """\
+        #!/bin/bash
+
+        pip install torch
+        python train.py
+        """
+    _, warnings = _convert(script)
+    assert any('setup' in w.lower() for w in warnings)
+
+
+def test_slurm_only_command_emits_warning():
+    script = """\
+        #!/bin/bash
+
+        sbcast -p data.tar /tmp/data.tar
+        python train.py
+        """
+    _, warnings = _convert(script)
+    assert any('sbcast' in w or 'Slurm-only' in w for w in warnings)
+
+
+def test_inline_srun_warns():
+    """`time srun cmd` etc are not translated; user should see a warning."""
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        time srun python train.py
+        """
+    yaml_text, warnings = _convert(script)
+    # The line passes through unchanged...
+    assert 'time srun python train.py' in yaml_text
+    # ...but we warn the user that the inline srun was not translated.
+    assert any('not at the start' in w or 'inline' in w.lower() or 'srun' in w
+               for w in warnings)
+
+
+def test_multi_line_srun_continuation_is_translated():
+    script = """\
+        #!/bin/bash
+        #SBATCH --nodes=2
+
+        srun \\
+          --ntasks-per-node=1 \\
+          python train.py
+        """
+    yaml_text, _ = _convert(script)
+    # After joining continuations, the per-task=1 srun should collapse to a
+    # bare command (no srun, no rank guard).
+    assert 'srun' not in yaml_text
+    assert 'python train.py' in yaml_text
+    assert 'SKYPILOT_NODE_RANK' not in yaml_text

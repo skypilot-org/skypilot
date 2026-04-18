@@ -38,6 +38,10 @@ _ENV_VAR_MAPPING: Dict[str, str] = {
     'SLURM_GPUS_ON_NODE': 'SKYPILOT_NUM_GPUS_PER_NODE',
     'SLURM_JOB_ID': 'SKYPILOT_TASK_ID',
     'SLURM_JOBID': 'SKYPILOT_TASK_ID',
+    # ``SLURM_ARRAY_TASK_ID`` only makes sense once the user has converted the
+    # job array to a ``sky jobs launch --env TASK_ID=$i`` shell loop (per the
+    # migration guide). Substituting to ``TASK_ID`` keeps the body usable.
+    'SLURM_ARRAY_TASK_ID': 'TASK_ID',
 }
 
 # Short option -> long option for the SBATCH directives we recognize. Slurm
@@ -113,6 +117,41 @@ def _parse_sbatch_tokens(tokens: List[str]) -> List[Tuple[str, str]]:
     return pairs
 
 
+def _join_continuations(lines: List[str]) -> List[str]:
+    """Join shell line continuations (``\\`` at end of line) into single lines.
+
+    Slurm scripts often spell long ``srun`` invocations across several lines
+    using ``\\`` continuations, e.g.::
+
+        srun \\
+          --ntasks-per-node=8 \\
+          python train.py
+
+    The body translator inspects one line at a time, so we collapse these
+    before handing them off so the srun translator sees the full command.
+    """
+    merged: List[str] = []
+    buffer: Optional[str] = None
+    for line in lines:
+        # Strip a trailing ``\`` (with optional whitespace before it).
+        m = re.match(r'^(.*?)\s*\\\s*$', line)
+        if m:
+            piece = m.group(1)
+            if buffer is None:
+                buffer = piece
+            else:
+                buffer += ' ' + piece.lstrip()
+            continue
+        if buffer is not None:
+            merged.append(buffer + ' ' + line.lstrip())
+            buffer = None
+        else:
+            merged.append(line)
+    if buffer is not None:
+        merged.append(buffer)
+    return merged
+
+
 def _parse_script(script: str) -> _ParsedScript:
     directives: Dict[str, str] = {}
     unknown: List[str] = []
@@ -162,7 +201,9 @@ def _parse_gpu_spec(value: str) -> Tuple[Optional[str], Optional[int]]:
     Returns ``(type, count)``. Type may be ``None`` when omitted.
     """
     if not value:
-        return None, None
+        # Bare ``--gres=gpu`` with no count is sometimes accepted by Slurm
+        # and means one GPU. Default to that rather than skipping silently.
+        return None, 1
     # Slurm's ``--gres=gpu:type:count`` or ``--gres=gpu:count`` already has the
     # leading ``gpu:`` stripped by the caller.
     parts = value.split(':')
@@ -553,14 +594,52 @@ def _translate_mpi_launcher_line(indent: str,
     ]
 
 
+# Slurm-only commands that won't work outside a Slurm allocation.
+_SLURM_ONLY_COMMAND_RE = re.compile(
+    r'(^|[\s;&|`(])(sbcast|sgather|sattach|squeue|sacct|sinfo|scontrol|'
+    r'srun_cr|smap|sshare|sprio|sstat|sreport|sdiag|sbatch)\b')
+
+# Heuristics for commands that *work* in a SkyPilot ``run:`` block but really
+# belong in ``setup:`` so they don't re-run on every launch.
+_SETUP_HINT_RE = re.compile(
+    r'(^|[\s;&|`(])(pip\s+install|pip3\s+install|conda\s+(create|install)|'
+    r'apt(-get)?\s+install|yum\s+install|dnf\s+install|brew\s+install|'
+    r'mamba\s+install|micromamba\s+install)\b')
+
+# ``module load``/``module purge`` won't work without environment modules
+# installed, which SkyPilot images normally don't have.
+_MODULE_RE = re.compile(r'(^|[\s;&|`(])module\s+(load|purge|swap|unload|use)\b')
+
+
 def _translate_body(body: str,
                     num_nodes: Optional[int]) -> Tuple[str, List[str]]:
     """Rewrite the script body: translate ``srun``/``mpirun`` invocations."""
     warnings: List[str] = []
+    saw_module_load = False
+    saw_setup_hint = False
+    saw_slurm_only = False
+    saw_inline_srun = False
     out_lines: List[str] = []
-    for line in body.splitlines():
+    # Collapse ``\\``-continued lines so multi-line ``srun`` invocations are
+    # seen as a single line by the per-line translator.
+    lines = _join_continuations(body.splitlines())
+    for line in lines:
         stripped = line.lstrip()
         indent = line[:len(line) - len(stripped)]
+        # Body-level diagnostics (don't transform; just warn once each).
+        if not saw_module_load and _MODULE_RE.search(stripped):
+            saw_module_load = True
+        if not saw_setup_hint and _SETUP_HINT_RE.search(stripped):
+            saw_setup_hint = True
+        if not saw_slurm_only and _SLURM_ONLY_COMMAND_RE.search(stripped):
+            saw_slurm_only = True
+        # Detect ``srun`` that isn't at the start of a line, e.g.
+        # ``time srun ...``, ``cd /tmp && srun ...``, ``(srun ...)``.
+        if (not saw_inline_srun and 'srun' in stripped and
+                not (stripped == 'srun' or stripped.startswith('srun '))):
+            if re.search(r'(^|[\s;&|`(])srun\s', stripped):
+                saw_inline_srun = True
+
         if stripped == 'srun' or stripped.startswith('srun '):
             new_lines, ws = _translate_srun_line(indent, stripped, num_nodes)
             out_lines.extend(new_lines)
@@ -573,6 +652,30 @@ def _translate_body(body: str,
             warnings.extend(ws)
         else:
             out_lines.append(line)
+
+    if saw_module_load:
+        warnings.append(
+            'Found `module load` (or similar) in the script body. Slurm '
+            'environment modules are not available in SkyPilot tasks; '
+            'use a Docker `image_id` or install dependencies in `setup:` '
+            'instead.')
+    if saw_setup_hint:
+        warnings.append(
+            'Found `pip/conda/apt install` (or similar) in the script body. '
+            'Move these into a `setup:` block so they only run once per '
+            'cluster launch instead of every job submission.')
+    if saw_slurm_only:
+        warnings.append(
+            'Found Slurm-only commands (sbcast/sgather/sattach/squeue/...) '
+            'in the script body. These will not work in a SkyPilot task; '
+            'replace them with the SkyPilot equivalent (see the migration '
+            'guide).')
+    if saw_inline_srun:
+        warnings.append(
+            'Found `srun` not at the start of a line (e.g. `time srun ...`, '
+            '`cmd && srun ...`, `(srun ...)`). The converter only translates '
+            'leading `srun` invocations; please review these lines manually.')
+
     return '\n'.join(out_lines), warnings
 
 
@@ -622,8 +725,14 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
     num_nodes: Optional[int] = None
     if 'nodes' in directives:
         nodes_val = directives.pop('nodes')
-        # Slurm also allows ``min-max``; pick the minimum.
-        nodes_val = nodes_val.split('-')[0]
+        # Slurm also allows ``min-max``; pick the minimum and warn the user.
+        if '-' in nodes_val:
+            min_part, max_part = nodes_val.split('-', 1)
+            warnings.append(
+                f'--nodes={nodes_val} is a range; SkyPilot needs a fixed '
+                f'count. Using {min_part}; change `num_nodes` if you want '
+                f'{max_part} instead.')
+            nodes_val = min_part
         try:
             num_nodes = int(nodes_val)
         except ValueError:
@@ -733,6 +842,43 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
             'the name of your configured Slurm cluster from '
             '`~/.sky/config.yaml`.')
 
+    # ``--container-image`` (Pyxis / enroot, common on HPC clusters) maps to
+    # SkyPilot's ``image_id`` -- prefix with ``docker:`` if the user didn't.
+    image_id: Optional[str] = None
+    container_image = directives.pop('container-image', None)
+    if container_image:
+        if '://' in container_image:
+            # E.g. ``docker://nvidia/cuda:12.1.1`` -- normalize to docker:.
+            scheme, rest = container_image.split('://', 1)
+            image_id = f'{scheme}:{rest}' if scheme == 'docker' \
+                else container_image
+        elif container_image.startswith('docker:') or \
+                container_image.startswith('oci:'):
+            image_id = container_image
+        else:
+            image_id = f'docker:{container_image}'
+    # Other Pyxis ``--container-*`` options aren't first-class in SkyPilot.
+    # Drop them with a heads-up so they don't get pushed into sbatch_options
+    # where they'd no-op.
+    for pyxis_key in ('container-mounts', 'container-workdir', 'container-name',
+                      'container-save', 'container-env', 'container-remap-root',
+                      'container-writable', 'container-readonly'):
+        if pyxis_key in directives:
+            value = directives.pop(pyxis_key)
+            warnings.append(
+                f'Dropped Pyxis option --{pyxis_key}={value}: SkyPilot '
+                'manages container mounts and entry differently. Use '
+                '`file_mounts:` and `setup:` instead.')
+
+    # ``--ntasks=N`` is only meaningful inside a Slurm allocation; SkyPilot
+    # always launches the ``run`` block once per node. Drop it with a note.
+    if 'ntasks' in directives:
+        ntasks_val = directives.pop('ntasks')
+        warnings.append(
+            f'Dropped --ntasks={ntasks_val}: SkyPilot launches `run:` once '
+            'per node. Use a distributed launcher (torchrun/mpirun) inside '
+            'the run block to spawn additional tasks.')
+
     # Directives that SkyPilot does not map directly.
     unsupported_notes: List[Tuple[str, str]] = []
 
@@ -840,6 +986,8 @@ def convert_slurm_script(script: str) -> Tuple[str, List[str]]:
         resources.append(f'  cpus: {cpus}+')
     if memory_gb:
         resources.append(f'  memory: {memory_gb}+')
+    if image_id:
+        resources.append(f'  image_id: {_yaml_scalar(image_id)}')
     if resources:
         lines.append('resources:')
         lines.extend(resources)
