@@ -1007,10 +1007,13 @@ def write_cluster_config(
                 # `VolumeMount.pre_mount`): record the attachment timestamp
                 # and IN_USE status so the Volumes dashboard surfaces the
                 # "Last Use" column correctly for auto-mounted volumes.
-                global_user_state.update_volume(
-                    volume_name,
-                    last_attached_at=int(time.time()),
-                    status=status_lib.VolumeStatus.IN_USE)
+                # Skip on dryrun so `sky launch --dryrun` does not mutate
+                # volume metadata.
+                if not dryrun:
+                    global_user_state.update_volume(
+                        volume_name,
+                        last_attached_at=int(time.time()),
+                        status=status_lib.VolumeStatus.IN_USE)
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path
