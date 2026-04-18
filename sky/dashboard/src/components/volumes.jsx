@@ -280,7 +280,9 @@ export function Volumes() {
                   <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="text-sm text-amber-800 space-y-2">
                     <p className="m-0">
-                      <strong>Force remove won&apos;t delete the underlying volume.</strong>{' '}
+                      <strong>
+                        Force remove won&apos;t delete the underlying volume.
+                      </strong>{' '}
                       Removing the SkyPilot entry means this volume will no
                       longer appear here, but{' '}
                       {volumeToDelete?.type === 'k8s-pvc' &&
@@ -293,7 +295,8 @@ export function Volumes() {
                           {volumeToDelete.namespace &&
                             volumeToDelete.namespace !== '-' && (
                               <>
-                                {' '}in namespace{' '}
+                                {' '}
+                                in namespace{' '}
                                 <code className="bg-amber-100 px-1 rounded">
                                   {volumeToDelete.namespace}
                                 </code>
@@ -363,7 +366,9 @@ export function Volumes() {
                     </Button>
                     <Button
                       onClick={handlePurgeVolumeConfirm}
-                      disabled={!purgeConfirmed || deleteLoading || purgeLoading}
+                      disabled={
+                        !purgeConfirmed || deleteLoading || purgeLoading
+                      }
                       className="bg-amber-600 hover:bg-amber-700 text-white"
                     >
                       {purgeLoading ? 'Removing...' : 'Force Remove'}
