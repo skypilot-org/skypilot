@@ -662,7 +662,7 @@ function VolumesTable({
     isPlugin: true,
     renderHeader: () => {
       const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap'
+        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-gray-50'
         : 'whitespace-nowrap';
       const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
       return (
