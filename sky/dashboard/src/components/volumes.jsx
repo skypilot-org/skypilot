@@ -263,7 +263,7 @@ export function Volumes() {
               </DialogHeader>
 
               {volumeToDelete?.config?.use_existing && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-start gap-2">
+                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 my-3 flex items-start gap-2">
                   <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
                   <div className="text-sm text-sky-900">
                     This volume was imported from an existing{' '}
