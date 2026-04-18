@@ -207,7 +207,10 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
-_PROVISION_FAILURE_HINTS = [
+# Hints currently only cover Kubernetes failure modes. Scoped to k8s blocks
+# in _format_provision_failure_blocks to avoid false positives on cloud
+# error messages (e.g., AWS "InsufficientInstanceCapacity").
+_KUBERNETES_FAILURE_HINTS = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'Verify the image tag exists and registry credentials are configured.'),
     (['OOMKilled'], 'The container ran out of memory. '
@@ -217,9 +220,9 @@ _PROVISION_FAILURE_HINTS = [
 ]
 
 
-def _get_provision_hint(reason: str) -> Optional[str]:
-    """Return a hint for the given provision failure reason, or None."""
-    for substrings, hint in _PROVISION_FAILURE_HINTS:
+def _get_kubernetes_hint(reason: str) -> Optional[str]:
+    """Return a hint for the given Kubernetes failure reason, or None."""
+    for substrings, hint in _KUBERNETES_FAILURE_HINTS:
         if any(s in reason for s in substrings):
             return hint
     return None
@@ -237,11 +240,12 @@ def _format_provision_failure_blocks(
         reason = str(exception)
         lines.append(f'\u2717 {infra} \u2014 {resource_str}')
         lines.append(f'  {reason}')
-        hint = _get_provision_hint(reason)
-        if hint:
-            lines.append(f'  Hint: {hint}')
+        if isinstance(resource.cloud, clouds.Kubernetes):
+            hint = _get_kubernetes_hint(reason)
+            if hint:
+                lines.append(f'  Hint: {hint}')
         lines.append('')
-    return '\n'.join(lines)
+    return '\n'.join(lines).rstrip() + '\n'
 
 
 # Number of seconds to wait locking the cluster before communicating with user.

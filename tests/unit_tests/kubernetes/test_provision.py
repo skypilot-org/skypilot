@@ -1743,9 +1743,20 @@ def mock_format_resource(monkeypatch):
 class TestProvisionFailureBlocks:
     """Tests for _format_provision_failure_blocks."""
 
-    def test_single_failure_block(self, mock_format_resource):
+    def _make_k8s_resource(self, infra_str='Kubernetes (in-cluster)'):
         resource = mock.MagicMock()
-        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.Kubernetes()
+        return resource
+
+    def _make_aws_resource(self, infra_str='AWS (us-east-1)'):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.AWS()
+        return resource
+
+    def test_single_failure_block(self, mock_format_resource):
+        resource = self._make_k8s_resource()
         exc = sky_exceptions.ResourcesUnavailableError(
             'Failed to acquire resources in context in-cluster. '
             'Reason: OOMKilled (exit code 137)')
@@ -1755,8 +1766,7 @@ class TestProvisionFailureBlocks:
         assert 'OOMKilled' in result
 
     def test_hint_for_image_pull(self, mock_format_resource):
-        resource = mock.MagicMock()
-        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        resource = self._make_k8s_resource()
         exc = sky_exceptions.ResourcesUnavailableError(
             'Reason: ImagePullBackOff: nvcr.io/foo:bad - manifest unknown')
         result = cloud_vm_ray_backend._format_provision_failure_blocks(
@@ -1765,8 +1775,7 @@ class TestProvisionFailureBlocks:
         assert 'image' in result.lower() or 'registry' in result.lower()
 
     def test_hint_for_oom(self, mock_format_resource):
-        resource = mock.MagicMock()
-        resource.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
+        resource = self._make_k8s_resource()
         exc = sky_exceptions.ResourcesUnavailableError(
             'Reason: OOMKilled (exit code 137)')
         result = cloud_vm_ray_backend._format_provision_failure_blocks(
@@ -1774,20 +1783,32 @@ class TestProvisionFailureBlocks:
         assert 'Hint:' in result
         assert 'memory' in result.lower()
 
-    def test_no_hint_for_unknown(self, mock_format_resource):
-        resource = mock.MagicMock()
-        resource.infra.formatted_str.return_value = 'AWS (us-east-1)'
+    def test_no_hint_for_unknown_k8s_failure(self, mock_format_resource):
+        """K8s block with no recognized failure substring gets no hint."""
+        resource = self._make_k8s_resource()
         exc = sky_exceptions.ResourcesUnavailableError(
-            'Failed to acquire resources in us-east-1.')
+            'Some unrecognized cluster failure.')
         result = cloud_vm_ray_backend._format_provision_failure_blocks(
             {resource: exc})
         assert 'Hint:' not in result
 
-    def test_multiple_failures(self, mock_format_resource):
-        r1 = mock.MagicMock()
-        r1.infra.formatted_str.return_value = 'Kubernetes (in-cluster)'
-        r2 = mock.MagicMock()
-        r2.infra.formatted_str.return_value = 'AWS (us-east-1)'
+    def test_no_hint_for_non_k8s_cloud(self, mock_format_resource):
+        """Hints don't fire for non-k8s clouds even if substring matches.
+
+        Prevents AWS messages like 'InsufficientInstanceCapacity' from
+        triggering the k8s 'kubectl describe nodes' hint.
+        """
+        resource = self._make_aws_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'InsufficientInstanceCapacity: no A100 capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+        assert 'kubectl' not in result
+
+    def test_multiple_failures_mixed_clouds(self, mock_format_resource):
+        r1 = self._make_k8s_resource()
+        r2 = self._make_aws_resource()
         exc1 = sky_exceptions.ResourcesUnavailableError(
             'Reason: OOMKilled (exit code 137)')
         exc2 = sky_exceptions.ResourcesUnavailableError(
@@ -1798,6 +1819,8 @@ class TestProvisionFailureBlocks:
         })
         assert '\u2717 Kubernetes (in-cluster)' in result
         assert '\u2717 AWS (us-east-1)' in result
+        # K8s block has the OOM hint
+        assert 'memory' in result.lower()
 
 
 class TestFullPipeline:

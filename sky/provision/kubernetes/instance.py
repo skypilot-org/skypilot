@@ -716,9 +716,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 f'Pod {pod.metadata.name} terminated: {termination_reason}')
             condensed = _condensed_pod_reason(pod)
             raise config_lib.KubernetesError(
-                f'Pod {pod.metadata.name} failed: {condensed}. '
-                f'Run `sky logs --provision {cluster_name}` '
-                'for more details.')
+                f'Pod {pod.metadata.name} failed: {condensed}')
 
         container_statuses = pod.status.container_statuses
         # Continue if pod and all the containers within the
