@@ -262,6 +262,41 @@ export function Volumes() {
                 </DialogDescription>
               </DialogHeader>
 
+              {volumeToDelete?.config?.use_existing && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-sky-900">
+                    This volume was imported from an existing{' '}
+                    {volumeToDelete?.type === 'k8s-pvc'
+                      ? 'PVC'
+                      : 'resource'}
+                    . Deleting it only removes it from SkyPilot
+                    {volumeToDelete?.type === 'k8s-pvc' &&
+                    volumeToDelete?.name_on_cloud ? (
+                      <>
+                        ; the underlying PVC{' '}
+                        <code className="bg-sky-100 px-1 rounded">
+                          {volumeToDelete.name_on_cloud}
+                        </code>
+                        {volumeToDelete.namespace &&
+                          volumeToDelete.namespace !== '-' && (
+                            <>
+                              {' '}
+                              in namespace{' '}
+                              <code className="bg-sky-100 px-1 rounded">
+                                {volumeToDelete.namespace}
+                              </code>
+                            </>
+                          )}{' '}
+                        will be left intact.
+                      </>
+                    ) : (
+                      <>; the underlying resource will be left intact.</>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <ErrorDisplay
                 error={deleteError}
                 title="Deletion Failed"
