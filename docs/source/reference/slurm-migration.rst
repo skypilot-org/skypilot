@@ -14,6 +14,110 @@ Why use SkyPilot instead of Slurm?
 - **Dependency management**: All Slurm jobs run in an identical environment and having different dependencies per-job can be tricky. SkyPilot provides full isolation for each job's environment.
 - **Unified dashboard**: SkyPilot provides a :ref:`web dashboard <dashboard>` for job management, logs, and monitoring across all infrastructure.
 
+.. _porting-sbatch-scripts:
+
+Porting sbatch scripts to SkyPilot YAML
+---------------------------------------
+
+For an existing Slurm script, the easiest first step is to use the
+``sky utils convert-slurm`` CLI to auto-generate a starting point:
+
+.. code-block:: bash
+
+   # Print the converted YAML to stdout.
+   sky utils convert-slurm train.slurm
+
+   # Or write it to a file.
+   sky utils convert-slurm train.slurm train.sky.yaml
+
+The converter applies the directive mapping documented in this guide:
+
+- ``--job-name``, ``--nodes``, ``--cpus-per-task``, ``--mem``,
+  ``--gpus-per-node`` / ``--gres=gpu`` / ``--gpus`` map to top-level fields
+  (``name``, ``num_nodes``, ``resources.cpus``, ``resources.memory``,
+  ``resources.accelerators``).
+- ``--time=DD-HH:MM:SS`` maps to :ref:`autostop <auto-stop>`.
+- ``--partition`` maps to ``resources.infra: slurm/<cluster>/<partition>``
+  (the converter leaves a ``<cluster>`` placeholder for you to fill in).
+- Other ``#SBATCH`` directives (``--account``, ``--qos``, ``--constraint``,
+  ``--mail-*``, ``--exclusive``, ``--reservation``, ``--dependency``, ...)
+  pass through to ``config.slurm.sbatch_options`` so they round-trip to
+  Slurm at submission time.
+- Common ``SLURM_*`` environment variables in the body are rewritten to
+  their ``SKYPILOT_*`` equivalents (see the
+  :ref:`environment variable mapping <slurm-env-var-mapping>` below).
+- ``srun`` wrappers are translated based on Slurm semantics: a bare
+  ``srun cmd`` becomes ``cmd`` (SkyPilot's ``run`` block already executes
+  on every node); ``srun -N1 -n1 cmd`` is wrapped in a
+  ``$SKYPILOT_NODE_RANK == 0`` guard; for ``srun --ntasks-per-node=N`` with
+  N > 1 the converter emits ready-to-copy ``torchrun`` and ``mpirun``
+  templates next to the original line.
+- Directives without a direct equivalent (``--output``, ``--error``,
+  ``--array``) are preserved as comments at the top of the YAML for review.
+
+The output is a starting point: always read through the generated YAML and
+adjust before launching.
+
+Side-by-side comparison
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equivalent:
+
+.. raw:: html
+
+   <div class="row">
+       <div class="col-md-6 mb-3">
+            <h4> Slurm sbatch script </h4>
+
+.. code-block:: bash
+
+   #!/bin/bash
+   #SBATCH --job-name=train
+   #SBATCH --nodes=2
+   #SBATCH --gpus-per-node=8
+   #SBATCH --cpus-per-task=32
+   #SBATCH --mem=256G
+   #SBATCH --partition=gpu
+
+   module load cuda/12.1
+   source ~/venv/bin/activate
+
+   srun python train.py --epochs 100
+
+.. raw:: html
+
+       </div>
+       <div class="col-md-6 mb-3">
+            <h4> SkyPilot YAML </h4>
+
+.. code-block:: yaml
+
+   name: train
+
+   num_nodes: 2
+
+   resources:
+     accelerators: H100:8
+     cpus: 32+
+     memory: 256+
+     image_id: docker:nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+   setup: pip install torch transformers
+
+   run: python train.py --epochs 100
+
+.. raw:: html
+
+       </div>
+   </div>
+
+Key differences:
+
+- **No module system**: Use ``setup:`` for environment configuration (pip, conda) or Docker images
+- **Time limits are optional**: SkyPilot uses :ref:`autostop <auto-stop>` for auto-termination. Can be configured to terminate on idleness or wall-clock time.
+- **Simpler syntax**: Resource requirements are declarative YAML fields
+- **Native container support**: Easily use :ref:`containers <docker-containers>` by setting ``image_id``.
+
 Slurm to SkyPilot
 -----------------
 
@@ -86,6 +190,8 @@ Slurm clusters have login nodes for submitting jobs and accessing shared storage
 - **For batch workflows**: Use :ref:`managed jobs <managed-jobs>` (``sky jobs launch``) which don't require a persistent cluster.
 
 
+.. _slurm-env-var-mapping:
+
 Environment variable mapping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -130,107 +236,6 @@ Example usage in a distributed training script:
      else
        echo "I am worker $SKYPILOT_NODE_RANK, connecting to $HEAD_IP"
      fi
-
-Porting sbatch scripts to SkyPilot YAML
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-For an existing Slurm script, the easiest first step is to use the
-``sky utils convert-slurm`` CLI to auto-generate a starting point:
-
-.. code-block:: bash
-
-   # Print the converted YAML to stdout.
-   sky utils convert-slurm train.slurm
-
-   # Or write it to a file.
-   sky utils convert-slurm train.slurm train.sky.yaml
-
-The converter applies the directive mapping documented in this guide:
-
-- ``--job-name``, ``--nodes``, ``--cpus-per-task``, ``--mem``,
-  ``--gpus-per-node`` / ``--gres=gpu`` / ``--gpus`` map to top-level fields
-  (``name``, ``num_nodes``, ``resources.cpus``, ``resources.memory``,
-  ``resources.accelerators``).
-- ``--time=DD-HH:MM:SS`` maps to :ref:`autostop <auto-stop>`.
-- ``--partition`` maps to ``resources.infra: slurm/<cluster>/<partition>``
-  (the converter leaves a ``<cluster>`` placeholder for you to fill in).
-- Other ``#SBATCH`` directives (``--account``, ``--qos``, ``--constraint``,
-  ``--mail-*``, ``--exclusive``, ``--reservation``, ``--dependency``, ...)
-  pass through to ``config.slurm.sbatch_options`` so they round-trip to
-  Slurm at submission time.
-- Common ``SLURM_*`` environment variables in the body are rewritten to
-  their ``SKYPILOT_*`` equivalents (see the table above).
-- ``srun`` wrappers are translated based on Slurm semantics: a bare
-  ``srun cmd`` becomes ``cmd`` (SkyPilot's ``run`` block already executes
-  on every node); ``srun -N1 -n1 cmd`` is wrapped in a
-  ``$SKYPILOT_NODE_RANK == 0`` guard; for ``srun --ntasks-per-node=N`` with
-  N > 1 the converter emits ready-to-copy ``torchrun`` and ``mpirun``
-  templates next to the original line.
-- Directives without a direct equivalent (``--output``, ``--error``,
-  ``--array``) are preserved as comments at the top of the YAML for review.
-
-The output is a starting point: always read through the generated YAML and
-adjust before launching.
-
-Side-by-side comparison
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equivalent:
-
-.. raw:: html
-
-   <div class="row">
-       <div class="col-md-6 mb-3">
-            <h4> Slurm sbatch script </h4>
-
-.. code-block:: bash
-
-   #!/bin/bash
-   #SBATCH --job-name=train
-   #SBATCH --nodes=2
-   #SBATCH --gpus-per-node=8
-   #SBATCH --cpus-per-task=32
-   #SBATCH --mem=256G
-   #SBATCH --partition=gpu
-
-   module load cuda/12.1
-   source ~/venv/bin/activate
-
-   srun python train.py --epochs 100
-
-.. raw:: html
-
-       </div>
-       <div class="col-md-6 mb-3">
-            <h4> SkyPilot YAML </h4>
-
-.. code-block:: yaml
-
-   name: train
-
-   num_nodes: 2
-
-   resources:
-     accelerators: H100:8
-     cpus: 32+
-     memory: 256+
-     image_id: docker:nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
-
-   setup: pip install torch transformers
-
-   run: python train.py --epochs 100
-
-.. raw:: html
-
-       </div>
-   </div>
-
-Key differences:
-
-- **No module system**: Use ``setup:`` for environment configuration (pip, conda) or Docker images
-- **Time limits are optional**: SkyPilot uses :ref:`autostop <auto-stop>` for auto-termination. Can be configured to terminate on idleness or wall-clock time.
-- **Simpler syntax**: Resource requirements are declarative YAML fields
-- **Native container support**: Easily use :ref:`containers <docker-containers>` by setting ``image_id``.
 
 Resource requests
 ~~~~~~~~~~~~~~~~~
