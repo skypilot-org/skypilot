@@ -27,7 +27,8 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         apt-get update -y && \
         apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs; \
+        apt-get install -y nodejs && \
+        apt-get clean && rm -rf /var/lib/apt/lists/*; \
 fi
 
 COPY sky/dashboard/package.json sky/dashboard/package-lock.json \
@@ -44,8 +45,7 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Building dashboard in Stage 2" && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
         echo "Cleaning up dashboard build-time dependencies" && \
-        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*; \
+        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm; \
     fi
 
 COPY . /skypilot
