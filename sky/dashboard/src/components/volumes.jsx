@@ -38,7 +38,10 @@ import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { usePluginComponents } from '@/plugins/PluginProvider';
+import {
+  usePluginComponents,
+  useTableColumns,
+} from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 
@@ -515,6 +518,152 @@ function VolumesTable({
     }
   };
 
+  const pluginColumns = useTableColumns('volumes');
+
+  const sortableHeader = (label, sortKey) => (
+    <TableHead
+      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+      onClick={() => requestSort(sortKey)}
+    >
+      {label}
+      {getSortDirection(sortKey)}
+    </TableHead>
+  );
+
+  const baseColumns = [
+    {
+      id: 'name',
+      order: 0,
+      renderHeader: () => sortableHeader('Name', 'name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href={`/volumes/${encodeURIComponent(volume.name)}`}
+            className="text-blue-600"
+          >
+            {volume.name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'infra',
+      order: 10,
+      renderHeader: () => sortableHeader('Infra', 'infra'),
+      renderCell: (volume) => <TableCell>{volume.infra || 'N/A'}</TableCell>,
+    },
+    {
+      id: 'status',
+      order: 20,
+      renderHeader: () => sortableHeader('Status', 'status'),
+      renderCell: (volume) => (
+        <TableCell>
+          <StatusBadge
+            status={volume.status}
+            statusTooltip={volume.error_message || volume.status}
+          />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'size',
+      order: 30,
+      renderHeader: () => sortableHeader('Size', 'size'),
+      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+    },
+    {
+      id: 'user_name',
+      order: 40,
+      renderHeader: () => sortableHeader('User', 'user_name'),
+      renderCell: (volume) => (
+        <TableCell>{volume.user_name || 'N/A'}</TableCell>
+      ),
+    },
+    {
+      id: 'last_attached_at',
+      order: 50,
+      renderHeader: () => sortableHeader('Last Use', 'last_attached_at'),
+      renderCell: (volume) => (
+        <TableCell>{formatTimestamp(volume.last_attached_at)}</TableCell>
+      ),
+    },
+    {
+      id: 'type',
+      order: 60,
+      renderHeader: () => sortableHeader('Type', 'type'),
+      renderCell: (volume) => <TableCell>{volume.type || 'N/A'}</TableCell>,
+    },
+    {
+      id: 'usedby_clusters',
+      order: 70,
+      renderHeader: () => sortableHeader('Used By', 'usedby_clusters'),
+      renderCell: (volume) => (
+        <TableCell>
+          <UsedByCell
+            clusters={volume.usedby_clusters}
+            pods={volume.usedby_pods}
+          />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'actions',
+      order: 1000,
+      renderHeader: () => <TableHead>Actions</TableHead>,
+      renderCell: (volume) => (
+        <TableCell>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDeleteVolume(volume)}
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            title="Delete volume"
+          >
+            <Trash2Icon className="w-4 h-4" />
+          </Button>
+        </TableCell>
+      ),
+    },
+  ];
+
+  const pluginColumnDefs = pluginColumns.map((col) => ({
+    id: col.id,
+    order: col.header.order,
+    isPlugin: true,
+    renderHeader: () => {
+      const baseClasses = col.header.sortKey
+        ? 'sortable whitespace-nowrap'
+        : 'whitespace-nowrap';
+      const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+      return (
+        <TableHead
+          className={className}
+          onClick={
+            col.header.sortKey
+              ? () => requestSort(col.header.sortKey)
+              : undefined
+          }
+        >
+          {col.header.label}
+          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+        </TableHead>
+      );
+    },
+    renderCell: (volume) => {
+      const cellContent = col.cell.render(volume, { item: volume });
+      return (
+        <TableCell className={col.cell.className || ''}>
+          {cellContent}
+        </TableCell>
+      );
+    },
+  }));
+
+  const visibleColumns = [...baseColumns, ...pluginColumnDefs].sort(
+    (a, b) => a.order - b.order
+  );
+  const totalColSpan = visibleColumns.length;
+
   return (
     <div>
       <Card>
@@ -522,62 +671,16 @@ function VolumesTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('size')}
-                >
-                  Size{getSortDirection('size')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('user_name')}
-                >
-                  User{getSortDirection('user_name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('last_attached_at')}
-                >
-                  Last Use{getSortDirection('last_attached_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('type')}
-                >
-                  Type{getSortDirection('type')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('usedby_clusters')}
-                >
-                  Used By{getSortDirection('usedby_clusters')}
-                </TableHead>
-                <TableHead>Actions</TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
-                    colSpan={11}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -589,50 +692,17 @@ function VolumesTable({
               ) : paginatedData.length > 0 ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
-                    <TableCell>
-                      <Link
-                        href={`/volumes/${encodeURIComponent(volume.name)}`}
-                        className="text-blue-600"
-                      >
-                        {volume.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{volume.infra || 'N/A'}</TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        status={volume.status}
-                        statusTooltip={volume.error_message || volume.status}
-                      />
-                    </TableCell>
-                    <TableCell>{formatSize(volume.size)}</TableCell>
-                    <TableCell>{volume.user_name || 'N/A'}</TableCell>
-                    <TableCell>
-                      {formatTimestamp(volume.last_attached_at)}
-                    </TableCell>
-                    <TableCell>{volume.type || 'N/A'}</TableCell>
-                    <TableCell>
-                      <UsedByCell
-                        clusters={volume.usedby_clusters}
-                        pods={volume.usedby_pods}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onDeleteVolume(volume)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        title="Delete volume"
-                      >
-                        <Trash2Icon className="w-4 h-4" />
-                      </Button>
-                    </TableCell>
+                    {visibleColumns.map((col) =>
+                      React.cloneElement(col.renderCell(volume), {
+                        key: col.id,
+                      })
+                    )}
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={11}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     No volumes found
