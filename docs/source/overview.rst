@@ -28,17 +28,21 @@ Batch processing, development, (pre)training, finetuning, hyperparameter sweeps,
 
 Using SkyPilot to run workloads offers these benefits:
 
-.. dropdown:: Unified execution on any cloud, region, and cluster
+.. dropdown:: Unified execution on any cluster, cloud, or region
 
-    Regardless of how many clouds, regions, and clusters you have, you can use a unified interface
+    Regardless of how many clusters, clouds, or regions you have, you can use a unified interface
     to submit, run, and manage workloads on them.
 
     You focus on the workload, and SkyPilot alleviates the burden of
     dealing with cloud infra details and differences.
 
-.. dropdown:: Cost and capacity optimization
+.. dropdown:: Maximize GPU fleet utilization
 
-    When launching a workload, SkyPilot will automatically choose the cheapest and most available infra choice in your search space.
+    When launching a workload, SkyPilot automatically finds an available
+    cluster in your search space. GPU utilization is further maximized through
+    binpacking and queueing.
+
+    If you are provisioning elastic resources (VMs), SkyPilot additionally optimizes for cost by choosing the cheapest and available zone/region/cloud.
 
 .. dropdown:: Auto-failover across infra choices
 
