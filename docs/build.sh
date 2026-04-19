@@ -63,7 +63,14 @@ if [ "$AUTO_BUILD" = true ]; then
     # Ignore gallery directory and llms.txt to prevent unnecessary rebuilds
     export SPHINX_BUILD_LOCAL=true
     export SPHINX_PORT=${PORT:-8000}
+    # Share the doctree cache with `make html` (which writes to
+    # build/doctrees) so the initial watch-mode build is incremental.
+    # Without -d, sphinx defaults to build/html/.doctrees and ignores the
+    # existing cache. -j auto enables parallel reads/writes, matching the
+    # Makefile default.
     sphinx-autobuild source build/html \
+        -d build/doctrees \
+        -j auto \
         --ignore "*.md" \
         --ignore "**/llms.txt" \
         --port ${PORT:-8000}
