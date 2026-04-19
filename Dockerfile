@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.20
+
 # Stage 1: Install Google Cloud SDK using APT
 FROM python:3.10.19-slim AS gcloud-apt-install
 
@@ -41,7 +43,8 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
 
 COPY sky/dashboard /skypilot/sky/dashboard
 
-RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+RUN --mount=type=cache,id=dashboard-next-cache,target=/skypilot/sky/dashboard/.next/cache \
+    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Building dashboard in Stage 2" && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
         echo "Cleaning up dashboard build-time dependencies" && \
@@ -67,6 +70,7 @@ RUN cd /skypilot && \
 FROM python:3.10.19-slim
 
 ARG INSTALL_FROM_SOURCE=true
+ENV UV_LINK_MODE=copy
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -112,12 +116,12 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 # Install Nebius CLI
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
-    ~/.local/bin/uv cache clean && \
-    rm -rf ~/.cache/pip ~/.cache/uv && \
+    rm -rf ~/.cache/pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -125,7 +129,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 COPY --from=process-source /skypilot /skypilot
 
 # Install SkyPilot and set up dashboard based on installation method
-RUN cd /skypilot && \
+RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
+    cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
         ~/.local/bin/uv pip install -e ".[all]" --system; \
@@ -140,9 +145,10 @@ RUN cd /skypilot && \
         ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
-    # Cleanup all caches to reduce the image size
-    ~/.local/bin/uv cache clean && \
-    rm -rf ~/.cache/pip ~/.cache/uv && \
+    ~/.local/bin/uv cache prune --ci && \
+    # Cleanup non-mounted caches to reduce the image size. The uv cache lives
+    # on the BuildKit cache mount and is not committed into the image.
+    rm -rf ~/.cache/pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     # Remove the empty /skypilot dir for backward compatibility
