@@ -203,7 +203,6 @@ active tab to be moved up. */
 .bd-title-row {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
   gap: 0.6rem;
   /* Absorb the h1's natural margin-bottom onto the row so the button aligns
      with the title and the gap to the following content is preserved. */
@@ -219,9 +218,6 @@ active tab to be moved up. */
 .copy-page-wrapper {
   position: relative;  /* anchor for the dropdown below */
   flex-shrink: 0;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
   z-index: 10;
 }
 
