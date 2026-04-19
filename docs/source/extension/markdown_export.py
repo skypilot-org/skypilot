@@ -26,8 +26,8 @@ def export_markdown_files(app, exception):
         # .html — sphinx only refreshes .html mtime when the page actually
         # needs regenerating, so this avoids invoking pandoc on every
         # unchanged page (~32s on this codebase).
-        if md_path.exists() and md_path.stat().st_mtime >= html_path.stat(
-        ).st_mtime:
+        if md_path.exists(
+        ) and md_path.stat().st_mtime >= html_path.stat().st_mtime:
             continue
 
         if source_path.suffix in ['.md', '.rst']:

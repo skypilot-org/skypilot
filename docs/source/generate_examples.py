@@ -47,6 +47,7 @@ def _git_tracked_files() -> frozenset:
     entries = result.stdout.split(b'\x00')
     return frozenset(e.decode() for e in entries if e)
 
+
 # Scan this subdir and its subdirs.
 EXAMPLE_DIRS = [
     ROOT_DIR / 'llm',
