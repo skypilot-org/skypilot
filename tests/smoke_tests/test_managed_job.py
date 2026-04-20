@@ -521,7 +521,7 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     # make_cluster_name_on_cloud truncates the display name to fit
     # within K8s's 42-char limit, so name_on_cloud is no longer a
     # prefix of the actual pod name.
-    stable_prefix = name_on_cloud[:10]
+    stable_prefix = name_on_cloud[:15]
     terminate_head_cmd = (
         f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
         f'grep -- "{stable_prefix}" | grep -- "{user_hash}-head" | '
