@@ -913,15 +913,19 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                 known_fields = set(e.schema.get('properties', {}).keys())
                 assert isinstance(e.instance,
                                   dict), 'Instance must be a dictionary'
+                sub_msgs = []
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'Instead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
+                            sub_msgs.append(
+                                f'Instead of {field!r}, did you mean '
+                                f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'Found unsupported field {field!r}.'
+                            sub_msgs.append(
+                                f'Found unsupported field {field!r}.')
+                err_msg += ' '.join(sub_msgs)
         else:
             message = e.message
             # Object in jsonschema is represented as dict in Python. Replace

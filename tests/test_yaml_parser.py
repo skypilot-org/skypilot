@@ -185,3 +185,26 @@ def test_replace_envs_in_workdir(tmpdir, tmp_path):
             """), tmp_path)
     task = Task.from_yaml(config_path)
     assert task.workdir == tmpdir
+
+
+def test_multiple_unknown_fields_separator(tmp_path):
+    """Multiple typos at the same level should not be concatenated together.
+
+    Previously the error read '...did you mean X?Instead of...' with no
+    whitespace separator between the two suggestions.
+    """
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            setups: echo hello
+            env:
+                FOO: bar
+            """), tmp_path)
+    with pytest.raises(InvalidSkyPilotConfigError) as e:
+        Task.from_yaml(config_path)
+    msg = e.value.args[0]
+    # Both suggestions must be present...
+    assert "did you mean 'setup'" in msg
+    assert "did you mean 'envs'" in msg
+    # ...and they must be separated by at least whitespace or a newline
+    # so the message is readable. The old broken form was '...?Instead'.
+    assert '?Instead' not in msg
