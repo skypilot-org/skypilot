@@ -1009,6 +1009,27 @@ def deploy_single_cluster(cluster_name,
     else:
         logger.debug('No GPUs detected. Skipping GPU Operator installation.')
 
+    # Install Prometheus + node-exporter in the `skypilot` namespace so the
+    # API server's /gpu-metrics endpoint can federate DCGM + node-level
+    # metrics. Runs on every pool (GPU or CPU) because node-level metrics
+    # are always useful.
+    force_update_status(f'Installing Prometheus [{cluster_name}]')
+    prom_cmd = _prometheus_install_cmd(askpass_block)
+    prom_result = deploy_utils.run_remote(head_node,
+                                          prom_cmd,
+                                          ssh_user,
+                                          ssh_key,
+                                          use_ssh_config=head_use_ssh_config,
+                                          print_output=True)
+    if prom_result is None:
+        # Log and continue — the cluster is still usable without Prometheus.
+        logger.error(
+            f'{colorama.Fore.RED}Failed to install Prometheus. The cluster '
+            f'will still work, but /gpu-metrics federation will not find '
+            f'metrics until Prometheus is installed manually.{RESET_ALL}')
+    else:
+        success_message('Prometheus installed with node-exporter enabled.')
+
     # The env var KUBECONFIG ensures sky check uses the right kubeconfig
     os.environ['KUBECONFIG'] = kubeconfig_path
     deploy_utils.run_command(['sky', 'check', 'ssh'], shell=False)
@@ -1064,6 +1085,64 @@ def _dcgm_exporter_service_cmd(askpass_block: str, selector: str) -> str:
 cat <<'DCGM_SVC' | kubectl --kubeconfig ~/.kube/config apply -f -
 {svc_yaml}
 DCGM_SVC
+"""
+
+
+def _prometheus_install_cmd(askpass_block: str) -> str:
+    """Build the shell command to install prometheus-community/prometheus.
+
+    Installs into the `skypilot` namespace with node-exporter enabled so
+    the API server's /gpu-metrics endpoint can federate DCGM + node-level
+    metrics. Uses `helm upgrade --install` for idempotency.
+
+    The plain prometheus chart is used deliberately — kube-prometheus-stack
+    prefixes pod/namespace labels with `exported_` which breaks SkyPilot's
+    PromQL queries.
+
+    The command runs on the pool's head node, where `~/.kube/config` is the
+    kubeconfig k3s writes at install time with `current-context` pointing at
+    this cluster — so helm does not need `--kube-context`. Helm is installed
+    inline if missing (CPU-only pools skip the gpu-operator step that would
+    otherwise install it). The helm exit code is captured and propagated
+    explicitly so a failure isn't masked by the `rm -f` of the temp file.
+    """
+    return f"""{askpass_block}
+if ! command -v helm &> /dev/null; then
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
+    chmod 700 get_helm.sh &&
+    ./get_helm.sh &&
+    rm get_helm.sh
+fi
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+helm repo update prometheus-community
+PROM_VALUES_FILE=$(mktemp /tmp/skypilot-prom-values.XXXXXX.yaml)
+cat <<'PROM_VALUES' > "$PROM_VALUES_FILE"
+server:
+  persistentVolume:
+    enabled: true
+    size: 50Gi
+  retention: "1000d"
+  retentionSize: "43GB"
+kube-state-metrics:
+  enabled: true
+  metricLabelsAllowlist:
+    - pods=[skypilot-cluster,skypilot-cluster-name]
+prometheus-node-exporter:
+  enabled: true
+prometheus-pushgateway:
+  enabled: false
+alertmanager:
+  enabled: false
+PROM_VALUES
+helm upgrade --install skypilot-prometheus \\
+    prometheus-community/prometheus \\
+    --kubeconfig ~/.kube/config \\
+    --namespace skypilot \\
+    --create-namespace \\
+    -f "$PROM_VALUES_FILE"
+HELM_RET=$?
+rm -f "$PROM_VALUES_FILE"
+exit $HELM_RET
 """
 
 
