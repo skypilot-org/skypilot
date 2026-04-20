@@ -70,7 +70,6 @@ RUN cd /skypilot && \
 FROM python:3.10.19-slim
 
 ARG INSTALL_FROM_SOURCE=true
-ENV UV_LINK_MODE=copy
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -116,12 +115,12 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 # Install Nebius CLI
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
-RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
-    rm -rf ~/.cache/pip && \
+    ~/.local/bin/uv cache clean && \
+    rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -129,8 +128,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
 COPY --from=process-source /skypilot /skypilot
 
 # Install SkyPilot and set up dashboard based on installation method
-RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
-    cd /skypilot && \
+RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
         ~/.local/bin/uv pip install -e ".[all]" --system; \
@@ -145,10 +143,9 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=skypilot-uv-cache \
         ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
-    ~/.local/bin/uv cache prune --ci && \
-    # Cleanup non-mounted caches to reduce the image size. The uv cache lives
-    # on the BuildKit cache mount and is not committed into the image.
-    rm -rf ~/.cache/pip && \
+    # Cleanup all caches to reduce the image size
+    ~/.local/bin/uv cache clean && \
+    rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     # Remove the empty /skypilot dir for backward compatibility
