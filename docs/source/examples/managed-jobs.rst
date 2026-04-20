@@ -14,7 +14,13 @@ Managed Jobs
    :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
    can communicate with each other (e.g., RL workloads).
 
-SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from failures (job preemptions, GPU errors, node crashes, etc.), retry application errors, and clean up resources when done. Managed jobs also support cost-saving spot instances with automatic preemption recovery.
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically
+recover from failures (job preemptions, GPU errors, node crashes, etc.), retry
+application errors, and clean up resources when done.
+
+The benefits above apply to both reserved clusters or elastic instances.
+If you use the latter, managed jobs also support
+cost-saving spot instances with automatic preemption recovery.
 
 To start a managed job, use :code:`sky jobs launch`:
 
@@ -586,7 +592,9 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 Calling SkyPilot API from within managed jobs
 ---------------------------------------------
 
-By default (:code:`api_server_access: true`), SkyPilot automatically injects API server credentials into the job's environment when the server supports it. This means managed jobs can call the SkyPilot CLI/SDK to launch nested operations without any extra configuration:
+By default (:code:`api_server_access: true`), SkyPilot automatically injects API
+server credentials into the job's environment when the server supports it. This
+means managed jobs can call the SkyPilot CLI/SDK to launch new workloads:
 
 .. code-block:: yaml
 
