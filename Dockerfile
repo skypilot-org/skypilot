@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.20
+# syntax=docker/dockerfile:1
 
 # Stage 1: Install Google Cloud SDK using APT
 FROM python:3.10.19-slim AS gcloud-apt-install
