@@ -266,13 +266,18 @@ class BatchCoordinator:
 
         Uses all available workers — no fixed ``target_num_replicas``.
         If no workers are found immediately, waits up to the discovery
-        timeout for at least one to appear.
+        timeout for at least one to appear.  On resume the timeout is
+        extended because batches are already checkpointed and the pool
+        may briefly appear "not ready" while the controller pod and the
+        serve-side pool status plumbing stabilize after a restart.
         """
+        timeout = (constants.WORKER_DISCOVERY_RESUME_TIMEOUT
+                   if self._is_resume else constants.WORKER_DISCOVERY_TIMEOUT)
         workers = self._get_ready_workers()
 
         if not workers:
             logger.info('No workers ready yet, waiting for at least one...')
-            deadline = time.monotonic() + constants.WORKER_DISCOVERY_TIMEOUT
+            deadline = time.monotonic() + timeout
 
             while not workers and time.monotonic() < deadline:
                 time.sleep(5)
@@ -285,7 +290,7 @@ class BatchCoordinator:
         if not workers:
             raise RuntimeError(
                 f'No ready workers found in pool {self.pool_name} '
-                f'after waiting {constants.WORKER_DISCOVERY_TIMEOUT}s')
+                f'after waiting {timeout}s')
 
         self._workers = workers
         logger.info(f'Discovered {len(workers)} ready workers')
@@ -311,15 +316,23 @@ class BatchCoordinator:
             return []
         replica_infos = status.get('replica_info', [])
         ready = []
+        non_ready_summary: List[str] = []
         for info in replica_infos:
             raw_status = info.get('status', '')
             # status may be a ReplicaStatus enum or a string; normalise.
             replica_status = (raw_status.value if hasattr(raw_status, 'value')
                               else str(raw_status))
+            name = info.get('name')
             if replica_status == 'READY':
-                name = info.get('name')
                 if name:
                     ready.append(name)
+            elif name:
+                non_ready_summary.append(f'{name}={replica_status}')
+        if not ready and non_ready_summary:
+            # Help diagnose flaky resume cases where the pool exists but
+            # no replica is READY yet — log what states we did see.
+            logger.info('Pool %s has %d non-READY replicas: %s', self.pool_name,
+                        len(non_ready_summary), ', '.join(non_ready_summary))
         return ready
 
     # ------------------------------------------------------------------

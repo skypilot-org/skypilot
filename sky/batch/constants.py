@@ -6,6 +6,12 @@ WORKER_SERVICE_STARTUP_TIMEOUT = 60  # seconds to wait for service health
 
 # Timeouts (in seconds)
 WORKER_DISCOVERY_TIMEOUT = 300
+# On resume, the batches are already checkpointed and the pool is a durable
+# resource that may briefly appear "not ready" while the controller pod and
+# the serve-side pool status plumbing stabilize after a restart.  Use a much
+# longer timeout so a transient worker-unavailability window does not kill
+# the whole job.
+WORKER_DISCOVERY_RESUME_TIMEOUT = 1800
 BATCH_COMPLETION_TIMEOUT = 3600  # 1 hour max per batch
 
 # Polling interval for sdk.job_status() when waiting for batch completion

@@ -476,11 +476,15 @@ def test_batch_ha_kill_running(generic_cloud: str):
             smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
 
             # --- Verify resume preserves progress, then wait for SUCCEED ---
+            # The coordinator waits up to 30 min for pool workers to
+            # reappear after a controller restart (WORKER_DISCOVERY_
+            # RESUME_TIMEOUT).  Poll long enough to cover that plus
+            # execution time for the remaining batches.
             (
                 f'COMPLETED_BEFORE=$(cat /tmp/batch-ha-progress-{name}.txt)\n'
                 f'echo "Completed before kill: $COMPLETED_BEFORE"\n'
                 f'VERIFIED=0\n'
-                f'for i in $(seq 1 360); do\n'
+                f'for i in $(seq 1 540); do\n'
                 f'  LINE=$(sky jobs queue 2>/dev/null '
                 f'| grep "{pool_name}" | head -1)\n'
                 # Check progress once the job is back to RUNNING,
