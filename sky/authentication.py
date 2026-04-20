@@ -284,6 +284,11 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                     logger.debug(f'Reusing key:{key["name"]}, '
                                  f'matching existing public key.')
                     break
+            else:
+                raise Exception(
+                    'IBM VPC reports a key with the same fingerprint '
+                    'already exists, but no listed key matches the '
+                    'local public key.') from e
         elif 'Key with name already exists' in e.message:
             raise Exception("""a key with chosen name
                 already registered in the specified region""") from e
