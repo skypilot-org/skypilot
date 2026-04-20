@@ -215,8 +215,14 @@ def _interruptible_sleep(total_seconds: float) -> None:
     """
     signal_path = pathlib.Path(
         constants.CONTROLLER_START_SIGNAL_FILE).expanduser()
-    elapsed = 0.0
-    while elapsed < total_seconds:
+    # Use monotonic wall time rather than a counter so that the actual
+    # elapsed time stays accurate even if the loop body (file stat / sleep)
+    # runs slower than its nominal cost.
+    deadline = time.monotonic() + total_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
         if signal_path.exists():
             try:
                 signal_path.unlink(missing_ok=True)
@@ -226,8 +232,8 @@ def _interruptible_sleep(total_seconds: float) -> None:
                 pass
             logger.debug('Controller start signal detected, waking up early.')
             return
-        time.sleep(_WAKE_POLL_INTERVAL_SECONDS)
-        elapsed += _WAKE_POLL_INTERVAL_SECONDS
+        # Cap the last sleep so we don't overshoot ``total_seconds``.
+        time.sleep(min(_WAKE_POLL_INTERVAL_SECONDS, remaining))
 
 
 def managed_job_status_refresh_event():

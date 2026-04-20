@@ -324,11 +324,18 @@ def is_consolidation_mode() -> bool:
     return effective
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
 def is_ha_enabled() -> bool:
     """Return True if HA is enabled.
 
     HA mode is signaled by the HA feature plugin writing a sentinel file at
     ``constants.HA_MODE_SENTINEL_FILE`` during its install().
+
+    Cached at global scope (not request scope like is_consolidation_mode)
+    because the sentinel is sticky by design — plugin install only touches
+    it, nothing unlinks it during normal operation. Admins who need to flip
+    HA off must restart the server anyway (see HA_MODE_SENTINEL_FILE's
+    docstring), so a process-scoped cache matches documented behavior.
     """
     return pathlib.Path(constants.HA_MODE_SENTINEL_FILE).expanduser().exists()
 

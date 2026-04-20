@@ -562,7 +562,16 @@ _HA_SENTINEL_CONST = 'sky.skylet.constants.HA_MODE_SENTINEL_FILE'
 
 
 class TestIsHaEnabled:
-    """Tests for is_ha_enabled() — HA mode sentinel file detection."""
+    """Tests for is_ha_enabled() — HA mode sentinel file detection.
+
+    is_ha_enabled() has a global-scope lru_cache by design (the sentinel is
+    sticky — plugin install touches once, nothing unlinks during normal
+    operation). Every test must clear the cache in setup_method so prior
+    test state doesn't leak.
+    """
+
+    def setup_method(self):
+        utils.is_ha_enabled.cache_clear()
 
     def test_no_sentinel_returns_false(self):
         """No sentinel file => False."""
@@ -579,14 +588,20 @@ class TestIsHaEnabled:
             with mock.patch(_HA_SENTINEL_CONST, str(sentinel)):
                 assert utils.is_ha_enabled() is True
 
-    def test_sentinel_removal_flips_back(self):
-        """Removing the sentinel (plugin shutdown) returns False again."""
+    def test_cache_is_sticky_within_process(self):
+        """Once True, is_ha_enabled stays True for the process lifetime —
+        admin manual removal requires a server restart (documented
+        behavior). This test pins that contract."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sentinel = pathlib.Path(tmpdir) / '.ha_mode_enabled'
             sentinel.touch()
             with mock.patch(_HA_SENTINEL_CONST, str(sentinel)):
                 assert utils.is_ha_enabled() is True
                 sentinel.unlink()
+                # Cache hit: still True even though the file is gone.
+                assert utils.is_ha_enabled() is True
+                # After explicit cache_clear(), picks up the new state.
+                utils.is_ha_enabled.cache_clear()
                 assert utils.is_ha_enabled() is False
 
 

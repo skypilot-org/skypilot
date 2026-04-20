@@ -278,8 +278,10 @@ def _signal_controller_start_needed() -> None:
     up the new jobs within EVENT_CHECKING_INTERVAL_SECONDS.
     """
     try:
-        pathlib.Path(
-            constants.CONTROLLER_START_SIGNAL_FILE).expanduser().touch()
+        signal_path = pathlib.Path(
+            constants.CONTROLLER_START_SIGNAL_FILE).expanduser()
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+        signal_path.touch()
     except OSError:
         logger.warning(
             'Failed to create managed-job daemon wake signal file — '
