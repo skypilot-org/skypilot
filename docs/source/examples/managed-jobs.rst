@@ -583,8 +583,8 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 
 .. _nested-skypilot-managed-jobs:
 
-Nested SkyPilot from managed jobs
-----------------------------------
+Calling SkyPilot API from within managed jobs
+---------------------------------------------
 
 By default (:code:`api_server_access: true`), SkyPilot automatically injects API server credentials into the job's environment when the server supports it. This means managed jobs can call the SkyPilot CLI/SDK to launch nested operations without any extra configuration:
 
