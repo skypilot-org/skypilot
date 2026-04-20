@@ -423,7 +423,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
     task_ids = []
     task_names = []
     metadata_jsons = []
-    is_primary_in_job_groups = []
+    is_primary_in_job_groups: List[Optional[bool]] = []
     for task_id, task in enumerate(dag.tasks):
         task_ids.append(task_id)
         assert task.name is not None, 'task name is not set'
@@ -435,7 +435,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
                                        task.name in dag.primary_tasks)
             is_primary_in_job_groups.append(is_primary_in_job_group)
         else:
-            is_primary_in_job_groups.append(False)
+            is_primary_in_job_groups.append(None)
 
     # Use the same resources_str for all tasks
     resources_str = backend_utils.get_task_resources_str(dag.tasks[0],

@@ -1040,16 +1040,36 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         return [row[0] for row in rows if row[0] is not None]
 
 
-def _get_all_task_ids_statuses(
-        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+def _get_task_ids_statuses(
+        job_id: int,
+        primary_only: bool = False) -> List[Tuple[int, ManagedJobStatus]]:
+    """Returns (task_id, status) pairs for a job.
+
+    Args:
+        job_id: The job ID to query.
+        primary_only: If True, only primary tasks are returned for job groups
+            (is_primary_in_job_group=True). For non-job-group jobs (where
+            is_primary_in_job_group is NULL), all tasks are returned regardless.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        id_statuses = session.execute(
-            sqlalchemy.select(
-                spot_table.c.task_id,
-                spot_table.c.status,
-            ).where(spot_table.c.spot_job_id == job_id).order_by(
-                spot_table.c.task_id.asc())).fetchall()
+        query = sqlalchemy.select(
+            spot_table.c.task_id,
+            spot_table.c.status,
+        )
+        if primary_only:
+            query = query.where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    sqlalchemy.or_(
+                        spot_table.c.is_primary_in_job_group.is_(None),
+                        spot_table.c.is_primary_in_job_group.is_(True),
+                    ),
+                ))
+        else:
+            query = query.where(spot_table.c.spot_job_id == job_id)
+        query = query.order_by(spot_table.c.task_id.asc())
+        id_statuses = session.execute(query).fetchall()
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
@@ -1072,7 +1092,7 @@ def get_all_task_ids_names_statuses_logs(
 
 
 def get_num_tasks(job_id: int) -> int:
-    return len(_get_all_task_ids_statuses(job_id))
+    return len(_get_task_ids_statuses(job_id))
 
 
 def get_latest_task_id_from_statuses(
@@ -1101,9 +1121,13 @@ def get_latest_task_id_status(
     first task is succeeded, and the second task is being executed. This will
     return (1, ManagedJobStatus.RUNNING).
 
+    For job groups with primary/auxiliary tasks, only primary tasks are
+    considered so the overall status reflects primary task outcomes
+    (e.g. SUCCEEDED rather than CANCELLED from auto-terminated auxiliaries).
+
     If the job_id does not exist, (None, None) will be returned.
     """
-    id_statuses = _get_all_task_ids_statuses(job_id)
+    id_statuses = _get_task_ids_statuses(job_id, primary_only=True)
     return get_latest_task_id_from_statuses(id_statuses)
 
 
@@ -2204,22 +2228,45 @@ def get_workspace(job_id: int) -> str:
 
 async def get_latest_task_id_status_async(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
-    """Returns the (task id, status) of the latest task of a job."""
-    id_statuses = await get_all_task_ids_statuses_async(job_id)
+    """Returns the (task id, status) of the latest task of a job.
+
+    For job groups with primary/auxiliary tasks, only primary tasks are
+    considered so the overall status reflects primary task outcomes.
+    """
+    id_statuses = await get_task_ids_statuses_async(job_id, primary_only=True)
     return get_latest_task_id_from_statuses(id_statuses)
 
 
-async def get_all_task_ids_statuses_async(
-        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
-    """Returns all (task_id, status) pairs for a job (async version)."""
+async def get_task_ids_statuses_async(
+        job_id: int,
+        primary_only: bool = False) -> List[Tuple[int, ManagedJobStatus]]:
+    """Async version of _get_task_ids_statuses().
+
+    Args:
+        job_id: The job ID to query.
+        primary_only: If True, only primary tasks are returned for job groups
+            (is_primary_in_job_group=True). For non-job-group jobs (where
+            is_primary_in_job_group is NULL), all tasks are returned regardless.
+    """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        result = await session.execute(
-            sqlalchemy.select(
-                spot_table.c.task_id,
-                spot_table.c.status,
-            ).where(spot_table.c.spot_job_id == job_id).order_by(
-                spot_table.c.task_id.asc()))
+        query = sqlalchemy.select(
+            spot_table.c.task_id,
+            spot_table.c.status,
+        )
+        if primary_only:
+            query = query.where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    sqlalchemy.or_(
+                        spot_table.c.is_primary_in_job_group.is_(None),
+                        spot_table.c.is_primary_in_job_group.is_(True),
+                    ),
+                ))
+        else:
+            query = query.where(spot_table.c.spot_job_id == job_id)
+        query = query.order_by(spot_table.c.task_id.asc())
+        result = await session.execute(query)
         return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 

@@ -1221,7 +1221,8 @@ class JobLibCodeGen:
                                     task_names: List[str],
                                     resources_str: str,
                                     metadata_jsons: List[str],
-                                    is_primary_in_job_groups: List[bool],
+                                    is_primary_in_job_groups: List[
+                                        Optional[bool]],
                                     execution: str,
                                     num_jobs: int = 1) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
