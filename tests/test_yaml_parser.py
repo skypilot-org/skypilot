@@ -187,6 +187,32 @@ def test_replace_envs_in_workdir(tmpdir, tmp_path):
     assert task.workdir == tmpdir
 
 
+def test_anyof_error_points_at_inner_problem(tmp_path):
+    """Schema errors inside an anyOf/oneOf should name the real issue.
+
+    Previously the validator surfaced the outer 'is not valid under any of
+    the given schemas' message and truncated the JSON path at the anyOf
+    boundary, which gave users no clue what was wrong. With
+    jsonschema.exceptions.best_match, the inner type-mismatch error should
+    be reported instead.
+    """
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            resources:
+                cpus: 2
+                autostop:
+                    idle_minutes: "ten"
+            """), tmp_path)
+    with pytest.raises(InvalidSkyPilotConfigError) as e:
+        Task.from_yaml(config_path)
+    msg = e.value.args[0]
+    # Must not fall back to the outer anyOf message.
+    assert 'not valid under any of the given schemas' not in msg
+    # Must name the real issue: idle_minutes expected an integer.
+    assert 'integer' in msg
+    assert 'ten' in msg
+
+
 def test_multiple_unknown_fields_separator(tmp_path):
     """Multiple typos at the same level should not be concatenated together.
 

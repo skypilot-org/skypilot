@@ -927,13 +927,20 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                                 f'Found unsupported field {field!r}.')
                 err_msg += ' '.join(sub_msgs)
         else:
-            message = e.message
+            # When the error came from an anyOf/oneOf branch, jsonschema's
+            # default message is the unhelpful "X is not valid under any of
+            # the given schemas" with json_path truncated at the branch
+            # boundary. best_match recurses into the sub-error context for
+            # anyOf/oneOf nodes specifically (see its docstring) and
+            # surfaces the deepest, most-specific sub-error.
+            best = jsonschema.exceptions.best_match([e])
+            message = best.message
             # Object in jsonschema is represented as dict in Python. Replace
             # 'object' with 'dict' for better readability.
             message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + message +
-                       f'. Check problematic field(s): {e.json_path}')
+                       f'. Check problematic field(s): {best.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
