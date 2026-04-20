@@ -1132,24 +1132,39 @@ available_node_types:
 
               log_tail() {
                 FILE_PATTERN="~/sky_logs/*/tasks/*.log"
+
+                # O(1) membership set. Replaces an `echo $str | grep -q` check
+                # that was O(n) per file (O(n^2) across the outer loop).
+                local -A already_monitored
+
+                # Pre-seed with every file that exists at startup so we do NOT
+                # spawn monitor_file for them. On an HA controller pod restart
+                # the PVC retains task logs from all prior (completed) jobs;
+                # tailing them all spawns a tail+mylsof loop per file, and
+                # mylsof's /proc/*/fd/* scan grows with the process count,
+                # producing runaway fork growth. nullglob is off by default,
+                # so the `ls` guard handles the empty-glob case.
+                if ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; then
+                  for f in $(eval echo $FILE_PATTERN); do
+                    already_monitored[$f]=1
+                  done
+                fi
+
                 while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
                   sleep 1
                 done
 
-                # Keep track of already monitored files
-                already_monitored=""
-
                 # Infinite loop to continuously check for new files
                 while true; do
                   for file in $(eval echo $FILE_PATTERN); do
-                    if echo $already_monitored | grep -q $file; then
+                    if [[ -n "${already_monitored[$file]:-}" ]]; then
                       # File is already being monitored
                       continue
                     fi
 
                     # Monitor the new file
                     monitor_file $file &
-                    already_monitored="${already_monitored} ${file}"
+                    already_monitored[$file]=1
                   done
                   sleep 0.1
                 done
