@@ -242,7 +242,7 @@ def stop_safe_status():
     stream logs from user program and do not want it to interfere with the
     spinner display.
     """
-    if _is_thread_safe():
+    if not _is_thread_safe():
         return
     server_status = _get_server_status()
     if server_status is not None:
