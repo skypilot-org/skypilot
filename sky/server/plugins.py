@@ -3,6 +3,7 @@ import abc
 import dataclasses
 import importlib
 import os
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.server.blob import blob_storage as blob_storage_mod
+    from sky.server.requests import log_provider as log_provider_mod
+    from sky.server.requests import storage as storage_mod
+    from sky.server.requests.queues import base as queue_base_mod
 
 logger = sky_logging.init_logger(__name__)
 
@@ -94,6 +101,42 @@ class ExtensionContext:
     @property
     def managed_secrets_provider(self,) -> Optional[ManagedSecretsProvider]:
         return self._managed_secrets_provider
+
+    def register_request_storage(
+        self,
+        backend: 'storage_mod.RequestBackend',
+    ) -> None:
+        """Register a custom request backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import storage as rs
+        rs.set_request_backend(backend)
+
+    def register_queue_backend_factory(
+        self,
+        factory: 'queue_base_mod.QueueBackendFactory',
+    ) -> None:
+        """Register a custom queue backend factory."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.queues import base as qb
+        qb.set_queue_backend_factory(factory)
+
+    def register_blob_storage(
+        self,
+        backend: 'blob_storage_mod.BlobStorage',
+    ) -> None:
+        """Register a custom blob storage backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.blob import blob_storage as bs
+        bs.set_blob_storage(backend)
+
+    def register_log_provider(
+        self,
+        log_provider: 'log_provider_mod.LogProvider',
+    ) -> None:
+        """Register a custom log provider."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import log_provider as lp
+        lp.set_log_provider(log_provider)
 
     def register_rbac_rule(self,
                            path: str,
@@ -368,14 +411,26 @@ def get_remote_plugins_config_path() -> Optional[str]:
 _PLUGINS: Dict[str, BasePlugin] = {}
 _EXTENSION_CONTEXT: Optional[ExtensionContext] = None
 
+# Whether plugins have finished loading. On the server, schema validation
+# should only enforce additionalProperties: False after plugins have had
+# a chance to register their extra properties. Before that, we allow
+# additional properties so that plugin-provided fields are not rejected.
+_plugins_loaded: bool = False
+
+
+def plugins_loaded() -> bool:
+    """Return whether plugins have finished loading."""
+    return _plugins_loaded
+
 
 def load_plugins(extension_context: ExtensionContext):
     """Load and initialize plugins from the config."""
-    global _EXTENSION_CONTEXT
+    global _EXTENSION_CONTEXT, _plugins_loaded
     _EXTENSION_CONTEXT = extension_context
 
     config = _load_plugin_config()
     if not config:
+        _plugins_loaded = True
         return
 
     for plugin_config in config.get('plugins', []):
@@ -402,6 +457,8 @@ def load_plugins(extension_context: ExtensionContext):
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+
+    _plugins_loaded = True
 
 
 def get_plugins() -> List[BasePlugin]:

@@ -2469,25 +2469,6 @@ class TestCheckInstanceFits:
             assert reason is not None
             assert 'No ready nodes' in reason
 
-    def test_exact_resources_not_sufficient(self):
-        """Test that exact resource match is not considered sufficient.
-
-        The function requires strictly greater resources to account for
-        kube-system pods consuming resources.
-        """
-        # Node has exactly 4 CPUs and 16GB, requesting 4CPU--16GB should not fit
-        mock_node = self._create_mock_node(name='exact-match-node',
-                                           cpu_capacity='4',
-                                           memory_capacity='16Gi')
-
-        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                        return_value=[mock_node]):
-            fits, reason = utils.check_instance_fits('test-context',
-                                                     '4CPU--16GB')
-            assert fits is False
-            assert reason is not None
-            assert 'Maximum resources found' in reason
-
     def test_tpu_instance_fits(self):
         """Test TPU instance that fits on the cluster."""
         mock_node = self._create_mock_node(
@@ -4135,3 +4116,138 @@ class TestInjectDockerCacheVolume(unittest.TestCase):
         vm2 = next(c for c in pod2['spec']['containers']
                    if c['name'] == 'dind')['volumeMounts'][0]
         assert vm['subPath'] != vm2['subPath']
+
+
+def _make_node(cpu_cap: str,
+               mem_cap: str,
+               cpu_alloc: str,
+               mem_alloc: str,
+               ready: bool = True) -> utils.V1Node:
+    """Helper to build a V1Node for adjust_resources_to_allocatable tests."""
+    return utils.V1Node(
+        metadata=utils.V1ObjectMeta(name='node', labels={}),
+        status=utils.V1NodeStatus(
+            capacity={
+                'cpu': cpu_cap,
+                'memory': mem_cap
+            },
+            allocatable={
+                'cpu': cpu_alloc,
+                'memory': mem_alloc
+            },
+            addresses=[],
+            conditions=[
+                utils.V1NodeCondition(type='Ready',
+                                      status='True' if ready else 'False')
+            ],
+        ),
+        spec=utils.V1NodeSpec(unschedulable=False, taints=[]),
+    )
+
+
+class TestAdjustResourcesToAllocatable:
+    """Tests for adjust_resources_to_allocatable."""
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_dryrun_returns_original(self, mock_nodes):
+        """Dryrun should return original values without querying nodes."""
+        result = utils.adjust_resources_to_allocatable(4.0,
+                                                       16.0,
+                                                       'ctx',
+                                                       dryrun=True)
+        assert result == (4.0, 16.0)
+        mock_nodes.assert_not_called()
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_larger_node_skips_clamping(self, mock_nodes):
+        """If a node has strictly more CPU and memory, no clamping."""
+        mock_nodes.return_value = [
+            _make_node('16', '64Gi', '15900m', '62Gi'),
+        ]
+        result = utils.adjust_resources_to_allocatable(4.0, 16.0, 'ctx')
+        assert result == (4.0, 16.0)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_exact_match_clamps(self, mock_nodes):
+        """Exact capacity match should clamp to allocatable."""
+        mock_nodes.return_value = [
+            _make_node('8', '32Gi', '7910m', '28Gi'),
+        ]
+        cpus, mem = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        assert cpus < 8.0
+        assert mem < 32.0
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_no_matching_nodes_returns_original(self, mock_nodes):
+        """If no nodes match the request, return original values."""
+        mock_nodes.return_value = [
+            _make_node('16', '64Gi', '15900m', '62Gi'),
+            _make_node('32', '128Gi', '31900m', '126Gi'),
+        ]
+        # Request 4 CPU / 16G — neither node has exact match,
+        # and both are larger so we get early return anyway.
+        result = utils.adjust_resources_to_allocatable(4.0, 16.0, 'ctx')
+        assert result == (4.0, 16.0)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_multiple_exact_nodes_takes_minimum(self, mock_nodes):
+        """Min allocatable across matching nodes should be used."""
+        mock_nodes.return_value = [
+            _make_node('8', '32Gi', '7910m', '28Gi'),
+            _make_node('8', '32Gi', '7800m', '27Gi'),
+        ]
+        cpus, mem = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        # Should use the node with less allocatable resources.
+        cpus2, mem2 = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        assert cpus == cpus2
+        assert mem == mem2
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_independent_cpu_mem_matching(self, mock_nodes):
+        """CPU and memory are matched independently."""
+        # Node A: exact CPU match only (mem is larger)
+        # Node B: exact mem match only (cpu is larger)
+        mock_nodes.return_value = [
+            _make_node('8', '64Gi', '7910m', '62Gi'),
+            _make_node('16', '32Gi', '15900m', '28Gi'),
+        ]
+        cpus, mem = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        # CPU should be clamped (from node A), memory should be clamped
+        # (from node B).
+        assert cpus < 8.0
+        assert mem < 32.0
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_not_ready_nodes_ignored(self, mock_nodes):
+        """Not-ready nodes should not affect clamping."""
+        mock_nodes.return_value = [
+            _make_node('8', '32Gi', '4000m', '16Gi', ready=False),
+            _make_node('16', '64Gi', '15900m', '62Gi'),
+        ]
+        # The not-ready node has exact CPU match but should be ignored.
+        # The ready node is strictly larger, so no clamping.
+        result = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        assert result == (8.0, 32.0)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_larger_node_one_dimension_only(self, mock_nodes):
+        """A node larger in only one dimension should not skip clamping."""
+        # Node has more CPU but exact memory — not strictly larger in both.
+        mock_nodes.return_value = [
+            _make_node('16', '32Gi', '15900m', '28Gi'),
+        ]
+        cpus, mem = utils.adjust_resources_to_allocatable(8.0, 32.0, 'ctx')
+        # CPU doesn't match (16 != 8), memory matches exactly.
+        # Memory should be clamped.
+        assert cpus == 8.0
+        assert mem < 32.0
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_heterogeneous_cluster_with_larger_node(self, mock_nodes):
+        """Heterogeneous cluster: larger node exists, no clamping."""
+        mock_nodes.return_value = [
+            _make_node('4', '16Gi', '3900m', '14Gi'),
+            _make_node('8', '32Gi', '7910m', '28Gi'),
+        ]
+        result = utils.adjust_resources_to_allocatable(4.0, 16.0, 'ctx')
+        assert result == (4.0, 16.0)

@@ -391,6 +391,12 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         group_name = ' '.join(
             word.capitalize() for word in re.split(r'[-_]', key))
 
+        if not all_steps:
+            # Skip empty groups — Buildkite rejects pipelines with
+            # empty step groups.
+            print(f'No matching tests for {yaml_file_path}, skipping.')
+            return
+
         grouped_steps = [{
             'group': group_name,
             'key': key,

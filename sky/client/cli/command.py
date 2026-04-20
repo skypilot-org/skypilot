@@ -154,6 +154,18 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
 T = TypeVar('T')
 
 
+def _get_ws_proxy_command() -> str:
+    """Returns the ws-proxy command string.
+
+    Defaults to the Python websocket_proxy.py script. Plugins can
+    replace this function to prefer a native binary.
+    """
+    escaped_executable_path = shlex.quote(sys.executable)
+    escaped_websocket_proxy_path = shlex.quote(
+        f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+    return f'{escaped_executable_path} {escaped_websocket_proxy_path}'
+
+
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -179,6 +191,8 @@ def _get_cluster_records_and_set_ssh_config(
                             _include_credentials=True,
                             _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
+    # Cache the ws-proxy command (constant across clusters).
+    ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -206,9 +220,6 @@ def _get_cluster_records_and_set_ssh_config(
             escaped_key_path = shlex.quote(
                 (cluster_utils.SSHConfigHelper.generate_local_key_file(
                     handle.cluster_name, credentials)))
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
@@ -223,8 +234,7 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\"{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
+                f'\"{ws_proxy_cmd} '
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name} '
                 f'kubernetes-pod-ssh-proxy\"')
@@ -232,13 +242,9 @@ def _get_cluster_records_and_set_ssh_config(
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # %w is a placeholder for the node index, substituted per-node
             # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (f'{escaped_executable_path} '
-                             f'{escaped_websocket_proxy_path} '
+            proxy_command = (f'{ws_proxy_cmd} '
                              f'{server_common.get_server_url()} '
                              f'{handle.cluster_name} '
                              f'slurm-job-ssh-proxy %w')
@@ -726,7 +732,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
+                f'{colorama.Fore.YELLOW}{entrypoint!r} looks like a yaml '
+                f'path but {invalid_reason}'
+                f'{colorama.Style.RESET_ALL}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml, result
@@ -920,6 +928,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored '
                     'for JobGroup YAML.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
 
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
@@ -934,6 +945,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -1023,6 +1037,21 @@ class _DocumentedCodeCommand(click.Command):
 @annotations.client_api
 def cli():
     pass
+
+
+def _warn_if_name_looks_like_file_path(name: Optional[str], yes: bool,
+                                       name_label: str,
+                                       command_hint: str) -> None:
+    """Warns or prompts if a name looks like a file path."""
+    if not common_utils.cluster_name_looks_like_file_path(name):
+        return
+    warning = (f'{colorama.Fore.YELLOW}{name_label} {name!r} looks like a '
+               f'file path. Did you mean: {command_hint}'
+               f'{colorama.Style.RESET_ALL}')
+    if yes:
+        logger.warning(warning)
+    else:
+        click.confirm(f'{warning}\nProceed anyway?', abort=True)
 
 
 def _handle_infra_cloud_region_zone_options(infra: Optional[str],
@@ -1218,6 +1247,8 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    _warn_if_name_looks_like_file_path(
+        cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -5552,6 +5583,8 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
+    _warn_if_name_looks_like_file_path(name, yes, 'Job name',
+                                       f'sky jobs launch -n <job-name> {name}')
 
     if pool is not None:
         num_job_int = num_jobs if num_jobs is not None else 1

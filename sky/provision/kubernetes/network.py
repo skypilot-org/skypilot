@@ -50,6 +50,7 @@ def _open_ports_using_loadbalancer(
         cluster_name_on_cloud=cluster_name_on_cloud)
     context = kubernetes_utils.get_context_from_config(provider_config)
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    overrides = provider_config.get('cluster_config_overrides')
 
     content = network_utils.fill_loadbalancer_template(
         namespace=namespace,
@@ -58,10 +59,13 @@ def _open_ports_using_loadbalancer(
         ports=ports,
         selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
+        cluster_config_overrides=overrides,
     )
 
     # Update metadata from config
-    kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'])
+    kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'],
+                                           context=context,
+                                           cluster_config_overrides=overrides)
 
     network_utils.create_or_replace_namespaced_service(
         namespace=kubernetes_utils.get_namespace_from_config(provider_config),
@@ -77,6 +81,7 @@ def _open_ports_using_ingress(
 ) -> None:
     context = kubernetes_utils.get_context_from_config(provider_config)
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    overrides = provider_config.get('cluster_config_overrides')
     # Check if an ingress controller exists
     if not network_utils.ingress_controller_exists(context):
         raise Exception(
@@ -112,12 +117,16 @@ def _open_ports_using_ingress(
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
         selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
+        cluster_config_overrides=overrides,
     )
 
     # Create or update services based on the generated specs
     for service_name, service_spec in content['services_spec'].items():
         # Update metadata from config
-        kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
+        kubernetes_utils.merge_custom_metadata(
+            service_spec['metadata'],
+            context=context,
+            cluster_config_overrides=overrides)
         network_utils.create_or_replace_namespaced_service(
             namespace=namespace,
             context=context,
@@ -125,7 +134,9 @@ def _open_ports_using_ingress(
             service_spec=service_spec,
         )
 
-    kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
+    kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'],
+                                           context=context,
+                                           cluster_config_overrides=overrides)
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
         namespace=namespace,

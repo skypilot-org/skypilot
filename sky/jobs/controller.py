@@ -1226,11 +1226,15 @@ class JobController:
             if tasks_to_launch:
                 logger.info(f'Phase 1: Launching clusters for tasks '
                             f'{tasks_to_launch}...')
+                # Each launch gets its own SkyPilotContext copy so that
+                # the env-var pop/restore in _launch() doesn't race
+                # across concurrent tasks sharing the same context.
                 launch_coros = []
                 for task_id in tasks_to_launch:
                     executor = strategy_executors[task_id]
                     if executor is not None:
-                        launch_coros.append(executor.launch())
+                        launch_coros.append(
+                            context.contextual_async(executor.launch)())
 
                 if launch_coros:
                     results = await asyncio.gather(*launch_coros,

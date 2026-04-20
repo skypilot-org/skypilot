@@ -164,6 +164,12 @@
                 "tolerations": {
                     "type": "array"
                 },
+                "topologySpreadTopologyKey": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "upgradeStrategy": {
                     "type": "string"
                 }
@@ -486,6 +492,9 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "sessionAffinity": {
+                    "type": "boolean"
                 },
                 "tls": {
                     "type": "object",

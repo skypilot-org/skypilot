@@ -29,7 +29,8 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { TelemetrySection } from '@/components/TelemetrySection';
+import { hasAccelerator } from '@/utils/gpuUtils';
 
 function TaskDetails() {
   const router = useRouter();
@@ -46,7 +47,7 @@ function TaskDetails() {
 
   // GPU metrics state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
 
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -84,7 +85,7 @@ function TaskDetails() {
     try {
       setRefreshTrigger((prev) => prev + 1);
       setRefreshLogsFlag((prev) => prev + 1);
-      setGpuMetricsRefreshTrigger((prev) => prev + 1);
+      setTelemetryRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -183,16 +184,17 @@ function TaskDetails() {
               </Card>
             </div>
 
-            {/* GPU Metrics Section - Show for Kubernetes tasks with cluster_name_on_cloud */}
+            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes tasks with cluster_name_on_cloud */}
             {isGrafanaAvailable &&
-              taskData.full_infra?.includes('Kubernetes') &&
+              taskData.full_infra?.toLowerCase().includes('kubernetes') &&
               !taskData.pool &&
               taskData.cluster_name_on_cloud && (
-                <GPUMetricsSection
+                <TelemetrySection
                   clusterNameOnCloud={taskData.cluster_name_on_cloud}
                   displayName={taskData.task || `Task ${taskIndex}`}
-                  refreshTrigger={gpuMetricsRefreshTrigger}
-                  storageKey="skypilot-task-gpu-metrics-expanded"
+                  refreshTrigger={telemetryRefreshTrigger}
+                  storageKey="skypilot-task-telemetry-expanded"
+                  hasGpu={hasAccelerator(taskData.accelerators)}
                 />
               )}
 

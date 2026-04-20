@@ -500,6 +500,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'enable_docker'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
+    ('gcp', 'vpc_name'),
+    ('gcp', 'subnet_names'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -507,6 +509,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
+    ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,

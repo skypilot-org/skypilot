@@ -91,6 +91,13 @@ RUN ARCH=$(case "${TARGETARCH:-$(uname -m)}" in \
     sudo dpkg -i session-manager-plugin.deb && \
     rm session-manager-plugin.deb
 
+# Pre-install azcopy (Azure CLI's runtime download is unreliable)
+RUN curl -sL "https://aka.ms/downloadazcopy-v10-linux" -o /tmp/azcopy.tar.gz && \
+    tar xzf /tmp/azcopy.tar.gz -C /tmp && \
+    cp /tmp/azcopy_linux_amd64_*/azcopy /usr/local/bin/azcopy && \
+    chmod +x /usr/local/bin/azcopy && \
+    rm -rf /tmp/azcopy*
+
 # Add a custom user with sudo privileges
 RUN useradd -m ${USERNAME} && \
     echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
