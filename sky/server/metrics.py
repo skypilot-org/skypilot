@@ -196,7 +196,10 @@ def metrics() -> fastapi.Response:
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
-            registry.register(c)
+            try:
+                registry.register(c)
+            except ValueError:
+                pass
         data = generate_latest(registry)
     else:
         data = generate_latest()
