@@ -47,8 +47,8 @@ The job is launched on a temporary SkyPilot cluster, managed end-to-end, and aut
 
 Managed jobs have several benefits:
 
-#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from job preemptions, GPU failures, NCCL timeouts, node crashes, or hardware issues. Application errors can also be retried for a configurable number of times.
-#. :ref:`Scale across infra (clusters, regions, clouds) <scaling-to-many-jobs>`: Easily run and manage many jobs across your infrastructure choices.
+#. :ref:`Auto-recover from different failures <failure-recovery>`: Automatically recover from node crashes, job preemptions, GPU failures, NCCL timeouts, or hardware issues. Application errors can also be retried for a configurable number of times.
+#. :ref:`Scale across infra (clusters, regions, clouds) <scaling-to-many-jobs>`: Easily run and manage a large number of jobs across your infrastructure choices.
 #. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks.
    Useful for running a sequence of tasks that depend on each other, e.g., data
    processing, training a model, and then running inference on it.
@@ -143,7 +143,7 @@ SkyPilot will launch and start monitoring the job.
    * - Long-lived, manually managed cluster
      - Dedicated auto-managed cluster for each job
    * - Failures must be manually recovered
-     - Failures are auto-recovered
+     - Failures can be auto-recovered
    * - Number of parallel jobs limited by cluster resources
      - Easily manage hundreds or thousands of jobs at once
    * - Good for interactive dev
@@ -257,7 +257,7 @@ See the :ref:`Model training guide <training-guide>` for more training examples 
 Recovering from application failures
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Hardware failures (GPU errors, node crashes) and preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
+Hardware failures (e.g., node crashes) and preemptions are auto-recovered by default. However, **user code failures (non-zero exit codes) are not auto-recovered by default**.
 
 In many cases, you'll want jobs to automatically restart on application errors that are actually caused by transient hardware issues. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To enable this, set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
