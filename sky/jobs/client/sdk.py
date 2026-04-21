@@ -350,6 +350,7 @@ def cancel(
     pool: Optional[str] = None,
     graceful: bool = False,
     graceful_timeout: Optional[int] = None,
+    yes: bool = False,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -365,6 +366,9 @@ def cancel(
             fully uploaded. This helps with preserving user data integrity.
         graceful_timeout: If not None, sets a timeout for the graceful option
             above (in seconds).
+        yes: If True, skip the extra admin-override confirmation that the
+            server enforces when an admin cancels specific jobs by ID, name,
+            or pool.
 
     Returns:
         The request ID of the cancel request.
@@ -393,6 +397,7 @@ def cancel(
         pool=pool,
         graceful=graceful,
         graceful_timeout=graceful_timeout,
+        yes=yes,
     )
     response = server_common.make_authenticated_request(
         'POST',

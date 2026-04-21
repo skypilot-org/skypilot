@@ -1305,7 +1305,8 @@ def cancel(name: Optional[str] = None,
            all_users: bool = False,
            pool: Optional[str] = None,
            graceful: bool = False,
-           graceful_timeout: Optional[int] = None) -> None:
+           graceful_timeout: Optional[int] = None,
+           yes: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -1352,6 +1353,14 @@ def cancel(name: Optional[str] = None,
                     raise exceptions.NotSupportedError(
                         'Only admins can cancel all users\' jobs. '
                         'Use --all to cancel your own jobs.')
+
+            # Admins bypass ownership checks when cancelling specific jobs,
+            # so require explicit confirmation (-y/--yes) to avoid accidents.
+            if is_admin and not all_users and not all and not yes:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        'You are cancelling as admin, which bypasses job '
+                        'ownership checks. Re-run with -y/--yes to confirm.')
 
         # Pass requester_user_hash to enforce ownership on the controller.
         # None means no enforcement (admin or non-server context).
