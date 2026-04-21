@@ -13,11 +13,14 @@ import uuid
 import tqdm
 
 import sky
+from sky import exceptions
 from sky.batch import io_formats
 from sky.batch import remote
 from sky.batch import utils
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
+from sky.server import constants as server_constants
+from sky.server import versions
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +103,32 @@ def _wait_for_managed_job_completion(managed_job_id: int) -> None:
             pbar.close()
 
 
+def _validate_pool_for_batch(pool_name: str) -> None:
+    """Check that the pool exists and its workers support Sky Batch."""
+    try:
+        request_id = sky.jobs.pool_status([pool_name])
+        pool_statuses = sdk.stream_and_get(request_id)
+    except Exception as e:  # pylint: disable=broad-except
+        raise RuntimeError(
+            f'Failed to fetch pool status for {pool_name!r}: {e}') from e
+
+    if not pool_statuses:
+        raise RuntimeError(
+            f'Pool {pool_name!r} does not exist. Create it first with: '
+            f'sky jobs pool apply <pool.yaml> -p {pool_name}')
+
+    replica_infos = pool_statuses[0].get('replica_info', [])
+    min_ver = server_constants.MIN_BATCH_REPLICA_INFO_VERSION
+    for info in replica_infos:
+        ri_version = info.get('replica_info_version')
+        if ri_version is not None and ri_version < min_ver:
+            raise RuntimeError(
+                f'Pool {pool_name!r} was created with an older SkyPilot '
+                f'version that does not support Sky Batch. Please '
+                f'recreate the pool: sky jobs pool down {pool_name} -y '
+                f'&& sky jobs pool apply <pool.yaml> -p {pool_name}')
+
+
 class Dataset:
     """A dataset backed by a typed input format in cloud storage.
 
@@ -161,6 +190,19 @@ class Dataset:
                         parameters are invalid.
             RuntimeError: If the batch job fails.
         """
+        # Gate: require server to support sky.batch.
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is not None and
+                remote_api_version < server_constants.MIN_BATCH_API_VERSION):
+            raise exceptions.APINotSupportedError(
+                f'Sky Batch requires API server version '
+                f'{server_constants.MIN_BATCH_API_VERSION} or higher, but the '
+                f'server is running API version {remote_api_version}. '
+                f'Please upgrade your API server.')
+
+        # Gate: check pool exists and workers support sky.batch.
+        _validate_pool_for_batch(pool_name)
+
         # Validate mapper function
         if not remote.is_remote_function(mapper_fn):
             raise ValueError('Mapper function must be decorated with '

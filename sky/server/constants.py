@@ -42,6 +42,12 @@ MIN_API_ACCESS_API_VERSION = 42
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
+# Minimum API version that supports Sky Batch (sky.batch module).
+MIN_BATCH_API_VERSION = 49
+
+# Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
+MIN_BATCH_REPLICA_INFO_VERSION = 3
+
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
