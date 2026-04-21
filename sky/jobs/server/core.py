@@ -1341,9 +1341,11 @@ def cancel(name: Optional[str] = None,
 
         # Determine caller's identity and role. Only enforce ownership when
         # running as the API server (ENV_VAR_IS_SKYPILOT_SERVER is set).
+        is_server = bool(
+            os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER))
         requester_user_hash = common_utils.get_user_hash()
         is_admin = False
-        if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER):
+        if is_server:
             roles = permission_lib.permission_service.get_user_roles(
                 requester_user_hash)
             is_admin = rbac.RoleName.ADMIN.value in roles
@@ -1363,10 +1365,10 @@ def cancel(name: Optional[str] = None,
                         'ownership checks. Re-run with -y/--yes to confirm.')
 
         # Pass requester_user_hash to enforce ownership on the controller.
-        # None means no enforcement (admin or non-server context).
-        ownership_user_hash = None if (is_admin or all_users or all) else (
-            requester_user_hash if os.environ.get(
-                skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) else None)
+        # None means no enforcement (admin, bulk cancel, or non-server context).
+        ownership_user_hash = (requester_user_hash
+                               if is_server and not is_admin and
+                               not all_users and not all else None)
 
         job_ids = None if (all_users or all) else job_ids
 
