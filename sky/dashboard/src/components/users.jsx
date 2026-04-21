@@ -814,7 +814,7 @@ export function Users() {
       {/* Filter/Search and Create Service Account Row */}
       <div className="flex items-center justify-between mb-4">
         {activeMainTab === 'users' ? (
-          <div className="w-full sm:w-auto max-w-md">
+          <div className="w-full sm:w-auto max-w-xl">
             <FilterDropdown
               propertyList={PROPERTY_OPTIONS}
               valueList={valueList}

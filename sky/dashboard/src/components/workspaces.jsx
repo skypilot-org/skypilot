@@ -839,13 +839,13 @@ export function Workspaces() {
 
       {/* Search and Create Workspace Row */}
       <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 sm:flex-none">
           <input
             type="text"
             placeholder="Filter workspaces"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-0 focus:outline-none"
           />
           {searchQuery && (
             <button
