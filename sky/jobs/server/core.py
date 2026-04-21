@@ -41,6 +41,8 @@ from sky.serve.server import impl
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
+from sky.users import permission as permission_lib
+from sky.users import rbac
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
@@ -1336,6 +1338,28 @@ def cancel(name: Optional[str] = None,
                     'Can only specify one of JOB_IDS, name, pool, or all/'
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
+        # Determine caller's identity and role. Only enforce ownership when
+        # running as the API server (ENV_VAR_IS_SKYPILOT_SERVER is set).
+        requester_user_hash = common_utils.get_user_hash()
+        is_admin = False
+        if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER):
+            roles = permission_lib.permission_service.get_user_roles(
+                requester_user_hash)
+            is_admin = rbac.RoleName.ADMIN.value in roles
+
+            if all_users and not is_admin:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        'Only admins can cancel all users\' jobs. '
+                        'Use --all to cancel your own jobs.')
+
+        # Pass requester_user_hash to enforce ownership on the controller.
+        # None means no enforcement (admin or non-server context).
+        ownership_user_hash = None if (is_admin or all_users or all) else (
+            requester_user_hash
+            if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER)
+            else None)
+
         job_ids = None if (all_users or all) else job_ids
 
         backend = backend_utils.get_backend_from_handle(handle)
@@ -1354,15 +1378,23 @@ def cancel(name: Optional[str] = None,
                 if all_users or all or job_ids:
                     request.all_users = all_users
                     if all:
-                        request.user_hash = common_utils.get_user_hash()
+                        request.user_hash = requester_user_hash
+                    elif ownership_user_hash is not None:
+                        # Reuse user_hash to carry requester identity for
+                        # ownership enforcement on the controller side.
+                        request.user_hash = ownership_user_hash
                     if job_ids is not None:
                         request.job_ids.CopyFrom(
                             managed_jobsv1_pb2.JobIds(ids=job_ids))
                 elif name is not None:
                     request.job_name = name
+                    if ownership_user_hash is not None:
+                        request.user_hash = ownership_user_hash
                 else:
                     assert pool is not None, (job_ids, name, pool, all)
                     request.pool_name = pool
+                    if ownership_user_hash is not None:
+                        request.user_hash = ownership_user_hash
 
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: cloud_vm_ray_backend.SkyletClient(
@@ -1377,14 +1409,18 @@ def cancel(name: Optional[str] = None,
                     job_ids,
                     all_users=all_users,
                     graceful=graceful,
-                    graceful_timeout=graceful_timeout)
+                    graceful_timeout=graceful_timeout,
+                    requester_user_hash=ownership_user_hash)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-                    name, graceful=graceful, graceful_timeout=graceful_timeout)
+                    name,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout,
+                    requester_user_hash=ownership_user_hash)
             else:
                 assert pool is not None, (job_ids, name, pool, all)
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(
-                    pool)
+                    pool, requester_user_hash=ownership_user_hash)
             # The stderr is redirected to stdout
             returncode, stdout, stderr = backend.run_on_head(
                 handle, code, require_outputs=True, stream_logs=False)
@@ -1401,6 +1437,9 @@ def cancel(name: Optional[str] = None,
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     'Please specify the job ID instead of the job name.')
+        if 'Permission denied:' in stdout:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(stdout.strip())
 
 
 @usage_lib.entrypoint
