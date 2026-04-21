@@ -71,6 +71,7 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.utils.plugin_extensions import LocalControllerHandleSource
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -3303,6 +3304,11 @@ def is_controller_accessible(
        ) or (serve_utils.is_consolidation_mode() and
              controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):
         cn = 'local-controller-consolidation'
+        # Plugins may register a custom LocalResourcesHandle factory to
+        # swap in a command runner that avoids the subprocess overhead.
+        plugin_handle = LocalControllerHandleSource.create(cluster_name=cn)
+        if plugin_handle is not None:
+            return plugin_handle
         return backends.LocalResourcesHandle(
             cluster_name=cn,
             cluster_name_on_cloud=cn,
