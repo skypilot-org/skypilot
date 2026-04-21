@@ -28,3 +28,10 @@ recursive-include sky/recipes/examples *.yaml
 recursive-include sky_templates/ray *
 recursive-include sky_templates *.py
 include sky_templates/README.md
+
+# Exclude compiled bytecode - these are platform-specific, regenerated on
+# import, and cause non-deterministic wheels when the source tree contains
+# __pycache__ from editable installs (pip install -e).
+global-exclude __pycache__
+global-exclude *.pyc
+global-exclude *.pyo

@@ -322,7 +322,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-base text-gray-700">All Recipes</span>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-xl">
           <RecipeFilterDropdown
             propertyList={RECIPE_PROPERTY_OPTIONS}
             valueList={optionValues}

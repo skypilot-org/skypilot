@@ -22,6 +22,14 @@ def export_markdown_files(app, exception):
         source_path = Path(app.srcdir) / app.env.doc2path(docname, base=False)
         md_path = Path(app.outdir) / f"{docname}.html.md"
 
+        # Skip pages whose exported .md is already newer than the rebuilt
+        # .html — sphinx only refreshes .html mtime when the page actually
+        # needs regenerating, so this avoids invoking pandoc on every
+        # unchanged page (~32s on this codebase).
+        if md_path.exists(
+        ) and md_path.stat().st_mtime >= html_path.stat().st_mtime:
+            continue
+
         if source_path.suffix in ['.md', '.rst']:
             try:
                 process_source_file(source_path, md_path)
