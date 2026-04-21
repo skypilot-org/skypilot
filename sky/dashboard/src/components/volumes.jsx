@@ -275,8 +275,8 @@ export function Volumes() {
                   ) : (
                     <>
                       Are you sure you want to delete volume &quot;
-                      {volumeToDelete?.name || 'this volume'}&quot;? This
-                      action cannot be undone.
+                      {volumeToDelete?.name || 'this volume'}&quot;? This action
+                      cannot be undone.
                     </>
                   )}
                 </DialogDescription>
@@ -324,7 +324,7 @@ export function Volumes() {
               )}
 
               {showPurgeUI && (
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 flex items-start gap-2 mb-2">
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 my-3 flex items-start gap-2">
                   <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="text-sm text-amber-800 space-y-2">
                     <p className="m-0">
@@ -376,7 +376,8 @@ export function Volumes() {
                         className="cursor-pointer"
                       />
                       <span>
-                        I understand this may not delete the underlying volume
+                        I understand force removal may not delete the underlying
+                        volume
                       </span>
                     </label>
                   </div>
