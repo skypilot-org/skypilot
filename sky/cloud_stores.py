@@ -19,6 +19,7 @@ from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
@@ -747,6 +748,130 @@ class VastDataCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class HFCloudStorage(CloudStorage):
+    """Hugging Face Buckets and Hub repos."""
+
+    _GET_HF_HUB = [
+        f'{constants.SKY_UV_PIP_CMD} install "huggingface_hub>=1.10"',
+    ]
+    _TOKEN_HELPER = """
+token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+if not token:
+    for candidate in ('~/.cache/huggingface/token', '~/.huggingface/token'):
+        path = os.path.expanduser(candidate)
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                token = f.read().strip() or None
+            if token:
+                break
+"""
+
+    def is_directory(self, url: str) -> bool:
+        if data_utils.is_hf_bucket_path(url):
+            bucket_id, path = data_utils.split_hf_path(url)
+            path = path.rstrip('/')
+            if not path:
+                return True
+            entries = list(huggingface.api().list_bucket_tree(
+                bucket_id,
+                prefix=path,
+                recursive=False,
+                token=huggingface.get_token()))
+            prefix = f'{path}/'
+            for entry in entries:
+                entry_path = getattr(entry, 'path', '').rstrip('/')
+                if entry_path == path and getattr(entry, 'type',
+                                                  'file') == 'file':
+                    return False
+                if entry_path.startswith(prefix):
+                    return True
+            return True
+
+        repo_type, repo_id, revision, path = data_utils.split_hf_repo_path(url)
+        path = path.rstrip('/')
+        if not path:
+            return True
+        info = huggingface.api().repo_info(repo_id=repo_id,
+                                           repo_type=repo_type,
+                                           revision=revision,
+                                           token=huggingface.get_token())
+        prefix = f'{path}/'
+        for sibling in getattr(info, 'siblings', []) or []:
+            # ``huggingface_hub`` exposes the filename as ``rfilename`` on
+            # most repo types and ``path`` on a few; tolerate either. The
+            # trailing ``or ''`` keeps the type as ``str`` for mypy
+            # (``getattr(..., None)`` is ``Optional[Any]``).
+            filename: str = (getattr(sibling, 'rfilename', None) or
+                             getattr(sibling, 'path', '') or '')
+            if filename == path:
+                return False
+            if filename.startswith(prefix):
+                return True
+        return True
+
+    @classmethod
+    def _python_command(cls, code: str) -> str:
+        python = f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/python'
+        return ' && '.join(cls._GET_HF_HUB +
+                           [f'{python} -c {shlex.quote(code)}'])
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        if data_utils.is_hf_bucket_path(source):
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import HfApi',
+                self._TOKEN_HELPER,
+                (f'HfApi().sync_bucket({source!r}, {destination!r}, '
+                 'token=token, quiet=True)'),
+            ])
+            return self._python_command(code)
+
+        repo_type, repo_id, revision, sub_path = data_utils.split_hf_repo_path(
+            source)
+        allow_patterns = None
+        if sub_path:
+            allow_patterns = [f'{sub_path.rstrip("/")}/*']
+        code = '\n'.join([
+            'import os',
+            'from huggingface_hub import snapshot_download',
+            self._TOKEN_HELPER,
+            (f'snapshot_download(repo_id={repo_id!r}, repo_type={repo_type!r}, '
+             f'revision={revision!r}, local_dir={destination!r}, '
+             f'allow_patterns={allow_patterns!r}, token=token)'),
+        ])
+        return self._python_command(code)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        if data_utils.is_hf_bucket_path(source):
+            bucket_id, path = data_utils.split_hf_path(source)
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import HfApi',
+                self._TOKEN_HELPER,
+                (f'HfApi().download_bucket_files({bucket_id!r}, '
+                 f'files=[({path!r}, {destination!r})], token=token)'),
+            ])
+            return self._python_command(code)
+
+        repo_type, repo_id, revision, path = data_utils.split_hf_repo_path(
+            source)
+        code = '\n'.join([
+            'import os',
+            'import shutil',
+            'import tempfile',
+            'from huggingface_hub import hf_hub_download',
+            self._TOKEN_HELPER,
+            'tmp_dir = tempfile.mkdtemp()',
+            (f'downloaded = hf_hub_download(repo_id={repo_id!r}, '
+             f'repo_type={repo_type!r}, revision={revision!r}, '
+             f'filename={path!r}, local_dir=tmp_dir, token=token)'),
+            (f'os.makedirs(os.path.dirname({destination!r}) or ".", '
+             'exist_ok=True)'),
+            f'shutil.copy2(downloaded, {destination!r})',
+        ])
+        return self._python_command(code)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -766,6 +891,7 @@ _REGISTRY = {
     'nebius': NebiusCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
     'vastdata': VastDataCloudStorage(),
+    'hf': HFCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

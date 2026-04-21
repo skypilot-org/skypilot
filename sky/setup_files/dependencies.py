@@ -207,6 +207,11 @@ cloud_dependencies: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'coreweave': aws_dependencies + kubernetes_dependencies,
+    # Hugging Face Buckets require huggingface_hub>=1.10 (first version with
+    # the buckets API), which in turn requires Python >=3.10. On Python 3.9
+    # the extra is effectively a no-op and using `store: hf` will raise a
+    # clear ImportError at runtime.
+    'huggingface': ['huggingface_hub>=1.10; python_version>="3.10"'],
     'scp': local_ray,
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,

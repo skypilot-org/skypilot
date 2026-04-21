@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import huggingface
 from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
@@ -26,7 +27,8 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
-STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME)
+STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME,
+                       huggingface.NAME)
 
 logger = sky_logging.init_logger(__name__)
 
@@ -152,13 +154,15 @@ def check_capabilities(
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
             # the cloud object. Includes special handling for storage-only
-            # providers (Cloudflare, CoreWeave, VastData).
+            # providers (Cloudflare, CoreWeave, VastData, HuggingFace).
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('coreweave'):
                 return coreweave.NAME, coreweave
             elif cloud_name.lower().startswith('vastdata'):
                 return vastdata.NAME, vastdata
+            elif cloud_name.lower().startswith('huggingface'):
+                return huggingface.NAME, huggingface
             else:
                 try:
                     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
@@ -497,6 +501,11 @@ def get_cloud_credential_file_mounts(
     if vastdata_is_enabled:
         vastdata_credential_mounts = vastdata.get_credential_file_mounts()
         file_mounts.update(vastdata_credential_mounts)
+
+    hf_is_enabled, _ = huggingface.check_storage_credentials()
+    if hf_is_enabled:
+        hf_credential_mounts = huggingface.get_credential_file_mounts()
+        file_mounts.update(hf_credential_mounts)
     return file_mounts
 
 

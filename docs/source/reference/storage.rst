@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage or IBM COS.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or Hugging Face Buckets (and read-only Hugging Face model/dataset/space repos).
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>, hf://buckets/<namespace>/<bucket>, hf://<namespace>/<model>, hf://datasets/<namespace>/<dataset>, hf://spaces/<namespace>/<space>
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, hf
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -68,7 +68,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
+              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, hf
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -416,6 +416,35 @@ FAQ
   Therefore, SkyPilot does not automatically create them. Please manually create
   your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
 
+* **My MOUNT-mode Hugging Face bucket / repo fails to mount.**
+
+  ``MOUNT`` / ``MOUNT_CACHED`` mode for ``store: hf`` uses the
+  `hf-mount <https://github.com/huggingface/hf-mount>`_ FUSE backend.
+  There are currently two known environment constraints:
+
+  1. **glibc >= 2.32 required.** The upstream Linux binaries for
+     hf-mount ``v0.3.1`` are dynamically linked against glibc 2.32+. They
+     won't run on Ubuntu 20.04 (glibc 2.31, the default SkyPilot Kubernetes
+     image) or older RHEL/CentOS releases. Fix: pick a newer base image in
+     ``resources``:
+
+     .. code-block:: yaml
+
+        resources:
+          image_id: docker:mirror.gcr.io/ubuntu:22.04   # glibc 2.35
+
+  2. **``/dev/fuse`` must be directly accessible in the task environment.**
+     hf-mount's FUSE backend opens ``/dev/fuse`` directly instead of going
+     through ``fusermount``, so it does not work with SkyPilot's default
+     Kubernetes fusermount-shim setup (which is how gcsfuse / blobfuse2 /
+     rclone mount / goofys normally get FUSE in unprivileged pods). On
+     bare-VM clouds (AWS, GCP, Azure, etc.) this is a non-issue -- the host
+     exposes ``/dev/fuse`` natively.
+
+  **COPY-mode workaround.** In any environment where the mount constraints
+  above are a problem, ``mode: COPY`` doesn't need ``hf-mount`` at all --
+  SkyPilot uploads/downloads via ``huggingface_hub`` directly.
+
 
 .. _storage-yaml-reference:
 
@@ -445,12 +474,16 @@ Storage YAML reference
             - vastdata://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
+            - hf://buckets/<namespace>/<bucket_name>        (HF Bucket, read-write)
+            - hf://<namespace>/<model>[@<rev>]              (HF model repo, read-only)
+            - hf://datasets/<namespace>/<dataset>[@<rev>]   (HF dataset repo, read-only)
+            - hf://spaces/<namespace>/<space>[@<rev>]       (HF space repo, read-only)
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, or ibm). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, ibm, or hf). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci', 'hf'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.

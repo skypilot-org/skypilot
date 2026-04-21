@@ -1742,6 +1742,18 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.HF:
+                    if storage.source is not None and not isinstance(
+                            storage.source, list) and data_utils.is_hf_path(
+                                storage.source):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'hf://buckets/' + storage.name
+                        blob_path = storage.get_bucket_sub_path_prefix(
+                            blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '

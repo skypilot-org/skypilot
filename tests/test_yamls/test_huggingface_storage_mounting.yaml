@@ -1,0 +1,64 @@
+file_mounts:
+  # HF Bucket: COPY mode with a source directory.
+  /mount_bucket_copy:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    store: hf
+    mode: COPY
+
+  # HF Bucket: COPY mode with a list of files as source.
+  /mount_bucket_copy_lof:
+    name: {{storage_name}}
+    source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
+    store: hf
+    mode: COPY
+
+  # HF Bucket: MOUNT mode (read-write via hf-mount NFS backend).
+  /mount_bucket_mount:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    store: hf
+    mode: MOUNT
+
+  # HF Bucket: MOUNT_CACHED mode (also served by hf-mount's built-in cache).
+  /mount_bucket_mount_cached:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    store: hf
+    mode: MOUNT_CACHED
+
+  # HF Repo: mount a public model as a read-only filesystem.
+  /mount_hf_model:
+    source: hf://openai-community/gpt2
+    store: hf
+    mode: MOUNT
+
+  # HF Repo: mount a public dataset with an explicit revision.
+  /mount_hf_dataset:
+    source: hf://datasets/open-index/hacker-news@main
+    store: hf
+    mode: MOUNT
+
+run: |
+  set -ex
+
+  # Check bucket contents via each mode.
+  ls -ltr /mount_bucket_copy/foo
+  ls -ltr /mount_bucket_copy/tmp\ file
+  ls -ltr /mount_bucket_copy_lof/tmp\ file
+  ls -ltr /mount_bucket_copy_lof/tmp\ file2
+  ls -ltr /mount_bucket_mount/foo
+  ls -ltr /mount_bucket_mount/tmp\ file
+
+  # Symlinks are not copied to buckets.
+  ! ls /mount_bucket_copy/circle-link
+  ! ls /mount_bucket_mount/circle-link
+
+  # Writes to a bucket in MOUNT / MOUNT_CACHED mode should succeed.
+  echo "hello" > /mount_bucket_mount/hello.txt
+  echo "hello2" > /mount_bucket_mount_cached/hello2.txt
+
+  # HF repo mounts are read-only: reads work, writes should fail.
+  ls /mount_hf_model/config.json
+  ls /mount_hf_dataset | head -n 1
+  ! echo "should fail" > /mount_hf_model/should-fail.txt
