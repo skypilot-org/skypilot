@@ -2627,11 +2627,11 @@ def test_node_names_multi_node(generic_cloud: str):
         sky.get(sky.down(name))
 
 
-# ---------- K8s Preemption Hook ----------
+# ---------- K8s Termination Hook (pod-spec + preemption events) ----------
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
-def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
-    """Test preemption hook pod spec and that hook fires on graceful delete.
+def test_k8s_termination_hook_pod_spec_and_graceful_delete():
+    """Test termination_hook pod spec and that hook fires on graceful delete.
 
     Verifies:
     1. Pod with hook: terminationGracePeriodSeconds=60, preStop lifecycle
@@ -2642,14 +2642,14 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
     nohook_name = f'{name}-nohook'
-    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
+    proof_cm = f'termination-proof-{name}-{user_hash}-head'
     test = smoke_tests_utils.Test(
-        'k8s_preemption_hook_spec_and_delete',
+        'k8s_termination_hook_spec_and_delete',
         [
             # --- Test 1: Pod spec WITH hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
             f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            'tests/test_yamls/test_k8s_termination_hook_with_configmap.yaml',
             # Verify terminationGracePeriodSeconds = 60
             f'POD={name}-{user_hash}-head && '
             'kubectl get pod $POD -o jsonpath='
@@ -2663,7 +2663,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
 
             # --- Test 2: Pod spec WITHOUT hook ---
             f'sky launch -y -d -c {nohook_name} '
-            'tests/test_yamls/test_k8s_no_preemption_hook.yaml',
+            'tests/test_yamls/test_k8s_termination_hook_nohook.yaml',
             # Verify terminationGracePeriodSeconds = 30 (default)
             f'POD={nohook_name}-{user_hash}-head && '
             'kubectl get pod $POD -o jsonpath='
@@ -2688,7 +2688,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
             # --- Test 4: sky down does NOT trigger hook ---
             # Re-launch the cluster
             f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            'tests/test_yamls/test_k8s_termination_hook_with_configmap.yaml',
             # Clean ConfigMap marker
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # sky down uses grace_period_seconds=0 (force delete)
@@ -2711,8 +2711,8 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
 
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
-def test_k8s_preemption_hook_drain_and_priority_preemption():
-    """Test preemption hook fires on node drain and priority preemption.
+def test_k8s_termination_hook_drain_and_priority_preemption():
+    """Test termination_hook fires on node drain and priority preemption.
 
     Verifies:
     1. Node drain: ConfigMap proof created
@@ -2720,14 +2720,14 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
     """
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
+    proof_cm = f'termination-proof-{name}-{user_hash}-head'
     test = smoke_tests_utils.Test(
-        'k8s_preemption_hook_drain_and_priority',
+        'k8s_termination_hook_drain_and_priority',
         [
             # --- Test 1: Node drain triggers hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
             f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            'tests/test_yamls/test_k8s_termination_hook_with_configmap.yaml',
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Get node name and drain it
             f'POD={name}-{user_hash}-head && '
@@ -2745,7 +2745,7 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Re-launch (previous pod was evicted by drain)
             f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            'tests/test_yamls/test_k8s_termination_hook_with_configmap.yaml',
             # Create high-priority class
             'kubectl apply -f - <<EOF\n'
             'apiVersion: scheduling.k8s.io/v1\n'
@@ -2912,71 +2912,5 @@ def test_k8s_termination_hook_lifecycle():
         ],
         f'sky down -y {name}',
         timeout=35 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
-def test_k8s_termination_hook_backward_compat_autostop_hook():
-    """`autostop.hook` produces an equivalent pod spec to `termination_hook`.
-
-    Needs two clusters live at the same time so we can diff their pod specs
-    directly — this check can't be folded into the single-cluster lifecycle
-    test above.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    legacy_name = f'{name}-legacy'
-    user_hash = common_utils.get_user_hash()
-    head = f'{name}-{user_hash}-head'
-    legacy_head = f'{legacy_name}-{user_hash}-head'
-    test = smoke_tests_utils.Test(
-        'k8s_termination_hook_backward_compat_autostop_hook',
-        [
-            f'sky launch -y -d -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook.yaml',
-            f'sky launch -y -d -c {legacy_name} '
-            'tests/test_yamls/test_k8s_termination_hook_legacy_autostop.yaml',
-            # terminationGracePeriodSeconds must match (both should be 60).
-            f'NEW=$(kubectl get pod {head} -o '
-            "jsonpath='{.spec.terminationGracePeriodSeconds}') && "
-            f'OLD=$(kubectl get pod {legacy_head} -o '
-            "jsonpath='{.spec.terminationGracePeriodSeconds}') && "
-            '[ "$NEW" = "$OLD" ]',
-            # The preStop.exec.command rendering must match bit-for-bit.
-            f'NEW=$(kubectl get pod {head} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}') "
-            f'&& OLD=$(kubectl get pod {legacy_head} -o '
-            "jsonpath='{.spec.containers[0].lifecycle.preStop.exec.command}') "
-            '&& [ "$NEW" = "$OLD" ]',
-        ],
-        f'sky down -y {name} {legacy_name}',
-        timeout=30 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
-def test_k8s_termination_hook_mutual_exclusion_errors():
-    """Specifying both `autostop.hook` and `termination_hook` must error.
-
-    Fast parse-time check — no cluster is ever provisioned. Kept separate
-    from the lifecycle test so that an unrelated parser regression fails in
-    an obvious test rather than getting swallowed by a ~5 min setup.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'k8s_termination_hook_mutual_exclusion_errors',
-        [
-            # sky launch must fail. Capture combined output and grep for the
-            # expected error hint.
-            f'! OUTPUT=$(sky launch -y -c {name} '
-            'tests/test_yamls/test_k8s_termination_hook_conflict.yaml '
-            '2>&1) || (echo "$OUTPUT" | grep -q "termination_hook")',
-        ],
-        # Teardown (best effort — cluster likely never got created).
-        f'sky down -y {name} 2>/dev/null || true',
-        timeout=5 * 60,
     )
     smoke_tests_utils.run_one_test(test)

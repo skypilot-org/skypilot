@@ -2463,6 +2463,9 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+# TODO: the `--autostop` flag reflects the legacy vocabulary. A follow-up
+# PR will add a `--termination-hook` alias and teach log streaming to fetch
+# K8s preStop output (captured via pod logs rather than the skylet log file).
 @click.option('--autostop',
               is_flag=True,
               default=False,

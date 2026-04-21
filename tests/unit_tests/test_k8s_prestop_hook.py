@@ -1,4 +1,10 @@
-"""Tests for K8s preStop hook populated from autostop_config.hook."""
+"""Tests for K8s preStop hook rendered from the standalone termination_hook.
+
+These tests pin the de-merged design: ``termination_hook`` lives on
+``Resources`` as its own field and does NOT interact with
+``AutostopConfig``. ``autostop.hook`` keeps its master behavior (skylet
+idle path only — no preStop rendering).
+"""
 import jsonschema
 import pytest
 
@@ -153,49 +159,70 @@ class TestTerminationHookSchema:
 
 
 class TestTerminationHookResources:
-    """Tests for Resources parsing of termination_hook and backward compat."""
+    """Tests for Resources.termination_hook as a standalone field."""
 
-    def test_termination_hook_merged_into_autostop_config(self):
+    def test_termination_hook_is_standalone_field(self):
+        """`termination_hook` must NOT merge into `autostop_config`.
+
+        Revert-check: if the merge is reintroduced, ``autostop_config``
+        will be non-None here (constructed with ``enabled=True``) and the
+        assertion fails.
+        """
         r = Resources(infra='kubernetes',
                       termination_hook={
                           'command': 'save.sh',
                           'timeout': 90,
                       })
-        assert r.autostop_config is not None
-        assert r.autostop_config.hook == 'save.sh'
-        assert r.autostop_config.hook_timeout == 90
+        assert r.termination_hook == {'command': 'save.sh', 'timeout': 90}
+        # No side effect on autostop_config.
+        assert r.autostop_config is None
 
     def test_termination_hook_without_timeout(self):
         r = Resources(infra='kubernetes',
                       termination_hook={'command': 'save.sh'})
-        assert r.autostop_config is not None
-        assert r.autostop_config.hook == 'save.sh'
-        assert r.autostop_config.hook_timeout is None
+        assert r.termination_hook == {'command': 'save.sh'}
+        assert r.autostop_config is None
 
-    def test_termination_hook_conflict_with_autostop_hook(self):
-        with pytest.raises(ValueError, match='termination_hook'):
-            Resources(infra='kubernetes',
-                      autostop={
-                          'idle_minutes': 5,
-                          'hook': 'a.sh',
-                      },
-                      termination_hook={'command': 'b.sh'})
+    def test_autostop_hook_does_not_populate_termination_hook(self):
+        """Revert-check for the removed autostop.hook -> preStop bridge.
 
-    def test_termination_hook_matches_autostop_hook_no_conflict(self):
-        # Same hook specified on both should not error.
+        On master ``autostop.hook`` is skylet-only. If the bridge (merge
+        into AutostopConfig then render preStop) is reintroduced,
+        ``r.termination_hook`` will be populated here and the test fails.
+        """
         r = Resources(infra='kubernetes',
                       autostop={
                           'idle_minutes': 5,
-                          'hook': 'a.sh',
+                          'hook': 'legacy.sh',
+                          'hook_timeout': 30,
+                      })
+        assert r.termination_hook is None
+        # Legacy autostop.hook path is unchanged from master.
+        assert r.autostop_config is not None
+        assert r.autostop_config.hook == 'legacy.sh'
+        assert r.autostop_config.hook_timeout == 30
+
+    def test_both_keys_coexist_without_raising(self):
+        """Mutual exclusion removed. Both keys may be set together.
+
+        Revert-check: if an exclusion ValueError is added back, this test
+        fails.
+        """
+        r = Resources(infra='kubernetes',
+                      autostop={
+                          'idle_minutes': 5,
+                          'hook': 'legacy.sh',
                           'hook_timeout': 10,
                       },
                       termination_hook={
-                          'command': 'a.sh',
-                          'timeout': 10,
+                          'command': 'new.sh',
+                          'timeout': 20,
                       })
+        # Independent fields: each reflects its own source.
         assert r.autostop_config is not None
-        assert r.autostop_config.hook == 'a.sh'
+        assert r.autostop_config.hook == 'legacy.sh'
         assert r.autostop_config.hook_timeout == 10
+        assert r.termination_hook == {'command': 'new.sh', 'timeout': 20}
 
     def test_from_yaml_config_round_trip(self):
         yaml_config = {
@@ -207,35 +234,36 @@ class TestTerminationHookResources:
         }
         resources_set = Resources.from_yaml_config(yaml_config)
         r = next(iter(resources_set))
-        assert r.autostop_config.hook == 'save.sh'
-        assert r.autostop_config.hook_timeout == 120
+        assert r.termination_hook == {
+            'command': 'save.sh',
+            'timeout': 120,
+        }
         round_tripped = r.to_yaml_config()
         assert round_tripped['termination_hook'] == {
             'command': 'save.sh',
             'timeout': 120,
         }
+        # Standalone field must not leak into the autostop block.
+        assert 'autostop' not in round_tripped
 
-    def test_backward_compat_autostop_hook_still_works(self):
+    def test_to_yaml_does_not_emit_termination_hook_for_autostop_only(self):
+        """`autostop.hook` alone must not emit a top-level termination_hook.
+
+        Revert-check for the removed to_yaml_config double-emit.
+        """
         r = Resources(infra='kubernetes',
                       autostop={
                           'idle_minutes': 5,
                           'hook': 'legacy.sh',
                           'hook_timeout': 30,
                       })
-        assert r.autostop_config.hook == 'legacy.sh'
-        assert r.autostop_config.hook_timeout == 30
-        # to_yaml_config now also emits termination_hook for convenience.
         yc = r.to_yaml_config()
-        assert yc['termination_hook'] == {
-            'command': 'legacy.sh',
-            'timeout': 30,
-        }
+        assert 'termination_hook' not in yc
+        assert yc['autostop']['hook'] == 'legacy.sh'
+        assert yc['autostop']['hook_timeout'] == 30
 
-    def test_autostop_without_hook_plus_termination_hook_combines(self):
-        """`autostop: {idle_minutes: N}` + `termination_hook` is not a conflict.
-
-        The mutual-exclusion rule only fires when both sources specify a hook.
-        """
+    def test_autostop_without_hook_plus_termination_hook_coexist(self):
+        """`autostop: {idle_minutes}` + `termination_hook` stay independent."""
         r = Resources(infra='kubernetes',
                       autostop={
                           'idle_minutes': 5,
@@ -245,45 +273,40 @@ class TestTerminationHookResources:
                           'command': 'cleanup.sh',
                           'timeout': 60,
                       })
+        assert r.autostop_config is not None
         assert r.autostop_config.enabled is True
         assert r.autostop_config.idle_minutes == 5
         assert r.autostop_config.down is True
-        assert r.autostop_config.hook == 'cleanup.sh'
-        assert r.autostop_config.hook_timeout == 60
+        # No merge: autostop_config has no hook, termination_hook is its own.
+        assert r.autostop_config.hook is None
+        assert r.termination_hook == {'command': 'cleanup.sh', 'timeout': 60}
 
     def test_copy_preserves_termination_hook(self):
-        """`Resources.copy()` must carry the hook through when no override."""
+        """`Resources.copy()` must carry termination_hook through."""
         r = Resources(infra='kubernetes',
                       termination_hook={
                           'command': 'save.sh',
                           'timeout': 42,
                       })
         copied = r.copy()
-        assert copied.autostop_config is not None
-        assert copied.autostop_config.hook == 'save.sh'
-        assert copied.autostop_config.hook_timeout == 42
-        # The hook also round-trips via to_yaml_config on the copy.
-        yc = copied.to_yaml_config()
-        assert yc['termination_hook'] == {
+        assert copied.termination_hook == {
             'command': 'save.sh',
             'timeout': 42,
         }
+        assert copied.autostop_config is None
 
     def test_copy_with_termination_hook_override(self):
-        """Override via copy(termination_hook=...) must apply cleanly.
-
-        The existing autostop_config carries the same hook, so the override
-        should match (no mutual-exclusion error) and values propagate.
-        """
+        """`copy(termination_hook=...)` must replace, not merge."""
         r = Resources(infra='kubernetes',
                       termination_hook={
                           'command': 'save.sh',
                           'timeout': 10,
                       })
-        # Override the timeout (command stays the same to avoid conflict).
         copied = r.copy(termination_hook={
-            'command': 'save.sh',
+            'command': 'different.sh',
             'timeout': 99,
         })
-        assert copied.autostop_config.hook == 'save.sh'
-        assert copied.autostop_config.hook_timeout == 99
+        assert copied.termination_hook == {
+            'command': 'different.sh',
+            'timeout': 99,
+        }

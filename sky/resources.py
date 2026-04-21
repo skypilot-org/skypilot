@@ -143,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 32  # add ephemeral_storage.
+    _VERSION = 33  # add termination_hook as a standalone field.
 
     def __init__(
         self,
@@ -433,7 +433,8 @@ class Resources:
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
-        self._set_autostop_config(autostop, termination_hook)
+        self._set_autostop_config(autostop)
+        self._set_termination_hook(termination_hook)
         self._set_priority(priority)
         self._set_priority_class(priority_class)
         self._set_volumes(volumes)
@@ -733,6 +734,16 @@ class Resources:
         return self._autostop_config
 
     @property
+    def termination_hook(self) -> Optional[Dict[str, Any]]:
+        """The termination hook spec (``{command, timeout}``) or ``None``.
+
+        Kubernetes-only in this release: rendered into the pod's
+        ``preStop`` lifecycle hook. Unrelated to ``autostop.hook`` — the
+        two are independent code paths.
+        """
+        return self._termination_hook
+
+    @property
     def priority(self) -> Optional[int]:
         """The priority for this resource configuration.
 
@@ -950,34 +961,21 @@ class Resources:
     def _set_autostop_config(
         self,
         autostop: Union[bool, int, str, Dict[str, Any], None],
-        termination_hook: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
-        if termination_hook is not None:
-            hook_command = termination_hook.get('command')
-            hook_timeout = termination_hook.get('timeout')
-            if self._autostop_config is None:
-                self._autostop_config = AutostopConfig(enabled=True)
-            elif self._autostop_config.enabled is False:
-                # User explicitly disabled autostop but set termination_hook.
-                # Re-enable the config object only to carry the hook fields; the
-                # autostop behavior stays effectively disabled (idle_minutes=0,
-                # down=False). On K8s, autostop is unsupported anyway and only
-                # the hook fields are read.
-                self._autostop_config = AutostopConfig(enabled=True)
-            # Mutually exclusive with autostop.hook.
-            if (self._autostop_config.hook is not None and
-                    hook_command is not None and
-                    self._autostop_config.hook != hook_command):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify both `autostop.hook` and '
-                        '`termination_hook`. Please use `termination_hook` '
-                        'as the unified hook.')
-            if hook_command is not None:
-                self._autostop_config.hook = hook_command
-            if hook_timeout is not None:
-                self._autostop_config.hook_timeout = hook_timeout
+
+    def _set_termination_hook(
+        self,
+        termination_hook: Optional[Dict[str, Any]],
+    ) -> None:
+        # Standalone field: does NOT merge into AutostopConfig. On
+        # Kubernetes, this is rendered into the pod's preStop lifecycle
+        # hook by the template. On other clouds, this is currently a
+        # no-op; wiring to non-K8s termination paths is a follow-up PR.
+        if termination_hook is None:
+            self._termination_hook: Optional[Dict[str, Any]] = None
+            return
+        self._termination_hook = dict(termination_hook)
 
     def _set_priority(self, priority: Optional[int]) -> None:
         """Sets the priority for this resource configuration.
@@ -2150,10 +2148,8 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
-            # termination_hook is resolved into autostop_config at construction
-            # time. Pass through override if provided; otherwise the hook is
-            # already carried by autostop above.
-            termination_hook=override.pop('termination_hook', None),
+            termination_hook=override.pop('termination_hook',
+                                          self._termination_hook),
             priority=override.pop('priority', self.priority),
             priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
@@ -2574,17 +2570,8 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-            # Also emit termination_hook as the preferred top-level form so
-            # that round-tripping yaml preserves user intent. Internally this
-            # is redundant with autostop.hook, but keeps the two views in sync.
-            if self._autostop_config.hook is not None:
-                termination_hook: Dict[str, Any] = {
-                    'command': self._autostop_config.hook,
-                }
-                if self._autostop_config.hook_timeout is not None:
-                    termination_hook['timeout'] = (
-                        self._autostop_config.hook_timeout)
-                config['termination_hook'] = termination_hook
+        if self._termination_hook is not None:
+            config['termination_hook'] = dict(self._termination_hook)
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)
@@ -2777,6 +2764,9 @@ class Resources:
 
         if version < 32:
             self._ephemeral_storage = None
+
+        if version < 33:
+            self._termination_hook = None
 
         self.__dict__.update(state)
 

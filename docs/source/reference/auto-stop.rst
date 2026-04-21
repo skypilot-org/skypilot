@@ -304,16 +304,15 @@ and fires on **all nodes** (head + workers).
          cp checkpoint.pt s3://bucket/checkpoints/
        timeout: 600  # seconds
 
-``termination_hook`` is the recommended way to configure this behavior. For
-backward compatibility, ``autostop.hook`` is still accepted and produces the
-same pod spec; the two are mutually exclusive within one resources block and
-SkyPilot will raise an error if both specify different values.
+``termination_hook`` is an independent top-level field and does not interact
+with :ref:`autostop hooks <autostop-hooks>`. The legacy ``autostop.hook``
+key retains its original skylet-based semantics (idle autostop only); it
+does not render a ``preStop`` lifecycle hook. Both keys may be set in the
+same resources block — they are separate code paths and do not conflict.
 
 **How it works:**
 
 - The hook runs on **all nodes** via the Kubernetes ``preStop`` lifecycle hook
-- On Kubernetes, the hook is only executed via the ``preStop`` path (not via the
-  skylet), so it fires exactly once per termination event
 - ``timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
   (default: 30s when unset)
 - Re-launching an existing cluster with a changed ``termination_hook`` will

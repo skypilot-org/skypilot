@@ -4634,6 +4634,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
+    # TODO: a follow-up PR renames this to tail_termination_hook_logs and
+    # adds a K8s-specific dispatch via `read_namespaced_pod_log` (preStop
+    # output is captured by kubelet as pod logs, not written to the
+    # file this SSH-tail path reads).
     def tail_autostop_logs(self,
                            handle: CloudVmRayResourceHandle,
                            follow: bool = True,
@@ -5698,15 +5702,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
 
-            # If the new task specifies an autostop_config (which carries the
-            # termination_hook / autostop.hook), override the existing
-            # resources so the hook can be added, updated, or removed on a
-            # re-launch of an existing cluster. Without this override,
-            # `to_provision` reuses `handle.launched_resources` which may
-            # reflect stale hook settings.
-            if one_task_resource.autostop_config is not None:
+            # If the new task specifies a termination_hook, override the
+            # existing resources so the hook can be added, updated, or
+            # removed on a re-launch of an existing cluster. Without this
+            # override, `to_provision` reuses `handle.launched_resources`
+            # which may reflect a stale hook spec.
+            if one_task_resource.termination_hook is not None:
                 to_provision = to_provision.copy(
-                    autostop=one_task_resource.autostop_config.to_yaml_config())
+                    termination_hook=one_task_resource.termination_hook)
 
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:
