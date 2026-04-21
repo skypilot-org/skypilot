@@ -2202,14 +2202,20 @@ def get_workspace(job_id: int) -> str:
         return job_workspace
 
 
-def get_user_hash_for_job(job_id: int) -> Optional[str]:
-    """Return the user_hash of the job's submitter, or None if not found."""
+def get_user_hashes_for_jobs(job_ids: List[int]) -> Dict[int, Optional[str]]:
+    """Return a mapping of job_id -> user_hash for the given job IDs.
+
+    Missing job IDs (not found in DB) are omitted from the result.
+    """
+    if not job_ids:
+        return {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row = session.execute(
-            sqlalchemy.select(job_info_table.c.user_hash).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        return row[0] if row else None
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.user_hash).where(
+                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
+    return {row[0]: row[1] for row in rows}
 
 
 async def get_latest_task_id_status_async(

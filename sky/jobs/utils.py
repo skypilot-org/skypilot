@@ -1032,6 +1032,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
     unauthorized_job_ids: List[int] = []
+
+    # Pre-fetch all owner hashes in one query to avoid N+1 DB calls.
+    job_owner_hashes: Dict[int, Optional[str]] = {}
+    if requester_user_hash is not None:
+        job_owner_hashes = managed_job_state.get_user_hashes_for_jobs(job_ids)
+
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -1047,8 +1053,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         # Ownership check: only cancel jobs owned by the requester unless
         # requester_user_hash is None (admin or bulk cancel with user_hash).
         if requester_user_hash is not None:
-            job_owner_hash = managed_job_state.get_user_hash_for_job(job_id)
-            if job_owner_hash != requester_user_hash:
+            if job_owner_hashes.get(job_id) != requester_user_hash:
                 unauthorized_job_ids.append(job_id)
                 continue
 
