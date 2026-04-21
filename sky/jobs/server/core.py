@@ -30,6 +30,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
@@ -46,7 +47,6 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import plugin_extensions
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -229,173 +229,118 @@ def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
     return ','.join(ranges)
 
 
-def _fetch_managed_job_table_via_controller(
-    *,
-    handle: 'backends.CloudVmRayResourceHandle',
-    backend: 'backends.CloudVmRayBackend',
-    skip_finished: bool,
-    accessible_workspaces: List[str],
-    job_ids: Optional[List[int]],
-    workspace_match: Optional[str],
-    name_match: Optional[str],
-    pool_match: Optional[str],
-    page: Optional[int],
-    limit: Optional[int],
-    user_hashes: Optional[List[Optional[str]]],
-    statuses: Optional[List[str]],
-    fields: Optional[List[str]],
-    sort_by: Optional[str],
-    sort_order: Optional[str],
-) -> Tuple[List[Dict[str, Any]], int,
-           'managed_job_utils.ManagedJobQueueResultType', int, Dict[str, int]]:
-    """Fetch the managed jobs table from the controller via codegen.
+class _DefaultManagedJobRunner:
+    """Default implementation — codegen + run_on_head on the controller.
 
-    Generates the ManagedJobCodeGen.get_job_table code, runs it on the
-    controller head node, validates the returncode, and parses the payload.
-    Returns ``(jobs, total, result_type, total_no_filter, status_counts)``.
-
-    Extracted so plugins can override the controller round-trip (e.g., to
-    call the managed jobs DB directly when the controller is in-process).
+    Registered at module import. Plugins override by calling
+    ``sky.jobs.runner.register()`` with their own implementation.
     """
-    runner = plugin_extensions.ExternalManagedJobRunner
-    if runner.is_registered():
-        return runner.fetch_managed_job_table(
-            handle=handle,
-            backend=backend,
-            skip_finished=skip_finished,
-            accessible_workspaces=accessible_workspaces,
-            job_ids=job_ids,
-            workspace_match=workspace_match,
-            name_match=name_match,
-            pool_match=pool_match,
-            page=page,
-            limit=limit,
-            user_hashes=user_hashes,
-            statuses=statuses,
-            fields=fields,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
-    with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
-        code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-            skip_finished, accessible_workspaces, job_ids, workspace_match,
-            name_match, pool_match, page, limit, user_hashes, statuses, fields,
-            sort_by, sort_order)
-    with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
-        returncode, job_table_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
 
-    if returncode != 0:
-        logger.error(job_table_payload + stderr)
-        raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                           f'{returncode}.\n{job_table_payload + stderr}')
+    def fetch_managed_job_table(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
+        skip_finished: bool,
+        accessible_workspaces: List[str],
+        job_ids: Optional[List[int]],
+        workspace_match: Optional[str],
+        name_match: Optional[str],
+        pool_match: Optional[str],
+        page: Optional[int],
+        limit: Optional[int],
+        user_hashes: Optional[List[Optional[str]]],
+        statuses: Optional[List[str]],
+        fields: Optional[List[str]],
+        sort_by: Optional[str],
+        sort_order: Optional[str],
+    ) -> Tuple[List[Dict[str, Any]], int,
+               'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
+                                                                        int]]:
+        with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
+            code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+                skip_finished, accessible_workspaces, job_ids, workspace_match,
+                name_match, pool_match, page, limit, user_hashes, statuses,
+                fields, sort_by, sort_order)
+        with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
+            returncode, job_table_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
 
-    with metrics_lib.time_it('jobs.queue.load_job_queue', group='jobs'):
-        (jobs, total, result_type, total_no_filter, status_counts
-        ) = managed_job_utils.load_managed_job_queue(job_table_payload)
-    return jobs, total, result_type, total_no_filter, status_counts
+        if returncode != 0:
+            logger.error(job_table_payload + stderr)
+            raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                               f'{returncode}.\n{job_table_payload + stderr}')
 
+        with metrics_lib.time_it('jobs.queue.load_job_queue', group='jobs'):
+            (jobs, total, result_type, total_no_filter, status_counts
+            ) = managed_job_utils.load_managed_job_queue(job_table_payload)
+        return jobs, total, result_type, total_no_filter, status_counts
 
-def _cancel_managed_jobs_via_controller(
-    *,
-    handle: 'backends.CloudVmRayResourceHandle',
-    backend: 'backends.CloudVmRayBackend',
-    all_users: bool,
-    all: bool,  # pylint: disable=redefined-builtin
-    job_ids: Optional[List[int]],
-    name: Optional[str],
-    pool: Optional[str],
-    graceful: bool,
-    graceful_timeout: Optional[int],
-) -> str:
-    """Cancel managed jobs on the controller via codegen.
-
-    Selects the appropriate ManagedJobCodeGen cancel variant based on the
-    arguments, runs it on the controller head node, and returns stdout.
-
-    Extracted so plugins can override the controller round-trip (e.g., to
-    call the managed jobs DB directly when the controller is in-process).
-    """
-    runner = plugin_extensions.ExternalManagedJobRunner
-    if runner.is_registered():
-        return runner.cancel_managed_jobs(
-            handle=handle,
-            backend=backend,
-            all_users=all_users,
-            all=all,
-            job_ids=job_ids,
+    def cancel_managed_jobs(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
+        all_users: bool,
+        all: bool,  # pylint: disable=redefined-builtin
+        job_ids: Optional[List[int]],
+        name: Optional[str],
+        pool: Optional[str],
+        graceful: bool,
+        graceful_timeout: Optional[int],
+    ) -> str:
+        # Single codegen that embeds the dispatcher (``cancel_managed_jobs``)
+        # via ``inspect.getsource`` — keeps the variant selection in one place.
+        code = managed_job_utils.ManagedJobCodeGen.cancel_managed_jobs(
             name=name,
+            job_ids=job_ids,
             pool=pool,
+            all=all,
+            all_users=all_users,
             graceful=graceful,
             graceful_timeout=graceful_timeout,
         )
-    # Single codegen that embeds the dispatcher (``cancel_managed_jobs``)
-    # via ``inspect.getsource`` — keeps the variant selection in one place.
-    code = managed_job_utils.ManagedJobCodeGen.cancel_managed_jobs(
-        name=name,
-        job_ids=job_ids,
-        pool=pool,
-        all=all,
-        all_users=all_users,
-        graceful=graceful,
-        graceful_timeout=graceful_timeout,
-    )
-    # The stderr is redirected to stdout.
-    returncode, stdout, stderr = backend.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=False)
-    try:
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to cancel managed job',
-                                           stdout + stderr)
-    except exceptions.CommandError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(e.error_msg) from e
-    return stdout
+        # The stderr is redirected to stdout.
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         require_outputs=True,
+                                                         stream_logs=False)
+        try:
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to cancel managed job',
+                                               stdout + stderr)
+        except exceptions.CommandError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(e.error_msg) from e
+        return stdout
+
+    def tail_managed_job_logs(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
+        job_id: Optional[int],
+        job_name: Optional[str],
+        follow: bool,
+        controller: bool,
+        tail: Optional[int],
+        task: Optional[Union[str, int]],
+    ) -> int:
+        return backend.tail_managed_job_logs(handle,
+                                             job_id=job_id,
+                                             job_name=job_name,
+                                             follow=follow,
+                                             controller=controller,
+                                             tail=tail,
+                                             task=task)
 
 
-def _tail_managed_job_logs_via_controller(
-    *,
-    handle: 'backends.CloudVmRayResourceHandle',
-    backend: 'backends.CloudVmRayBackend',
-    job_id: Optional[int],
-    job_name: Optional[str],
-    follow: bool,
-    controller: bool,
-    tail: Optional[int],
-    task: Optional[Union[str, int]],
-) -> int:
-    """Tail managed job logs from the controller.
-
-    Delegates to ``backend.tail_managed_job_logs`` and returns the exit code.
-    Extracted so plugins can override the controller round-trip (e.g., to
-    stream logs directly from the managed jobs DB when the controller is
-    in-process).
-    """
-    runner = plugin_extensions.ExternalManagedJobRunner
-    if runner.is_registered():
-        return runner.tail_managed_job_logs(
-            handle=handle,
-            backend=backend,
-            job_id=job_id,
-            job_name=job_name,
-            follow=follow,
-            controller=controller,
-            tail=tail,
-            task=task,
-        )
-    return backend.tail_managed_job_logs(handle,
-                                         job_id=job_id,
-                                         job_name=job_name,
-                                         follow=follow,
-                                         controller=controller,
-                                         tail=tail,
-                                         task=task)
+# Register the default runner so it's available before any plugin loads.
+managed_job_runner.register(_DefaultManagedJobRunner())
 
 
 def _consolidated_launch(
@@ -1394,7 +1339,7 @@ def queue_v2(
             pass
 
     (jobs, total, result_type, total_no_filter,
-     status_counts) = _fetch_managed_job_table_via_controller(
+     status_counts) = managed_job_runner.current().fetch_managed_job_table(
          handle=handle,
          backend=backend,
          skip_finished=skip_finished,
@@ -1539,7 +1484,7 @@ def cancel(name: Optional[str] = None,
                 use_legacy = True
 
         if use_legacy:
-            stdout = _cancel_managed_jobs_via_controller(
+            stdout = managed_job_runner.current().cancel_managed_jobs(
                 handle=handle,
                 backend=backend,
                 all_users=all_users,
@@ -1604,7 +1549,7 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    return _tail_managed_job_logs_via_controller(
+    return managed_job_runner.current().tail_managed_job_logs(
         handle=handle,
         backend=backend,
         job_id=job_id,
