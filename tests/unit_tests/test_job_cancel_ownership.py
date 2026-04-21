@@ -12,11 +12,13 @@ def _make_cancel_jobs_by_id_mocks(job_statuses, job_owners, job_workspaces):
     def get_status(job_id):
         return job_statuses.get(job_id)
 
-    def get_user_hashes_for_jobs(job_ids):
-        return {jid: job_owners[jid] for jid in job_ids if jid in job_owners}
-
-    def get_workspace(job_id):
-        return job_workspaces.get(job_id, 'default')
+    def get_job_owner_and_workspace(job_ids):
+        result = {}
+        for jid in job_ids:
+            if jid in job_owners or jid in job_workspaces:
+                result[jid] = (job_owners.get(jid),
+                               job_workspaces.get(jid, 'default'))
+        return result
 
     def get_nonterminal_job_ids_by_name(name, user_hash=None, all_users=False):
         return []
@@ -30,9 +32,8 @@ def _make_cancel_jobs_by_id_mocks(job_statuses, job_owners, job_workspaces):
     return mock.patch.multiple(
         'sky.jobs.utils.managed_job_state',
         get_status=mock.Mock(side_effect=get_status),
-        get_user_hashes_for_jobs=mock.Mock(
-            side_effect=get_user_hashes_for_jobs),
-        get_workspace=mock.Mock(side_effect=get_workspace),
+        get_job_owner_and_workspace=mock.Mock(
+            side_effect=get_job_owner_and_workspace),
         get_nonterminal_job_ids_by_name=mock.Mock(
             side_effect=get_nonterminal_job_ids_by_name),
         is_legacy_controller_process=mock.Mock(

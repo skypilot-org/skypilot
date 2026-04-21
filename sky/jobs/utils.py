@@ -1033,10 +1033,10 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     wrong_workspace_job_ids: List[int] = []
     unauthorized_job_ids: List[int] = []
 
-    # Pre-fetch all owner hashes in one query to avoid N+1 DB calls.
-    job_owner_hashes: Dict[int, Optional[str]] = {}
-    if requester_user_hash is not None:
-        job_owner_hashes = managed_job_state.get_user_hashes_for_jobs(job_ids)
+    # Pre-fetch owner hash and workspace together in one query to avoid
+    # N+1 DB calls for both the ownership check and the workspace check.
+    job_info: Dict[int, Tuple[Optional[str], str]] = (
+        managed_job_state.get_job_owner_and_workspace(job_ids))
 
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
@@ -1053,7 +1053,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         # Ownership check: only cancel jobs owned by the requester unless
         # requester_user_hash is None (admin or bulk cancel with user_hash).
         if requester_user_hash is not None:
-            if job_owner_hashes.get(job_id) != requester_user_hash:
+            owner_hash, _ = job_info.get(
+                job_id, (None, constants.SKYPILOT_DEFAULT_WORKSPACE))
+            if owner_hash != requester_user_hash:
                 unauthorized_job_ids.append(job_id)
                 continue
 
@@ -1066,7 +1068,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        job_workspace = managed_job_state.get_workspace(job_id)
+        _, job_workspace = job_info.get(
+            job_id, (None, constants.SKYPILOT_DEFAULT_WORKSPACE))
         if current_workspace is not None and job_workspace != current_workspace:
             wrong_workspace_job_ids.append(job_id)
             continue
@@ -1116,17 +1119,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             f' {", ".join(map(str, wrong_workspace_job_ids))} '
             f'{plural_verb} skipped as they are not in the active workspace '
             f'{current_workspace!r}. Check the workspace of the job with: '
-            f'sky jobs queue')
+            f'sky jobs queue.')
 
     unauthorized_str = ''
     if unauthorized_job_ids:
         plural = 's' if len(unauthorized_job_ids) > 1 else ''
         plural_verb = 'are' if len(unauthorized_job_ids) > 1 else 'is'
+        belong_str = ('they belong'
+                      if len(unauthorized_job_ids) > 1 else 'it belongs')
         ids_str = ', '.join(map(str, unauthorized_job_ids))
         unauthorized_str = (
             f' Permission denied: job{plural} with ID{plural} {ids_str} '
-            f'{plural_verb} not cancelled because they belong to another user.'
-            f' Only admins can cancel other users\' jobs.')
+            f'{plural_verb} not cancelled because {belong_str} to another '
+            f'user. Only admins can cancel other users\' jobs.')
 
     if not cancelled_job_ids:
         return f'No job to cancel.{wrong_workspace_job_str}{unauthorized_str}'
