@@ -734,11 +734,15 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     #   elements that cannot easily carry nonces.  CSS cannot execute
     #   scripts, so the risk is negligible.
     # - font-src 'self': Only allow same-origin fonts
-    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
-    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
-    #   needed by the /token page's legacy auth callback flow (the page's
-    #   JavaScript POSTs the auth token to a local HTTP server started by
-    #   the CLI on localhost)
+    # - connect-src 'self' https://usage-v3.skypilot.co
+    #   http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket, analytics traffic via the
+    #   usage-v3 reverse proxy, and localhost connections needed by the
+    #   /token page's legacy auth callback flow (the page's JavaScript
+    #   POSTs the auth token to a local HTTP server started by the CLI
+    #   on localhost)
+    # - worker-src 'self' blob:: Allow same-origin workers and blob
+    #   workers (needed for analytics).
     # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
     # - img-src 'self' data:: Allow same-origin images and data URIs
     # - object-src 'none': Block all plugin content (Flash, Java, etc.)
@@ -746,11 +750,13 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
     _CSP_TEMPLATE = ('default-src \'self\'; '
-                     'script-src {script_src}; '
+                     'script-src {script_src} '
+                     'https://usage-v3.skypilot.co; '
                      'style-src \'self\' \'unsafe-inline\'; '
                      'font-src \'self\'; '
-                     'connect-src \'self\' http://localhost:* '
-                     'http://127.0.0.1:*; '
+                     'connect-src \'self\' https://usage-v3.skypilot.co '
+                     'http://localhost:* http://127.0.0.1:*; '
+                     'worker-src \'self\' blob:; '
                      'frame-src \'self\'; '
                      'img-src \'self\' data:; '
                      'object-src \'none\'; '
@@ -1368,6 +1374,7 @@ async def _receive_and_assemble_chunks(
     request: fastapi.Request,
     chunk_index: int,
     total_chunks: int,
+    extract: bool = True,
 ) -> Optional[payloads.UploadZipFileResponse]:
     """Receive chunks, assemble into a zip file, and extract.
 
@@ -1444,7 +1451,8 @@ async def _receive_and_assemble_chunks(
                             break
                         await zip_file.write(data)
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, base_dir)
+    if extract:
+        await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return None
@@ -1548,11 +1556,13 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
 
         # Receive chunks, assemble, and extract into staging dir.
         staging_dir = storage.get_staging_dir(user_id, upload_id)
-        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
-                                                    zip_name='staging',
-                                                    request=request,
-                                                    chunk_index=chunk_index,
-                                                    total_chunks=total_chunks)
+        result = await _receive_and_assemble_chunks(
+            base_dir=staging_dir,
+            zip_name='staging',
+            request=request,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            extract=storage.extract_on_upload())
         if result is not None:
             return result
         # Atomic rename of the extracted staging dir to the final
@@ -2155,6 +2165,10 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
     # Validate request_id prefix matches a single request.
     request_id = await get_expanded_request_id(request_id)
 
+    # Exponential backoff: start fast (10ms) for short requests like
+    # status/queue, then back off to 100ms for long requests like
+    # launch/exec.
+    poll_interval = 0.01
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -2167,9 +2181,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             break
         if req_status.status > requests_lib.RequestStatus.RUNNING:
             break
-        # yield control to allow other coroutines to run, sleep shortly
-        # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(poll_interval)
+        # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
+        poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
     # TODO(aylei): refine this, /api/get will not be retried and this is
     # meaningless to retry. It is the original request that should be retried.
@@ -2497,6 +2511,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
+        # Whether telemetry/usage collection is enabled
+        telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
     )
 
 

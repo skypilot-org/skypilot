@@ -4,6 +4,7 @@ Tests verify correct instance type parsing and formatting.
 """
 import pytest
 
+from sky.clouds import kubernetes as kubernetes_cloud
 from sky.provision.kubernetes.utils import KubernetesInstanceType
 
 
@@ -60,7 +61,7 @@ def test_kubernetes_instance_type():
 
 def test_gpu_name_underscore_preservation():
     """Test that GPU names with underscores are preserved exactly as-is.
-    
+
     This specifically tests the fix for CoreWeave H100_NVLINK_80GB support
     where underscores were incorrectly converted to spaces during parsing.
     """
@@ -95,3 +96,20 @@ def test_gpu_name_underscore_preservation():
         assert original_name in instance.name, (
             f"Instance type string '{instance.name}' should contain "
             f"original accelerator name '{original_name}'")
+
+
+def test_get_vcpus_mem_suppresses_internal_traceback():
+    """A non-Kubernetes instance name should raise a clean ValueError.
+
+    Previously, passing e.g. an AWS instance_type to a Kubernetes cloud
+    (or hitting this path during dryrun YAML serialization) leaked the
+    internal KubernetesInstanceType regex-mismatch traceback. The
+    message should name the offending value and be raised without a
+    chained internal exception.
+    """
+    with pytest.raises(ValueError) as e:
+        kubernetes_cloud.Kubernetes.get_vcpus_mem_from_instance_type('m5.large')
+    # Must clearly mention the offending input.
+    assert 'm5.large' in str(e.value)
+    # No chained 'during handling of another exception' context.
+    assert e.value.__suppress_context__ is True

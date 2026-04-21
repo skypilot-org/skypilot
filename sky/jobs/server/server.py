@@ -139,7 +139,7 @@ async def logs(
         # Cancel the coroutine after the request is done or client disconnects
         background_tasks.add_task(task.cancel)
     else:
-        executor.schedule_prepared_request(request_task)
+        await executor.schedule_prepared_request(request_task)
         # When runs in long executor process, we should kill the request on
         # disconnect to cancel the running routine.
         kill_request_on_disconnect = True

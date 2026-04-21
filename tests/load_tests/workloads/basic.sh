@@ -12,7 +12,12 @@
 # Each phase manages its own resources and cleanup.
 # Emits ##BENCH_START / ##BENCH_END markers for per-operation timing.
 
-set -uo pipefail
+# Abort a phase on the first unexpected failure.  Ops that are allowed to
+# fail (e.g. sky_jobs_logs, sky_jobs_cancel) use explicit `|| true` below.
+# Without `-e`, a broken cluster-side setup silently runs every phase and
+# puts the managed-jobs controller into an unbounded recovery loop, which
+# can exhaust API-server memory in long-running benchmarks.
+set -euo pipefail
 
 UNIQUE_ID=${BENCHMARK_UNIQUE_ID:-"test-$(date +%s)-$$"}
 CLOUD=${BENCHMARK_CLOUD:-"kubernetes"}

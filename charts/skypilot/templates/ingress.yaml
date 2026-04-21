@@ -16,13 +16,20 @@ metadata:
     kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName }}
     {{- end }}
     {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
-    # Enable session affinity and retry on 502 for RollingUpdate strategy
+    # Retry on 502 during RollingUpdate so requests hitting a terminating pod are
+    # transparently re-dispatched to a ready pod (zero-downtime upgrades).
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
+    {{- if .Values.ingress.sessionAffinity }}
+    # Cookie-based session affinity keeps a client pinned to the same pod across
+    # requests during a rolling upgrade. Disable via ingress.sessionAffinity=false
+    # when stickiness is managed externally (e.g., upstream load balancer) or the
+    # ingress controller does not support it.
     nginx.ingress.kubernetes.io/affinity: "cookie"
     nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
     nginx.ingress.kubernetes.io/affinity-mode: "persistent"
     nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
-    nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
-    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
+    {{- end }}
     {{- end }}
     {{/* If oauth authentication is enabled on the API server, disable the oauth2-proxy at ingress to avoid conflicts */}}
     {{- if and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth.enabled) }}

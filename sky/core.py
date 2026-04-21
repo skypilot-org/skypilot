@@ -1461,6 +1461,9 @@ def enabled_clouds(workspace: Optional[str] = None,
                    expand: bool = False) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
+    else:
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(), workspace)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):

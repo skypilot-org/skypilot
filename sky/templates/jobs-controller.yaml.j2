@@ -44,7 +44,7 @@ run: |
   {{ sky_activate_python_env }}
   # Install plugin wheels if any
   {%- if plugins_wheel_install_commands %}
-  {{plugins_wheel_install_commands}}
+  {{ plugins_wheel_install_commands | indent(2) }}
   # Move the temporary plugins config to the final location if it exists
   if [ -f {{remote_plugins_config_path}}.tmp ]; then
     mv {{remote_plugins_config_path}}.tmp {{remote_plugins_config_path}}

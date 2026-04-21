@@ -238,17 +238,36 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
                 f'those {noun}s first.{colorama.Style.RESET_ALL}')
 
 
+def _pool_consolidation_extra_validator(arg: bool) -> None:
+    """Warn about leftover pools when switching to non-consolidated mode.
+
+    Passed as extra_validator to controller_utils.is_jobs_consolidation_mode
+    from the pool branch of is_consolidation_mode. Skipped when consolidation
+    is on because the jobs validator already warns about the shared
+    controller cluster in that case.
+    """
+    if not arg:
+        _validate_consolidation_mode_config(arg, pool=True)
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
-    # Use jobs config for pool consolidation mode.
-    controller = controller_utils.get_controller_for_pool(pool).value
-    consolidation_mode = skypilot_config.get_nested(
-        (controller.controller_type, 'controller', 'consolidation_mode'),
-        default_value=False)
+    if pool:
+        # INVARIANT: pool consolidation state must match managed jobs —
+        # pool operations run on the jobs controller. Route both readers
+        # through controller_utils.is_jobs_consolidation_mode so they
+        # cannot diverge. Pool adds one extra validator (leftover pools)
+        # because the jobs validator only knows about leftover jobs.
+        return controller_utils.is_jobs_consolidation_mode(
+            extra_validator=_pool_consolidation_extra_validator)
+    # Serve (pool=False) runs on its own controller cluster, independent of
+    # the jobs controller, and keeps a config-driven consolidation flag.
     if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        # if we are in the job controller, we must always be in consolidation
-        # mode.
+        # if we are in the serve controller, we must always be in
+        # consolidation mode.
         return True
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.

@@ -6,7 +6,7 @@ import os
 import pathlib
 import tempfile
 import typing
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -23,6 +23,7 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -1371,12 +1372,129 @@ def _is_consolidation_mode(pool: bool) -> bool:
     if pool:
         # For jobs, the signal file is the source of truth (managed by
         # setup_consolidation_mode_on_startup at server start).
-        signal_file = pathlib.Path(
-            managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-        ).expanduser()
-        return signal_file.exists()
+        return _read_jobs_consolidation_signal()
     return skypilot_config.get_nested(
         ('serve', 'controller', 'consolidation_mode'), default_value=False)
+
+
+def _read_jobs_consolidation_signal() -> bool:
+    """Return whether the jobs consolidation signal file is present.
+
+    Source of truth for jobs-controller consolidation state. The file is
+    written by setup_consolidation_mode_on_startup at API server start.
+    """
+    signal_file = pathlib.Path(
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+    return signal_file.exists()
+
+
+def warn_jobs_consolidation_mode_intent(enabled: bool) -> None:
+    """Warn about leftover state that would block a consolidation-mode flip.
+
+    - enabled=True: warn if a separate jobs-controller cluster still exists.
+    - enabled=False: warn if managed jobs are still running.
+
+    Called from is_jobs_consolidation_mode (server-side) and from
+    setup_consolidation_mode_on_startup (at API server start).
+    """
+    if enabled:
+        controller_cn = (Controllers.JOBS_CONTROLLER.value.cluster_name)
+        if global_user_state.cluster_with_name_exists(controller_cn):
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
+                f'but the controller cluster {controller_cn} is still running. '
+                'Please terminate the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
+    else:
+        total_jobs = managed_job_state.get_managed_jobs_total()
+        if total_jobs > 0:
+            nonterminal_jobs = (
+                managed_job_state.get_nonterminal_job_ids_by_name(
+                    None, None, all_users=True))
+            if nonterminal_jobs:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are still {len(nonterminal_jobs)} managed jobs '
+                    'running. Please terminate those jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are {total_jobs} jobs from previous '
+                    'consolidation mode. Reset the `jobs.controller.'
+                    'consolidation_mode` to `true` and run `sky jobs queue` '
+                    'to see those jobs. Switching to normal mode will '
+                    f'lose the job history.{colorama.Style.RESET_ALL}')
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _effective_jobs_consolidation_with_warnings(
+) -> Tuple[bool, Optional[bool]]:
+    """Compute effective jobs consolidation and emit warnings once per request.
+
+    Returns (effective, intent_arg). intent_arg is None when not on the API
+    server (no guidance to emit); otherwise it is the value validators should
+    check — `config_value` when explicitly set, else `effective`.
+
+    Cached on the request scope so the jobs validator and config-vs-signal
+    warning fire at most once per request, even when both managed-jobs and
+    pool readers resolve in the same request.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # Inside the controller process. Always consolidated from its own
+        # perspective; no admin-facing guidance to emit.
+        return True, None
+    effective = _read_jobs_consolidation_signal()
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        # Not on the API server — no config to consult. See #6611.
+        return effective, None
+    config_value = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+    if config_value is not None and config_value != effective:
+        expected = 'enabled' if config_value else 'disabled'
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
+            f'is {expected} in the server config, but the API server has '
+            'not been restarted yet. Please restart the API server to '
+            f'apply the change.{colorama.Style.RESET_ALL}')
+    arg = config_value if config_value is not None else effective
+    warn_jobs_consolidation_mode_intent(arg)
+    return effective, arg
+
+
+def is_jobs_consolidation_mode(
+        extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
+    """Return effective jobs-controller consolidation state.
+
+    Single source of truth for whether the jobs controller is running in
+    consolidation mode. Used by both managed-jobs and pool readers — pool
+    operations run on the jobs controller, so both callers must see the
+    same value.
+
+    Behavior:
+    - OVERRIDE_CONSOLIDATION_MODE env forces True (used inside the
+      controller process itself, which is always consolidated from its
+      own perspective).
+    - Otherwise reads the JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE, written
+      by setup_consolidation_mode_on_startup at API server start.
+    - On the API server (IS_SKYPILOT_SERVER env set): warns if the config
+      disagrees with effective state (user needs to restart), runs the
+      jobs validator against intent (config when set, effective otherwise),
+      and calls extra_validator (if supplied) with the same arg. Callers
+      may use extra_validator for domain-specific warnings (e.g. the pool
+      reader warns about leftover pools in addition to leftover jobs).
+
+    The shared/warning portion is cached per request via
+    _effective_jobs_consolidation_with_warnings so warnings fire once even
+    when multiple readers resolve in the same request. extra_validator is
+    called per invocation; callers should cache their own wrappers if
+    their extra_validator is expensive.
+    """
+    effective, arg = _effective_jobs_consolidation_with_warnings()
+    if extra_validator is not None and arg is not None:
+        extra_validator(arg)
+    return effective
 
 
 @annotations.lru_cache(scope='request')

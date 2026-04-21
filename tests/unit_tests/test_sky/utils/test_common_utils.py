@@ -94,6 +94,38 @@ class TestCheckClusterNameIsValid:
         common_utils.check_cluster_name_is_valid(None)
 
 
+class TestClusterNameLooksLikeFilePath:
+
+    def test_yaml_extension(self):
+        assert common_utils.cluster_name_looks_like_file_path('job.yaml')
+
+    def test_yml_extension(self):
+        assert common_utils.cluster_name_looks_like_file_path('job.yml')
+
+    def test_json_extension(self):
+        assert common_utils.cluster_name_looks_like_file_path('config.json')
+
+    def test_yaml_case_insensitive(self):
+        assert common_utils.cluster_name_looks_like_file_path('job.YAML')
+
+    def test_normal_name(self):
+        assert not common_utils.cluster_name_looks_like_file_path('mycluster')
+
+    def test_name_with_dot(self):
+        assert not common_utils.cluster_name_looks_like_file_path('my.cluster')
+
+    def test_name_with_hyphen(self):
+        assert not common_utils.cluster_name_looks_like_file_path('my-cluster')
+
+    def test_none(self):
+        assert not common_utils.cluster_name_looks_like_file_path(None)
+
+    def test_existing_file(self, tmp_path):
+        test_file = tmp_path / 'somefile'
+        test_file.write_text('content')
+        assert common_utils.cluster_name_looks_like_file_path(str(test_file))
+
+
 class TestMakeClusterNameOnCloud:
 
     @mock.patch('sky.utils.common_utils.get_user_hash')

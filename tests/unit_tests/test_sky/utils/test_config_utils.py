@@ -346,12 +346,92 @@ def test_k8s_config_merge_with_multiple_volumes():
     vol3 = next(v for v in base_config['volumes'] if v['name'] == 'vol3')
     assert vol3['hostPath'] == '/path3'
 
-    # Check volumeMounts
-    assert len(base_config['volumeMounts']) == 3
-    mount1 = next(m for m in base_config['volumeMounts'] if m['name'] == 'vol1')
-    assert mount1['mountPath'] == '/new-mnt1'
-    mount3 = next(m for m in base_config['volumeMounts'] if m['name'] == 'vol3')
-    assert mount3['mountPath'] == '/mnt3'
+    # Check volumeMounts - mountPath is the merge key per K8s API spec,
+    # so vol1 at /new-mnt1 is a new entry (different mountPath from /mnt1),
+    # giving us 4 total: /mnt1, /mnt2, /new-mnt1, /mnt3
+    assert len(base_config['volumeMounts']) == 4
+    expected_mounts = [
+        ('vol1', '/mnt1'),
+        ('vol2', '/mnt2'),
+        ('vol1', '/new-mnt1'),
+        ('vol3', '/mnt3'),
+    ]
+    actual_mounts = [
+        (m['name'], m['mountPath']) for m in base_config['volumeMounts']
+    ]
+    assert sorted(actual_mounts) == sorted(expected_mounts)
+
+
+def test_k8s_config_merge_volumemounts_same_name_different_subpath():
+    """Two volumeMounts sharing a volume name but different
+    mountPath/subPath must both survive the merge. This is the
+    standard K8s pattern for projecting Secret keys into paths."""
+    base_config = {
+        'volumes': [{
+            'name': 'git-creds',
+            'secret': {
+                'secretName': 'creds'
+            }
+        }],
+        'volumeMounts': []
+    }
+
+    override_config = {
+        'volumeMounts': [{
+            'name': 'git-creds',
+            'mountPath': '/home/sky/.gitconfig',
+            'subPath': 'gitconfig',
+            'readOnly': True
+        }, {
+            'name': 'git-creds',
+            'mountPath': '/home/sky/.git-credentials',
+            'subPath': 'credentials',
+            'readOnly': True
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    assert len(base_config['volumeMounts']) == 2
+    expected_mounts = [
+        ('git-creds', '/home/sky/.gitconfig'),
+        ('git-creds', '/home/sky/.git-credentials'),
+    ]
+    actual_mounts = [
+        (m['name'], m['mountPath']) for m in base_config['volumeMounts']
+    ]
+    assert sorted(actual_mounts) == sorted(expected_mounts)
+
+
+def test_k8s_config_merge_volumemounts_same_name_base_and_override():
+    """Override adds a volumeMount with same volume name as base but different
+    mountPath. Both must survive."""
+    base_config = {
+        'volumeMounts': [{
+            'name': 'shared-vol',
+            'mountPath': '/data/a',
+            'subPath': 'a'
+        }]
+    }
+    override_config = {
+        'volumeMounts': [{
+            'name': 'shared-vol',
+            'mountPath': '/data/b',
+            'subPath': 'b'
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    assert len(base_config['volumeMounts']) == 2
+    expected_mounts = [
+        ('shared-vol', '/data/a'),
+        ('shared-vol', '/data/b'),
+    ]
+    actual_mounts = [
+        (m['name'], m['mountPath']) for m in base_config['volumeMounts']
+    ]
+    assert sorted(actual_mounts) == sorted(expected_mounts)
 
 
 def test_nested_config_override_precedence():

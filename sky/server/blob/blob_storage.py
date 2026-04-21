@@ -89,6 +89,15 @@ class BlobStorage(abc.ABC):
         """
         yield True
 
+    def extract_on_upload(self) -> bool:
+        """Whether to extract the zip during upload.
+
+        When ``False``, the blob directory stores only the raw zip file
+        and extraction is deferred to :meth:`resolve_blob_to_dir` time.
+        Default ``True`` (extract immediately during upload).
+        """
+        return True
+
     @abc.abstractmethod
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         """Return the base blobs directory for a user."""

@@ -1140,6 +1140,82 @@ class TestPopulateConfigFromPVC:
 
         assert config.config.get('storage_class_name') == 'fast-ssd'
         assert config.size == '100'  # Converted from '100Gi' to string
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
+
+    def test_populate_access_mode_inferred(self):
+        """Test access_mode is inferred from PVC when not set in config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteMany'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteMany'
+
+    def test_populate_access_mode_override_with_warning(self):
+        """Test access_mode is overridden when PVC differs from config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteMany'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteMany'
+
+    def test_populate_access_mode_matching(self):
+        """Test no change when PVC access_mode matches config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteOnce'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
+
+    def test_populate_access_mode_empty(self):
+        """Test no change when PVC has no access_modes."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.spec.access_modes = None
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
 
     def test_populate_config_from_pvc_preserve_existing(self):
         """Test that existing config values are not overwritten."""

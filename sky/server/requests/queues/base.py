@@ -22,6 +22,12 @@ class QueueBackend(abc.ABC):
         """Put a (request_id, ignore_return_value, retryable) tuple."""
         raise NotImplementedError
 
+    async def put_async(self, item: Tuple[str, bool, bool]) -> None:
+        """Async version of put."""
+        # By default we assume put is not blocking and can be
+        # called directly in event loop
+        self.put(item)
+
     @abc.abstractmethod
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Non-blocking get. Returns None if queue is empty."""

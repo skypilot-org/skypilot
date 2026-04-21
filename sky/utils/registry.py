@@ -1,5 +1,6 @@
 """Registry for classes to be discovered"""
 
+import difflib
 import typing
 from typing import Callable, Dict, List, Optional, Set, Type, Union
 
@@ -42,11 +43,18 @@ class _Registry(dict, typing.Generic[T]):
         if search_name in self._aliases:
             return self[self._aliases[search_name]]
 
+        known_names = [*self.keys(), *self._aliases.keys()]
+        suggestion = difflib.get_close_matches(search_name,
+                                               known_names,
+                                               n=1,
+                                               cutoff=0.6)
+        suggestion_msg = (f' Did you mean {suggestion[0]!r}?'
+                          if suggestion else '')
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{self._registry_name.capitalize()} {name!r} is not a '
                 f'valid {self._registry_name} among '
-                f'{[*self.keys(), *self._aliases.keys()]}')
+                f'{known_names}.{suggestion_msg}')
 
     def type_register(self,
                       name: str,
