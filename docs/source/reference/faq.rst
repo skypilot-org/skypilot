@@ -265,6 +265,40 @@ To launch a VS Code tunnel using a SkyPilot task definition, you can use the fol
 Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
 
 
+.. _macos-ssh-runtime-setup:
+
+My cluster hangs at ``Preparing SkyPilot runtime`` on macOS. What should I do?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On recent macOS releases (notably Sequoia), the system OpenSSH client shipped
+at ``/usr/bin/ssh`` has known bugs that show up when SkyPilot opens many
+parallel SSH connections during cluster runtime setup. Symptoms include:
+
+- ``sky launch`` hangs indefinitely at ``Preparing SkyPilot runtime (1/3 -
+  initializing)`` or ``(2/3 - dependencies)``.
+- SSH errors such as ``max_client``, ``kex_exchange_identification: Connection
+  closed by remote host``, ``ssh_dispatch_run_fatal``, or ``Connection reset
+  by peer``.
+- Setup commands fail with exit code 255 after retrying.
+
+**Fix:** install a newer OpenSSH via Homebrew (so it takes precedence on
+``PATH`` over ``/usr/bin/ssh``) and restart the SkyPilot API server so the
+new client is picked up:
+
+.. code-block:: shell
+
+  brew install openssh   # or: brew reinstall openssh
+  sky api stop && sky api start
+
+Then retry ``sky launch``. If launches were partially created, you may also
+want to ``sky down`` the cluster and start fresh.
+
+SkyPilot auto-detects this scenario and prints the same hint when it sees
+SSH connection errors during runtime setup on macOS. If you have already
+installed Homebrew's OpenSSH but the hint still appears, make sure the brew
+``bin`` directory is ahead of ``/usr/bin`` on your shell's ``PATH``.
+
+
 .. _upgrade-skypilot:
 
 Upgrading SkyPilot

@@ -15,6 +15,7 @@ import platform
 import random
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -1248,6 +1249,72 @@ def removeprefix(string: str, prefix: str) -> str:
     if string.startswith(prefix):
         return string[len(prefix):]
     return string
+
+
+@functools.lru_cache(maxsize=1)
+def _macos_system_ssh_is_default() -> bool:
+    """Returns True on macOS when `ssh` resolves to the system OpenSSH.
+
+    The system OpenSSH shipped with recent macOS releases (notably Sequoia)
+    has been reported to hang or fail when SkyPilot opens many parallel SSH
+    connections during cluster runtime setup. Users typically fix this by
+    installing a newer OpenSSH (e.g., `brew install openssh`) so that the
+    brew binary takes precedence on PATH.
+    """
+    if sys.platform != 'darwin':
+        return False
+    try:
+        ssh_path = shutil.which('ssh')
+    except Exception:  # pylint: disable=broad-except
+        return False
+    if not ssh_path:
+        return False
+    # /usr/bin/ssh is Apple's system OpenSSH. Homebrew installs under
+    # /opt/homebrew/... (Apple Silicon) or /usr/local/... (Intel), so any of
+    # those paths indicates a user-installed OpenSSH is already being used.
+    return os.path.realpath(ssh_path) == '/usr/bin/ssh'
+
+
+# SSH client errors commonly seen on macOS when the system OpenSSH misbehaves
+# under many parallel connections. Matched case-insensitively as substrings.
+_MACOS_SSH_CLIENT_ERROR_MARKERS = (
+    'max_client',
+    'too many authentication failures',
+    'connection reset by peer',
+    'kex_exchange_identification',
+    'broken pipe',
+    'ssh_dispatch_run_fatal',
+)
+
+
+def maybe_macos_ssh_hint(stderr: str = '') -> str:
+    """Returns a macOS-specific hint when SSH likely hit a local client bug.
+
+    Returns an empty string on non-macOS hosts, when the user already has a
+    non-system OpenSSH on PATH, or when `stderr` does not look like a known
+    macOS SSH client failure pattern. When `stderr` is empty the check is
+    skipped and a hint is always returned on affected macOS systems.
+
+    The hint recommends installing Homebrew's OpenSSH and restarting the
+    SkyPilot API server, which is the empirical fix users have reported for
+    cluster launches that hang at "Preparing SkyPilot runtime".
+    """
+    if not _macos_system_ssh_is_default():
+        return ''
+    if stderr:
+        lowered = stderr.lower()
+        if not any(marker in lowered
+                   for marker in _MACOS_SSH_CLIENT_ERROR_MARKERS):
+            return ''
+    return (
+        'Hint: on macOS (especially Sequoia), the system OpenSSH client has '
+        'known bugs under many parallel SSH connections and can cause cluster '
+        'setup to hang or fail. Try installing a newer OpenSSH and restarting '
+        'the SkyPilot API server:\n'
+        '  brew install openssh   # or: brew reinstall openssh\n'
+        '  sky api stop && sky api start\n'
+        'See https://docs.skypilot.co/en/latest/reference/faq.html for more '
+        'details.')
 
 
 def release_memory():

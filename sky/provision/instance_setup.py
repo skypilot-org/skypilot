@@ -241,6 +241,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 # conda.
                 source_bashrc=True)
             retry_cnt = 0
+            hinted_macos_ssh = False
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
                 # happen when a setup step requires a reboot, e.g. nvidia-driver
@@ -248,6 +249,11 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 logger.info('Network connection issue during setup, this is '
                             'likely due to the reboot of the instance. '
                             'Retrying setup in 10 seconds.')
+                if not hinted_macos_ssh:
+                    macos_hint = common_utils.maybe_macos_ssh_hint(stderr)
+                    if macos_hint:
+                        logger.warning(macos_hint)
+                        hinted_macos_ssh = True
                 time.sleep(10)
                 retry_cnt += 1
                 returncode, stdout, stderr = runner.run_setup(
@@ -260,11 +266,18 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                     break
 
             if returncode:
+                # SSH exits with 255 on connection errors. On macOS, this is
+                # frequently caused by the system OpenSSH client misbehaving
+                # under many parallel connections, so surface a targeted hint.
+                macos_hint = ''
+                if returncode == 255:
+                    macos_hint = common_utils.maybe_macos_ssh_hint(stderr)
+                hint_suffix = f'\n{macos_hint}' if macos_hint else ''
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
                     f'(exit code {returncode}). Error: '
                     f'===== stdout ===== \n{stdout}\n'
-                    f'===== stderr ====={stderr}')
+                    f'===== stderr ====={stderr}{hint_suffix}')
 
     _parallel_ssh_with_cache(_setup_node,
                              cluster_name,

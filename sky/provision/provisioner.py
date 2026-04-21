@@ -422,9 +422,11 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                                      ssh_probe_timeout=ssh_probe_timeout)
             if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
+                    macos_hint = common_utils.maybe_macos_ssh_hint(stderr)
+                    hint_suffix = f'\n{macos_hint}' if macos_hint else ''
                     raise RuntimeError(
                         f'Failed to SSH to {ip} after timeout {timeout}s, with '
-                        f'{stderr}')
+                        f'{stderr}{hint_suffix}')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
 

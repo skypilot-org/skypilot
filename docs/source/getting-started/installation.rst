@@ -68,6 +68,22 @@ SkyPilot supports installation with ``uv`` or ``pip``.
       pip install "skypilot[kubernetes,aws,gcp]"
 
 
+.. note::
+
+   **macOS users (especially Sequoia):** the system OpenSSH client shipped
+   with recent macOS releases has known bugs that can cause cluster launches
+   to hang at ``Preparing SkyPilot runtime`` or fail with SSH errors like
+   ``max_client`` / ``kex_exchange_identification``. If you hit this, install
+   a newer OpenSSH via Homebrew and restart the API server:
+
+   .. code-block:: shell
+
+      brew install openssh   # or: brew reinstall openssh
+      sky api stop && sky api start
+
+   See :ref:`the FAQ <macos-ssh-runtime-setup>` for details.
+
+
 .. dropdown:: Install SkyPilot from nightly build or source
 
     SkyPilot provides nightly builds and source code for the latest features and for development.
