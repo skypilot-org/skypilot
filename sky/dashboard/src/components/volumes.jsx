@@ -59,6 +59,7 @@ export function Volumes() {
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
+  const [volumesData, setVolumesData] = useState([]);
   const pluginTabs = usePluginComponents('volumes.tabs');
 
   const handleTabChange = useCallback(
@@ -226,7 +227,10 @@ export function Volumes() {
             </button>
             <PluginSlot
               name="volumes.header-actions"
-              context={{ onVolumeChange: handleRefresh }}
+              context={{
+                onVolumeChange: handleRefresh,
+                volumes: volumesData,
+              }}
               wrapperClassName="contents"
             />
           </div>
@@ -241,6 +245,7 @@ export function Volumes() {
             setLoading={setLoading}
             refreshDataRef={refreshDataRef}
             onDeleteVolume={handleDeleteVolumeClick}
+            onDataChange={setVolumesData}
             preloadingComplete={preloadingComplete}
           />
 
@@ -427,6 +432,7 @@ function VolumesTable({
   setLoading,
   refreshDataRef,
   onDeleteVolume,
+  onDataChange,
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
@@ -445,15 +451,21 @@ function VolumesTable({
     try {
       const volumesData = await dashboardCache.get(getVolumes);
       setData(volumesData);
+      if (onDataChange) {
+        onDataChange(volumesData);
+      }
     } catch (error) {
       console.error('Failed to fetch volumes:', error);
       setData([]);
+      if (onDataChange) {
+        onDataChange([]);
+      }
     } finally {
       setLoading(false);
       setLocalLoading(false);
       setIsInitialLoad(false);
     }
-  }, [setLoading]);
+  }, [setLoading, onDataChange]);
 
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
@@ -925,5 +937,6 @@ VolumesTable.propTypes = {
     current: PropTypes.func,
   }).isRequired,
   onDeleteVolume: PropTypes.func.isRequired,
+  onDataChange: PropTypes.func,
   preloadingComplete: PropTypes.bool.isRequired,
 };
