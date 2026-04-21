@@ -19,6 +19,7 @@ Lifecycle::
                      ├─ Merge results
                      └─ Return (success) or raise (failure)
 """
+import base64
 import collections
 import contextvars
 import json
@@ -39,6 +40,93 @@ from sky.jobs import state as managed_job_state
 from sky.skylet import constants as skylet_constants
 
 logger = logging.getLogger(__name__)
+
+# Runs on the worker node before we start a fresh worker service: if
+# port {port} (the WORKER_SERVICE_PORT) is still bound by a stale
+# worker from the previous controller incarnation, SIGTERM/SIGKILL its
+# holder and wait up to 30s for the port to free.  Plain-format string
+# (single ``{port}`` placeholder) so it can be injected into shell code
+# via ``str.format``/``shlex.quote`` without f-string/heredoc issues.
+_PORT_CLEANUP_PY = """
+import errno, os, signal, socket, time
+
+PORT = {port}
+
+def port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return False
+        except OSError as e:
+            return e.errno == errno.EADDRINUSE
+
+
+def kill_listeners(port):
+    hex_port = f"{{port:04X}}"
+    listener_inodes = set()
+    try:
+        with open("/proc/net/tcp", "r") as f:
+            next(f, None)
+            for line in f:
+                parts = line.split()
+                if len(parts) < 10:
+                    continue
+                local, state, inode = parts[1], parts[3], parts[9]
+                if state == "0A" and local.endswith(f":{{hex_port}}"):
+                    listener_inodes.add(inode)
+    except FileNotFoundError:
+        return
+    if not listener_inodes:
+        return
+    my_pid = os.getpid()
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == my_pid:
+            continue
+        fd_dir = f"/proc/{{pid}}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except (FileNotFoundError, PermissionError):
+            continue
+        matched = False
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(fd_dir, fd))
+            except (FileNotFoundError, PermissionError):
+                continue
+            if target.startswith("socket:["):
+                inode = target[len("socket:["):-1]
+                if inode in listener_inodes:
+                    matched = True
+                    break
+        if matched:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.kill(pid, sig)
+                except ProcessLookupError:
+                    break
+                time.sleep(1)
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+
+
+if port_in_use(PORT):
+    print(f"Port {{PORT}} is in use; killing stale holder(s)...", flush=True)
+    kill_listeners(PORT)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and port_in_use(PORT):
+        time.sleep(1)
+    if port_in_use(PORT):
+        print(f"WARNING: port {{PORT}} still in use after cleanup",
+              flush=True)
+    else:
+        print(f"Port {{PORT}} is now free", flush=True)
+"""
 
 
 class BatchCoordinator:
@@ -384,6 +472,16 @@ class BatchCoordinator:
                                          []).replace('\'', '\'\\\'\'')
 
         port = constants.WORKER_SERVICE_PORT
+        # Python snippet that frees port {port} if a stale worker
+        # service is still holding it after a controller crash.  Kept
+        # as a module-level constant (``_PORT_CLEANUP_PY``) so it is
+        # not reindented by the surrounding textwrap.dedent call, then
+        # base64-encoded so the whole thing is a single opaque token in
+        # the generated shell script (no multi-line content that would
+        # confuse textwrap.dedent).
+        port_cleanup_py = _PORT_CLEANUP_PY.format(port=port)
+        port_cleanup_b64 = base64.b64encode(
+            port_cleanup_py.encode('utf-8')).decode('ascii')
         return textwrap.dedent(f"""\
             set -e
             export SKY_BATCH_SERIALIZED_FN='{self.serialized_fn}'
@@ -394,24 +492,9 @@ class BatchCoordinator:
 
             # On HA resume the previous worker service may still be
             # holding port {port} even after sdk.cancel has returned.
-            # Kill any process bound to the port, then wait up to 10s
-            # for the port to become free so the new service can bind.
-            if command -v fuser >/dev/null 2>&1; then
-                fuser -k {port}/tcp 2>/dev/null || true
-            elif command -v lsof >/dev/null 2>&1; then
-                lsof -ti tcp:{port} 2>/dev/null \\
-                    | xargs -r kill -9 2>/dev/null || true
-            fi
-            for _ in $(seq 1 10); do
-                if ! (command -v lsof >/dev/null 2>&1 \\
-                      && lsof -i tcp:{port} >/dev/null 2>&1) \\
-                   && ! (command -v ss >/dev/null 2>&1 \\
-                         && ss -ltn "sport = :{port}" 2>/dev/null \\
-                              | grep -q ":{port}"); then
-                    break
-                fi
-                sleep 1
-            done
+            # Free the port before we try to bind; best-effort and
+            # portable across container images (no fuser/lsof/ss).
+            echo '{port_cleanup_b64}' | base64 -d | {sky_runtime}/bin/python -
 
             # Make sky.batch visible to the user's python.
             SKY_SITE=$({sky_runtime}/bin/python -c \\
