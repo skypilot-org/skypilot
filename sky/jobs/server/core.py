@@ -1352,7 +1352,7 @@ def cancel(name: Optional[str] = None,
 
             if all_users and not is_admin:
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
+                    raise exceptions.PermissionDeniedError(
                         'Only admins can cancel all users\' jobs. '
                         'Use --all to cancel your own jobs.')
 
@@ -1360,7 +1360,7 @@ def cancel(name: Optional[str] = None,
             # so require explicit confirmation (-y/--yes) to avoid accidents.
             if is_admin and not all_users and not all and not yes:
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
+                    raise RuntimeError(
                         'You are cancelling as admin, which bypasses job '
                         'ownership checks. Re-run with -y/--yes to confirm.')
 
