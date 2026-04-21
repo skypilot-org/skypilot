@@ -1038,6 +1038,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     job_info: Dict[int, Tuple[Optional[str], str]] = (
         managed_job_state.get_job_owner_and_workspace(job_ids))
 
+    # Refresh controller liveness for all nonterminal jobs in one pass before
+    # entering the per-job loop, so we avoid N separate DB round-trips and the
+    # status check at the top of the loop reflects any dead controllers.
+    update_managed_jobs_statuses()
+
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -1065,8 +1070,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             if cancelled:
                 cancelled_job_ids.append(job_id)
                 continue
-
-        update_managed_jobs_statuses(job_id)
 
         _, job_workspace = job_info.get(
             job_id, (None, constants.SKYPILOT_DEFAULT_WORKSPACE))
