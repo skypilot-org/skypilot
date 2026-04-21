@@ -162,14 +162,11 @@ def launch_workers(cfg: BenchmarkConfig) -> List[str]:
     # failed — the API server may still be provisioning. Verify state.
     print('  Verifying worker cluster state ...', flush=True)
     up = _verify_up(target_names, wait_s=900)
-    if not up:
-        raise RuntimeError(
-            f'No workers came UP after launch + 15 min verify window. '
-            f'Attempted: {target_names}')
     if len(up) < n:
-        print(f'WARNING: only {len(up)}/{n} workers UP ({up})',
-              file=sys.stderr,
-              flush=True)
+        failed = sorted(set(target_names) - set(up))
+        raise RuntimeError(
+            f'{len(failed)}/{n} workers failed to come UP: {failed}. '
+            f'Aborting benchmark.')
     return sorted(up)
 
 

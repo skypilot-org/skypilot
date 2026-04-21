@@ -254,11 +254,20 @@ class LongConnGenerator(GeneratorBase):
                     pass
         if slot.iterator is not None:
             was_alive = True
-            try:
-                slot.iterator.close()  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001
-                pass
+            it = slot.iterator
             slot.iterator = None
+
+            # Close in a daemon thread — the streaming HTTP response may not
+            # shut down cleanly under load, and we don't want to block.
+            def _close_iter():
+                try:
+                    it.close()  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    pass
+
+            t = threading.Thread(target=_close_iter, daemon=True)
+            t.start()
+            t.join(timeout=5)
         if was_alive:
             self._emit({
                 'event': 'disconnect',

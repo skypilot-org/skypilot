@@ -30,12 +30,6 @@ duration_s: 600
 victim_pool:
   enabled: true
   count: 2
-  # IMPORTANT: for the ssh_idle long-connection generator to actually
-  # exercise the target API server's websocket endpoints
-  # (/kubernetes-pod-ssh-proxy, /slurm-job-ssh-proxy), the victim cloud
-  # must be kubernetes or slurm. AWS/GCP use direct-TCP SSH that bypasses
-  # the API server and won't show up as websocket connections on the
-  # dashboard. Defaults to target.cloud if omitted.
   cloud: kubernetes
   cpus: 2
   memory: 4
@@ -48,24 +42,19 @@ generators:
   - name: shell-lifecycle
     type: shell
     workload: workloads/basic.sh
-    threads_per_worker: 4
-    repeats: 10
+    threads_per_worker: 10
+    repeats: 2
     phases: [cluster, jobs]
     timeout_per_run_s: 3600
 
   # Constant-rate short reads (open-loop, won't stall on slow ops above).
   - name: api-read-qps
     type: qps
-    target_qps: 20
+    target_qps: 30
     max_inflight_per_worker: 20
     operations:
       - op: status
         weight: 5
-      - op: jobs_queue
-        weight: 3
-      - op: job_status
-        weight: 2
-        needs_victim: true
 
   # Concurrent long-lived sessions to victims.
   - name: long-connections
@@ -74,6 +63,6 @@ generators:
     reconnect_on_drop: true
     protocols:
       - kind: ssh_idle
-        connections_per_worker: 5
+        connections_per_worker: 10
       - kind: logs_follow
-        connections_per_worker: 5
+        connections_per_worker: 10

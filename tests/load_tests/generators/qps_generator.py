@@ -59,8 +59,9 @@ class QpsGenerator(GeneratorBase):
         if self._dispatcher:
             self._dispatcher.join(timeout=5)
         if self._collector_pool:
-            # Allow in-flight requests a few seconds to drain.
-            self._collector_pool.shutdown(wait=True, cancel_futures=False)
+            # Cancel pending futures and don't block on in-flight requests —
+            # under heavy load sky_sdk.get() calls can hang indefinitely.
+            self._collector_pool.shutdown(wait=False, cancel_futures=True)
 
     def summarize(self) -> Dict[str, Any]:
         rows = self.records()
