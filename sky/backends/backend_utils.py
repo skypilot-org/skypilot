@@ -1487,8 +1487,14 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
 
     config_hash = hashlib.sha256()
 
+    # Sort keys so the hashed representation is stable across processes.
+    # Otherwise dict insertion order (which can reflect per-process set
+    # iteration under PYTHONHASHSEED) leaks into the hash and causes the
+    # same logical config to hash to different values on different API
+    # server workers.
     yaml_hash = hashlib.sha256(
-        yaml_utils.dump_yaml_str(yaml_config).encode('utf-8'))
+        yaml_utils.dump_yaml_str(yaml_config,
+                                 sort_keys=True).encode('utf-8'))
     config_hash.update(yaml_hash.digest())
 
     file_mounts = yaml_config.get('file_mounts', {})

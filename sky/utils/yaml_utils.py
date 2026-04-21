@@ -134,10 +134,15 @@ def dump_yaml(path: str,
         f.write(contents)
 
 
-def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
+def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]],
+                  sort_keys: bool = False) -> str:
     """Dumps a YAML string.
     Args:
         config: the configuration to dump.
+        sort_keys: if True, sort dict keys in the output. Use this when the
+            output must be deterministic across processes (e.g. for hashing),
+            since Python dict iteration order can reflect non-deterministic
+            upstream state like set iteration under PYTHONHASHSEED.
     Returns:
         The YAML string.
     """
@@ -156,5 +161,5 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
         dump_func = yaml.dump  # type: ignore
     return dump_func(config,
                      Dumper=LineBreakDumper,
-                     sort_keys=False,
+                     sort_keys=sort_keys,
                      default_flow_style=False)
