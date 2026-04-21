@@ -285,10 +285,11 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                                  f'matching existing public key.')
                     break
             else:
-                raise Exception(
+                raise RuntimeError(
                     'IBM VPC reports a key with the same fingerprint '
                     'already exists, but no listed key matches the '
-                    'local public key.') from e
+                    'local public key. Please check your IBM Cloud '
+                    'console to resolve this conflict.') from e
         elif 'Key with name already exists' in e.message:
             raise Exception("""a key with chosen name
                 already registered in the specified region""") from e
