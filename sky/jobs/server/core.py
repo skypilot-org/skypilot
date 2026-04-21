@@ -333,18 +333,17 @@ def _cancel_managed_jobs_via_controller(
             graceful=graceful,
             graceful_timeout=graceful_timeout,
         )
-    if all_users or all or job_ids:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-            job_ids,
-            all_users=all_users,
-            graceful=graceful,
-            graceful_timeout=graceful_timeout)
-    elif name is not None:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-            name, graceful=graceful, graceful_timeout=graceful_timeout)
-    else:
-        assert pool is not None, (job_ids, name, pool, all)
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(pool)
+    # Single codegen that embeds the dispatcher (``cancel_managed_jobs``)
+    # via ``inspect.getsource`` — keeps the variant selection in one place.
+    code = managed_job_utils.ManagedJobCodeGen.cancel_managed_jobs(
+        name=name,
+        job_ids=job_ids,
+        pool=pool,
+        all=all,
+        all_users=all_users,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
+    )
     # The stderr is redirected to stdout.
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,

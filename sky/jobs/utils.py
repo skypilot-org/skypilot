@@ -10,6 +10,7 @@ import concurrent.futures
 import contextlib
 from datetime import datetime
 import enum
+import inspect
 import json
 import os
 import pathlib
@@ -1135,6 +1136,57 @@ def cancel_jobs_by_pool(pool_name: str,
     if not job_ids:
         return f'No running job found in pool {pool_name!r}.'
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+
+
+def cancel_managed_jobs(
+    *,
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    pool: Optional[str] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+    current_workspace: Optional[str] = None,
+    user_hash: Optional[str] = None,
+) -> str:
+    """Dispatch to the correct cancel variant based on selector args.
+
+    One of ``job_ids``/``name``/``pool``/``all``/``all_users`` should be set.
+    Precedence:
+
+      - ``all_users`` or ``all`` or ``job_ids`` -> ``cancel_jobs_by_id``
+      - ``name`` -> ``cancel_job_by_name``
+      - ``pool`` -> ``cancel_jobs_by_pool``
+
+    This dispatcher is also embedded verbatim into
+    ``ManagedJobCodeGen.cancel_managed_jobs`` via ``inspect.getsource`` so
+    the subprocess codegen path runs the same Python. Keep the body pure
+    (no module-level dependencies beyond ``cancel_jobs_by_id`` /
+    ``cancel_job_by_name`` / ``cancel_jobs_by_pool``) so the embedded
+    source works without additional imports.
+    """
+    if all_users or all or job_ids:
+        return cancel_jobs_by_id(
+            job_ids,
+            all_users=all_users,
+            current_workspace=current_workspace,
+            user_hash=user_hash,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    if name is not None:
+        return cancel_job_by_name(
+            name,
+            current_workspace=current_workspace,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    assert pool is not None, (job_ids, name, pool, all)
+    return cancel_jobs_by_pool(
+        pool,
+        current_workspace=current_workspace,
+    )
 
 
 def controller_log_file_for_job(job_id: int,
@@ -2858,6 +2910,52 @@ class ManagedJobCodeGen:
             msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
             print(msg, end="", flush=True)
         """)
+        return cls._build(code)
+
+    @classmethod
+    def cancel_managed_jobs(
+        cls,
+        *,
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        pool: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+    ) -> str:
+        """Unified cancel codegen — embeds the dispatcher via inspect.
+
+        The controller runs the same ``cancel_managed_jobs`` Python
+        function as in-process callers because its source is shipped
+        verbatim in the generated code. No ``managed_job_version`` gating
+        is needed for the dispatcher itself: the codegen supplies the
+        definition before calling it. We still inject imports for the
+        three underlying cancel functions so the embedded dispatcher's
+        bare-name lookups resolve in the exec scope.
+        """
+        active_workspace = skypilot_config.get_active_workspace()
+        user_hash = common_utils.get_user_hash() if all else None
+        dispatcher_src = inspect.getsource(cancel_managed_jobs)
+        code = ('from typing import List, Optional  # noqa: F401\n'
+                'from sky.jobs.utils import (\n'
+                '    cancel_jobs_by_id,\n'
+                '    cancel_job_by_name,\n'
+                '    cancel_jobs_by_pool,\n'
+                ')\n'
+                f'{dispatcher_src}\n'
+                'msg = cancel_managed_jobs(\n'
+                f'    name={name!r},\n'
+                f'    job_ids={job_ids!r},\n'
+                f'    pool={pool!r},\n'
+                f'    all={all!r},\n'
+                f'    all_users={all_users!r},\n'
+                f'    graceful={graceful!r},\n'
+                f'    graceful_timeout={graceful_timeout!r},\n'
+                f'    current_workspace={active_workspace!r},\n'
+                f'    user_hash={user_hash!r},\n'
+                ')\n'
+                'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod
