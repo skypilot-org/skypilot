@@ -1257,7 +1257,7 @@ available_node_types:
                 - bash
                 - -c
                 - |
-                  timeout {{termination_hook_timeout | default(300)}} bash <(echo "{{termination_hook}}" | base64 --decode)
+                  timeout {{termination_hook_timeout | default(300)}} bash <(echo "{{termination_hook}}" | base64 --decode) > /proc/1/fd/1 2> /proc/1/fd/2
           {% endif %}
           ports:
           - containerPort: 22  # Used for SSH

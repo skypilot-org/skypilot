@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 48  # mount config read_only support
+API_VERSION = 49  # termination_hook: unified hook + K8s log dispatch
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -41,6 +41,10 @@ MIN_API_ACCESS_API_VERSION = 42
 
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
+
+# Minimum API version that exposes /termination_hook_logs and
+# tail_termination_hook_logs (K8s-aware pod-log dispatch).
+MIN_TERMINATION_HOOK_LOGS_API_VERSION = 49
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

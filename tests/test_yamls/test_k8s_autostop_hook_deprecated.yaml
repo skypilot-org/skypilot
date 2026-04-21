@@ -1,0 +1,19 @@
+# Legacy YAML input form: autostop.hook / autostop.hook_timeout.
+# Exercised by test_k8s_autostop_hook_deprecated_alias_renders_prestop:
+# after PR2, these fields are still accepted (with a deprecation
+# warning) and are routed into termination_hook so the K8s preStop
+# block still renders.
+resources:
+  cloud: kubernetes
+  cpus: 1
+  autostop:
+    hook: |
+      echo "legacy autostop hook running"
+    hook_timeout: 60
+
+setup: |
+  echo "Setup complete"
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

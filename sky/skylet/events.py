@@ -221,20 +221,20 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _execute_hook_if_present(self, autostop_config) -> None:
-        """Execute autostop hook if present in the config."""
-        hook = autostop_config.hook
-        hook_timeout = autostop_config.hook_timeout
+        """Execute termination hook if present in the config."""
+        hook = autostop_config.termination_hook
+        hook_timeout = autostop_config.termination_hook_timeout
         if hook:
-            logger.info(f'Executing autostop hook before stopping cluster '
+            logger.info(f'Executing termination hook before stopping cluster '
                         f'(timeout: {hook_timeout}s)...')
-            hook_success = autostop_lib.execute_autostop_hook(
+            hook_success = autostop_lib.execute_termination_hook(
                 hook, hook_timeout)
             if not hook_success:
                 logger.warning(
-                    'Autostop hook failed, but continuing with cluster stop. '
-                    'Check logs for details.')
+                    'Termination hook failed, but continuing with cluster '
+                    'stop. Check logs for details.')
             else:
-                logger.info('Autostop hook completed successfully.')
+                logger.info('Termination hook completed successfully.')
 
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==

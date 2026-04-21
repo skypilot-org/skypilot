@@ -378,20 +378,22 @@ def _execute_dag(
                 raise ValueError(
                     'All resources must have the same autostop config.')
         resource_autostop_config = resources[0].autostop_config
+        resource_termination_hook = resources[0].termination_hook
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         hook: Optional[str] = None
         hook_timeout: Optional[int] = None
+        if resource_termination_hook is not None:
+            hook = resource_termination_hook.get('command')
+            hook_timeout = resource_termination_hook.get('timeout')
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
-                hook = resource_autostop_config.hook
-                hook_timeout = resource_autostop_config.hook_timeout
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.

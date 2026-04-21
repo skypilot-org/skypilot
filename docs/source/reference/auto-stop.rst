@@ -140,64 +140,101 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
 
+.. _termination-hooks:
 .. _auto-stop-hooks:
 
-Autostop hooks
-~~~~~~~~~~~~~~
+Termination hooks
+~~~~~~~~~~~~~~~~~
 
-To execute a script before autostopping, specify a hook in the autostop configuration.
-The hook script runs on the remote cluster before the cluster is stopped or torn down.
-This is useful for tasks like committing code, saving checkpoints, or performing cleanup operations.
+To execute a script before the cluster is terminated, specify a
+``termination_hook`` in the resources block. The hook runs on the
+remote cluster and is useful for committing code, saving checkpoints,
+uploading logs, or performing cleanup operations.
 
 .. code-block:: yaml
 
    resources:
-     autostop:
-       idle_minutes: 10
-       hook: |
+     termination_hook:
+       command: |
          cd my-code-base
          git add .
          git commit -m "Commit my code"
          git push
-       hook_timeout: 300
+       timeout: 300  # seconds
 
-The hook script runs on the cluster and has access to the cluster's filesystem and environment variables.
-If the hook script fails (non-zero exit code), the autostop process will still continue,
-but a warning will be logged.
+The hook has access to the cluster's filesystem and environment
+variables. If it fails (non-zero exit code) or times out, the
+termination process continues after logging a warning.
 
-**Hook Timeout**
+**Where and when the hook fires depends on the cloud:**
 
-By default, autostop hooks have a **1-hour (3600 seconds) timeout**. If your hook
-takes longer than this, it will be killed and autostop will proceed. To
-customize the timeout in your YAML configuration:
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 30 20
+
+   * - Cloud
+     - Fires on
+     - Nodes
+     - Retrieval
+   * - Kubernetes
+     - pod termination of any kind (idle autostop, K8s preemption,
+       node drain, eviction, ``sky down`` best-effort)
+     - head **and** all workers (rendered as a ``preStop`` lifecycle
+       hook on every pod)
+     - ``sky logs --termination-hook`` (via kubelet pod logs)
+   * - AWS / GCP / Azure / others
+     - cluster autostop (idle timer) only
+     - head only (executed by the skylet)
+     - ``sky logs --termination-hook`` (tailed from
+       ``~/.sky/autostop_hook.log``)
+
+Extending the hook to non-Kubernetes termination events (spot
+preemption, ``sky down``) is a future work item.
+
+**Hook timeout**
+
+By default, termination hooks have a **1-hour (3600 seconds) timeout**.
+If your hook takes longer than this, it will be killed and termination
+will proceed. Customize the timeout in YAML:
 
 .. code-block:: yaml
 
    resources:
-     autostop:
-       idle_minutes: 10
-       hook: |
+     termination_hook:
+       command: |
          # Long-running backup operation
          tar -czf backup.tar.gz /large/dataset
          aws s3 cp backup.tar.gz s3://my-bucket/
-       hook_timeout: 7200  # 2 hours in seconds
+       timeout: 7200  # 2 hours in seconds
 
-**Important Notes:**
+On Kubernetes, ``timeout`` also sets the pod's
+``terminationGracePeriodSeconds`` so the pod stays alive long enough
+for the hook to finish.
 
-- If the hook times out, autostop will proceed after logging a warning
-- The minimum timeout is 1 second
-- Hook execution will keep the cluster from terminating while it runs, occupying the resources. Be aware of that when setting ``idle_minutes``
+**Important notes**
 
-Common use cases for autostop hooks:
+- If the hook times out, termination proceeds after logging a warning.
+- The minimum timeout is 1 second.
+- Hook execution keeps the cluster from terminating while it runs,
+  occupying the resources. Keep that in mind when combined with
+  ``autostop.idle_minutes``.
+- On ``sky down``, SkyPilot uses ``grace_period_seconds=0`` (force
+  delete) which is intended to skip the ``preStop`` hook. Due to a
+  `known kubelet regression
+  <https://github.com/kubernetes/kubernetes/issues/123408>`_, the hook
+  may still execute briefly (~1-2s). Design your hook as best-effort
+  on user-initiated teardown.
+- ``sky stop`` is not supported on Kubernetes clusters.
+
+Common use cases:
 
 .. dropdown:: Committing and pushing code changes
 
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              cd my-code-base
              git add .
              git commit -m "Auto-commit before shutdown"
@@ -208,9 +245,8 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Save checkpoints to a mounted volume or cloud storage
              cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
              # Or upload to S3
@@ -221,9 +257,8 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Upload logs to S3
              aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
              # Or upload to GCS
@@ -234,9 +269,8 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Sync W&B runs to the cloud before shutdown
              # Sync all runs in the wandb directory
              wandb sync ./wandb
@@ -248,9 +282,8 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Send email notification
              echo "Cluster shutting down after idle period" | \
                mail -s "Cluster Autostop" user@example.com
@@ -264,9 +297,8 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Trigger an evaluation pipeline in Airflow
              curl -X POST https://airflow.example.com/api/v1/dags/model_eval/dag_runs \
                   -H "Content-Type: application/json" \
@@ -277,67 +309,51 @@ Common use cases for autostop hooks:
     .. code-block:: yaml
 
        resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
+         termination_hook:
+           command: |
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
 
-.. _termination-hooks:
+**Streaming hook logs**
 
-Termination hooks on Kubernetes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Use ``sky logs --termination-hook <cluster>`` to view the hook's
+output. On Kubernetes this streams the head pod's logs (preStop
+output is captured by kubelet); on other clouds it tails
+``~/.sky/autostop_hook.log`` on the head node.
 
-On Kubernetes, use the top-level ``termination_hook`` under ``resources`` to
-register a script that runs before the pod is terminated (for any reason —
-idle autostop, preemption, node drain, or eviction). The hook is embedded as a
-Kubernetes-native ``preStop`` lifecycle hook in the pod spec at launch time
-and fires on **all nodes** (head + workers).
+Backward compatibility: ``autostop.hook``
+-----------------------------------------
+
+The legacy form ``autostop.hook`` / ``autostop.hook_timeout`` is still
+accepted but **deprecated**. When used, SkyPilot emits a one-line
+warning and routes the value into ``termination_hook`` for you:
 
 .. code-block:: yaml
 
    resources:
-     cloud: kubernetes
+     autostop:
+       idle_minutes: 10
+       hook: |
+         cd my-code-base
+         git add .
+         git commit -m "Auto-commit before shutdown"
+         git push
+       hook_timeout: 300
+
+is equivalent to:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
      termination_hook:
        command: |
-         echo "Saving checkpoint before shutdown"
-         cp checkpoint.pt s3://bucket/checkpoints/
-       timeout: 600  # seconds
+         cd my-code-base
+         git add .
+         git commit -m "Auto-commit before shutdown"
+         git push
+       timeout: 300
 
-``termination_hook`` is an independent top-level field and does not interact
-with :ref:`autostop hooks <autostop-hooks>`. The legacy ``autostop.hook``
-key retains its original skylet-based semantics (idle autostop only); it
-does not render a ``preStop`` lifecycle hook. Both keys may be set in the
-same resources block — they are separate code paths and do not conflict.
-
-**How it works:**
-
-- The hook runs on **all nodes** via the Kubernetes ``preStop`` lifecycle hook
-- ``timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
-  (default: 30s when unset)
-- Re-launching an existing cluster with a changed ``termination_hook`` will
-  recreate the affected pods with the new lifecycle spec. Re-launching with the
-  same hook is a no-op (the config hash matches and provisioning is skipped)
-
-**When the hook fires:**
-
-- Cluster autostop/autodown (idle timeout triggers pod deletion)
-- Kubernetes preemption (higher-priority pod needs resources)
-- Node drain (e.g., during cluster maintenance)
-- Pod eviction (e.g., resource pressure)
-
-**Behavior on** ``sky down``:
-
-SkyPilot uses ``grace_period_seconds=0`` (force delete) when tearing down clusters,
-which is intended to skip the ``preStop`` hook. However, due to a `known kubelet
-regression <https://github.com/kubernetes/kubernetes/issues/123408>`_, the
-``preStop`` hook may still execute briefly (~1-2 seconds) before the container is
-killed. Fast hooks (e.g., uploading a small file) may complete; longer hooks (e.g.,
-saving a large checkpoint) will be interrupted.
-
-Design your hook to be **best-effort** — it is guaranteed to run on genuine
-preemption events, but may or may not complete on user-initiated teardown.
-
-.. note::
-
-   ``sky stop`` is not supported on Kubernetes clusters.
+The CLI flag ``sky logs --autostop`` is also deprecated; use
+``sky logs --termination-hook``. Both flags still work.

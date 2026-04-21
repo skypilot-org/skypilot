@@ -2463,13 +2463,18 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
-# TODO: the `--autostop` flag reflects the legacy vocabulary. A follow-up
-# PR will add a `--termination-hook` alias and teach log streaming to fetch
-# K8s preStop output (captured via pod logs rather than the skylet log file).
+@click.option('--termination-hook',
+              'termination_hook',
+              is_flag=True,
+              default=False,
+              help='Stream the termination hook logs from the cluster. On '
+              'Kubernetes the logs are fetched via the K8s pod-log API; on '
+              'other clouds they are tailed from the head node.')
 @click.option('--autostop',
               is_flag=True,
               default=False,
-              help='Stream the autostop hook logs from the cluster.')
+              help='(Deprecated; use --termination-hook.) Stream the '
+              'termination hook logs from the cluster.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2514,6 +2519,7 @@ def logs(
     job_ids: Tuple[str, ...],
     provision: bool,
     autostop: bool,  # pylint: disable=redefined-outer-name
+    termination_hook: bool,
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2544,9 +2550,20 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
 
-    5. If ``--autostop`` is specified, stream the autostop hook logs from the
-    cluster. This shows the output of the autostop hook script.
+    5. If ``--termination-hook`` is specified (or the deprecated
+    ``--autostop`` alias), stream the termination hook logs from the
+    cluster. This shows the output of the termination/autostop hook
+    script.
     """
+    if autostop and termination_hook:
+        raise click.UsageError(
+            '--autostop and --termination-hook are aliases. Use '
+            '--termination-hook (the --autostop flag is deprecated).')
+    if autostop:
+        click.echo('--autostop is deprecated; use --termination-hook.',
+                   err=True)
+        termination_hook = True
+
     if worker is not None:
         if not provision:
             raise click.UsageError(
@@ -2554,18 +2571,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
-    if provision and autostop:
+    if provision and termination_hook:
         raise click.UsageError(
-            '--provision and --autostop cannot be used together.')
+            '--provision and --termination-hook cannot be used together.')
 
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
 
-    if autostop and (sync_down or status or job_ids or worker is not None):
+    if termination_hook and (sync_down or status or job_ids or
+                             worker is not None):
         raise click.UsageError(
-            '--autostop cannot be combined with job log options '
+            '--termination-hook cannot be combined with job log options '
             '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
@@ -2588,12 +2606,12 @@ def logs(
                                     follow=follow,
                                     tail=tail))
 
-    if autostop:
-        # Stream autostop hook logs
+    if termination_hook:
+        # Stream termination hook logs
         sys.exit(
-            sdk.tail_autostop_logs(cluster_name=cluster,
-                                   follow=follow,
-                                   tail=tail))
+            sdk.tail_termination_hook_logs(cluster_name=cluster,
+                                           follow=follow,
+                                           tail=tail))
 
     if sync_down:
         with rich_utils.client_status(

@@ -412,10 +412,21 @@ class ProvisionLogsBody(RequestBody):
 
 
 class AutostopLogsBody(RequestBody):
-    """Autostop logs request body."""
+    """Termination hook logs request body.
+
+    Historical name: the class is still called ``AutostopLogsBody``
+    because it is part of the wire contract. A new alias
+    ``TerminationHookLogsBody`` is exported below for code using the
+    new vocabulary.
+    """
     cluster_name: str
     follow: bool = True
     tail: int = 0
+
+
+# New name used by `/termination_hook_logs` server route + the new SDK
+# method. Identical schema — safe to alias.
+TerminationHookLogsBody = AutostopLogsBody
 
 
 class ClusterJobBody(RequestBody):

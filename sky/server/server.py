@@ -2033,18 +2033,49 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
+@app.post('/termination_hook_logs')
+async def termination_hook_logs(
+    request: fastapi.Request,
+    termination_hook_logs_body: payloads.TerminationHookLogsBody,
+    background_tasks: fastapi.BackgroundTasks
+) -> fastapi.responses.StreamingResponse:
+    """Tails the termination hook logs of a cluster."""
+    executor.check_request_thread_executor_available()
+    request_task = await executor.prepare_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
+        request_body=termination_hook_logs_body,
+        func=core.tail_termination_hook_logs,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=termination_hook_logs_body.cluster_name,
+        auth_user=request.state.auth_user,
+    )
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
+    return stream_utils.stream_response_for_long_request(
+        request_id=request.state.request_id,
+        logs_path=request_task.log_path,
+        background_tasks=background_tasks,
+        kill_request_on_disconnect=False,
+    )
+
+
 @app.post('/autostop_logs')
 async def autostop_logs(
     request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    """Tails the autostop hook logs of a cluster."""
+    """Deprecated alias for /termination_hook_logs.
+
+    Kept so old clients (SDK `tail_autostop_logs` calls that predate the
+    rename) keep working against a new server.
+    """
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
         request_body=autostop_logs_body,
-        func=core.tail_autostop_logs,
+        func=core.tail_termination_hook_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=autostop_logs_body.cluster_name,
         auth_user=request.state.auth_user,

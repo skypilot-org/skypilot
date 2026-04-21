@@ -60,7 +60,14 @@ MEMORY_SIZE_UNITS = {
 
 @dataclasses.dataclass
 class AutostopConfig:
-    """Configuration for autostop."""
+    """Configuration for autostop.
+
+    Note: the former ``hook`` / ``hook_timeout`` fields were removed in
+    the termination_hook migration. The hook now lives on
+    ``Resources.termination_hook`` as a standalone field. Legacy YAML
+    input that sets ``autostop.hook`` is accepted and routed there by
+    ``Resources._set_autostop_config``.
+    """
     # enabled isn't present in the yaml config, but it's needed for this class
     # to be complete.
     enabled: bool
@@ -70,8 +77,6 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-    hook: Optional[str] = None
-    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -82,10 +87,6 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
-        if self.hook is not None:
-            config['hook'] = self.hook
-        if self.hook_timeout is not None:
-            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -117,10 +118,8 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
-            if 'hook' in config:
-                autostop_config.hook = config['hook']
-            if 'hook_timeout' in config:
-                autostop_config.hook_timeout = config['hook_timeout']
+            # Legacy `hook` / `hook_timeout` keys are popped and routed into
+            # Resources.termination_hook by `_set_autostop_config`.
             return autostop_config
 
         return None
@@ -143,7 +142,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 33  # add termination_hook as a standalone field.
+    _VERSION = 34  # remove AutostopConfig.hook; unify into termination_hook.
 
     def __init__(
         self,
@@ -433,8 +432,8 @@ class Resources:
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
-        self._set_autostop_config(autostop)
-        self._set_termination_hook(termination_hook)
+        legacy_termination_hook = self._set_autostop_config(autostop)
+        self._set_termination_hook(termination_hook, legacy_termination_hook)
         self._set_priority(priority)
         self._set_priority_class(priority_class)
         self._set_volumes(volumes)
@@ -961,21 +960,53 @@ class Resources:
     def _set_autostop_config(
         self,
         autostop: Union[bool, int, str, Dict[str, Any], None],
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
+        """Parse autostop config, returning any legacy hook routed out.
+
+        If the user wrote ``autostop.hook`` / ``autostop.hook_timeout``
+        in YAML, those keys are deprecated. We pop them from the dict,
+        emit a one-line warning, and return an equivalent
+        ``{'command', 'timeout'}`` dict so the caller can route it into
+        ``_termination_hook``. Returns ``None`` when no legacy keys are
+        present.
+        """
+        legacy_termination_hook: Optional[Dict[str, Any]] = None
+        if isinstance(autostop, dict):
+            legacy_hook = autostop.pop('hook', None)
+            legacy_timeout = autostop.pop('hook_timeout', None)
+            if legacy_hook is not None or legacy_timeout is not None:
+                logger.warning(
+                    'autostop.hook is deprecated. Use termination_hook '
+                    'instead (the system is routing autostop.hook into '
+                    'termination_hook for you).')
+                legacy_termination_hook = {}
+                if legacy_hook is not None:
+                    legacy_termination_hook['command'] = legacy_hook
+                if legacy_timeout is not None:
+                    legacy_termination_hook['timeout'] = legacy_timeout
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+        return legacy_termination_hook
 
     def _set_termination_hook(
         self,
         termination_hook: Optional[Dict[str, Any]],
+        legacy_termination_hook: Optional[Dict[str, Any]] = None,
     ) -> None:
-        # Standalone field: does NOT merge into AutostopConfig. On
-        # Kubernetes, this is rendered into the pod's preStop lifecycle
-        # hook by the template. On other clouds, this is currently a
-        # no-op; wiring to non-K8s termination paths is a follow-up PR.
-        if termination_hook is None:
-            self._termination_hook: Optional[Dict[str, Any]] = None
-            return
-        self._termination_hook = dict(termination_hook)
+        # Standalone field. On Kubernetes, this is rendered into the
+        # pod's preStop lifecycle hook by the template. On other clouds,
+        # it currently has no effect; wiring to non-K8s termination
+        # paths is a follow-up PR.
+        #
+        # ``legacy_termination_hook`` carries values routed in from the
+        # deprecated ``autostop.hook`` YAML keys. An explicit
+        # ``termination_hook`` argument wins if both are present.
+        if termination_hook is not None:
+            self._termination_hook: Optional[Dict[str,
+                                                  Any]] = dict(termination_hook)
+        elif legacy_termination_hook is not None:
+            self._termination_hook = dict(legacy_termination_hook)
+        else:
+            self._termination_hook = None
 
     def _set_priority(self, priority: Optional[int]) -> None:
         """Sets the priority for this resource configuration.
@@ -2767,6 +2798,32 @@ class Resources:
 
         if version < 33:
             self._termination_hook = None
+
+        if version < 34:
+            # Pickled AutostopConfig used to carry `hook` / `hook_timeout`.
+            # Route any surviving legacy values into _termination_hook and
+            # scrub them off the AutostopConfig so the dataclass's new
+            # shape stays consistent after unpickling.
+            ac = state.get('_autostop_config')
+            legacy_hook = getattr(ac, 'hook', None) if ac is not None else None
+            legacy_timeout = (getattr(ac, 'hook_timeout', None)
+                              if ac is not None else None)
+            if legacy_hook is not None or legacy_timeout is not None:
+                existing = state.get('_termination_hook')
+                if existing is None:
+                    routed: Dict[str, Any] = {}
+                    if legacy_hook is not None:
+                        routed['command'] = legacy_hook
+                    if legacy_timeout is not None:
+                        routed['timeout'] = legacy_timeout
+                    state['_termination_hook'] = routed
+            if ac is not None:
+                for attr in ('hook', 'hook_timeout'):
+                    if hasattr(ac, attr):
+                        try:
+                            delattr(ac, attr)
+                        except AttributeError:
+                            pass
 
         self.__dict__.update(state)
 

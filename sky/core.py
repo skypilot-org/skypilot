@@ -577,15 +577,17 @@ def _start(
         controller_resources = controller_utils.get_controller_resources(
             controller, [])
         # All resources should have the same autostop config.
-        controller_autostop_config = list(
-            controller_resources)[0].autostop_config
+        controller_resource = list(controller_resources)[0]
+        controller_autostop_config = controller_resource.autostop_config
         if (controller_autostop_config is not None and
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
-            hook = controller_autostop_config.hook
-            hook_timeout = controller_autostop_config.hook_timeout
+            if controller_resource.termination_hook is not None:
+                hook = controller_resource.termination_hook.get('command')
+                hook_timeout = controller_resource.termination_hook.get(
+                    'timeout')
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
@@ -1283,10 +1285,14 @@ def tail_logs(cluster_name: str,
 
 
 @usage_lib.entrypoint
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs of a cluster.
+def tail_termination_hook_logs(cluster_name: str,
+                               follow: bool = True,
+                               tail: int = 0) -> int:
+    """Tails the termination hook logs of a cluster.
+
+    Dispatches on the cluster's cloud: on Kubernetes the hook output is
+    retrieved via pod logs; on other clouds it is SSH-tailed from the
+    skylet's autostop-hook log file.
 
     Args:
         cluster_name: name of the cluster.
@@ -1310,13 +1316,20 @@ def tail_autostop_logs(cluster_name: str,
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        operation='tailing autostop logs',
+        operation='tailing termination hook logs',
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    returnval = backend.tail_termination_hook_logs(handle,
+                                                   follow=follow,
+                                                   tail=tail)
     return returnval
+
+
+# Back-compat alias for the old name. Old server routes and any external
+# callers depending on sky.core.tail_autostop_logs continue to work.
+tail_autostop_logs = tail_termination_hook_logs
 
 
 @usage_lib.entrypoint

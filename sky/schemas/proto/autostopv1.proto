@@ -21,8 +21,13 @@ message SetAutostopRequest {
   string backend = 2;
   AutostopWaitFor wait_for = 3;
   bool down = 4;
-  optional string hook = 5;
-  optional int32 hook_timeout = 6;
+  // Field numbers 5 and 6 were previously named `hook` / `hook_timeout`.
+  // Renamed to `termination_hook` / `termination_hook_timeout` in the
+  // PR2 migration. Wire format is unchanged: field numbers 5 and 6 are
+  // preserved so new clients/servers interoperate with old binaries at
+  // the wire level.
+  optional string termination_hook = 5;
+  optional int32 termination_hook_timeout = 6;
 }
 
 message SetAutostopResponse {}

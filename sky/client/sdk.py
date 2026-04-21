@@ -1106,11 +1106,19 @@ def tail_provision_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_TERMINATION_HOOK_LOGS_API_VERSION)
 @annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+def tail_termination_hook_logs(cluster_name: str,
+                               follow: bool = True,
+                               tail: int = 0) -> int:
+    """Tails the termination hook logs for a cluster.
+
+    On Kubernetes, the hook runs via the pod's ``preStop`` lifecycle
+    hook and its output is streamed from kubelet-captured pod logs.
+    On other clouds, the hook runs via the skylet's autostop path and
+    its output is streamed from ``~/.sky/autostop_hook.log`` on the
+    head node.
 
     Args:
         cluster_name: name of the cluster.
@@ -1131,6 +1139,42 @@ def tail_autostop_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
+    body = payloads.TerminationHookLogsBody(cluster_name=cluster_name,
+                                            follow=follow,
+                                            tail=tail)
+
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/termination_hook_logs',
+        json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the termination hook logs (deprecated alias).
+
+    Kept as a thin alias for ``tail_termination_hook_logs`` to preserve
+    the old public API. New code should call
+    ``tail_termination_hook_logs`` directly. On servers older than
+    ``MIN_TERMINATION_HOOK_LOGS_API_VERSION`` this still targets the
+    legacy ``/autostop_logs`` route to maintain client/server back-compat.
+    """
+    logger.warning(
+        'tail_autostop_logs is deprecated; use tail_termination_hook_logs.')
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version >=
+            server_constants.MIN_TERMINATION_HOOK_LOGS_API_VERSION):
+        return tail_termination_hook_logs(cluster_name,
+                                          follow=follow,
+                                          tail=tail)
+
     body = payloads.AutostopLogsBody(cluster_name=cluster_name,
                                      follow=follow,
                                      tail=tail)

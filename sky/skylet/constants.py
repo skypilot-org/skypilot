@@ -150,16 +150,21 @@ SKYLET_VERSION = '35'  # Add fields to ManagedJobInfo proto for handle.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
+SKYLET_LIB_VERSION = 7  # Rename hook -> termination_hook on set_autostop.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
-AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+# Log file for the termination hook. File path intentionally kept as
+# .sky/autostop_hook.log for backward-compat with clusters launched
+# before the hook was renamed.
+TERMINATION_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+# Back-compat alias; external tooling may reference the old constant name.
+AUTOSTOP_HOOK_LOG_FILE = TERMINATION_HOOK_LOG_FILE
 
-# Autostop hook timeout default (1 hour in seconds)
+# Termination hook timeout default (1 hour in seconds)
 DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options

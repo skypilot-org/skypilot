@@ -17,20 +17,20 @@ AUTOSTOP_WAIT_FOR_JOBS: AutostopWaitFor
 AUTOSTOP_WAIT_FOR_NONE: AutostopWaitFor
 
 class SetAutostopRequest(_message.Message):
-    __slots__ = ("idle_minutes", "backend", "wait_for", "down", "hook", "hook_timeout")
+    __slots__ = ("idle_minutes", "backend", "wait_for", "down", "termination_hook", "termination_hook_timeout")
     IDLE_MINUTES_FIELD_NUMBER: _ClassVar[int]
     BACKEND_FIELD_NUMBER: _ClassVar[int]
     WAIT_FOR_FIELD_NUMBER: _ClassVar[int]
     DOWN_FIELD_NUMBER: _ClassVar[int]
-    HOOK_FIELD_NUMBER: _ClassVar[int]
-    HOOK_TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    TERMINATION_HOOK_FIELD_NUMBER: _ClassVar[int]
+    TERMINATION_HOOK_TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     idle_minutes: int
     backend: str
     wait_for: AutostopWaitFor
     down: bool
-    hook: str
-    hook_timeout: int
-    def __init__(self, idle_minutes: _Optional[int] = ..., backend: _Optional[str] = ..., wait_for: _Optional[_Union[AutostopWaitFor, str]] = ..., down: bool = ..., hook: _Optional[str] = ..., hook_timeout: _Optional[int] = ...) -> None: ...
+    termination_hook: str
+    termination_hook_timeout: int
+    def __init__(self, idle_minutes: _Optional[int] = ..., backend: _Optional[str] = ..., wait_for: _Optional[_Union[AutostopWaitFor, str]] = ..., down: bool = ..., termination_hook: _Optional[str] = ..., termination_hook_timeout: _Optional[int] = ...) -> None: ...
 
 class SetAutostopResponse(_message.Message):
     __slots__ = ()

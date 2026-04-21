@@ -4634,15 +4634,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
-    # TODO: a follow-up PR renames this to tail_termination_hook_logs and
-    # adds a K8s-specific dispatch via `read_namespaced_pod_log` (preStop
-    # output is captured by kubelet as pod logs, not written to the
-    # file this SSH-tail path reads).
-    def tail_autostop_logs(self,
-                           handle: CloudVmRayResourceHandle,
-                           follow: bool = True,
-                           tail: int = 0) -> int:
-        """Tail the autostop hook logs.
+    def tail_termination_hook_logs(self,
+                                   handle: CloudVmRayResourceHandle,
+                                   follow: bool = True,
+                                   tail: int = 0) -> int:
+        """Tail the termination hook logs.
+
+        Dispatches on the cluster's cloud:
+
+        - **Kubernetes**: the hook runs via a ``preStop`` lifecycle hook
+          whose output is redirected to the main container's stdout
+          (``/proc/1/fd/1``). Stream via ``read_namespaced_pod_log`` on
+          the head pod.
+        - **Other clouds**: the hook runs via the skylet's autostop
+          path, which writes to ``~/.sky/autostop_hook.log``. Stream
+          via SSH tail.
 
         Args:
             handle: The handle to the cluster.
@@ -4653,8 +4659,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             The exit code of the tail command.
         """
-        # Construct tail command for the autostop hook log
-        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            return self._tail_termination_hook_logs_kubernetes(handle,
+                                                               follow=follow,
+                                                               tail=tail)
+        return self._tail_termination_hook_logs_skylet(handle,
+                                                       follow=follow,
+                                                       tail=tail)
+
+    # Back-compat alias so old SDK / server routes keep working.
+    tail_autostop_logs = tail_termination_hook_logs
+
+    def _tail_termination_hook_logs_skylet(self,
+                                           handle: CloudVmRayResourceHandle,
+                                           follow: bool, tail: int) -> int:
+        """SSH-tail the skylet's termination hook log on the head node."""
+        # Construct tail command for the termination hook log
+        log_path = f'~/{constants.TERMINATION_HOOK_LOG_FILE}'
         tail_cmd_parts = ['tail']
         if tail > 0:
             tail_cmd_parts.extend(['-n', str(tail)])
@@ -4664,8 +4685,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Add fallback to show helpful message if file doesn't exist
         tail_cmd = ' '.join(tail_cmd_parts)
-        error_msg = (f'Autostop hook log file not found at {log_path}. '
-                     f'The autostop hook may not have been executed yet.')
+        error_msg = (f'Termination hook log file not found at {log_path}. '
+                     f'The termination hook may not have been executed yet.')
         cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
                f'else echo "{error_msg}"; exit 1; fi')
 
@@ -4685,6 +4706,68 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         except SystemExit as e:
             returncode = e.code
         return returncode
+
+    def _tail_termination_hook_logs_kubernetes(self,
+                                               handle: CloudVmRayResourceHandle,
+                                               follow: bool, tail: int) -> int:
+        """Stream the head pod's stdout (captures preStop hook output)."""
+        # Import the K8s adaptor locally to avoid pulling it into the
+        # common code path.
+        # pylint: disable=import-outside-toplevel
+        from sky.adaptors import kubernetes
+
+        if handle.cluster_yaml is None:
+            logger.error('Cluster YAML is not available for this cluster; '
+                         'cannot fetch termination hook logs.')
+            return 1
+        cluster_yaml = global_user_state.get_cluster_yaml_dict(
+            os.path.expanduser(handle.cluster_yaml))
+        provider = cluster_yaml.get('provider') or {}
+        namespace = kubernetes_utils.get_namespace_from_config(provider)
+        context = kubernetes_utils.get_context_from_config(provider)
+        head_pod = kubernetes_utils.get_head_pod_name(
+            handle.cluster_name_on_cloud)
+
+        read_kwargs: Dict[str, Any] = {
+            'name': head_pod,
+            'namespace': namespace,
+            'follow': follow,
+            '_preload_content': False,
+        }
+        if tail > 0:
+            read_kwargs['tail_lines'] = tail
+        # Try the running container first; fall back to `previous=True`
+        # to read logs from an already-terminated container (typical for
+        # a hook that ran via preStop during pod deletion).
+        try:
+            stream = kubernetes.core_api(context).read_namespaced_pod_log(
+                **read_kwargs)
+        except kubernetes.kubernetes.client.ApiException as e:
+            if e.status in (400, 404):
+                read_kwargs['previous'] = True
+                read_kwargs['follow'] = False
+                try:
+                    stream = kubernetes.core_api(
+                        context).read_namespaced_pod_log(**read_kwargs)
+                except kubernetes.kubernetes.client.ApiException as inner:
+                    logger.error(
+                        f'Unable to fetch termination hook logs for pod '
+                        f'{head_pod}: {inner}')
+                    return 1
+            else:
+                logger.error(f'Unable to fetch termination hook logs for '
+                             f'pod {head_pod}: {e}')
+                return 1
+        try:
+            for chunk in stream.stream():
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.flush()
+        finally:
+            try:
+                stream.release_conn()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        return 0
 
     def tail_managed_job_logs(self,
                               handle: CloudVmRayResourceHandle,
@@ -5447,9 +5530,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     down=down,
                 )
                 if hook:
-                    request.hook = hook
+                    request.termination_hook = hook
                 if hook_timeout is not None:
-                    request.hook_timeout = hook_timeout
+                    request.termination_hook_timeout = hook_timeout
 
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
