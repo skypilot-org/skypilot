@@ -46,6 +46,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import plugin_extensions
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -256,6 +257,25 @@ def _fetch_managed_job_table_via_controller(
     Extracted so plugins can override the controller round-trip (e.g., to
     call the managed jobs DB directly when the controller is in-process).
     """
+    runner = plugin_extensions.ExternalManagedJobRunner
+    if runner.is_registered():
+        return runner.fetch_managed_job_table(
+            handle=handle,
+            backend=backend,
+            skip_finished=skip_finished,
+            accessible_workspaces=accessible_workspaces,
+            job_ids=job_ids,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            page=page,
+            limit=limit,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            fields=fields,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
@@ -300,6 +320,19 @@ def _cancel_managed_jobs_via_controller(
     Extracted so plugins can override the controller round-trip (e.g., to
     call the managed jobs DB directly when the controller is in-process).
     """
+    runner = plugin_extensions.ExternalManagedJobRunner
+    if runner.is_registered():
+        return runner.cancel_managed_jobs(
+            handle=handle,
+            backend=backend,
+            all_users=all_users,
+            all=all,
+            job_ids=job_ids,
+            name=name,
+            pool=pool,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
     if all_users or all or job_ids:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
             job_ids,
@@ -345,6 +378,18 @@ def _tail_managed_job_logs_via_controller(
     stream logs directly from the managed jobs DB when the controller is
     in-process).
     """
+    runner = plugin_extensions.ExternalManagedJobRunner
+    if runner.is_registered():
+        return runner.tail_managed_job_logs(
+            handle=handle,
+            backend=backend,
+            job_id=job_id,
+            job_name=job_name,
+            follow=follow,
+            controller=controller,
+            tail=tail,
+            task=task,
+        )
     return backend.tail_managed_job_logs(handle,
                                          job_id=job_id,
                                          job_name=job_name,
