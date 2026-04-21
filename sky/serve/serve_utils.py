@@ -28,7 +28,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import state as managed_job_state
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
@@ -241,14 +240,15 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
 
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
-    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
-
-    if pool:
-        return managed_job_utils.is_consolidation_mode()
-
+    # Use jobs config for pool consolidation mode.
+    controller = controller_utils.get_controller_for_pool(pool).value
     consolidation_mode = skypilot_config.get_nested(
-        ('serve', 'controller', 'consolidation_mode'), default_value=False)
+        (controller.controller_type, 'controller', 'consolidation_mode'),
+        default_value=False)
+    if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # if we are in the job controller, we must always be in consolidation
+        # mode.
+        return True
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
