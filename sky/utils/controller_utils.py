@@ -419,7 +419,8 @@ def _get_cloud_dependencies_installation_commands(
         if sc.lower() in constants.STORAGE_ONLY_CLOUDS:
             python_packages.update(dependencies.extras_require[sc.lower()])
 
-    packages_string = ' '.join([f'"{package}"' for package in python_packages])
+    packages_string = ' '.join(
+        [f'"{package}"' for package in sorted(python_packages)])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
