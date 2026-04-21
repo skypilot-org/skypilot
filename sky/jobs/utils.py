@@ -10,7 +10,6 @@ import concurrent.futures
 import contextlib
 from datetime import datetime
 import enum
-import inspect
 import json
 import os
 import pathlib
@@ -1159,12 +1158,11 @@ def cancel_managed_jobs(
       - ``name`` -> ``cancel_job_by_name``
       - ``pool`` -> ``cancel_jobs_by_pool``
 
-    This dispatcher is also embedded verbatim into
-    ``ManagedJobCodeGen.cancel_managed_jobs`` via ``inspect.getsource`` so
-    the subprocess codegen path runs the same Python. Keep the body pure
-    (no module-level dependencies beyond ``cancel_jobs_by_id`` /
-    ``cancel_job_by_name`` / ``cancel_jobs_by_pool``) so the embedded
-    source works without additional imports.
+    Single source of truth for the dispatch precedence. Direct callers
+    (including plugins registering a custom ``ManagedJobRunner``) invoke
+    this function; the codegen path
+    (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
+    name on controllers running ``MANAGED_JOBS_VERSION >= 18``.
     """
     if all_users or all or job_ids:
         return cancel_jobs_by_id(
@@ -2846,73 +2844,6 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls,
-                          job_ids: Optional[List[int]],
-                          all_users: bool = False,
-                          graceful: bool = False,
-                          graceful_timeout: Optional[int] = None) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
-                            current_workspace={active_workspace!r})
-        else:
-            msg = utils.cancel_jobs_by_id(
-                {job_ids},
-                all_users={all_users},
-                current_workspace={active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
-
-    @classmethod
-    def cancel_job_by_name(cls,
-                           job_name: str,
-                           graceful: bool = False,
-                           graceful_timeout: Optional[int] = None) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
-            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        else:
-            msg = utils.cancel_job_by_name(
-                {job_name!r},
-                {active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
-
-    @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
-
-    @classmethod
     def cancel_managed_jobs(
         cls,
         *,
@@ -2924,38 +2855,65 @@ class ManagedJobCodeGen:
         graceful: bool = False,
         graceful_timeout: Optional[int] = None,
     ) -> str:
-        """Unified cancel codegen — embeds the dispatcher via inspect.
+        """Unified cancel codegen.
 
-        The controller runs the same ``cancel_managed_jobs`` Python
-        function as in-process callers because its source is shipped
-        verbatim in the generated code. No ``managed_job_version`` gating
-        is needed for the dispatcher itself: the codegen supplies the
-        definition before calling it. We still inject imports for the
-        three underlying cancel functions so the embedded dispatcher's
-        bare-name lookups resolve in the exec scope.
+        On controllers running ``MANAGED_JOBS_VERSION >= 18``, emits a
+        single call to ``utils.cancel_managed_jobs`` — the one dispatch
+        function that direct callers also use. On older controllers
+        (``< 18``) that don't have the dispatcher, falls back to a
+        targeted call to the underlying ``utils.cancel_jobs_by_id`` /
+        ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
+        client-side based on the selector args.
         """
         active_workspace = skypilot_config.get_active_workspace()
         user_hash = common_utils.get_user_hash() if all else None
-        dispatcher_src = inspect.getsource(cancel_managed_jobs)
-        code = ('from typing import List, Optional  # noqa: F401\n'
-                'from sky.jobs.utils import (\n'
-                '    cancel_jobs_by_id,\n'
-                '    cancel_job_by_name,\n'
-                '    cancel_jobs_by_pool,\n'
-                ')\n'
-                f'{dispatcher_src}\n'
-                'msg = cancel_managed_jobs(\n'
-                f'    name={name!r},\n'
-                f'    job_ids={job_ids!r},\n'
-                f'    pool={pool!r},\n'
-                f'    all={all!r},\n'
-                f'    all_users={all_users!r},\n'
-                f'    graceful={graceful!r},\n'
-                f'    graceful_timeout={graceful_timeout!r},\n'
-                f'    current_workspace={active_workspace!r},\n'
-                f'    user_hash={user_hash!r},\n'
-                ')\n'
-                'print(msg, end="", flush=True)\n')
+
+        # Client-side pick of the legacy call for old controllers. This
+        # matches the historical dispatch precedence so behaviour on
+        # older controllers is unchanged. Lines are indented by 4 spaces
+        # so they nest under the ``if managed_job_version < 18:`` below.
+        if all_users or all or job_ids:
+            legacy_call_lines = [
+                'msg = utils.cancel_jobs_by_id(',
+                f'    {job_ids!r},',
+                f'    all_users={all_users!r},',
+                f'    current_workspace={active_workspace!r},',
+                f'    graceful={graceful!r},',
+                f'    graceful_timeout={graceful_timeout!r},',
+                ')',
+            ]
+        elif name is not None:
+            legacy_call_lines = [
+                'msg = utils.cancel_job_by_name(',
+                f'    {name!r},',
+                f'    {active_workspace!r},',
+                f'    graceful={graceful!r},',
+                f'    graceful_timeout={graceful_timeout!r},',
+                ')',
+            ]
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            legacy_call_lines = [
+                f'msg = utils.cancel_jobs_by_pool({pool!r}, '
+                f'{active_workspace!r})',
+            ]
+
+        legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        code = (f'if managed_job_version < 18:\n'
+                f'{legacy_block}\n'
+                f'else:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'        name={name!r},\n'
+                f'        job_ids={job_ids!r},\n'
+                f'        pool={pool!r},\n'
+                f'        all={all!r},\n'
+                f'        all_users={all_users!r},\n'
+                f'        graceful={graceful!r},\n'
+                f'        graceful_timeout={graceful_timeout!r},\n'
+                f'        current_workspace={active_workspace!r},\n'
+                f'        user_hash={user_hash!r},\n'
+                f'    )\n'
+                f'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod
