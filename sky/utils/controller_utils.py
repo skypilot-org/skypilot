@@ -324,7 +324,7 @@ def _get_cloud_dependencies_installation_commands(
     k8s_and_ssh_label = ' and '.join(sorted(enabled_k8s_and_ssh))
     k8s_dependencies_installed = False
 
-    for cloud in enabled_clouds:
+    for cloud in sorted(enabled_clouds, key=repr):
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 
