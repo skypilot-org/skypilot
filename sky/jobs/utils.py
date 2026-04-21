@@ -2868,31 +2868,53 @@ class ManagedJobCodeGen:
         active_workspace = skypilot_config.get_active_workspace()
         user_hash = common_utils.get_user_hash() if all else None
 
-        # Client-side pick of the legacy call for old controllers. This
-        # matches the historical dispatch precedence so behaviour on
-        # older controllers is unchanged. Lines are indented by 4 spaces
-        # so they nest under the ``if managed_job_version < 18:`` below.
+        # Client-side pick of which legacy variant to emit for controllers
+        # running ``managed_job_version < 18``. Each variant preserves the
+        # per-version gating that its dedicated codegen method used before
+        # we consolidated everything into ``cancel_managed_jobs``: older
+        # controllers predate args like ``current_workspace``/``graceful``
+        # and must not receive them. Lines are at column 0 here; the final
+        # assembly indents them by 4 spaces so they nest under
+        # ``if managed_job_version < 18:`` in the generated code.
         if all_users or all or job_ids:
             legacy_call_lines = [
-                'msg = utils.cancel_jobs_by_id(',
-                f'    {job_ids!r},',
-                f'    all_users={all_users!r},',
-                f'    current_workspace={active_workspace!r},',
-                f'    graceful={graceful!r},',
-                f'    graceful_timeout={graceful_timeout!r},',
-                ')',
+                'if managed_job_version < 2:',
+                # #4787: all_users not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r})',
+                'elif managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
             ]
         elif name is not None:
             legacy_call_lines = [
-                'msg = utils.cancel_job_by_name(',
-                f'    {name!r},',
-                f'    {active_workspace!r},',
-                f'    graceful={graceful!r},',
-                f'    graceful_timeout={graceful_timeout!r},',
-                ')',
+                'if managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_job_by_name({name!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
             ]
         else:
             assert pool is not None, (job_ids, name, pool, all)
+            # cancel_jobs_by_pool had no historical version gating.
             legacy_call_lines = [
                 f'msg = utils.cancel_jobs_by_pool({pool!r}, '
                 f'{active_workspace!r})',
