@@ -41,6 +41,7 @@ import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { trackVolumeAction } from '@/lib/analytics';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -77,6 +78,7 @@ export function Volumes() {
   }, [router.isReady, router.query.tab]);
 
   const handleRefresh = () => {
+    trackVolumeAction('refresh');
     dashboardCache.invalidate(getVolumes);
     // Reset preloading state so VolumesTable can fetch fresh data immediately
     setPreloadingComplete(false);
@@ -92,6 +94,7 @@ export function Volumes() {
   };
 
   const handleDeleteVolumeClick = (volume) => {
+    trackVolumeAction('delete');
     setVolumeToDelete(volume);
     setShowDeleteConfirmDialog(true);
     setDeleteError(null);

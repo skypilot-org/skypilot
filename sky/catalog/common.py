@@ -299,7 +299,7 @@ def validate_region_zone_impl(
     """
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
-        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.6)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
         if candidate_loc:

@@ -734,11 +734,15 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     #   elements that cannot easily carry nonces.  CSS cannot execute
     #   scripts, so the risk is negligible.
     # - font-src 'self': Only allow same-origin fonts
-    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
-    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
-    #   needed by the /token page's legacy auth callback flow (the page's
-    #   JavaScript POSTs the auth token to a local HTTP server started by
-    #   the CLI on localhost)
+    # - connect-src 'self' https://usage-v3.skypilot.co
+    #   http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket, analytics traffic via the
+    #   usage-v3 reverse proxy, and localhost connections needed by the
+    #   /token page's legacy auth callback flow (the page's JavaScript
+    #   POSTs the auth token to a local HTTP server started by the CLI
+    #   on localhost)
+    # - worker-src 'self' blob:: Allow same-origin workers and blob
+    #   workers (needed for analytics).
     # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
     # - img-src 'self' data:: Allow same-origin images and data URIs
     # - object-src 'none': Block all plugin content (Flash, Java, etc.)
@@ -746,11 +750,13 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
     _CSP_TEMPLATE = ('default-src \'self\'; '
-                     'script-src {script_src}; '
+                     'script-src {script_src} '
+                     'https://usage-v3.skypilot.co; '
                      'style-src \'self\' \'unsafe-inline\'; '
                      'font-src \'self\'; '
-                     'connect-src \'self\' http://localhost:* '
-                     'http://127.0.0.1:*; '
+                     'connect-src \'self\' https://usage-v3.skypilot.co '
+                     'http://localhost:* http://127.0.0.1:*; '
+                     'worker-src \'self\' blob:; '
                      'frame-src \'self\'; '
                      'img-src \'self\' data:; '
                      'object-src \'none\'; '
@@ -2505,6 +2511,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
+        # Whether telemetry/usage collection is enabled
+        telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
     )
 
 

@@ -244,6 +244,14 @@ def pytest_addoption(parser):
               'ensure the tests will not be skipped but no actual effect)'),
     )
     parser.addoption(
+        '--serve-consolidation',
+        action='store_true',
+        default=False,
+        help=('If set, the tests will be run in serve consolidation mode '
+              '(The config change is made in buildkite so this is a flag to '
+              'ensure the tests will not be skipped but no actual effect)'),
+    )
+    parser.addoption(
         '--grpc',
         action='store_true',
         default=False,

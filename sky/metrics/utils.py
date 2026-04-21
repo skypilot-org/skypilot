@@ -182,6 +182,15 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'Total number of short-running request executors in the API server',
 )
 
+# Time a request spends waiting in the task queue (from creation to dequeue).
+SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
+    'sky_apiserver_queue_wait_seconds',
+    'Time a request spent waiting in the task queue before execution',
+    ['schedule_type'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
+             120.0, 300.0, 600.0, float('inf')),
+)
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).

@@ -72,6 +72,7 @@ import {
   buildFilterUrl,
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
+import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -333,6 +334,11 @@ export function ManagedJobs() {
     sharedUpdateURLParams(router, filters);
   };
 
+  // Track only the newly added filter (called from FilterDropdown callbacks)
+  const trackNewFilter = (property, value) => {
+    trackFilterUsed('job', { property, value });
+  };
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -373,6 +379,7 @@ export function ManagedJobs() {
             valueList={valueList}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
+            onFilterAdd={trackNewFilter}
             placeholder="Filter jobs"
           />
         </div>
@@ -2176,6 +2183,7 @@ export function Status2Actions({
   const handleLogsClick = (e, type) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('view_logs', { jobId });
     router.push({
       pathname: `${jobParent}/${jobId}`,
       query: { tab: type },
@@ -2185,6 +2193,7 @@ export function Status2Actions({
   const handleDownloadLogs = (e, controller = false) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('download_logs', { jobId });
 
     if (managed) {
       // For managed jobs
@@ -2229,6 +2238,7 @@ export function Status2Actions({
         <button
           onClick={(e) => handleDownloadLogs(e, false)}
           className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          title="Download logs"
         >
           <Download className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Download</span>}

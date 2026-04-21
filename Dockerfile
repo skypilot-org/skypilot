@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Stage 1: Install Google Cloud SDK using APT
 FROM python:3.10.19-slim AS gcloud-apt-install
 
@@ -41,7 +43,8 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
 
 COPY sky/dashboard /skypilot/sky/dashboard
 
-RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+RUN --mount=type=cache,id=dashboard-next-cache,target=/skypilot/sky/dashboard/.next/cache \
+    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Building dashboard in Stage 2" && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
         echo "Cleaning up dashboard build-time dependencies" && \

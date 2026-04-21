@@ -146,11 +146,11 @@ def normalize_local_disk(local_disk: str) -> str:
                 raise ValueError()
         except ValueError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(  # pylint: disable=raise-missing-from
+                raise ValueError(
                     f'Invalid local_disk: {local_disk!r}. '
                     'Expected "mode:size[+]", "mode", or "size[+]". Mode '
                     'must be "nvme" or "ssd", size must be positive (GB), '
-                    'optionally with "+".')
+                    'optionally with "+".') from None
 
     if len(parts) == 1:
         part = parts[0]
@@ -164,13 +164,16 @@ def normalize_local_disk(local_disk: str) -> str:
     elif len(parts) == 2:
         mode, size_str = parts
         if mode not in ('nvme', 'ssd'):
-            raise ValueError(f'Invalid local_disk mode: {mode!r}. '
-                             'Must be "nvme" or "ssd".')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid local_disk mode: {mode!r}. '
+                                 'Must be "nvme" or "ssd".')
         _check_size(size_str)
     else:
-        raise ValueError(f'Invalid local_disk format: {local_disk!r}. '
-                         'Expected "mode:size[+]", "mode", or "size[+]". '
-                         'Examples: "nvme:1000+", "ssd:500", "nvme", "1000+".')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid local_disk format: {local_disk!r}. '
+                'Expected "mode:size[+]", "mode", or "size[+]". '
+                'Examples: "nvme:1000+", "ssd:500", "nvme", "1000+".')
 
     return f'{mode}:{size_str}'
 
@@ -519,9 +522,11 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
     """
     assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
-    error_msg = (f'"{field_name}" field should be a '
-                 f'{constants.MEMORY_SIZE_PATTERN}+?,'
-                 f' got {resource_qty_str}')
+    plus_hint = ' or "<number>+" for "at least"' if allow_plus else ''
+    error_msg = (f'"{field_name}" field should be a number (e.g. "16") or '
+                 f'"<number><unit>" where unit is one of KB/MB/GB/TB/PB '
+                 f'(e.g. "16GB"){plus_hint}. '
+                 f'Got: {resource_qty_str!r}')
 
     resource_str = str(resource_qty_str)
 
@@ -532,7 +537,8 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             resource_str = resource_str[:-1]
             plus = '+'
         else:
-            raise ValueError(error_msg)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(error_msg)
 
     x = ''
     if resource_str.endswith('x'):
@@ -540,7 +546,8 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             resource_str = resource_str[:-1]
             x = 'x'
         else:
-            raise ValueError(error_msg)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(error_msg)
 
     try:
         # We assume it is already in the wanted units to maintain backwards
@@ -564,7 +571,8 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             except ValueError:
                 continue
 
-    raise ValueError(error_msg)
+    with ux_utils.print_exception_no_traceback():
+        raise ValueError(error_msg)
 
 
 def _parse_time_with_units(time: str, time_units: Dict[str, int]) -> int:

@@ -198,41 +198,6 @@ def terminate_cluster(
             time.sleep(backoff.current_backoff())
 
 
-def _validate_consolidation_mode_config(
-        current_is_consolidation_mode: bool) -> None:
-    """Validate the consolidation mode config."""
-    # Check whether the consolidation mode config is changed.
-    if current_is_consolidation_mode:
-        controller_cn = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.cluster_with_name_exists(controller_cn):
-            logger.warning(
-                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
-                f'but the controller cluster {controller_cn} is still running. '
-                'Please terminate the controller cluster first.'
-                f'{colorama.Style.RESET_ALL}')
-    else:
-        total_jobs = managed_job_state.get_managed_jobs_total()
-        if total_jobs > 0:
-            nonterminal_jobs = (
-                managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, None, all_users=True))
-            if nonterminal_jobs:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are still {len(nonterminal_jobs)} managed jobs '
-                    'running. Please terminate those jobs first.'
-                    f'{colorama.Style.RESET_ALL}')
-            else:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {total_jobs} jobs from previous '
-                    'consolidation mode. Reset the `jobs.controller.'
-                    'consolidation_mode` to `true` and run `sky jobs queue` '
-                    'to see those jobs. Switching to normal mode will '
-                    f'lose the job history.{colorama.Style.RESET_ALL}')
-
-
 def setup_consolidation_mode_on_startup(deploy: bool) -> None:
     """Set up consolidation mode signal file on API server startup.
 
@@ -274,7 +239,7 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
             # Local API server: don't auto-enable
             enabled = False
 
-    _validate_consolidation_mode_config(enabled)
+    controller_utils.warn_jobs_consolidation_mode_intent(enabled)
 
     if enabled:
         signal_file.touch()
@@ -286,42 +251,14 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# The signal file is the source of truth, managed by
-# setup_consolidation_mode_on_startup() at server start. Config changes
-# (enabling or disabling) require a server restart to take effect.
+# Thin wrapper around controller_utils.is_jobs_consolidation_mode — the helper
+# owns the signal-file read, the config-vs-signal restart warning, and the
+# jobs validator call. See controller_utils for the full contract.
+# INVARIANT: serve_utils.is_consolidation_mode(pool=True) routes through the
+# same helper, so pool and managed-jobs readers cannot diverge.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
-
-    signal_file = pathlib.Path(
-        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-    ).expanduser()
-    effective = signal_file.exists()
-
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        # Warn if explicit config disagrees with actual state — the admin
-        # needs to restart the server for the config change to take effect.
-        config_value = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=None)
-        if config_value is not None and config_value != effective:
-            expected = 'enabled' if config_value else 'disabled'
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
-                f'is {expected} in the server config, but the API server has '
-                'not been restarted yet. Please restart the API server to '
-                f'apply the change.{colorama.Style.RESET_ALL}')
-        # Validation may print a warning. Run validation against the intended
-        # (config) value to print warnings that should be addressed before the
-        # server is restarted.
-        if config_value is not None:
-            assert isinstance(config_value, bool), config_value
-            _validate_consolidation_mode_config(config_value)
-
-    return effective
+    return controller_utils.is_jobs_consolidation_mode()
 
 
 def ha_recovery_for_consolidation_mode() -> None:

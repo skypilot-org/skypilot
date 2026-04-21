@@ -820,3 +820,132 @@ def test_controller_cluster_name_client_side(controller_type: str):
     proc.start()
     proc.join()
     assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
+
+
+_JOBS_SIGNAL_CONST = (
+    'sky.jobs.constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE')
+
+
+class TestIsJobsConsolidationMode:
+    """Tests for controller_utils.is_jobs_consolidation_mode.
+
+    Shared helper behind both sky/jobs/utils.py::is_consolidation_mode() and
+    sky/serve/serve_utils.py::is_consolidation_mode(pool=True). Owns:
+    - OVERRIDE_CONSOLIDATION_MODE env short-circuit.
+    - Signal-file read (source of truth).
+    - Config-vs-signal restart warning (server only).
+    - Jobs validator call against intent (server only).
+    - Optional extra_validator call (e.g. pool-specific warnings).
+    """
+
+    def setup_method(self):
+        (controller_utils._effective_jobs_consolidation_with_warnings.
+         cache_clear())
+
+    def test_override_env_short_circuits_to_true(self, monkeypatch, tmp_path):
+        """OVERRIDE_CONSOLIDATION_MODE forces True without reading signal file
+        or config. Used inside the controller process itself."""
+        monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', '1')
+        signal_file = tmp_path / 'signal'  # does not exist
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent') as mock_validate:
+            assert controller_utils.is_jobs_consolidation_mode() is True
+            mock_config.get_nested.assert_not_called()
+            mock_validate.assert_not_called()
+
+    @pytest.mark.parametrize('signal_exists', [True, False])
+    def test_without_server_env_reads_signal_only(self, monkeypatch,
+                                                  signal_exists, tmp_path):
+        """Without IS_SKYPILOT_SERVER, no config reads or validator calls.
+        Matches the behavior for CLI-only callers and inside controllers."""
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        if signal_exists:
+            signal_file.touch()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent') as mock_validate:
+            assert (controller_utils.is_jobs_consolidation_mode() is
+                    signal_exists)
+            mock_config.get_nested.assert_not_called()
+            mock_validate.assert_not_called()
+
+    @pytest.mark.parametrize(
+        'signal_exists,config_value,expected_effective,expected_warn,'
+        'expected_validator_arg',
+        [
+            # Deploy-mode auto-enable regression: signal on, config None.
+            # Previously diverged between readers; now helper is the single
+            # source of truth.
+            (True, None, True, False, True),
+            (False, None, False, False, False),
+            # Config matches signal: no restart warning. Validator runs
+            # against config (intent).
+            (True, True, True, False, True),
+            (False, False, False, False, False),
+            # Config disagrees with signal: restart warning fires. Validator
+            # runs against config (intent) so user sees warnings that apply
+            # post-restart.
+            (True, False, True, True, False),
+            (False, True, False, True, True),
+        ])
+    def test_server_path_warns_and_validates(self, monkeypatch, tmp_path,
+                                             signal_exists, config_value,
+                                             expected_effective, expected_warn,
+                                             expected_validator_arg):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        if signal_exists:
+            signal_file.touch()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch(
+                 'sky.utils.controller_utils.'
+                 'warn_jobs_consolidation_mode_intent') as mock_validate, \
+             mock.patch('sky.utils.controller_utils.logger') as mock_logger:
+            mock_config.get_nested.return_value = config_value
+            assert (controller_utils.is_jobs_consolidation_mode() is
+                    expected_effective)
+            mock_config.get_nested.assert_called_once_with(
+                ('jobs', 'controller', 'consolidation_mode'),
+                default_value=None)
+            mock_validate.assert_called_once_with(expected_validator_arg)
+            assert mock_logger.warning.called is expected_warn
+
+    def test_extra_validator_called_with_arg(self, monkeypatch, tmp_path):
+        """extra_validator receives the same intent arg as the jobs validator.
+        Used by pool reader to warn about leftover pools."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        signal_file.touch()
+        extra = mock.Mock()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent'):
+            # Config False disagrees with signal-on — intent arg is False.
+            mock_config.get_nested.return_value = False
+            controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
+            extra.assert_called_once_with(False)
+
+    def test_extra_validator_skipped_without_server_env(self, monkeypatch,
+                                                        tmp_path):
+        """extra_validator is only invoked when on the API server (intent
+        arg is meaningful). Skip off-server to match jobs validator behavior."""
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        extra = mock.Mock()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
+            controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
+            extra.assert_not_called()

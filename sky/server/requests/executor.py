@@ -216,10 +216,16 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
+            request = api_requests.get_request(request_id,
+                                               fields=['status', 'created_at'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            if metrics_utils.METRICS_ENABLED:
+                metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
+                    schedule_type=self.schedule_type.value,).observe(
+                        max(0,
+                            time.time() - request.created_at))
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be

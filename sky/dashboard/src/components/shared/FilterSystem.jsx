@@ -173,6 +173,7 @@ export const FilterDropdown = ({
   valueList,
   setFilters,
   updateURLParams,
+  onFilterAdd,
   placeholder = 'Filter items',
 }) => {
   const inputRef = useRef(null);
@@ -258,11 +259,12 @@ export const FilterDropdown = ({
   };
 
   const handleOptionSelect = (option) => {
+    const property = getPropertyLabel(propertyValue);
     setFilters((prevFilters) => {
       const updatedFilters = [
         ...prevFilters,
         {
-          property: getPropertyLabel(propertyValue),
+          property,
           operator: ':',
           value: option,
         },
@@ -271,6 +273,7 @@ export const FilterDropdown = ({
       updateURLParams(updatedFilters);
       return updatedFilters;
     });
+    if (onFilterAdd) onFilterAdd(property, option);
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -278,11 +281,12 @@ export const FilterDropdown = ({
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && value.trim() !== '') {
+      const property = getPropertyLabel(propertyValue);
       setFilters((prevFilters) => {
         const updatedFilters = [
           ...prevFilters,
           {
-            property: getPropertyLabel(propertyValue),
+            property,
             operator: ':',
             value: value,
           },
@@ -291,6 +295,7 @@ export const FilterDropdown = ({
         updateURLParams(updatedFilters);
         return updatedFilters;
       });
+      if (onFilterAdd) onFilterAdd(property, value);
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {

@@ -32,6 +32,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -430,8 +431,17 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
-            instance_type)
+        try:
+            k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+                instance_type)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid Kubernetes instance type: {instance_type!r}. '
+                    'Kubernetes instance types use the format '
+                    '"<cpus>CPU--<mem>GB" or '
+                    '"<cpus>CPU--<mem>GB--<accelerator>:<count>" '
+                    '(e.g. "4CPU--16GB", "4CPU--16GB--H100:1").') from None
         return k.cpus, k.memory
 
     @classmethod

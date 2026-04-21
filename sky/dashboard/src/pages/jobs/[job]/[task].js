@@ -31,6 +31,7 @@ import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { trackJobAction } from '@/lib/analytics';
 
 function TaskDetails() {
   const router = useRouter();
@@ -225,6 +226,9 @@ function TaskDetails() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            trackJobAction('download_logs', {
+                              jobId,
+                            });
                             downloadManagedJobLogs({
                               jobId: parseInt(jobId),
                               controller: false,

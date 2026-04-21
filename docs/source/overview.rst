@@ -122,7 +122,7 @@ A *job* is a program you want to run. Two types of jobs are supported:
    * - Jobs are submitted to an existing cluster and reuse that cluster's setup.
      - Each job runs in its own temporary cluster, with auto-recovery.
    * - Ideal for interactive development and debugging on an existing cluster.
-     - Ideal for jobs requiring recovery (e.g., spot instances) or scaling to many parallel jobs.
+     - Ideal for jobs requiring recovery or scaling to many parallel jobs.
 
 
 
@@ -182,15 +182,13 @@ Managed jobs
 
 
 *Managed jobs* automatically provision a temporary cluster for each job and handle
-auto-recovery. A lightweight jobs controller is used to offer hands-off monitoring and recovery.
-You can use ``sky jobs launch`` to launch managed jobs.
+auto-recovery. You can use ``sky jobs launch`` to launch managed jobs.
 
-Managed jobs are especially ideal for running jobs on preemptible spot instances (e.g.,
-finetuning, batch inference). Spot GPUs can typically save 3--6x costs. They are also
-ideal for scaling to many parallel jobs.
+Managed jobs are especially ideal for running jobs that may require retries (e.g., handling job preemptions; running on hardware that may fail).
+They are also ideal for scaling to many parallel jobs.
 
-Suggested pattern: Use clusters to interactively develop and debug your code first, and then
-use managed jobs to run them at scale.
+Suggested pattern: Use clusters (``sky launch``, ``sky exec``) to interactively develop and debug your code first, and then
+use managed jobs (``sky jobs launch``) to run them at scale.
 
 See :ref:`managed-jobs` and :ref:`many-jobs` to get started.
 

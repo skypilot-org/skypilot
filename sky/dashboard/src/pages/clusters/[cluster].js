@@ -40,6 +40,7 @@ import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
+import { trackClusterAction } from '@/lib/analytics';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
   Select,
@@ -153,10 +154,12 @@ function ClusterDetails() {
   };
 
   const handleConnectClick = () => {
+    trackClusterAction('connect');
     setIsSSHModalOpen(true);
   };
 
   const handleVSCodeClick = () => {
+    trackClusterAction('vscode');
     setIsVSCodeModalOpen(true);
   };
 

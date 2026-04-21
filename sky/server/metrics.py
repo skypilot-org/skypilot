@@ -97,6 +97,19 @@ try:
 except ValueError:
     pass
 
+# Collectors registered by plugins at runtime.
+_plugin_collectors: list = []
+
+
+def register_plugin_collector(collector):
+    """Register a custom Prometheus collector from a plugin."""
+    _plugin_collectors.append(collector)
+    try:
+        prom.REGISTRY.register(collector)
+    except ValueError:
+        pass
+
+
 # Cache TTL shared by all custom collectors.
 _COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
 
@@ -182,6 +195,11 @@ def metrics() -> fastapi.Response:
         registry.register(_BURN_RATE_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        for c in _plugin_collectors:
+            try:
+                registry.register(c)
+            except ValueError:
+                pass
         data = generate_latest(registry)
     else:
         data = generate_latest()

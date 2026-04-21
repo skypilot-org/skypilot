@@ -63,6 +63,7 @@ import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
+import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -477,7 +478,10 @@ export function Clusters() {
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <div className="flex items-center gap-2">
-            <label className="flex items-center cursor-pointer">
+            <label
+              className="flex items-center cursor-pointer"
+              title="Toggle cluster history"
+            >
               <input
                 type="checkbox"
                 checked={showHistory}
@@ -1308,6 +1312,7 @@ export function Status2Actions({
   const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
+    trackClusterAction(actionName, { status });
     switch (actionName) {
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
@@ -1504,6 +1509,7 @@ const FilterDropdown = ({
   };
 
   const handleOptionSelect = (option) => {
+    trackFilterUsed('cluster', { property: propertyValue, value: option });
     setFilters((prevFilters) => {
       const updatedFilters = [
         ...prevFilters,
