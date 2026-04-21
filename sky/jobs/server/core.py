@@ -1356,9 +1356,8 @@ def cancel(name: Optional[str] = None,
         # Pass requester_user_hash to enforce ownership on the controller.
         # None means no enforcement (admin or non-server context).
         ownership_user_hash = None if (is_admin or all_users or all) else (
-            requester_user_hash
-            if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER)
-            else None)
+            requester_user_hash if os.environ.get(
+                skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) else None)
 
         job_ids = None if (all_users or all) else job_ids
 
