@@ -98,7 +98,8 @@ def _cluster_is_up(name: str) -> bool:
     # The status table has a line containing the cluster name followed by
     # columns; look for "UP" on the same line.
     for line in out.splitlines():
-        if name in line and ' UP' in line:
+        parts = line.split()
+        if parts and parts[0] == name and 'UP' in parts:
             return True
     return False
 

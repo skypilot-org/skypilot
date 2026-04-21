@@ -136,12 +136,14 @@ class LongConnGenerator(GeneratorBase):
         slot.stderr_log = log_path  # type: ignore[attr-defined]
         try:
             # Open the log for appending; reconnect attempts accumulate.
+            # Close in parent after Popen duplicates the fd.
             log_fh = open(log_path, 'a')
             slot.proc = subprocess.Popen(cmd,
                                          stdin=subprocess.DEVNULL,
                                          stdout=log_fh,
                                          stderr=log_fh,
                                          start_new_session=True)
+            log_fh.close()
             slot.connect_ts = time.time()
             self._emit({
                 'event': 'connect',
