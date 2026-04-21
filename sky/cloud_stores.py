@@ -752,7 +752,7 @@ class HFCloudStorage(CloudStorage):
     """Hugging Face Buckets and Hub repos."""
 
     _GET_HF_HUB = [
-        f'{constants.SKY_UV_PIP_CMD} install "huggingface_hub>=1.10"',
+        f'{constants.SKY_UV_PIP_CMD} install "huggingface_hub>=1.5"',
     ]
     _TOKEN_HELPER = """
 token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
@@ -790,24 +790,33 @@ if not token:
         repo_type, repo_id, revision, path = data_utils.split_hf_repo_path(url)
         path = path.rstrip('/')
         if not path:
+            # Repo root is always a directory.
             return True
-        info = huggingface.api().repo_info(repo_id=repo_id,
-                                           repo_type=repo_type,
-                                           revision=revision,
-                                           token=huggingface.get_token())
-        prefix = f'{path}/'
-        for sibling in getattr(info, 'siblings', []) or []:
-            # ``huggingface_hub`` exposes the filename as ``rfilename`` on
-            # most repo types and ``path`` on a few; tolerate either. The
-            # trailing ``or ''`` keeps the type as ``str`` for mypy
-            # (``getattr(..., None)`` is ``Optional[Any]``).
-            filename: str = (getattr(sibling, 'rfilename', None) or
-                             getattr(sibling, 'path', '') or '')
-            if filename == path:
+        # ``list_repo_tree(path_in_repo=path)`` lists the immediate children
+        # of ``path`` when it is a directory and raises
+        # ``EntryNotFoundError`` / HTTP 404 when it is a file (or doesn't
+        # exist). This is much cheaper than ``repo_info(...).siblings`` for
+        # large repos, which eagerly fetches metadata for every file.
+        try:
+            list(huggingface.api().list_repo_tree(
+                repo_id=repo_id,
+                repo_type=repo_type,
+                revision=revision,
+                path_in_repo=path,
+                recursive=False,
+                token=huggingface.get_token()))
+            return True
+        except Exception as e:  # pylint: disable=broad-except
+            errors = huggingface.hf_hub_errors()
+            not_found_types = tuple(cls for cls in (
+                getattr(errors, 'EntryNotFoundError', None),
+                getattr(errors, 'RepositoryNotFoundError', None),
+            ) if cls is not None)
+            status_code = getattr(getattr(e, 'response', None), 'status_code',
+                                  None)
+            if isinstance(e, not_found_types) or status_code == 404:
                 return False
-            if filename.startswith(prefix):
-                return True
-        return True
+            raise
 
     @classmethod
     def _python_command(cls, code: str) -> str:

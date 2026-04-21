@@ -554,3 +554,81 @@ class TestHfCloudStorage:
         assert 'snapshot_download' in command
         assert "'dataset'" in command
         assert 'subdir/*' in command
+
+    @mock.patch('sky.cloud_stores.huggingface.get_token', return_value=None)
+    @mock.patch('sky.cloud_stores.huggingface.api')
+    def test_repo_is_directory_uses_list_repo_tree(self, mock_api, mock_token):
+        """Directory check must go through list_repo_tree, not repo_info.
+
+        repo_info eagerly fetches metadata for every file in the repo
+        (siblings), which is slow on large repos. list_repo_tree only
+        fetches the specified path.
+        """
+        del mock_token
+        mock_api.return_value.list_repo_tree.return_value = iter([])
+        result = cloud_stores.HFCloudStorage().is_directory(
+            'hf://openai-community/gpt2/onnx')
+        assert result is True
+        mock_api.return_value.list_repo_tree.assert_called_once()
+        mock_api.return_value.repo_info.assert_not_called()
+
+    @mock.patch('sky.cloud_stores.huggingface.hf_hub_errors')
+    @mock.patch('sky.cloud_stores.huggingface.get_token', return_value=None)
+    @mock.patch('sky.cloud_stores.huggingface.api')
+    def test_repo_is_directory_file_path_returns_false(self, mock_api,
+                                                       mock_token, mock_errors):
+        """File paths should raise EntryNotFoundError -> returns False."""
+        del mock_token
+
+        class _EntryNotFound(Exception):
+            pass
+
+        errs = mock.MagicMock()
+        errs.EntryNotFoundError = _EntryNotFound
+        errs.RepositoryNotFoundError = _EntryNotFound
+        mock_errors.return_value = errs
+        mock_api.return_value.list_repo_tree.side_effect = _EntryNotFound(
+            'not found')
+        assert cloud_stores.HFCloudStorage().is_directory(
+            'hf://openai-community/gpt2/config.json') is False
+
+
+class TestHfMountCachedCommand:
+    """Tests for HuggingFaceStore.mount_cached_command propagation."""
+
+    def _make_bucket_store(self):
+        obj = storage.HuggingFaceStore.__new__(storage.HuggingFaceStore)
+        obj.name = 'ns/bucket'
+        obj.source = None
+        obj._repo_type = None
+        obj._revision = None
+        obj._hf_id = 'ns/bucket'
+        obj._bucket_sub_path = None
+        return obj
+
+    def test_mount_cached_no_config(self):
+        o = self._make_bucket_store()
+        cmd = o.mount_cached_command('/mnt/data', config=None)
+        # No --read-only flag when config is unset.
+        assert '--read-only' not in cmd
+
+    def test_mount_cached_with_read_only(self):
+        o = self._make_bucket_store()
+        cfg = storage.MountCachedConfig(read_only=True)
+        cmd = o.mount_cached_command('/mnt/data', config=cfg)
+        assert '--read-only' in cmd
+
+    def test_mount_cached_ignores_rclone_only_fields(self):
+        """rclone-specific fields should not produce any hf-mount args."""
+        o = self._make_bucket_store()
+        cfg = storage.MountCachedConfig(
+            transfers=16,
+            buffer_size='128M',
+            vfs_cache_max_size='10G',
+            vfs_read_chunk_streams=8,
+        )
+        cmd = o.mount_cached_command('/mnt/data', config=cfg)
+        # None of these rclone flags should appear in the hf-mount command.
+        for flag in ('--transfers', '--buffer-size', '--vfs-cache-max-size',
+                     '--vfs-read-chunk-streams'):
+            assert flag not in cmd

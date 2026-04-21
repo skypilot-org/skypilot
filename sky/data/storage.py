@@ -5782,11 +5782,14 @@ class HuggingFaceStore(AbstractStore):
                              config: Optional[MountCachedConfig] = None) -> str:
         """Returns a command to mount the HF bucket/repo with local caching.
 
-        ``hf-mount`` already provides an on-disk chunk cache (see its
-        ``--cache-dir``/``--cache-size`` flags), so this is the same mount
-        command as :meth:`mount_command`. ``MountCachedConfig`` options that
-        don't map to ``hf-mount`` are ignored.
+        ``hf-mount`` already provides an on-disk chunk cache (configured via
+        its own ``--cache-dir`` / ``--cache-size`` flags; not currently
+        exposed), so this reuses :meth:`mount_command`. Of
+        ``MountCachedConfig``'s fields, only ``read_only`` maps cleanly to
+        ``hf-mount`` (as ``--read-only`` on bucket mounts; repo mounts are
+        always read-only). The rclone-specific fields (``transfers``,
+        ``buffer_size``, ``vfs_*``) have no ``hf-mount`` equivalent and are
+        silently ignored.
         """
-        # hf-mount caching is configured via --cache-dir/--cache-size.
-        del config
-        return self.mount_command(mount_path)
+        read_only = bool(config.read_only) if config is not None else False
+        return self.mount_command(mount_path, read_only=read_only)

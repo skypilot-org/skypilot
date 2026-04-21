@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or Hugging Face Buckets (and read-only Hugging Face model/dataset/space repos).
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or HF buckets.
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>, hf://buckets/<namespace>/<bucket>, hf://<namespace>/<model>, hf://datasets/<namespace>/<dataset>, hf://spaces/<namespace>/<space>
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, vastdata://, cos://<region>/<bucket>, oci://<bucket_name>, hf://
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -474,10 +474,7 @@ Storage YAML reference
             - vastdata://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
-            - hf://buckets/<namespace>/<bucket_name>        (HF Bucket, read-write)
-            - hf://<namespace>/<model>[@<rev>]              (HF model repo, read-only)
-            - hf://datasets/<namespace>/<dataset>[@<rev>]   (HF dataset repo, read-only)
-            - hf://spaces/<namespace>/<space>[@<rev>]       (HF space repo, read-only)
+            - hf://buckets/<namespace>/<bucket_name>  (see the Hugging Face CLI for the full URL syntax of repos, datasets, and spaces)
 
           If the source is local, data is uploaded to the cloud to an appropriate
           bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, ibm, or hf). If source is bucket URI,
