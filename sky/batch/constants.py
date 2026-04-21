@@ -6,13 +6,18 @@ WORKER_SERVICE_STARTUP_TIMEOUT = 60  # seconds to wait for service health
 
 # Timeouts (in seconds)
 WORKER_DISCOVERY_TIMEOUT = 300
-# On resume, the batches are already checkpointed and the pool is a durable
-# resource that may briefly appear "not ready" while the controller pod and
-# the serve-side pool status plumbing stabilize after a restart.  Use a much
-# longer timeout so a transient worker-unavailability window does not kill
-# the whole job.
-WORKER_DISCOVERY_RESUME_TIMEOUT = 1800
+# On resume, batches are already checkpointed so we can afford to wait longer
+# for pool workers to reappear while the controller pod and the serve-side
+# pool status plumbing stabilize after a restart.  Don't make this too large
+# though: if the controller pod is stuck in a restart loop, we want the run
+# to fail fast enough for the next attempt to take over.
+WORKER_DISCOVERY_RESUME_TIMEOUT = 600
 BATCH_COMPLETION_TIMEOUT = 3600  # 1 hour max per batch
+
+# Grace period after cancelling stale worker jobs before launching fresh
+# workers.  ``sdk.cancel`` only sends SIGTERM; the Python HTTP service
+# holding port 8290 needs a moment to actually exit and release the port.
+STALE_WORKER_GRACE_PERIOD = 15
 
 # Polling interval for sdk.job_status() when waiting for batch completion
 BATCH_POLL_INTERVAL = 5

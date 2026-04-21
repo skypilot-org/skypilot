@@ -476,29 +476,32 @@ def test_batch_ha_kill_running(generic_cloud: str):
             smoke_tests_utils.kill_and_wait_controller(name, 'jobs'),
 
             # --- Verify resume preserves progress, then wait for SUCCEED ---
-            # The coordinator waits up to 30 min for pool workers to
-            # reappear after a controller restart (WORKER_DISCOVERY_
-            # RESUME_TIMEOUT).  Poll long enough to cover that plus
-            # execution time for the remaining batches.
+            # Bound progress-based, not wall-clock based.  The HA
+            # guarantee is "resumed progress preserved AND forward
+            # progress continues" — bail fast if progress stalls for
+            # STALL_LIMIT iterations (~10 min), but keep polling as long
+            # as we keep seeing new batches complete.
             (
                 f'COMPLETED_BEFORE=$(cat /tmp/batch-ha-progress-{name}.txt)\n'
                 f'echo "Completed before kill: $COMPLETED_BEFORE"\n'
                 f'VERIFIED=0\n'
-                f'for i in $(seq 1 540); do\n'
+                f'LAST_PROGRESS=$COMPLETED_BEFORE\n'
+                f'STALL=0\n'
+                f'STALL_LIMIT=120\n'  # 120 * 5s = 10 min without progress
+                f'MAX_ITERS=600\n'  # hard cap: 50 min
+                f'for i in $(seq 1 $MAX_ITERS); do\n'
                 f'  LINE=$(sky jobs queue 2>/dev/null '
                 f'| grep "{pool_name}" | head -1)\n'
-                # Check progress once the job is back to RUNNING,
-                # WINDING_DOWN, or SUCCEEDED.
                 f'  if echo "$LINE" | grep -qE "FAILED"; then\n'
                 f'    echo "ERROR: Batch job FAILED after recovery"\n'
                 f'    echo "Job line: $LINE"\n'
                 f'    exit 1\n'
                 f'  fi\n'
                 f'  if echo "$LINE" | grep -qE "RUNNING|WINDING_DOWN|SUCCEEDED"; then\n'
-                f'    if [ "$VERIFIED" -eq 0 ]; then\n'
-                f'      PROGRESS_AFTER=$(echo "$LINE" '
+                f'    PROGRESS_AFTER=$(echo "$LINE" '
                 f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
-                f'      COMPLETED_AFTER=${{PROGRESS_AFTER%%/*}}\n'
+                f'    COMPLETED_AFTER=${{PROGRESS_AFTER%%/*}}\n'
+                f'    if [ "$VERIFIED" -eq 0 ]; then\n'
                 f'      echo "Progress after recovery: $PROGRESS_AFTER"\n'
                 # When the job is in WINDING_DOWN, the progress column
                 # shows "Winding down" instead of "N/M", so
@@ -522,7 +525,21 @@ def test_batch_ha_kill_running(generic_cloud: str):
                 f'        exit 1\n'
                 f'      fi\n'
                 f'    fi\n'
-                # Now check if job reached SUCCEEDED.
+                # Detect stalled progress once VERIFIED (skip during
+                # WINDING_DOWN where COMPLETED_AFTER is empty).
+                f'    if [ "$VERIFIED" -eq 1 ] && [ -n "$COMPLETED_AFTER" ]; then\n'
+                f'      if [ "$COMPLETED_AFTER" -gt "$LAST_PROGRESS" ]; then\n'
+                f'        LAST_PROGRESS=$COMPLETED_AFTER\n'
+                f'        STALL=0\n'
+                f'      else\n'
+                f'        STALL=$((STALL + 1))\n'
+                f'        if [ "$STALL" -ge "$STALL_LIMIT" ]; then\n'
+                f'          echo "ERROR: Job progress stalled at '
+                f'$LAST_PROGRESS/30 for $((STALL * 5))s after recovery"\n'
+                f'          exit 1\n'
+                f'        fi\n'
+                f'      fi\n'
+                f'    fi\n'
                 f'    if echo "$LINE" | grep -q "SUCCEEDED"; then\n'
                 f'      echo "Batch job SUCCEEDED after controller recovery"\n'
                 f'      exit 0\n'

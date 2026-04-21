@@ -246,16 +246,26 @@ class BatchCoordinator:
         After a controller crash the old worker SkyPilot jobs are still
         running and hold port 8290.  We cancel **all** jobs on each
         worker cluster so the port is guaranteed to be free before we
-        launch fresh services.
+        launch fresh services.  ``sdk.cancel`` returns once the cancel
+        request is accepted, but the underlying processes need a moment
+        to actually terminate and release the socket.  Give them a grace
+        period before we start launching replacements, otherwise the new
+        worker service will fail to bind port 8290 and the coordinator
+        will spin retrying indefinitely.
         """
+        cancelled_any = False
         for cluster_name in self._workers:
             try:
                 cancel_req_id = sdk.cancel(cluster_name, all=True)
                 sdk.get(cancel_req_id)
                 logger.info(f'Cancelled all stale jobs on {cluster_name}')
+                cancelled_any = True
             except Exception:  # pylint: disable=broad-except
                 logger.debug(f'No stale jobs to cancel on '
                              f'{cluster_name}')
+        if cancelled_any:
+            logger.info('Waiting for stale worker processes to exit...')
+            time.sleep(constants.STALE_WORKER_GRACE_PERIOD)
 
     # ------------------------------------------------------------------
     # Worker discovery
@@ -373,6 +383,7 @@ class BatchCoordinator:
         output_formats_json = json.dumps(self._output_formats_dict or
                                          []).replace('\'', '\'\\\'\'')
 
+        port = constants.WORKER_SERVICE_PORT
         return textwrap.dedent(f"""\
             set -e
             export SKY_BATCH_SERIALIZED_FN='{self.serialized_fn}'
@@ -380,6 +391,27 @@ class BatchCoordinator:
             export SKY_BATCH_JOB_ID='{job_id}'
             export SKY_BATCH_INPUT_FORMAT='{input_format_json}'
             export SKY_BATCH_OUTPUT_FORMATS='{output_formats_json}'
+
+            # On HA resume the previous worker service may still be
+            # holding port {port} even after sdk.cancel has returned.
+            # Kill any process bound to the port, then wait up to 10s
+            # for the port to become free so the new service can bind.
+            if command -v fuser >/dev/null 2>&1; then
+                fuser -k {port}/tcp 2>/dev/null || true
+            elif command -v lsof >/dev/null 2>&1; then
+                lsof -ti tcp:{port} 2>/dev/null \\
+                    | xargs -r kill -9 2>/dev/null || true
+            fi
+            for _ in $(seq 1 10); do
+                if ! (command -v lsof >/dev/null 2>&1 \\
+                      && lsof -i tcp:{port} >/dev/null 2>&1) \\
+                   && ! (command -v ss >/dev/null 2>&1 \\
+                         && ss -ltn "sport = :{port}" 2>/dev/null \\
+                              | grep -q ":{port}"); then
+                    break
+                fi
+                sleep 1
+            done
 
             # Make sky.batch visible to the user's python.
             SKY_SITE=$({sky_runtime}/bin/python -c \\
