@@ -157,6 +157,11 @@ export function Volumes() {
     setPurgeConfirmed(false);
   };
 
+  const handleBackFromPurge = () => {
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
+  };
+
   useEffect(() => {
     const preloadData = async () => {
       try {
@@ -256,15 +261,28 @@ export function Volumes() {
           >
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Delete Volume</DialogTitle>
+                <DialogTitle>
+                  {showPurgeUI ? 'Force remove volume' : 'Delete Volume'}
+                </DialogTitle>
                 <DialogDescription>
-                  Are you sure you want to delete volume &quot;
-                  {volumeToDelete?.name || 'this volume'}&quot;? This action
-                  cannot be undone.
+                  {showPurgeUI ? (
+                    <>
+                      Remove &quot;
+                      {volumeToDelete?.name || 'this volume'}&quot; from
+                      SkyPilot records. The underlying volume will not be
+                      deleted.
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to delete volume &quot;
+                      {volumeToDelete?.name || 'this volume'}&quot;? This
+                      action cannot be undone.
+                    </>
+                  )}
                 </DialogDescription>
               </DialogHeader>
 
-              {volumeToDelete?.config?.use_existing && (
+              {!showPurgeUI && volumeToDelete?.config?.use_existing && (
                 <div className="bg-sky-50 border border-sky-200 rounded-md p-3 my-3 flex items-start gap-2">
                   <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
                   <div className="text-sm text-sky-900">
@@ -297,20 +315,12 @@ export function Volumes() {
                 </div>
               )}
 
-              <ErrorDisplay
-                error={deleteError}
-                title="Deletion Failed"
-                onDismiss={() => setDeleteError(null)}
-              />
-
-              {deleteError && !showPurgeUI && (
-                <button
-                  type="button"
-                  onClick={() => setShowPurgeUI(true)}
-                  className="text-sm text-amber-700 hover:text-amber-800 underline self-start bg-transparent border-0 p-0 cursor-pointer"
-                >
-                  Force remove from SkyPilot records
-                </button>
+              {!showPurgeUI && (
+                <ErrorDisplay
+                  error={deleteError}
+                  title="Deletion Failed"
+                  onDismiss={() => setDeleteError(null)}
+                />
               )}
 
               {showPurgeUI && (
@@ -318,9 +328,6 @@ export function Volumes() {
                   <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="text-sm text-amber-800 space-y-2">
                     <p className="m-0">
-                      <strong>
-                        Force remove won&apos;t delete the underlying volume.
-                      </strong>{' '}
                       Removing the SkyPilot entry means this volume will no
                       longer appear here, but{' '}
                       {volumeToDelete?.type === 'k8s-pvc' &&
@@ -377,36 +384,50 @@ export function Volumes() {
               )}
 
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={handleCancelDelete}
-                  disabled={deleteLoading || purgeLoading}
-                >
-                  Cancel
-                </Button>
                 {!showPurgeUI && (
-                  <Button
-                    variant="destructive"
-                    onClick={handleDeleteVolumeConfirm}
-                    disabled={deleteLoading}
-                  >
-                    {deleteLoading ? 'Deleting...' : 'Delete'}
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={handleCancelDelete}
+                      disabled={deleteLoading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDeleteVolumeConfirm}
+                      disabled={deleteLoading}
+                    >
+                      {deleteLoading
+                        ? 'Deleting...'
+                        : deleteError
+                          ? 'Retry Delete'
+                          : 'Delete'}
+                    </Button>
+                    {deleteError && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowPurgeUI(true)}
+                        disabled={deleteLoading}
+                        className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                      >
+                        Force remove
+                      </Button>
+                    )}
+                  </>
                 )}
                 {showPurgeUI && (
                   <>
                     <Button
-                      variant="destructive"
-                      onClick={handleDeleteVolumeConfirm}
-                      disabled={deleteLoading || purgeLoading}
+                      variant="outline"
+                      onClick={handleBackFromPurge}
+                      disabled={purgeLoading}
                     >
-                      {deleteLoading ? 'Deleting...' : 'Retry Delete'}
+                      Back
                     </Button>
                     <Button
                       onClick={handlePurgeVolumeConfirm}
-                      disabled={
-                        !purgeConfirmed || deleteLoading || purgeLoading
-                      }
+                      disabled={!purgeConfirmed || purgeLoading}
                       className="bg-amber-600 hover:bg-amber-700 text-white"
                     >
                       {purgeLoading ? 'Removing...' : 'Force Remove'}
