@@ -235,6 +235,9 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # the cluster exists, it will only include the zone that the cluster is
     # actually in.
     ('provider', 'availability_zone'),
+    # The security group name includes a hostname-derived hash
+    # (user_and_hostname_hash) that varies across API server restart
+    ('provider', 'security_group'),
 ]
 
 _ACK_MESSAGE = 'ack'
