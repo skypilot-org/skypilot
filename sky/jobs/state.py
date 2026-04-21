@@ -2202,22 +2202,6 @@ def get_workspace(job_id: int) -> str:
         return job_workspace
 
 
-def get_user_hashes_for_jobs(job_ids: List[int]) -> Dict[int, Optional[str]]:
-    """Return a mapping of job_id -> user_hash for the given job IDs.
-
-    Missing job IDs (not found in DB) are omitted from the result.
-    """
-    if not job_ids:
-        return {}
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.execute(
-            sqlalchemy.select(
-                job_info_table.c.spot_job_id, job_info_table.c.user_hash).where(
-                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
-    return {row[0]: row[1] for row in rows}
-
-
 def get_job_owner_and_workspace(
         job_ids: List[int]) -> Dict[int, Tuple[Optional[str], str]]:
     """Return {job_id: (user_hash, workspace)} in a single batch query.

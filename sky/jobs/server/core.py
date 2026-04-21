@@ -1386,23 +1386,23 @@ def cancel(name: Optional[str] = None,
                 if all_users or all or job_ids:
                     request.all_users = all_users
                     if all:
+                        # Use requester hash to filter to the caller's own jobs.
                         request.user_hash = requester_user_hash
-                    elif ownership_user_hash is not None:
-                        # Reuse user_hash to carry requester identity for
-                        # ownership enforcement on the controller side.
-                        request.user_hash = ownership_user_hash
                     if job_ids is not None:
                         request.job_ids.CopyFrom(
                             managed_jobsv1_pb2.JobIds(ids=job_ids))
                 elif name is not None:
                     request.job_name = name
-                    if ownership_user_hash is not None:
-                        request.user_hash = ownership_user_hash
                 else:
                     assert pool is not None, (job_ids, name, pool, all)
                     request.pool_name = pool
-                    if ownership_user_hash is not None:
-                        request.user_hash = ownership_user_hash
+
+                # For specific-target criteria (job_ids/name/pool, non-admin),
+                # carry the requester's identity for ownership enforcement on
+                # the controller. ownership_user_hash is already None for the
+                # all/all_users paths, so this is a no-op there.
+                if ownership_user_hash is not None:
+                    request.user_hash = ownership_user_hash
 
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: cloud_vm_ray_backend.SkyletClient(
