@@ -4,6 +4,7 @@ import atexit
 import contextlib
 import dataclasses
 import enum
+import fcntl
 import functools
 import os
 import pathlib
@@ -541,6 +542,78 @@ def request_lock_path(request_id: str) -> str:
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
+class _SafeAsyncFileLock(filelock.AsyncFileLock):
+    """AsyncFileLock that releases the OFD on cancel-mid-acquire.
+
+    Upstream ``filelock.AsyncFileLock.acquire`` awaits
+    ``run_in_executor(self._acquire)``. The sync ``_acquire`` in the
+    executor thread sets ``self._context.lock_file_fd`` as its final
+    step. Two cancel races leak the OS file descriptor (and the flock
+    on it) forever:
+
+    (A) Thread finishes ``_acquire`` (fd + flock set), then the task is
+        cancelled as ``await`` resumes. Upstream ``acquire``'s
+        ``except BaseException`` only decrements ``lock_counter``; it
+        does not close the fd.
+
+    (B) Task is cancelled before the thread finishes. The ``except``
+        runs, sees ``lock_file_fd is None``, and re-raises. The thread
+        then completes and sets ``lock_file_fd``. Nothing ever closes
+        the fd.
+
+    Fix: (1) explicit cleanup in ``acquire`` covers case (A)
+    immediately. (2) ``__del__`` closes any fd still held when the
+    object is GC'd, which covers case (B) once the thread's bound-method
+    reference to ``self`` is released.
+    """
+
+    async def acquire(self, *args, **kwargs):  # type: ignore[override]
+        try:
+            return await super().acquire(*args, **kwargs)
+        except BaseException:
+            # Case (A): thread set lock_file_fd before our await raised.
+            # Release synchronously (no await — task is already
+            # cancelled).
+            if self.is_locked:
+                try:
+                    self._release()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                self._context.lock_counter = 0
+            raise
+
+    def __del__(self) -> None:
+        # Case (B) backstop: if the executor thread completed _acquire
+        # after our except handler ran, lock_file_fd is set but nothing
+        # released it. Clean up on GC. Must be defensive — may run
+        # during interpreter shutdown.
+        try:
+            ctx = getattr(self, '_context', None)
+            if ctx is None:
+                return
+            fd = getattr(ctx, 'lock_file_fd', None)
+            if fd is None:
+                return
+            ctx.lock_file_fd = None
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:  # pylint: disable=broad-except
+                pass
+            try:
+                os.close(fd)
+            except Exception:  # pylint: disable=broad-except
+                pass
+            lock_file = getattr(self, 'lock_file', None)
+            if lock_file is not None:
+                try:
+                    os.unlink(lock_file)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+        except Exception:  # pylint: disable=broad-except
+            # Never raise from __del__.
+            pass
+
+
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     """Kill all pending and running requests for a cluster.
 
@@ -649,7 +722,7 @@ async def kill_request_async(request_id: str) -> bool:
     Returns:
         True if the request was killed, False otherwise.
     """
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request = await _get_request_no_lock_async(request_id)
         if not _should_kill_request(request_id, request):
             return False
@@ -687,7 +760,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
     """Update the status of a request"""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request = await _get_request_no_lock_async(request_id)
         if request is not None:
             request.status = status
@@ -699,7 +772,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request = await _get_request_no_lock_async(request_id)
         if request is not None:
             request.status_msg = status_msg
@@ -773,7 +846,7 @@ async def get_request_async(
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Async version of get_request."""
     # TODO(aylei): figure out how to remove FileLock here to avoid the overhead
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         return await _get_request_no_lock_async(request_id, fields)
 
 
@@ -1080,7 +1153,7 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
     set_exception_stacktrace(e)
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
@@ -1105,7 +1178,7 @@ def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
 async def set_request_succeeded_async(request_id: str,
                                       result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
@@ -1120,7 +1193,7 @@ async def set_request_succeeded_async(request_id: str,
 @asyncio_utils.shield
 async def set_request_cancelled_async(request_id: str) -> None:
     """Set a pending or running request to cancelled."""
-    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    async with _SafeAsyncFileLock(request_lock_path(request_id)):
         request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
         # Already finished or cancelled.
