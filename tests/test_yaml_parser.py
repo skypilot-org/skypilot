@@ -4,6 +4,7 @@ import textwrap
 
 import pytest
 
+from sky import task as task_module
 from sky.exceptions import InvalidSkyPilotConfigError
 from sky.task import Task
 from sky.utils import dag_utils
@@ -253,37 +254,29 @@ def test_file_mounts_empty_task_is_not_triggered_by_file_mounts(tmp_path):
     assert '/remote/dest' in task.file_mounts
 
 
-def test_empty_task_has_no_run_or_setup(tmp_path):
-    """A YAML with neither `run` nor `setup` previously produced an empty
-    cluster silently, wasting cloud resources. Require at least one.
+def test_empty_task_warns_without_blocking(tmp_path, monkeypatch):
+    """A YAML with neither `run` nor `setup` is almost always a misconfig
+    (e.g. two-doc pipeline with a trailing empty document). Warn so the
+    user is aware, but do not block — `resources`-only YAMLs to
+    pre-provision a cluster or `file_mounts`-only upload tasks are
+    legitimate.
     """
+    warnings = []
+    monkeypatch.setattr(task_module.logger, 'warning',
+                        lambda msg, *a, **kw: warnings.append(msg % a))
     config_path = _create_config_file('name: nothing\n', tmp_path)
-    task = Task.from_yaml(config_path)
-    with pytest.raises(ValueError) as e:
-        task.validate()
-    msg = str(e.value)
-    assert 'run' in msg or 'setup' in msg
+    Task.from_yaml(config_path)
+    assert any('run' in w and 'setup' in w for w in warnings), warnings
 
 
-def test_empty_task_null_run_and_null_setup(tmp_path):
-    # Explicit nulls are the same as missing.
-    config_path = _create_config_file(
-        textwrap.dedent("""\
-            name: nothing
-            run:
-            setup:
-            """), tmp_path)
-    task = Task.from_yaml(config_path)
-    with pytest.raises(ValueError):
-        task.validate()
-
-
-def test_task_with_only_setup_is_valid(tmp_path):
-    # Setup-only tasks (e.g. warming up an environment) remain valid.
+def test_task_with_only_setup_does_not_warn(tmp_path, monkeypatch):
+    # Setup-only tasks (e.g. warming up an environment) are not a misconfig.
+    warnings = []
+    monkeypatch.setattr(task_module.logger, 'warning',
+                        lambda msg, *a, **kw: warnings.append(msg % a))
     config_path = _create_config_file('setup: echo setting up\n', tmp_path)
-    task = Task.from_yaml(config_path)
-    # Should not raise even though `run` is None.
-    task.validate()
+    Task.from_yaml(config_path)
+    assert not any('run' in w and 'setup' in w for w in warnings)
 
 
 def test_duplicate_top_level_key_rejected(tmp_path):

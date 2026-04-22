@@ -518,14 +518,6 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
-        run_is_empty = self.run is None or not self.run.strip()
-        setup_is_empty = self.setup is None or not self.setup.strip()
-        if run_is_empty and setup_is_empty:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Task has neither `run` nor `setup` defined, so it has '
-                    'nothing to execute. Provide a `run` command (or a '
-                    '`setup` script) either in the YAML or on the CLI.')
 
     def expand_and_validate_file_mounts(self):
         """Expand file_mounts paths to absolute paths and validate them.
@@ -578,12 +570,15 @@ class Task:
     def _validate_mount_dest_is_absolute(self, path: str, location: str):
         if data_utils.is_cloud_store_url(path):
             return
-        if not os.path.isabs(path):
+        # Explicitly use POSIX semantics — `os.path.isabs` treats e.g.
+        # 'C:/foo' as absolute on Windows, but the remote side is always
+        # POSIX. Tilde is allowed as a common shorthand for the remote
+        # home directory (see Task docstring examples).
+        if not (path.startswith('/') or path.startswith('~')):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'File mount destination must be an absolute path. '
-                    f'Got: {path!r} in {location}. Prefix with "/" to use '
-                    'an absolute path on the remote node.')
+                    f'File mount destination must be an absolute path '
+                    f'(start with "/" or "~"). Got: {path!r} in {location}.')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -935,6 +930,22 @@ class Task:
                 task.volume_mounts.append(volume_mount)
 
         assert not config, f'Invalid task args: {config.keys()}'
+
+        # Warn when a user-loaded YAML has neither `run` nor `setup`. This
+        # is almost always a misconfiguration (e.g. a two-document pipeline
+        # where the trailing `---` split an empty tail), but there are
+        # legitimate cases (resources-only YAML to pre-provision a cluster,
+        # file_mounts-only upload) where we should not block.
+        run_is_empty = task.run is None or (isinstance(task.run, str) and
+                                            not task.run.strip())
+        setup_is_empty = task.setup is None or (isinstance(task.setup, str) and
+                                                not task.setup.strip())
+        if run_is_empty and setup_is_empty:
+            logger.warning(
+                'Task %r has neither `run` nor `setup` defined; launching '
+                'this task will bring up resources but not execute any '
+                'workload. If that was not intended, add a `run:` command '
+                'to the YAML.', task.name or '<unnamed>')
         return task
 
     @staticmethod
