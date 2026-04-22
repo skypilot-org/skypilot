@@ -120,6 +120,13 @@ P = ParamSpec('P')
 
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
+# Resolve the absolute path of kubectl once at import time. We need a
+# path with a directory component so kubernetes_pod_ssh_proxy's call to
+# ``asyncio.create_subprocess_exec`` (+ ``close_fds=False``) can route
+# the underlying ``subprocess.Popen`` through ``posix_spawn`` instead of
+# ``_posixsubprocess.fork_exec``.
+_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
@@ -2598,10 +2605,22 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
+    # Avoid fork_exec to prevent the SQLite-mutex deadlock in child process.
+    # Route subprocess.Popen through posix_spawn by:
+    #   (1) passing an absolute executable path, and
+    #   (2) passing close_fds=False (fork_exec is otherwise forced).
+    # Both kwargs flow through asyncio.create_subprocess_exec unchanged.
+    # close_fds=False is safe because Python 3.4+ defaults
+    # os.open/pipe/socket fds to O_CLOEXEC (PEP 446).
+    if _KUBECTL_PATH is None or not os.path.dirname(_KUBECTL_PATH):
+        raise RuntimeError('kubectl not found in PATH')
     proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
+        _KUBECTL_PATH,
+        *kubectl_cmd[1:],
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
+        stderr=asyncio.subprocess.STDOUT,
+        close_fds=False,
+    )
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
 
     # Wait for port-forward to be ready and get the local port

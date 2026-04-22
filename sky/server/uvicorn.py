@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -204,6 +205,15 @@ class Server(uvicorn.Server):
             db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
+        # kubernetes_pod_ssh_proxy relies on subprocess.Popen routing through
+        # posix_spawn (instead of fork_exec) to avoid deadlocking the child
+        # process.
+        if not getattr(subprocess, '_USE_POSIX_SPAWN', False):
+            logger.warning(
+                'subprocess is NOT using posix_spawn on this platform '
+                '(glibc too old, or CPython build lacks posix_spawn). '
+                'kubernetes_pod_ssh_proxy will fall back to fork_exec and '
+                'the SQLite-mutex bug may recur.')
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         lag_threshold = perf_utils.get_loop_lag_threshold()
