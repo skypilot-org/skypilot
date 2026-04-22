@@ -545,7 +545,7 @@ if script or False:
         ])
         bash_cmd = shlex.quote(' '.join(cmd_parts))
         srun_cmd = (
-            "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
+            "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-remap-root --container-name=test-cluster:exec {extra_flags} '
             f'/bin/bash -c {bash_cmd}'

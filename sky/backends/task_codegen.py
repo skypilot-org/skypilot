@@ -917,10 +917,19 @@ class SlurmCodeGen(TaskCodeGen):
                     # SLURM_CPU_BIND, SLURM_NNODES, and SLURM_NODELIST constrain
                     # the inner srun to the parent step's allocation. This causes
                     # "CPU binding outside of job step allocation" errors.
-                    # Unsetting all SLURM_* variables allows this srun to access the full job
-                    # allocation. See:
+                    # Unsetting SLURM_* variables allows this srun to access the
+                    # full job allocation. See:
                     # https://support.schedmd.com/show_bug.cgi?id=14298
                     # https://github.com/huggingface/datatrove/issues/248
+                    #
+                    # Preserve SLURM_CONF* (SLURM_CONF, SLURM_CONF_SERVER): srun
+                    # needs these to locate slurmctld when /etc/slurm/slurm.conf
+                    # is not present and DNS SRV discovery is unavailable. On
+                    # sites that distribute the config via SLURM_CONF, stripping
+                    # it causes srun to fail with:
+                    #   resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
+                    #   fetch_config: DNS SRV lookup failed
+                    #   fatal: Could not establish a configuration source
                     cmd_parts = []
                     # Only unset SKY_RUNTIME_DIR for container runs. For non-container
                     # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
@@ -934,7 +943,7 @@ class SlurmCodeGen(TaskCodeGen):
                     ])
                     bash_cmd = shlex.quote(' '.join(cmd_parts))
                     srun_cmd = (
-                        "unset $(env | awk -F= '/^SLURM_/ {{print $1}}') && "
+                        "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {{print $1}}') && "
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
                         f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1{container_flags} {{extra_flags}} '
                         f'/bin/bash -c {{bash_cmd}}'
