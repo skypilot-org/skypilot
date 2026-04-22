@@ -381,7 +381,7 @@ def override_request_env_and_config(
         # server affecting client requests. If set on the client side, it will
         # be overridden by the request body.
         os.environ.pop('SKYPILOT_DEBUG', None)
-        for env_var in _SERVER_ONLY_ENV_VARS:
+        for env_var in list(_SERVER_ONLY_ENV_VARS):
             request_body.env_vars.pop(env_var, None)
         os.environ.update(request_body.env_vars)
         # Note: may be overridden by AuthProxyMiddleware.
