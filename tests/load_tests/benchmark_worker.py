@@ -33,6 +33,7 @@ from generators import GeneratorBase  # noqa: E402
 from generators import LongConnGenerator
 from generators import QpsGenerator
 from generators import ShellGenerator
+from generators import SshBenchGenerator
 from generators.base import WorkerContext  # noqa: E402
 
 
@@ -46,6 +47,8 @@ def _make_generators(cfg: BenchmarkConfig,
             gens.append(QpsGenerator(spec, ctx))
         elif spec.type == 'long_conn':
             gens.append(LongConnGenerator(spec, ctx))
+        elif spec.type == 'ssh_bench':
+            gens.append(SshBenchGenerator(spec, ctx))
         else:
             raise ValueError(f'unknown generator type: {spec.type}')
     return gens
@@ -77,31 +80,45 @@ def run_worker(cfg: BenchmarkConfig, worker_id: int, output_dir: str,
         g.start()
 
     # Termination policy:
-    #   - If any shell generator is configured, it is the driver. Non-shell
-    #     generators (qps, long_conn) run until ALL shell generators finish,
-    #     however long that takes (basic.sh can easily exceed cfg.duration_s
-    #     because of sky launch / ssh / logs / etc). duration_s acts only
-    #     as a lower bound in that case.
-    #   - If no shell generator is configured, cfg.duration_s is the fence.
-    shell_gens = [g for g in gens if g.spec.type == 'shell']
-    other_gens = [g for g in gens if g.spec.type != 'shell']
+    #   - "Driver" generators decide when the worker can exit. Today:
+    #       * shell generators (always drivers: the script runs to end)
+    #       * ssh_bench generators with finite per-op total_connections
+    #         (drive when their attempt budget is exhausted)
+    #   - Non-driver generators (qps, long_conn, unbounded ssh_bench)
+    #     keep running until ALL drivers finish; duration_s is only a
+    #     lower bound in that case.
+    #   - If there are no drivers, cfg.duration_s is the fence.
+    def _is_driver(g):
+        if g.spec.type == 'shell':
+            return True
+        if g.spec.type == 'ssh_bench' and getattr(g, 'is_bounded', False):
+            return True
+        return False
 
-    if shell_gens:
-        for g in shell_gens:
+    drivers = [g for g in gens if _is_driver(g)]
+    non_drivers = [g for g in gens if not _is_driver(g)]
+
+    if drivers:
+        for g in drivers:
             g.wait()
         elapsed = time.time() - t0
         remaining = cfg.duration_s - elapsed
-        if other_gens and remaining > 0:
+        if non_drivers and remaining > 0:
             print(
-                f'[worker {worker_id}] shell done in {elapsed:.1f}s; '
+                f'[worker {worker_id}] drivers done in {elapsed:.1f}s; '
                 f'waiting {remaining:.1f}s more to reach duration_s',
                 flush=True)
             time.sleep(remaining)
-    elif other_gens:
-        # No shell driver — let non-shell generators run for duration_s.
+        elif non_drivers:
+            print(
+                f'[worker {worker_id}] drivers done in {elapsed:.1f}s; '
+                f'duration_s already elapsed — stopping',
+                flush=True)
+    elif non_drivers:
+        # No driver — let non-driver generators run for duration_s.
         print(
-            f'[worker {worker_id}] no shell generator; '
-            f'running non-shell for {cfg.duration_s}s',
+            f'[worker {worker_id}] no driver generator; '
+            f'running non-drivers for {cfg.duration_s}s',
             flush=True)
         time.sleep(cfg.duration_s)
 

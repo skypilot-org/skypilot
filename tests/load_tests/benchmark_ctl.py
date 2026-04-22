@@ -556,6 +556,68 @@ def _print_qps_section(name: str, per_worker: List[Dict[str, Any]]) -> None:
                   f'{stats.get("p99", 0):>7.3f}s')
 
 
+def _print_ssh_bench_section(name: str, per_worker: List[Dict[str,
+                                                               Any]]) -> None:
+    print(f'\n── SSH bench generator: {name} ──')
+    # Group records by op kind.
+    ok_by_kind: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    err_by_kind: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for w in per_worker:
+        for r in w.get('records', []):
+            kind = r.get('kind', '?')
+            if r.get('event') == 'connect' and 'duration_s' in r:
+                ok_by_kind[kind].append(r)
+            elif r.get('event') == 'connect_error' and 'duration_s' in r:
+                err_by_kind[kind].append(r)
+    # Aggregate per-op summaries across workers.
+    all_kinds = set(ok_by_kind) | set(err_by_kind)
+    for w in per_worker:
+        all_kinds.update((w['summary'].get('per_op') or {}).keys())
+    for kind in sorted(all_kinds):
+        attempts = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
+            'attempts', 0) for w in per_worker)
+        succeeded = sum(((w['summary'].get('per_op') or {}).get(kind) or
+                         {}).get('succeeded', 0) for w in per_worker)
+        failed = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
+            'failed', 0) for w in per_worker)
+        budget = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
+            'budget_this_worker', 0) for w in per_worker)
+        first = next(
+            (((w['summary'].get('per_op') or {}).get(kind) or {})
+             for w in per_worker
+             if (w['summary'].get('per_op') or {}).get(kind)),
+            {},
+        )
+        total_global = first.get('total_connections_global', 0)
+        conc = first.get('concurrency_per_worker', 0)
+        print(f'  [{kind}] concurrency_per_worker={conc}  '
+              f'total_connections (global)='
+              f'{total_global if total_global else "unlimited"}  '
+              f'budget_sum={budget}')
+        print(f'    attempts: {attempts}  succeeded: {succeeded}  '
+              f'failed: {failed}')
+        ok_rows = ok_by_kind.get(kind, [])
+        err_rows = err_by_kind.get(kind, [])
+        if ok_rows:
+            s = summarize_durations(ok_rows)
+            print(f'    connect time (ok):   '
+                  f'p50={s["p50"]:.3f}s p95={s["p95"]:.3f}s '
+                  f'p99={s["p99"]:.3f}s max={s["max"]:.3f}s n={s["n"]}')
+        if err_rows:
+            s = summarize_durations(err_rows)
+            print(f'    connect time (err):  '
+                  f'p50={s["p50"]:.3f}s p95={s["p95"]:.3f}s '
+                  f'p99={s["p99"]:.3f}s max={s["max"]:.3f}s n={s["n"]}')
+            seen = set()
+            for r in err_rows:
+                e = (r.get('error') or '').split('\n')[0][:160]
+                if e and e not in seen:
+                    seen.add(e)
+                    print(f'      err: {e}')
+                if len(seen) >= 3:
+                    break
+
+
 def _print_long_conn_section(name: str, per_worker: List[Dict[str,
                                                               Any]]) -> None:
     total_slots = sum(w['summary'].get('slots', 0) for w in per_worker)
@@ -620,6 +682,8 @@ def print_report(workers: List[Dict[str, Any]], cfg: BenchmarkConfig) -> None:
             _print_qps_section(name, per_worker)
         elif t == 'long_conn':
             _print_long_conn_section(name, per_worker)
+        elif t == 'ssh_bench':
+            _print_ssh_bench_section(name, per_worker)
 
     # Combined footer.
     shell_threads = sum(g.threads_per_worker for g in cfg.shell_generators()) \
@@ -632,9 +696,13 @@ def print_report(workers: List[Dict[str, Any]], cfg: BenchmarkConfig) -> None:
         sum(w['summary'].get('slots', 0)
             for w in by_gen[g.name])
         for g in cfg.long_conn_generators())
+    ssh_bench_slots = sum(
+        sum(op.concurrency_per_worker for op in g.ops)
+        for g in cfg.ssh_bench_generators()) * cfg.workers.count
     print(f'\n{"─"*72}')
     print(f'Combined pressure: {shell_threads} shell threads + '
-          f'{qps_total:.1f} req/s + {long_conns} long connections '
+          f'{qps_total:.1f} req/s + {long_conns} long connections + '
+          f'{ssh_bench_slots} ssh-bench slots '
           f'over {cfg.workers.count} workers')
     print()
 

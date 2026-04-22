@@ -101,6 +101,26 @@ class LongConnGeneratorSpec:
     type: str = 'long_conn'
 
 
+@dataclasses.dataclass
+class SshBenchOp:
+    kind: str  # ssh | sky_logs
+    concurrency_per_worker: int = 4
+    # Global total across all workers, split evenly. 0 = unlimited
+    # (bounded by duration_s).
+    total_connections: int = 0
+
+
+@dataclasses.dataclass
+class SshBenchGeneratorSpec:
+    name: str
+    ops: List[SshBenchOp]
+    # SSH-specific ConnectTimeout (only applies to kind=ssh).
+    connect_timeout_s: int = 15
+    # Wall-clock upper bound for one attempt (both ssh and sky_logs).
+    op_timeout_s: int = 60
+    type: str = 'ssh_bench'
+
+
 GeneratorSpec = Any  # Union of the three above
 
 
@@ -123,11 +143,16 @@ class BenchmarkConfig:
     def long_conn_generators(self) -> List[LongConnGeneratorSpec]:
         return [g for g in self.generators if g.type == 'long_conn']
 
+    def ssh_bench_generators(self) -> List[SshBenchGeneratorSpec]:
+        return [g for g in self.generators if g.type == 'ssh_bench']
+
     def needs_victims(self) -> bool:
         for g in self.qps_generators():
             if any(op.needs_victim for op in g.operations):
                 return True
         if self.long_conn_generators():
+            return True
+        if self.ssh_bench_generators():
             return True
         return False
 
@@ -172,6 +197,43 @@ def _parse_generator(d: Dict[str, Any]) -> GeneratorSpec:
             protocols=protos,
             health_check_interval_s=int(d.get('health_check_interval_s', 30)),
             reconnect_on_drop=bool(d.get('reconnect_on_drop', True)),
+        )
+    if t == 'ssh_bench':
+        raw_ops = d.get('ops')
+        # Top-level concurrency_per_worker / total_connections act as
+        # defaults when an op entry omits them, and as the sole spec for
+        # the legacy shorthand (no `ops` list — implies a single ssh op).
+        default_conc = int(d.get('concurrency_per_worker', 4))
+        default_total = int(d.get('total_connections', 0))
+        ops: List[SshBenchOp] = []
+        if not raw_ops:
+            ops.append(
+                SshBenchOp(kind='ssh',
+                           concurrency_per_worker=default_conc,
+                           total_connections=default_total))
+        else:
+            for entry in raw_ops:
+                if isinstance(entry, str):
+                    ops.append(
+                        SshBenchOp(kind=entry,
+                                   concurrency_per_worker=default_conc,
+                                   total_connections=default_total))
+                else:
+                    ops.append(
+                        SshBenchOp(
+                            kind=entry['kind'],
+                            concurrency_per_worker=int(
+                                entry.get('concurrency_per_worker',
+                                          default_conc)),
+                            total_connections=int(
+                                entry.get('total_connections',
+                                          default_total)),
+                        ))
+        return SshBenchGeneratorSpec(
+            name=name,
+            ops=ops,
+            connect_timeout_s=int(d.get('connect_timeout_s', 15)),
+            op_timeout_s=int(d.get('op_timeout_s', 60)),
         )
     raise ValueError(f'Unknown generator type: {t!r}')
 
@@ -303,6 +365,21 @@ def _validate(cfg: BenchmarkConfig) -> None:
                 raise ValueError(
                     f'long_conn generator {g.name}: unknown protocol '
                     f'{p.kind!r}')
+    for g in cfg.ssh_bench_generators():
+        if not g.ops:
+            raise ValueError(f'ssh_bench generator {g.name}: no ops')
+        for op in g.ops:
+            if op.kind not in ('ssh', 'sky_logs'):
+                raise ValueError(f'ssh_bench generator {g.name}: '
+                                 f'unknown op kind {op.kind!r}')
+            if op.concurrency_per_worker < 1:
+                raise ValueError(f'ssh_bench generator {g.name} op '
+                                 f'{op.kind}: concurrency_per_worker '
+                                 'must be >= 1')
+            if op.total_connections < 0:
+                raise ValueError(f'ssh_bench generator {g.name} op '
+                                 f'{op.kind}: total_connections must '
+                                 'be >= 0')
     if cfg.needs_victims():
         if not cfg.victim_pool.enabled:
             raise ValueError('a generator requires victim clusters but '
