@@ -4,6 +4,7 @@ This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
 import asyncio
+import faulthandler
 import logging
 import os
 import signal
@@ -207,6 +208,15 @@ class Server(uvicorn.Server):
             db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
+        # Enable faulthandler so fatal signals (SEGV, ABRT, etc.) dump a
+        # Python traceback. Also register SIGUSR1 as a user-triggered dump
+        # of all thread stacks, used by SlowStartMultiprocess to capture
+        # what a hung worker is doing right before SIGKILL.
+        faulthandler.enable()
+        try:
+            faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+        except (ValueError, OSError) as e:
+            logger.warning(f'faulthandler SIGUSR1 register failed: {e}')
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         lag_threshold = perf_utils.get_loop_lag_threshold()
@@ -298,3 +308,56 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
         if self._init_thread is not None:
             self._init_thread.join()
         super().terminate_all()
+
+    def keep_subprocess_alive(self) -> None:
+        """Replicates upstream logic but distinguishes hung-worker from
+        crashed-worker and dumps the hung worker's Python stacks via
+        SIGUSR1 before SIGKILL, so we can see what the worker was stuck on.
+        """
+        if self.should_exit.is_set():
+            return
+        for idx, process in enumerate(self.processes):
+            underlying = process.process
+            if not underlying.is_alive():
+                # Worker already dead on its own (crash / abort / segfault /
+                # OOM-kill). exitcode tells us which: -N == killed by signal
+                # N, positive == clean exit with that code.
+                exitcode = underlying.exitcode
+                if exitcode is not None and exitcode < 0:
+                    signal_desc = f'signal={-exitcode}'
+                else:
+                    signal_desc = 'signal=n/a'
+                logger.warning(f'Worker PID={process.pid} exited on its own: '
+                               f'exitcode={exitcode} ({signal_desc}). '
+                               f'Not sending SIGKILL.')
+            else:
+                # Worker is alive per /proc — ping it; if ping fails the
+                # supervisor's default behavior is to SIGKILL. Before we
+                # do that, ask the worker to dump all thread stacks.
+                if process.ping(5):
+                    continue
+                logger.warning(
+                    f'Worker PID={process.pid} failed ping (event loop '
+                    f'or GIL stuck >5s). Sending SIGUSR1 for stack dump '
+                    f'before SIGKILL.')
+                try:
+                    os.kill(process.pid, signal.SIGUSR1)
+                except (ProcessLookupError, PermissionError) as e:
+                    logger.warning(f'SIGUSR1 to PID={process.pid} failed: {e}')
+                # Give faulthandler a moment to flush traceback to stderr.
+                # 2s is a tradeoff vs. startup latency of the replacement.
+                time.sleep(2)
+
+            process.kill()
+            process.join()
+
+            if self.should_exit.is_set():
+                return
+
+            final_exitcode = underlying.exitcode
+            logger.info(f'Child process [{process.pid}] died '
+                        f'(final exitcode={final_exitcode})')
+            new_process = multiprocess.Process(self.config, self.target,
+                                               self.sockets)
+            new_process.start()
+            self.processes[idx] = new_process
