@@ -1966,7 +1966,8 @@ def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
 def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
-        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1974,6 +1975,11 @@ def get_clusters_from_history(
               currently active) that were last used within the past 'days'
               days. Active clusters are always included regardless of this
               parameter.
+        cluster_hashes: If specified, only include clusters whose cluster_hash
+              is in this list.
+        cluster_names: If specified, only include clusters whose name is in
+              this list. Names are not unique in history, so a single name may
+              match multiple rows.
 
     Returns:
         List of cluster records with history information.
@@ -2037,6 +2043,9 @@ def get_clusters_from_history(
         if cluster_hashes is not None:
             query = query.filter(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
+        if cluster_names is not None:
+            query = query.filter(
+                cluster_history_table.c.name.in_(cluster_names))
         rows = query.all()
 
     usage_intervals_dict = {}

@@ -122,8 +122,11 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
+        // Filter server-side by cluster name so we don't pull full history.
         const historyData = await dashboardCache.get(getClusterHistory, [
-          cluster,
+          null,
+          30,
+          [cluster],
         ]);
         const foundHistoryCluster = historyData.find(
           (c) => c.cluster_hash === cluster || c.cluster === cluster

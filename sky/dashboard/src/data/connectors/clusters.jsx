@@ -155,7 +155,11 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null, days = 30) {
+export async function getClusterHistory(
+  clusterHash = null,
+  days = 30,
+  clusterNames = null
+) {
   try {
     const requestBody = {
       days: days,
@@ -165,6 +169,11 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
+    }
+
+    // If specific cluster names are provided, include them in the request
+    if (clusterNames) {
+      requestBody.cluster_names = clusterNames;
     }
 
     const history = await apiClient.fetch('/cost_report', requestBody);

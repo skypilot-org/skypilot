@@ -907,6 +907,9 @@ class CostReportBody(RequestBody):
     # we use hashes instead of names to avoid the case where
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
+    # Filter by cluster names. Names are not unique across history, so a given
+    # name may match multiple rows.
+    cluster_names: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
