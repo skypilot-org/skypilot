@@ -300,8 +300,12 @@ EXTRA_RESOURCES_OPTIONS = [
         required=False,
         type=str,
         multiple=True,
-        help=('Ports to open on the cluster. '
-              'If specified, overrides the "ports" config in the YAML. '),
+        help=('Ports to open on the cluster. Accepts a single port '
+              '(``--ports 8080``), a range (``--ports 8000-8010``), or '
+              'a comma-separated list (``--ports 8080,9090``). Repeat '
+              'the flag to specify multiple values (``--ports 8080 '
+              '--ports 9090-9100``). If specified, overrides the '
+              '"ports" config in the YAML.'),
     ),
 ]
 
