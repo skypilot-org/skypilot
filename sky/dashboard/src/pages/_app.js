@@ -15,6 +15,7 @@ import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
 import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
 import { getNonce } from '@/utils/csp';
+import { installFetchDedupe } from '@/lib/fetch-dedupe';
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
@@ -27,6 +28,9 @@ const Layout = dynamic(
 if (typeof window !== 'undefined') {
   window.React = React;
   window.ReactDOM = { ...ReactDOMAll, ...ReactDOM };
+  // Must run before any plugin <script> is injected by PluginProvider so
+  // plugin-side fetches for these endpoints also coalesce.
+  installFetchDedupe();
 }
 
 // Create an Emotion cache with the CSP nonce so that dynamically injected
