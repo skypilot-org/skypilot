@@ -5531,6 +5531,9 @@ def jobs_launch(
     """
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify --num-jobs without --pool.')
+    if num_jobs is not None and num_jobs < 1:
+        raise click.UsageError(
+            f'--num-jobs must be a positive integer. Got: {num_jobs}.')
 
     if cluster is not None:
         if name is not None and name != cluster:
