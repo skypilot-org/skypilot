@@ -930,22 +930,6 @@ class Task:
                 task.volume_mounts.append(volume_mount)
 
         assert not config, f'Invalid task args: {config.keys()}'
-
-        # Warn when a user-loaded YAML has neither `run` nor `setup`. This
-        # is almost always a misconfiguration (e.g. a two-document pipeline
-        # where the trailing `---` split an empty tail), but there are
-        # legitimate cases (resources-only YAML to pre-provision a cluster,
-        # file_mounts-only upload) where we should not block.
-        run_is_empty = task.run is None or (isinstance(task.run, str) and
-                                            not task.run.strip())
-        setup_is_empty = task.setup is None or (isinstance(task.setup, str) and
-                                                not task.setup.strip())
-        if run_is_empty and setup_is_empty:
-            logger.warning(
-                'Task %r has neither `run` nor `setup` defined; launching '
-                'this task will bring up resources but not execute any '
-                'workload. If that was not intended, add a `run:` command '
-                'to the YAML.', task.name or '<unnamed>')
         return task
 
     @staticmethod
