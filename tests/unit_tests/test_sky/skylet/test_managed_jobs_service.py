@@ -702,7 +702,7 @@ class TestCancelJobs:
         # Job 4 is SUCCEEDED so should not be cancelled
         expected_jobs = [self.job_ids['job_id1'], self.job_ids['job_id2']]
         assert response.message.lower(
-        ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled. job with id {self.job_ids['job_id3']} is skipped as they are not in the active workspace 'ws1'. check the workspace of the job with: sky jobs queue"
+        ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled. job with id {self.job_ids['job_id3']} is skipped as they are not in the active workspace 'ws1'. check the workspace of the job with: sky jobs queue."
         context_mock.abort.assert_not_called()
 
     def test_cancel_jobs_all_users_false(self):

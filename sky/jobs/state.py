@@ -2202,6 +2202,10 @@ def get_workspace(job_id: int) -> str:
         return job_workspace
 
 
+# SQLite's default variable limit; chunk IN queries to stay within it.
+_SQLITE_MAX_VARIABLE_NUMBER = 999
+
+
 def get_job_owner_and_workspace(
         job_ids: List[int]) -> Dict[int, Tuple[Optional[str], str]]:
     """Return {job_id: (user_hash, workspace)} in a single batch query.
@@ -2211,8 +2215,6 @@ def get_job_owner_and_workspace(
     """
     if not job_ids:
         return {}
-    # SQLite's default variable limit is 999; chunk to stay within it.
-    _SQLITE_MAX_VARIABLE_NUMBER = 999
     result: Dict[int, Tuple[Optional[str], str]] = {}
     engine = _db_manager.get_engine()
     for i in range(0, len(job_ids), _SQLITE_MAX_VARIABLE_NUMBER):
@@ -2223,12 +2225,10 @@ def get_job_owner_and_workspace(
                     job_info_table.c.spot_job_id,
                     job_info_table.c.user_hash,
                     job_info_table.c.workspace,
-                ).where(
-                    job_info_table.c.spot_job_id.in_(chunk))).fetchall()
+                ).where(job_info_table.c.spot_job_id.in_(chunk))).fetchall()
         result.update({
             row[0]: (row[1], row[2] if row[2] is not None else
-                     constants.SKYPILOT_DEFAULT_WORKSPACE)
-            for row in rows
+                     constants.SKYPILOT_DEFAULT_WORKSPACE) for row in rows
         })
     return result
 
