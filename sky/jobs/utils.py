@@ -1010,10 +1010,15 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       current_workspace: Optional[str] = None,
                       user_hash: Optional[str] = None,
                       graceful: bool = False,
-                      graceful_timeout: Optional[int] = None) -> str:
+                      graceful_timeout: Optional[int] = None,
+                      requester_user_hash: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
+
+    Args:
+        requester_user_hash: If set, only cancel jobs owned by this user.
+            None means no ownership enforcement (admin or legacy path).
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
@@ -1026,6 +1031,13 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
+    unauthorized_job_ids: List[int] = []
+
+    # Pre-fetch owner hash and workspace together in one query to avoid
+    # N+1 DB calls for both the ownership check and the workspace check.
+    job_info: Dict[int, Tuple[Optional[str], str]] = (
+        managed_job_state.get_job_owner_and_workspace(job_ids))
+
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -1037,7 +1049,17 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
-        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+
+        # Ownership check: only cancel jobs owned by the requester unless
+        # requester_user_hash is None (admin or bulk cancel with user_hash).
+        if requester_user_hash is not None:
+            owner_hash, _ = job_info.get(
+                job_id, (None, constants.SKYPILOT_DEFAULT_WORKSPACE))
+            if owner_hash != requester_user_hash:
+                unauthorized_job_ids.append(job_id)
+                continue
+
+        if job_status == managed_job_state.ManagedJobStatus.PENDING:
             # the "if PENDING" is a short circuit, this will be atomic.
             cancelled = managed_job_state.set_pending_cancelled(job_id)
             if cancelled:
@@ -1046,7 +1068,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        job_workspace = managed_job_state.get_workspace(job_id)
+        _, job_workspace = job_info.get(
+            job_id, (None, constants.SKYPILOT_DEFAULT_WORKSPACE))
         if current_workspace is not None and job_workspace != current_workspace:
             wrong_workspace_job_ids.append(job_id)
             continue
@@ -1096,23 +1119,37 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             f' {", ".join(map(str, wrong_workspace_job_ids))} '
             f'{plural_verb} skipped as they are not in the active workspace '
             f'{current_workspace!r}. Check the workspace of the job with: '
-            f'sky jobs queue')
+            f'sky jobs queue.')
+
+    unauthorized_str = ''
+    if unauthorized_job_ids:
+        plural = 's' if len(unauthorized_job_ids) > 1 else ''
+        plural_verb = 'are' if len(unauthorized_job_ids) > 1 else 'is'
+        belong_str = ('they belong'
+                      if len(unauthorized_job_ids) > 1 else 'it belongs')
+        ids_str = ', '.join(map(str, unauthorized_job_ids))
+        unauthorized_str = (
+            f' Permission denied: job{plural} with ID{plural} {ids_str} '
+            f'{plural_verb} not cancelled because {belong_str} to another '
+            f'user. Only admins can cancel other users\' jobs.')
 
     if not cancelled_job_ids:
-        return f'No job to cancel.{wrong_workspace_job_str}'
+        return f'No job to cancel.{wrong_workspace_job_str}{unauthorized_str}'
     identity_str = f'Job with ID {cancelled_job_ids[0]} is'
     if len(cancelled_job_ids) > 1:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
+    msg = (f'{identity_str} scheduled to be cancelled.'
+           f'{wrong_workspace_job_str}{unauthorized_str}')
     return msg
 
 
 def cancel_job_by_name(job_name: str,
                        current_workspace: Optional[str] = None,
                        graceful: bool = False,
-                       graceful_timeout: Optional[int] = None) -> str:
+                       graceful_timeout: Optional[int] = None,
+                       requester_user_hash: Optional[str] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -1124,17 +1161,21 @@ def cancel_job_by_name(job_name: str,
     msg = cancel_jobs_by_id(job_ids,
                             current_workspace=current_workspace,
                             graceful=graceful,
-                            graceful_timeout=graceful_timeout)
+                            graceful_timeout=graceful_timeout,
+                            requester_user_hash=requester_user_hash)
     return f'{job_name!r} {msg}'
 
 
 def cancel_jobs_by_pool(pool_name: str,
-                        current_workspace: Optional[str] = None) -> str:
+                        current_workspace: Optional[str] = None,
+                        requester_user_hash: Optional[str] = None) -> str:
     """Cancel all jobs in a pool."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
     if not job_ids:
         return f'No running job found in pool {pool_name!r}.'
-    return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    return cancel_jobs_by_id(job_ids,
+                             current_workspace=current_workspace,
+                             requester_user_hash=requester_user_hash)
 
 
 def controller_log_file_for_job(job_id: int,
@@ -2798,7 +2839,8 @@ class ManagedJobCodeGen:
                           job_ids: Optional[List[int]],
                           all_users: bool = False,
                           graceful: bool = False,
-                          graceful_timeout: Optional[int] = None) -> str:
+                          graceful_timeout: Optional[int] = None,
+                          requester_user_hash: Optional[str] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
@@ -2814,6 +2856,14 @@ class ManagedJobCodeGen:
         elif managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
+        elif managed_job_version < 18:
+            msg = utils.cancel_jobs_by_id(
+                {job_ids},
+                all_users={all_users},
+                current_workspace={active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         else:
             msg = utils.cancel_jobs_by_id(
                 {job_ids},
@@ -2821,6 +2871,7 @@ class ManagedJobCodeGen:
                 current_workspace={active_workspace!r},
                 graceful={graceful},
                 graceful_timeout={graceful_timeout},
+                requester_user_hash={requester_user_hash!r},
             )
         print(msg, end="", flush=True)
         """)
@@ -2830,7 +2881,8 @@ class ManagedJobCodeGen:
     def cancel_job_by_name(cls,
                            job_name: str,
                            graceful: bool = False,
-                           graceful_timeout: Optional[int] = None) -> str:
+                           graceful_timeout: Optional[int] = None,
+                           requester_user_hash: Optional[str] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 4:
@@ -2840,23 +2892,40 @@ class ManagedJobCodeGen:
             msg = utils.cancel_job_by_name({job_name!r})
         elif managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        else:
+        elif managed_job_version < 18:
             msg = utils.cancel_job_by_name(
                 {job_name!r},
                 {active_workspace!r},
                 graceful={graceful},
                 graceful_timeout={graceful_timeout},
             )
+        else:
+            msg = utils.cancel_job_by_name(
+                {job_name!r},
+                {active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+                requester_user_hash={requester_user_hash!r},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
+    def cancel_jobs_by_pool(cls,
+                            pool_name: str,
+                            requester_user_hash: Optional[str] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
+        if managed_job_version < 18:
             msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
+        else:
+            msg = utils.cancel_jobs_by_pool(
+                {pool_name!r},
+                {active_workspace!r},
+                requester_user_hash={requester_user_hash!r},
+            )
+        print(msg, end="", flush=True)
         """)
         return cls._build(code)
 

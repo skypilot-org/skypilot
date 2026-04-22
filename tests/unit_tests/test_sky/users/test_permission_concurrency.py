@@ -120,7 +120,12 @@ def test_concurrent_permission_service_no_race(permission_service):
             stop.wait(timeout=10)
             stop.set()
             for f in futures:
-                f.result(timeout=5)
+                # Each worker checks stop.is_set() only between iterations.
+                # One iteration can span several load_policy() write-lock
+                # acquisitions (one per role + one per unknown user), so on a
+                # loaded CI runner the thread may need several seconds to drain
+                # the current iteration before noticing the stop signal.
+                f.result(timeout=30)
     finally:
         adapter.load_policy = original_load
 

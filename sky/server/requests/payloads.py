@@ -614,6 +614,9 @@ class JobsCancelBody(RequestBody):
     pool: Optional[str] = None
     graceful: bool = False
     graceful_timeout: Optional[int] = None
+    # When True, skip the extra admin-override confirmation that the server
+    # requires when an admin cancels specific jobs (by ID, name, or pool).
+    yes: bool = False
 
 
 class JobsLogsBody(RequestBody):

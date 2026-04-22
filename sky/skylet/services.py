@@ -572,9 +572,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             graceful_timeout = (request.graceful_timeout if
                                 request.HasField('graceful_timeout') else None)
 
+            # For non-all_users criteria, user_hash carries the requester's
+            # identity for ownership enforcement (set by the API server for
+            # non-admin users). None means no ownership check (admin path).
+            requester_user_hash = (request.user_hash
+                                   if request.HasField('user_hash') else None)
+
             if cancellation_criteria == 'all_users':
-                user_hash = request.user_hash if request.HasField(
-                    'user_hash') else None
+                # For all_users criteria, user_hash filters by owner (original
+                # semantics), not for ownership enforcement.
+                user_hash = requester_user_hash
                 all_users = request.all_users
                 if not all_users and user_hash is None:
                     context.abort(
@@ -593,17 +600,20 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     job_ids=job_ids,
                     current_workspace=request.current_workspace,
                     graceful=graceful,
-                    graceful_timeout=graceful_timeout)
+                    graceful_timeout=graceful_timeout,
+                    requester_user_hash=requester_user_hash)
             elif cancellation_criteria == 'job_name':
                 message = managed_job_utils.cancel_job_by_name(
                     job_name=request.job_name,
                     current_workspace=request.current_workspace,
                     graceful=graceful,
-                    graceful_timeout=graceful_timeout)
+                    graceful_timeout=graceful_timeout,
+                    requester_user_hash=requester_user_hash)
             elif cancellation_criteria == 'pool_name':
                 message = managed_job_utils.cancel_jobs_by_pool(
                     pool_name=request.pool_name,
-                    current_workspace=request.current_workspace)
+                    current_workspace=request.current_workspace,
+                    requester_user_hash=requester_user_hash)
             else:
                 context.abort(
                     grpc.StatusCode.INVALID_ARGUMENT,

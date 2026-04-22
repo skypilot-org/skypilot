@@ -5909,7 +5909,9 @@ def jobs_cancel(
                             if job_ids else f'{name!r}' if name is not None else
                             f'managed jobs in pool {pool!r}')
         if all_users:
-            job_identity_str = 'all managed jobs FOR ALL USERS'
+            job_identity_str = (
+                'all managed jobs for ALL USERS '
+                '(admin override — other users\' jobs will be cancelled)')
         elif all:
             job_identity_str = 'all managed jobs'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
@@ -5924,7 +5926,8 @@ def jobs_cancel(
                             graceful=graceful,
                             graceful_timeout=graceful_timeout,
                             all=all,
-                            all_users=all_users))
+                            all_users=all_users,
+                            yes=yes))
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)

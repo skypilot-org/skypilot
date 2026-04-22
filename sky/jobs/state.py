@@ -2202,6 +2202,37 @@ def get_workspace(job_id: int) -> str:
         return job_workspace
 
 
+# SQLite's default variable limit; chunk IN queries to stay within it.
+_SQLITE_MAX_VARIABLE_NUMBER = 999
+
+
+def get_job_owner_and_workspace(
+        job_ids: List[int]) -> Dict[int, Tuple[Optional[str], str]]:
+    """Return {job_id: (user_hash, workspace)} in a single batch query.
+
+    Fetches both fields at once so callers avoid separate per-job lookups.
+    Missing job IDs are omitted from the result.
+    """
+    if not job_ids:
+        return {}
+    result: Dict[int, Tuple[Optional[str], str]] = {}
+    engine = _db_manager.get_engine()
+    for i in range(0, len(job_ids), _SQLITE_MAX_VARIABLE_NUMBER):
+        chunk = job_ids[i:i + _SQLITE_MAX_VARIABLE_NUMBER]
+        with orm.Session(engine) as session:
+            rows = session.execute(
+                sqlalchemy.select(
+                    job_info_table.c.spot_job_id,
+                    job_info_table.c.user_hash,
+                    job_info_table.c.workspace,
+                ).where(job_info_table.c.spot_job_id.in_(chunk))).fetchall()
+        result.update({
+            row[0]: (row[1], row[2] if row[2] is not None else
+                     constants.SKYPILOT_DEFAULT_WORKSPACE) for row in rows
+        })
+    return result
+
+
 async def get_latest_task_id_status_async(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job."""
