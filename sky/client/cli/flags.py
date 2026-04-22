@@ -1,7 +1,7 @@
 """Flags for the CLI."""
 
 import os
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import click
 import dotenv
@@ -11,7 +11,7 @@ from sky.skylet import autostop_lib
 from sky.utils import resources_utils
 
 
-def _parse_dotenv_file(path: str) -> dict:
+def _parse_dotenv_file(path: str) -> Dict[str, Optional[str]]:
     """Parse a dotenv file, erroring if the path does not exist.
 
     The raw `dotenv.dotenv_values` accepts a non-existent path and returns

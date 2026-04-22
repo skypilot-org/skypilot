@@ -215,11 +215,13 @@ def test_invalid_accelerator_count(enable_all_clouds):
     # Accelerator counts must be positive. Zero or negative counts were
     # previously accepted and produced either a misleading "catalog does
     # not contain" error or (on Kubernetes) a silently-launched pod with
-    # zero GPUs.
-    for bad_accel in ['V100:0', 'V100:-1', {'V100': 0}, {'V100': -2}]:
-        with pytest.raises(ValueError) as e:
-            _test_resources(sky.AWS(), accelerators=bad_accel)
-        assert 'positive' in str(e.value).lower()
+    # zero GPUs. Test both AWS and Kubernetes paths since the original
+    # bug report was specifically about the Kubernetes zero-GPU pod.
+    for cloud in [sky.AWS(), sky.Kubernetes()]:
+        for bad_accel in ['V100:0', 'V100:-1', {'V100': 0}, {'V100': -2}]:
+            with pytest.raises(ValueError) as e:
+                _test_resources(cloud, accelerators=bad_accel)
+            assert 'positive' in str(e.value).lower()
 
 
 def test_ports_comma_separated(enable_all_clouds):

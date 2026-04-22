@@ -23,12 +23,24 @@ def check_no_duplicate_keys(yaml_str: str) -> None:
     key name so the user can find it.
     """
     stream = io.StringIO(yaml_str)
-    nodes = list(yaml.compose_all(stream))
+    try:
+        nodes = list(yaml.compose_all(stream))
+    except yaml.YAMLError:
+        # Let the regular `safe_load` path produce the user-facing parse
+        # error; this function's job is only to catch silent duplicates.
+        return
 
     def walk(node: 'yaml.Node') -> None:
         if isinstance(node, yaml.MappingNode):
             seen: Dict[Any, int] = {}
             for key_node, value_node in node.value:
+                # Non-scalar keys (e.g. `? [a, b]`) are legal YAML but not
+                # hashable, and SkyPilot schemas don't use them. Skip
+                # duplicate detection for them so we don't raise a
+                # confusing TypeError.
+                if not isinstance(key_node, yaml.ScalarNode):
+                    walk(value_node)
+                    continue
                 key = key_node.value
                 if key in seen:
                     prev_line = seen[key] + 1

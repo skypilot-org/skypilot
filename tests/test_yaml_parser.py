@@ -296,6 +296,36 @@ def test_duplicate_top_level_key_rejected(tmp_path):
     assert 'duplicate' in msg.lower()
 
 
+def test_check_no_duplicate_keys_handles_non_scalar_key():
+    """Non-scalar mapping keys (e.g. `? [a, b]`) are legal YAML but not
+    hashable; the duplicate-key walker must skip them rather than raise
+    a bare TypeError from `key in seen`. (PyYAML's own safe_load will
+    still reject the document downstream; we only care that our walker
+    is robust.)
+    """
+    from sky.utils import yaml_utils
+
+    # Should not raise TypeError.
+    yaml_utils.check_no_duplicate_keys(
+        textwrap.dedent("""\
+        ? [a, b]
+        : 1
+        run: echo hi
+        """))
+
+
+def test_check_no_duplicate_keys_silent_on_malformed_yaml():
+    """`check_no_duplicate_keys` uses `yaml.compose_all`, which can itself
+    raise on malformed YAML. We swallow that so the regular `safe_load`
+    parser produces the user-facing error, not our helper.
+    """
+    from sky.utils import yaml_utils
+
+    # Unclosed bracket — compose_all would raise. check_no_duplicate_keys
+    # should swallow and return silently.
+    yaml_utils.check_no_duplicate_keys('name: [unclosed\nrun: echo hi\n')
+
+
 def test_duplicate_nested_key_rejected(tmp_path):
     """Duplicate file_mount destinations (which is also a duplicate YAML
     key) should be rejected so the user learns about the conflict.
@@ -323,7 +353,8 @@ def test_binary_entrypoint_raises_friendly_error(tmp_path):
     with pytest.raises(ValueError) as e:
         dag_utils.load_chain_dag_from_yaml(str(config_path))
     msg = str(e.value)
-    assert os.path.basename(str(config_path)) in msg or 'YAML' in msg
+    assert 'UTF-8' in msg
+    assert os.path.basename(str(config_path)) in msg
 
 
 def test_null_body_yaml_does_not_crash(tmp_path):
