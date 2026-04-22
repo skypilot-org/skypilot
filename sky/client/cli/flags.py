@@ -11,6 +11,20 @@ from sky.skylet import autostop_lib
 from sky.utils import resources_utils
 
 
+def _parse_dotenv_file(path: str) -> dict:
+    """Parse a dotenv file, erroring if the path does not exist.
+
+    The raw `dotenv.dotenv_values` accepts a non-existent path and returns
+    an empty dict, which means a typo in `--env-file` silently produces
+    an empty environment. Validate up-front so the user learns early.
+    """
+    if not os.path.isfile(path):
+        raise click.UsageError(
+            f'Dotenv file does not exist: {path}. Provide a path to an '
+            'existing file, or remove the flag.')
+    return dotenv.dotenv_values(path)
+
+
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
     """Parse env vars into a (KEY, VAL) pair."""
     if '=' not in env_var:
@@ -164,7 +178,7 @@ TASK_OPTIONS = [
                        'Passing "none" resets the config.')),
     click.option('--env-file',
                  required=False,
-                 type=dotenv.dotenv_values,
+                 type=_parse_dotenv_file,
                  help="""\
         Path to a dotenv file with environment variables to set on the remote
         node.
@@ -198,7 +212,7 @@ TASK_OPTIONS = [
     click.option(
         '--secret-file',
         required=False,
-        type=dotenv.dotenv_values,
+        type=_parse_dotenv_file,
         help="""\
         Path to a dotenv file with secret variables to set on the remote node.
 

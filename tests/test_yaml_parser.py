@@ -213,6 +213,77 @@ def test_anyof_error_points_at_inner_problem(tmp_path):
     assert 'ten' in msg
 
 
+def test_file_mounts_dest_must_be_absolute(tmp_path):
+    """Relative file_mount destination paths used to be accepted silently.
+
+    A relative remote path is almost never what the user wants and was
+    previously stored verbatim, producing confusing behavior on the
+    remote machine. Reject it with a clear message.
+    """
+    # Need a real source file so we don't fail on that check first.
+    src = tmp_path / 'local.txt'
+    src.write_text('hi')
+    config_path = _create_config_file(
+        textwrap.dedent(f"""\
+            run: echo hi
+            file_mounts:
+                relative/dest: {src}
+            """), tmp_path)
+    task = Task.from_yaml(config_path)
+    with pytest.raises(ValueError) as e:
+        task.expand_and_validate_file_mounts()
+    msg = str(e.value)
+    assert 'relative/dest' in msg
+    assert 'absolute' in msg
+
+
+def test_file_mounts_empty_task_is_not_triggered_by_file_mounts(tmp_path):
+    # Sanity: an absolute destination still works.
+    src = tmp_path / 'local.txt'
+    src.write_text('hi')
+    config_path = _create_config_file(
+        textwrap.dedent(f"""\
+            run: echo hi
+            file_mounts:
+                /remote/dest: {src}
+            """), tmp_path)
+    task = Task.from_yaml(config_path)
+    assert '/remote/dest' in task.file_mounts
+
+
+def test_empty_task_has_no_run_or_setup(tmp_path):
+    """A YAML with neither `run` nor `setup` previously produced an empty
+    cluster silently, wasting cloud resources. Require at least one.
+    """
+    config_path = _create_config_file('name: nothing\n', tmp_path)
+    task = Task.from_yaml(config_path)
+    with pytest.raises(ValueError) as e:
+        task.validate()
+    msg = str(e.value)
+    assert 'run' in msg or 'setup' in msg
+
+
+def test_empty_task_null_run_and_null_setup(tmp_path):
+    # Explicit nulls are the same as missing.
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            name: nothing
+            run:
+            setup:
+            """), tmp_path)
+    task = Task.from_yaml(config_path)
+    with pytest.raises(ValueError):
+        task.validate()
+
+
+def test_task_with_only_setup_is_valid(tmp_path):
+    # Setup-only tasks (e.g. warming up an environment) remain valid.
+    config_path = _create_config_file('setup: echo setting up\n', tmp_path)
+    task = Task.from_yaml(config_path)
+    # Should not raise even though `run` is None.
+    task.validate()
+
+
 def test_multiple_unknown_fields_separator(tmp_path):
     """Multiple typos at the same level should not be concatenated together.
 

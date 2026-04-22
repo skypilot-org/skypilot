@@ -518,6 +518,14 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('run must be a shell script (str). '
                                  f'Got {type(self.run)}')
+        run_is_empty = self.run is None or not self.run.strip()
+        setup_is_empty = self.setup is None or not self.setup.strip()
+        if run_is_empty and setup_is_empty:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Task has neither `run` nor `setup` defined, so it has '
+                    'nothing to execute. Provide a `run` command (or a '
+                    '`setup` script) either in the YAML or on the CLI.')
 
     def expand_and_validate_file_mounts(self):
         """Expand file_mounts paths to absolute paths and validate them.
@@ -549,6 +557,7 @@ class Task:
 
     def _validate_mount_path(self, path: str, location: str):
         self._validate_path(path, location)
+        self._validate_mount_dest_is_absolute(path, location)
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
         if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
@@ -565,6 +574,16 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Mount paths cannot end with a slash '
                                  f'Found: {path} in {location}')
+
+    def _validate_mount_dest_is_absolute(self, path: str, location: str):
+        if data_utils.is_cloud_store_url(path):
+            return
+        if not os.path.isabs(path):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'File mount destination must be an absolute path. '
+                    f'Got: {path!r} in {location}. Prefix with "/" to use '
+                    'an absolute path on the remote node.')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.

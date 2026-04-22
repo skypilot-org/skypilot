@@ -18,3 +18,23 @@ def test_jobs_launch_num_jobs_must_be_positive():
             ['--pool', 'mypool', '--num-jobs', bad, 'echo', 'hi'])
         assert result.exit_code != 0
         assert '--num-jobs' in result.output
+
+
+def test_env_file_must_exist():
+    # --env-file on a non-existent path previously returned {} silently
+    # (dotenv's default behavior) and the user never learned the file
+    # was missing. It should now error with a clear message.
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(
+        command.launch, ['--env-file', '/no/such/env/file.env', 'echo', 'hi'])
+    assert result.exit_code != 0
+    assert '/no/such/env/file.env' in result.output
+
+
+def test_secret_file_must_exist():
+    runner = cli_testing.CliRunner()
+    result = runner.invoke(
+        command.launch,
+        ['--secret-file', '/no/such/secret/file.env', 'echo', 'hi'])
+    assert result.exit_code != 0
+    assert '/no/such/secret/file.env' in result.output
