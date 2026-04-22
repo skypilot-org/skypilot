@@ -126,6 +126,8 @@ _SERVER_USER_HASH_KEY = 'server_user_hash'
 # the underlying ``subprocess.Popen`` through ``posix_spawn`` instead of
 # ``_posixsubprocess.fork_exec``.
 _KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+if _KUBECTL_PATH is not None:
+    _KUBECTL_PATH = os.path.abspath(_KUBECTL_PATH)
 
 logger = sky_logging.init_logger(__name__)
 
@@ -2612,7 +2614,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     # Both kwargs flow through asyncio.create_subprocess_exec unchanged.
     # close_fds=False is safe because Python 3.4+ defaults
     # os.open/pipe/socket fds to O_CLOEXEC (PEP 446).
-    if _KUBECTL_PATH is None or not os.path.dirname(_KUBECTL_PATH):
+    if _KUBECTL_PATH is None:
         raise RuntimeError('kubectl not found in PATH')
     proc = await asyncio.create_subprocess_exec(
         _KUBECTL_PATH,
