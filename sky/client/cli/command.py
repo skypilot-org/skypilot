@@ -704,6 +704,13 @@ def _check_yaml_only(
                                       'Please check syntax.\n'
                                       f'{detailed_error}')
                 is_yaml = False
+            except UnicodeDecodeError as e:
+                if yaml_file_provided:
+                    logger.debug(e)
+                    invalid_reason = (
+                        'is not a valid UTF-8 text file and cannot be '
+                        'parsed as YAML.')
+                is_yaml = False
 
     except OSError:
         if yaml_file_provided:

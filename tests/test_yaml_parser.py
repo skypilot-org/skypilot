@@ -1,3 +1,4 @@
+import os
 import pathlib
 import textwrap
 
@@ -5,6 +6,7 @@ import pytest
 
 from sky.exceptions import InvalidSkyPilotConfigError
 from sky.task import Task
+from sky.utils import dag_utils
 
 
 def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:
@@ -282,6 +284,65 @@ def test_task_with_only_setup_is_valid(tmp_path):
     task = Task.from_yaml(config_path)
     # Should not raise even though `run` is None.
     task.validate()
+
+
+def test_duplicate_top_level_key_rejected(tmp_path):
+    """Duplicate YAML keys were silently accepted (PyYAML default), with
+    the later value winning. That masked real user typos.
+    """
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            name: first
+            name: second
+            run: echo hi
+            """), tmp_path)
+    with pytest.raises(ValueError) as e:
+        Task.from_yaml(config_path)
+    msg = str(e.value)
+    assert 'name' in msg
+    assert 'duplicate' in msg.lower()
+
+
+def test_duplicate_nested_key_rejected(tmp_path):
+    """Duplicate file_mount destinations (which is also a duplicate YAML
+    key) should be rejected so the user learns about the conflict.
+    """
+    config_path = _create_config_file(
+        textwrap.dedent("""\
+            run: echo hi
+            file_mounts:
+              /remote: /etc/hosts
+              /remote: /etc/passwd
+            """), tmp_path)
+    with pytest.raises(ValueError) as e:
+        Task.from_yaml(config_path)
+    assert 'duplicate' in str(e.value).lower()
+
+
+def test_binary_entrypoint_raises_friendly_error(tmp_path):
+    """A non-UTF-8 file passed as an entrypoint used to leak a raw
+    UnicodeDecodeError traceback from deep inside PyYAML. Users should
+    see a short, actionable error instead.
+    """
+    config_path = tmp_path / 'binary.yaml'
+    config_path.write_bytes(b'\x00\x01\x02\x03\xff\xfe')
+    # Use the DAG loader path to mirror `sky launch <file>`.
+    with pytest.raises(ValueError) as e:
+        dag_utils.load_chain_dag_from_yaml(str(config_path))
+    msg = str(e.value)
+    assert os.path.basename(str(config_path)) in msg or 'YAML' in msg
+
+
+def test_null_body_yaml_does_not_crash(tmp_path):
+    """A YAML file containing only `null` (or `---\\n---`) previously
+    produced an internal AssertionError ('tasks: []') that leaked a
+    traceback. Users should get a clear error instead.
+    """
+    config_path = _create_config_file('null\n', tmp_path)
+    with pytest.raises(ValueError) as e:
+        dag_utils.load_chain_dag_from_yaml(str(config_path))
+    # Must not be an AssertionError traceback; must explain the problem.
+    assert 'empty' in str(e.value).lower() or 'no task' in str(e.value).lower()
 
 
 def test_multiple_unknown_fields_separator(tmp_path):

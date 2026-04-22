@@ -12,6 +12,43 @@ else:
 _c_extension_unavailable = False
 
 
+def check_no_duplicate_keys(yaml_str: str) -> None:
+    """Raise ValueError if any mapping in the YAML has duplicate keys.
+
+    PyYAML's default behavior is to silently drop the earlier value on
+    duplicate keys, which masks real user typos (e.g. two `name:` lines
+    in a task YAML or two mounts with the same remote destination).
+    This function walks the YAML node graph and raises a targeted error
+    the first time it finds a duplicate, including the line number and
+    key name so the user can find it.
+    """
+    stream = io.StringIO(yaml_str)
+    nodes = list(yaml.compose_all(stream))
+
+    def walk(node: 'yaml.Node') -> None:
+        if isinstance(node, yaml.MappingNode):
+            seen: Dict[Any, int] = {}
+            for key_node, value_node in node.value:
+                key = key_node.value
+                if key in seen:
+                    prev_line = seen[key] + 1
+                    line = key_node.start_mark.line + 1
+                    raise ValueError(
+                        f'Duplicate key {key!r} in YAML at line {line} '
+                        f'(also defined at line {prev_line}). '
+                        'Remove one of the entries so the intended value '
+                        'is unambiguous.')
+                seen[key] = key_node.start_mark.line
+                walk(value_node)
+        elif isinstance(node, yaml.SequenceNode):
+            for child in node.value:
+                walk(child)
+
+    for node in nodes:
+        if node is not None:
+            walk(node)
+
+
 def safe_load(stream) -> Any:
     global _c_extension_unavailable
     if _c_extension_unavailable:

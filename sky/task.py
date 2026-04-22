@@ -954,9 +954,6 @@ class Task:
             if there are any other parsing errors.
         """
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
             return Task.from_yaml_str(user_specified_yaml)
 
@@ -969,6 +966,8 @@ class Task:
 
                 task = sky.Task.from_yaml_str('yaml_str')
         """
+        with ux_utils.print_exception_no_traceback():
+            yaml_utils.check_no_duplicate_keys(yaml_str)
         config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
