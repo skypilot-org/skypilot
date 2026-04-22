@@ -84,6 +84,26 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
+# Remove the db connection uri from client supplied env vars, as the
+# client should not set the db string on server side.
+# Remove the in-cluster context name from client supplied env vars.
+# When a client runs inside a Kubernetes pod (e.g., a managed job with
+# api_server_access), its env has SKYPILOT_IN_CLUSTER_CONTEXT_NAME set
+# pod template. If this leaks into the server's os.environ, it causes
+# the server to attempt in-cluster auth (load_incluster_config) instead
+# of using its own kubeconfig, which fails when the server is not
+# running in a Kubernetes pod.
+_SERVER_ONLY_ENV_VARS: set = {
+    constants.ENV_VAR_DB_CONNECTION_URI,
+    kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR,
+}
+
+
+def register_server_only_env_var(name: str) -> None:
+    """Register an env var that should not be overridden by client requests."""
+    _SERVER_ONLY_ENV_VARS.add(name)
+
+
 # An upper limit of max threads for request execution per server process that
 # unlikely to be reached to allow higher concurrency while still prevent the
 # server process become overloaded.
@@ -361,18 +381,8 @@ def override_request_env_and_config(
         # server affecting client requests. If set on the client side, it will
         # be overridden by the request body.
         os.environ.pop('SKYPILOT_DEBUG', None)
-        # Remove the db connection uri from client supplied env vars, as the
-        # client should not set the db string on server side.
-        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-        # Remove the in-cluster context name from client supplied env vars.
-        # When a client runs inside a Kubernetes pod (e.g., a managed job with
-        # api_server_access), its env has SKYPILOT_IN_CLUSTER_CONTEXT_NAME set
-        # pod template. If this leaks into the server's os.environ, it causes
-        # the server to attempt in-cluster auth (load_incluster_config) instead
-        # of using its own kubeconfig, which fails when the server is not
-        # running in a Kubernetes pod.
-        request_body.env_vars.pop(
-            kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+        for env_var in _SERVER_ONLY_ENV_VARS:
+            request_body.env_vars.pop(env_var, None)
         os.environ.update(request_body.env_vars)
         # Note: may be overridden by AuthProxyMiddleware.
         # TODO(zhwu): we need to make the entire request a context available to
