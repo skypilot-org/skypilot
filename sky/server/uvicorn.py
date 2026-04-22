@@ -8,6 +8,7 @@ import faulthandler
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -217,6 +218,18 @@ class Server(uvicorn.Server):
             faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
         except (ValueError, OSError) as e:
             logger.warning(f'faulthandler SIGUSR1 register failed: {e}')
+        # kubernetes_pod_ssh_proxy relies on subprocess.Popen routing through
+        # posix_spawn (instead of fork_exec) to avoid deadlocking the child
+        # on an inherited libsqlite3 pthread mutex. If posix_spawn is not
+        # available in this Python build, that handler falls back to
+        # fork_exec and ghost-worker leaks may recur. Surface this as a
+        # warning so environmental regressions are loud rather than silent.
+        if not getattr(subprocess, '_USE_POSIX_SPAWN', False):
+            logger.warning(
+                'subprocess is NOT using posix_spawn on this platform '
+                '(glibc too old, or CPython build lacks posix_spawn). '
+                'kubernetes_pod_ssh_proxy will fall back to fork_exec and '
+                'the SQLite-mutex ghost-worker bug may recur.')
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         lag_threshold = perf_utils.get_loop_lag_threshold()
