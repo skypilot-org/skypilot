@@ -846,6 +846,66 @@ class TestGetProxyPrefix:
         assert prefix == ''
         assert not in_path
 
+    def test_referer_fallback_for_dashboard_subresource(self):
+        # Proxy strips its path prefix AND strips forwarded headers, but
+        # browsers still send Referer with the page URL -- which carries
+        # the prefix the server needs to rebuild absolute asset URLs.
+        request = _make_request(
+            '/dashboard/_next/static/chunks/main.js',
+            headers={
+                'Referer': 'https://host.example/proxy/46580/dashboard/',
+            })
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/46580'
+        assert not in_path
+
+    def test_referer_fallback_for_internal_api_call(self):
+        request = _make_request(
+            '/internal/dashboard/api/get',
+            headers={
+                'Referer':
+                    ('https://host.example/plugins/api/devspaces/code-server/'
+                     'go-client/proxy/46580/dashboard/clusters'),
+            })
+        prefix, _ = server._get_proxy_prefix(request)
+        assert prefix == (
+            '/plugins/api/devspaces/code-server/go-client/proxy/46580')
+
+    def test_referer_ignored_when_referer_is_native(self):
+        # Same-origin reload: Referer is already /dashboard/... so there's
+        # nothing to extract. Must not invent a spurious prefix.
+        request = _make_request(
+            '/dashboard/_next/static/chunks/main.js',
+            headers={
+                'Referer': 'https://host.example/dashboard/',
+            })
+        prefix, _ = server._get_proxy_prefix(request)
+        assert prefix == ''
+
+    def test_referer_ignored_for_non_dashboard_path(self):
+        # A non-dashboard path (e.g. /api/health) must not pick up a prefix
+        # from Referer -- the prefix only applies to dashboard traffic.
+        request = _make_request(
+            '/api/health',
+            headers={
+                'Referer': 'https://host.example/proxy/46580/dashboard/',
+            })
+        prefix, _ = server._get_proxy_prefix(request)
+        assert prefix == ''
+
+    def test_path_detection_beats_referer(self):
+        # If both the request path AND Referer carry prefixes, the path
+        # wins because the server must strip it from the scope before
+        # routing.
+        request = _make_request(
+            '/proxy/12345/dashboard/',
+            headers={
+                'Referer': 'https://host.example/proxy/99999/dashboard/',
+            })
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/12345'
+        assert in_path
+
 
 class TestRewriteDashboardHtmlWithPrefix:
     """Tests for ``_rewrite_dashboard_html_with_prefix``."""
@@ -892,6 +952,39 @@ class TestRewriteDashboardHtmlWithPrefix:
         html = '<script>const e = "/internal/dashboard";</script>'
         out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
         assert out == html
+
+
+class TestRewriteDashboardJsWithPrefix:
+    """Tests for ``_rewrite_dashboard_js_with_prefix``.
+
+    Next.js compiles ``basePath`` as a literal ``"/dashboard"`` into its
+    client bundles; without rewriting it, the client-side router escapes
+    any reverse-proxy URL prefix on navigation.
+    """
+
+    def test_no_prefix_is_noop(self):
+        js = 'var r="/dashboard";this.basePath="/dashboard"'
+        assert server._rewrite_dashboard_js_with_prefix(js, '') == js
+
+    def test_rewrites_basepath_literal(self):
+        js = 'this.basePath="/dashboard",this.sub=f'
+        out = server._rewrite_dashboard_js_with_prefix(js, '/proxy/46580')
+        assert 'this.basePath="/proxy/46580/dashboard"' in out
+
+    def test_rewrites_addpathprefix_call(self):
+        js = 'n.addPathPrefix)(e,"/dashboard")'
+        out = server._rewrite_dashboard_js_with_prefix(js, '/proxy/46580')
+        assert 'n.addPathPrefix)(e,"/proxy/46580/dashboard")' in out
+
+    def test_rewrites_nested_dashboard_path(self):
+        js = 'path:"/dashboard/_next/image"'
+        out = server._rewrite_dashboard_js_with_prefix(js, '/proxy/46580')
+        assert 'path:"/proxy/46580/dashboard/_next/image"' in out
+
+    def test_does_not_rewrite_dashboards_literal(self):
+        js = 'var x="/dashboards"'  # trailing "s"
+        out = server._rewrite_dashboard_js_with_prefix(js, '/proxy/46580')
+        assert out == js
 
 
 class TestProxyPrefixMiddleware:

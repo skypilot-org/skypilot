@@ -25,6 +25,7 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
+import urllib.parse
 import uuid
 import zipfile
 
@@ -801,7 +802,7 @@ _PROXY_PREFIX_PATH_RE = re.compile(
 def _get_proxy_prefix(request: fastapi.Request) -> Tuple[str, bool]:
     """Detects the URL prefix added by a reverse proxy, if any.
 
-    Supports two configurations:
+    Supports three configurations:
     1. The proxy forwards the full path unchanged (e.g. Coder's
        ``/proxy/<port>/...`` pattern). We detect the prefix by matching the
        request path against known dashboard suffixes and treat everything
@@ -809,6 +810,12 @@ def _get_proxy_prefix(request: fastapi.Request) -> Tuple[str, bool]:
     2. The proxy strips its prefix before forwarding but sets the standard
        ``X-Forwarded-Prefix`` header so the backend can reconstruct
        absolute URLs.
+    3. The proxy strips its prefix AND strips ``X-Forwarded-*``, but leaves
+       ``Referer`` intact. Subresource requests (JS, CSS, API calls) from a
+       loaded page carry ``Referer`` with the page's full URL, from which we
+       can extract the prefix. This covers environments like VS Code
+       code-server's port-forwarding, which only allowlists a small set of
+       headers when proxying.
 
     Returns:
         A ``(prefix, path_contains_prefix)`` tuple. ``prefix`` is the detected
@@ -827,12 +834,30 @@ def _get_proxy_prefix(request: fastapi.Request) -> Tuple[str, bool]:
     # Native server paths already start with ``/dashboard`` or
     # ``/internal/dashboard``; treating anything earlier as a proxy prefix
     # would misinterpret the native path layout.
-    if path.startswith('/dashboard') or path.startswith('/internal/dashboard'):
-        return '', False
+    if (not path.startswith('/dashboard') and
+            not path.startswith('/internal/dashboard')):
+        match = _PROXY_PREFIX_PATH_RE.match(path)
+        if match is not None:
+            return match.group('prefix'), True
 
-    match = _PROXY_PREFIX_PATH_RE.match(path)
-    if match is not None:
-        return match.group('prefix'), True
+    # Last resort: infer the prefix from the ``Referer`` of the enclosing
+    # page. Works for subresources and XHR/fetch calls once the page has
+    # loaded and the browser has set ``Referer`` to a URL that still carries
+    # the proxy prefix. The referer is only consulted when the current path
+    # is dashboard-relative, so non-dashboard traffic is never mutated.
+    if path.startswith('/dashboard') or path.startswith('/internal/dashboard'):
+        referer = request.headers.get('referer', '')
+        if referer:
+            try:
+                referer_path = urllib.parse.urlparse(referer).path
+            except (ValueError, AttributeError):
+                referer_path = ''
+            if referer_path and not referer_path.startswith(
+                    '/dashboard') and not referer_path.startswith(
+                        '/internal/dashboard'):
+                m = _PROXY_PREFIX_PATH_RE.match(referer_path)
+                if m is not None:
+                    return m.group('prefix'), False
 
     return '', False
 
@@ -3123,6 +3148,9 @@ def _resolve_dynamic_route(dashboard_dir: str, path: str) -> Optional[str]:
     return None
 
 
+_DASHBOARD_PATH_REWRITE_RE = re.compile(r'(["\'])/dashboard(/|(?=["\']))')
+
+
 def _rewrite_dashboard_html_with_prefix(content: str, prefix: str) -> str:
     """Prefixes absolute ``/dashboard`` URLs in a dashboard HTML page.
 
@@ -3139,9 +3167,31 @@ def _rewrite_dashboard_html_with_prefix(content: str, prefix: str) -> str:
         return content
     # Match the leading quote so we only rewrite path-valued strings, not
     # free-form text that happens to contain "/dashboard".
-    return re.sub(r'(["\'])/dashboard(/|(?=["\']))',
-                  lambda m: f'{m.group(1)}{prefix}/dashboard{m.group(2)}',
-                  content)
+    return _DASHBOARD_PATH_REWRITE_RE.sub(
+        lambda m: f'{m.group(1)}{prefix}/dashboard{m.group(2)}', content)
+
+
+def _rewrite_dashboard_js_with_prefix(content: str, prefix: str) -> str:
+    """Prefixes ``"/dashboard"`` string literals in Next.js JS bundles.
+
+    Next.js compiles ``basePath`` as a literal ``"/dashboard"`` string into
+    its client bundles (see ``main-*.js`` — ``this.basePath="/dashboard"``,
+    ``addPathPrefix(e,"/dashboard")``, etc.). Because this basePath is used
+    by the client-side router to construct *all* internal navigation URLs,
+    without rewriting it a click on a ``<Link href="/clusters">`` resolves
+    to ``/dashboard/clusters`` and escapes the reverse-proxy prefix.
+
+    This applies the same quote-anchored rewrite used for HTML. It is safe
+    for the dashboard's own bundles because the source code always routes
+    absolute ``/dashboard`` paths through the Next.js router or the
+    ``BASE_PATH`` runtime helper; free-standing literal ``"/dashboard"``
+    strings that the regex could match come from Next.js itself and all
+    represent basePath-carrying paths.
+    """
+    if not prefix:
+        return content
+    return _DASHBOARD_PATH_REWRITE_RE.sub(
+        lambda m: f'{m.group(1)}{prefix}/dashboard{m.group(2)}', content)
 
 
 def _serve_html_with_nonce(
@@ -3194,6 +3244,15 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
     if os.path.isfile(file_path):
         if file_path.endswith('.html'):
             return _serve_html_with_nonce(request, file_path)
+        prefix = getattr(request.state, 'url_prefix', '')
+        if prefix and file_path.endswith('.js'):
+            # Rewrite Next.js client bundles' compiled basePath literal so
+            # client-side navigation stays within the reverse-proxy prefix.
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            content = _rewrite_dashboard_js_with_prefix(content, prefix)
+            return fastapi.responses.Response(
+                content=content, media_type='application/javascript')
         return fastapi.responses.FileResponse(file_path)
 
     # Try serving a pre-rendered HTML page for the path.
