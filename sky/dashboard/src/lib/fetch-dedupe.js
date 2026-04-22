@@ -17,7 +17,13 @@ const inflight = new Map();
 
 function matchPath(input) {
   try {
-    const urlStr = typeof input === 'string' ? input : input && input.url;
+    // fetch() accepts a string, a Request (has .url), or a URL (has .href).
+    const urlStr =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input && input.url;
     if (!urlStr) return null;
     const u = new URL(urlStr, window.location.origin);
     for (const suffix of Object.keys(TTL_MS)) {
