@@ -788,6 +788,78 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+# Paths handled by the API server that the dashboard may reach via a reverse
+# proxy. When the server receives a request whose path starts with
+# ``<some-prefix>/dashboard/`` or ``<some-prefix>/internal/dashboard/``, the
+# prefix portion belongs to the proxy (e.g. Coder's ``/proxy/34020``) and must
+# be stripped before downstream routing runs. The matching group captures that
+# prefix.
+_PROXY_PREFIX_PATH_RE = re.compile(
+    r'^(?P<prefix>/.+?)(?P<rest>/(?:internal/)?dashboard(?:/.*)?)$')
+
+
+def _get_proxy_prefix(request: fastapi.Request) -> Tuple[str, bool]:
+    """Detects the URL prefix added by a reverse proxy, if any.
+
+    Supports two configurations:
+    1. The proxy forwards the full path unchanged (e.g. Coder's
+       ``/proxy/<port>/...`` pattern). We detect the prefix by matching the
+       request path against known dashboard suffixes and treat everything
+       before them as the prefix.
+    2. The proxy strips its prefix before forwarding but sets the standard
+       ``X-Forwarded-Prefix`` header so the backend can reconstruct
+       absolute URLs.
+
+    Returns:
+        A ``(prefix, path_contains_prefix)`` tuple. ``prefix`` is the detected
+        URL prefix (without a trailing slash) or an empty string if none was
+        detected. ``path_contains_prefix`` is ``True`` iff the prefix is
+        still present in ``request.url.path`` and therefore needs to be
+        stripped from the request scope before downstream routing.
+    """
+    # Explicit header takes precedence; the proxy has already stripped the
+    # prefix from the forwarded path so we must not strip it again.
+    forwarded_prefix = request.headers.get('x-forwarded-prefix', '').rstrip('/')
+    if forwarded_prefix:
+        return forwarded_prefix, False
+
+    path = request.url.path
+    # Native server paths already start with ``/dashboard`` or
+    # ``/internal/dashboard``; treating anything earlier as a proxy prefix
+    # would misinterpret the native path layout.
+    if path.startswith('/dashboard') or path.startswith('/internal/dashboard'):
+        return '', False
+
+    match = _PROXY_PREFIX_PATH_RE.match(path)
+    if match is not None:
+        return match.group('prefix'), True
+
+    return '', False
+
+
+# Middleware that normalizes incoming requests so downstream routing and
+# middleware always see paths rooted at the SkyPilot API server, regardless of
+# whether the request was proxied under a URL prefix.
+class ProxyPrefixMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Strips a reverse-proxy URL prefix from dashboard-bound requests.
+
+    The detected prefix is stored on ``request.state.url_prefix`` so that
+    HTML responses can be rewritten to include it in absolute asset URLs.
+    """
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        prefix, path_contains_prefix = _get_proxy_prefix(request)
+        request.state.url_prefix = prefix
+        if prefix and path_contains_prefix:
+            stripped = request.url.path[len(prefix):] or '/'
+            request.scope['path'] = stripped
+            raw_path = request.scope.get('raw_path')
+            if raw_path:
+                # raw_path includes only the path, not the query string.
+                request.scope['raw_path'] = stripped.encode('utf-8')
+        return await call_next(request)
+
+
 # Add a new middleware class to handle /internal/dashboard prefix
 class InternalDashboardPrefixMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
@@ -899,6 +971,12 @@ app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
+# ProxyPrefixMiddleware must run before any middleware that inspects the URL
+# path (e.g. CacheControlStaticMiddleware, PathCleanMiddleware,
+# InternalDashboardPrefixMiddleware). Starlette wraps the most recently added
+# middleware outermost, so adding it after those middlewares places it
+# closer to the network and ensures it strips the prefix first.
+app.add_middleware(ProxyPrefixMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -3045,6 +3123,27 @@ def _resolve_dynamic_route(dashboard_dir: str, path: str) -> Optional[str]:
     return None
 
 
+def _rewrite_dashboard_html_with_prefix(content: str, prefix: str) -> str:
+    """Prefixes absolute ``/dashboard`` URLs in a dashboard HTML page.
+
+    Next.js bakes the ``basePath`` (``/dashboard``) into every asset URL at
+    build time, so the raw HTML references assets as ``/dashboard/_next/...``.
+    When the dashboard is served behind a reverse proxy that adds a URL
+    prefix (e.g. Coder's ``/proxy/<port>``), those absolute URLs no longer
+    resolve through the proxy. This prefixes quoted ``/dashboard`` paths in
+    the HTML -- covering HTML attribute values as well as JSON strings like
+    the ones inside Next.js' ``__NEXT_DATA__`` payload, which the client
+    router uses for subsequent navigation.
+    """
+    if not prefix:
+        return content
+    # Match the leading quote so we only rewrite path-valued strings, not
+    # free-form text that happens to contain "/dashboard".
+    return re.sub(r'(["\'])/dashboard(/|(?=["\']))',
+                  lambda m: f'{m.group(1)}{prefix}/dashboard{m.group(2)}',
+                  content)
+
+
 def _serve_html_with_nonce(
     request: fastapi.Request,
     file_path: str,
@@ -3059,6 +3158,10 @@ def _serve_html_with_nonce(
 
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
+
+    prefix = getattr(request.state, 'url_prefix', '')
+    if prefix:
+        content = _rewrite_dashboard_html_with_prefix(content, prefix)
 
     content = csp_utils.inject_nonce_into_html(content, nonce)
     return fastapi.responses.HTMLResponse(content=content)
@@ -3122,8 +3225,13 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
 
 # Redirect the root path to dashboard
 @app.get('/')
-async def root():
-    return fastapi.responses.RedirectResponse(url='/dashboard/')
+async def root(request: fastapi.Request):
+    # Use a relative redirect so it naturally honors any reverse-proxy URL
+    # prefix present in the original request path (e.g. Coder's
+    # /proxy/<port>/).
+    prefix = getattr(request.state, 'url_prefix', '')
+    target = f'{prefix}/dashboard/' if prefix else '/dashboard/'
+    return fastapi.responses.RedirectResponse(url=target)
 
 
 def _init_or_restore_server_user_hash():

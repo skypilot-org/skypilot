@@ -755,3 +755,180 @@ class TestResolveDynamicRoute:
             result = server._resolve_dynamic_route(str(d), 'cron')
         assert result is not None
         assert result.endswith('[...path].html')
+
+
+# --- Tests for reverse-proxy URL prefix handling ---
+
+
+def _make_request(path: str, headers=None) -> fastapi.Request:
+    """Build a minimal ASGI Request for testing middleware helpers."""
+    scope = {
+        'type': 'http',
+        'method': 'GET',
+        'path': path,
+        'raw_path': path.encode('utf-8'),
+        'query_string': b'',
+        'headers': [(k.lower().encode('latin-1'), v.encode('latin-1'))
+                    for k, v in (headers or {}).items()],
+    }
+    return fastapi.Request(scope)
+
+
+class TestGetProxyPrefix:
+    """Tests for ``_get_proxy_prefix`` path + header detection."""
+
+    def test_no_prefix(self):
+        request = _make_request('/dashboard/clusters')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == ''
+        assert not in_path
+
+    def test_auto_detect_dashboard_prefix(self):
+        request = _make_request('/proxy/34020/dashboard/_next/foo.js')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/34020'
+        assert in_path
+
+    def test_auto_detect_internal_dashboard_prefix(self):
+        request = _make_request('/proxy/34020/internal/dashboard/api/get')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/34020'
+        assert in_path
+
+    def test_auto_detect_multi_segment_prefix(self):
+        request = _make_request(
+            '/user/bob/workspace/w/apps/34020/dashboard/clusters')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/user/bob/workspace/w/apps/34020'
+        assert in_path
+
+    def test_x_forwarded_prefix_header(self):
+        request = _make_request('/dashboard/',
+                                headers={'X-Forwarded-Prefix': '/proxy/34020'})
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/34020'
+        # Header-based: proxy already stripped the path, don't strip again.
+        assert not in_path
+
+    def test_x_forwarded_prefix_header_takes_precedence_over_path(self):
+        # If both signals are present, trust the explicit header and don't
+        # double-strip the path.
+        request = _make_request(
+            '/proxy/34020/dashboard/',
+            headers={'X-Forwarded-Prefix': '/alternate/prefix'})
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == '/alternate/prefix'
+        assert not in_path
+
+    def test_x_forwarded_prefix_strips_trailing_slash(self):
+        request = _make_request('/dashboard/',
+                                headers={'X-Forwarded-Prefix': '/proxy/34020/'})
+        prefix, _ = server._get_proxy_prefix(request)
+        assert prefix == '/proxy/34020'
+
+    def test_non_dashboard_path_no_auto_detect(self):
+        request = _make_request('/proxy/34020/api/health')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == ''
+        assert not in_path
+
+    def test_native_internal_dashboard_path_not_misdetected(self):
+        # /internal/dashboard/... is the native SkyPilot path; /internal
+        # must not be mistaken for a proxy prefix.
+        request = _make_request('/internal/dashboard/api/get')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == ''
+        assert not in_path
+
+    def test_native_dashboard_path_not_misdetected(self):
+        request = _make_request('/dashboard/clusters/my-cluster')
+        prefix, in_path = server._get_proxy_prefix(request)
+        assert prefix == ''
+        assert not in_path
+
+
+class TestRewriteDashboardHtmlWithPrefix:
+    """Tests for ``_rewrite_dashboard_html_with_prefix``."""
+
+    def test_no_prefix_is_noop(self):
+        html = '<script src="/dashboard/_next/foo.js"></script>'
+        assert server._rewrite_dashboard_html_with_prefix(html, '') == html
+
+    def test_rewrites_script_src(self):
+        html = '<script src="/dashboard/_next/foo.js"></script>'
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert '"/proxy/34020/dashboard/_next/foo.js"' in out
+
+    def test_rewrites_link_href(self):
+        html = '<link rel="preload" href="/dashboard/_next/static/a.css">'
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert '"/proxy/34020/dashboard/_next/static/a.css"' in out
+
+    def test_rewrites_next_data_json(self):
+        html = ('<script id="__NEXT_DATA__" type="application/json">'
+                '{"basePath":"/dashboard","assetPrefix":"/dashboard"}</script>')
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert '"basePath":"/proxy/34020/dashboard"' in out
+        assert '"assetPrefix":"/proxy/34020/dashboard"' in out
+
+    def test_rewrites_nested_dashboard_paths(self):
+        html = '<a href="/dashboard/clusters/my-cluster">go</a>'
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert '"/proxy/34020/dashboard/clusters/my-cluster"' in out
+
+    def test_rewrites_single_quoted_paths(self):
+        html = "<img src='/dashboard/skypilot.svg'>"
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert "'/proxy/34020/dashboard/skypilot.svg'" in out
+
+    def test_does_not_rewrite_unrelated_paths(self):
+        html = '<a href="/dashboards">listing</a>'  # trailing "s"
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert out == html
+
+    def test_does_not_rewrite_internal_dashboard(self):
+        # The client-side code computes /internal/dashboard at runtime based on
+        # window.location, so the HTML rewriter should leave it alone.
+        html = '<script>const e = "/internal/dashboard";</script>'
+        out = server._rewrite_dashboard_html_with_prefix(html, '/proxy/34020')
+        assert out == html
+
+
+class TestProxyPrefixMiddleware:
+    """End-to-end tests for ``ProxyPrefixMiddleware``."""
+
+    @staticmethod
+    def _make_client():
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        async def echo(request):
+            prefix = getattr(request.state, 'url_prefix', '<none>')
+            return PlainTextResponse(f'{request.url.path}|{prefix}')
+
+        app = Starlette(routes=[Route('/{p:path}', echo)])
+        app.add_middleware(server.ProxyPrefixMiddleware)
+        return TestClient(app)
+
+    def test_auto_detects_and_strips_prefix(self):
+        client = self._make_client()
+        response = client.get('/proxy/34020/dashboard/_next/foo.js')
+        assert response.text == '/dashboard/_next/foo.js|/proxy/34020'
+
+    def test_honors_x_forwarded_prefix_without_stripping(self):
+        client = self._make_client()
+        response = client.get('/dashboard/',
+                              headers={'X-Forwarded-Prefix': '/proxy/34020'})
+        assert response.text == '/dashboard/|/proxy/34020'
+
+    def test_passthrough_without_prefix(self):
+        client = self._make_client()
+        response = client.get('/dashboard/clusters')
+        assert response.text == '/dashboard/clusters|'
+
+    def test_internal_dashboard_prefix_is_stripped(self):
+        client = self._make_client()
+        response = client.get('/proxy/34020/internal/dashboard/api/get')
+        assert response.text == ('/internal/dashboard/api/get|/proxy/34020')
