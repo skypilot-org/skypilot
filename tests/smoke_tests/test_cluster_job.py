@@ -3520,23 +3520,23 @@ def test_resize(generic_cloud: str):
             f'sky launch -y -c {name} --infra kubernetes --cpus 2 --num-nodes 1',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
             # --- Scale up ---
-            f'sky launch -c {name} --resize --num-nodes 3',
+            f'sky launch -y -c {name} --resize --num-nodes 3',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "3x"',
             # --- No-op ---
-            f'sky launch -c {name} --resize --num-nodes 3 2>&1 | '
+            f'sky launch -y -c {name} --resize --num-nodes 3 2>&1 | '
             'grep "already has 3"',
             # --- Scale down (idle) ---
-            f'sky launch -c {name} --resize --num-nodes 2',
+            f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x"',
             # --- Scale down rejected when job running ---
             f'sky exec {name} --num-nodes 2 -d -- sleep 300',
             'sleep 5',
-            f'sky launch -c {name} --resize --num-nodes 1 2>&1 && '
+            f'sky launch -y -c {name} --resize --num-nodes 1 2>&1 && '
             'exit 1 || echo "Correctly rejected"',
             # Cancel jobs, then scale down succeeds.
             f'sky cancel -y {name} -a',
             'sleep 5',
-            f'sky launch -c {name} --resize --num-nodes 1',
+            f'sky launch -y -c {name} --resize --num-nodes 1',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x"',
         ],
         f'sky down -y {name}',

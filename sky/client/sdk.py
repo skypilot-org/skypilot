@@ -825,7 +825,14 @@ def _launch(
                 user_name_str = (f' (created by another user '
                                  f'{cluster_user_name!r}'
                                  f'{cluster_user_hash_str})')
-            if current_nodes == target_nodes:
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s). Proceed?')
+            elif current_nodes == target_nodes:
                 prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
                           f'has {current_nodes} node(s); --resize is a '
                           f'no-op. Proceed?')

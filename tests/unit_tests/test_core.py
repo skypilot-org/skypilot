@@ -810,3 +810,23 @@ def test_launch_confirm_resize_cluster_missing_uses_new_cluster_prompt(
     msg = calls[0]
     assert 'Launching a new cluster' in msg
     assert '--resize will be ignored' in msg
+
+
+def test_launch_confirm_resize_nodes_field_missing(monkeypatch):
+    """If the cluster record is missing the 'nodes' field (e.g. older server
+    or partial status response), the resize prompt must fall back to a
+    generic message instead of crashing with TypeError from comparing int to
+    None."""
+    # Intentionally omit 'nodes' from the record.
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod, sky_mod, num_nodes=4)
+    assert len(calls) == 1
+    msg = calls[0]
+    # Generic fallback: no "from N to M" comparison, just target count.
+    assert 'to 4 node' in msg
+    assert 'from' not in msg
