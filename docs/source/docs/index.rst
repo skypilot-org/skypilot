@@ -1,6 +1,6 @@
 .. rst-class:: hero-title
 
-SkyPilot: System to manage all AI compute
+SkyPilot: Manage all your AI compute
 =========================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg

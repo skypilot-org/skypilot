@@ -25,7 +25,7 @@
 </p>
 
 <h3 align="center">
-    System to manage all AI compute
+    Manage all your AI compute
 </h3>
 
 <div align="center">
