@@ -1079,6 +1079,65 @@ def test_cli_logs_streaming_progress_bar(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_hyperbolic
+def test_cli_logs_streaming_realtime(generic_cloud: str):
+    """Confirm `sky logs` is actually streaming, not buffering until exit.
+
+    Submits a job that prints six STREAM_TICK_* lines five seconds apart
+    (`python3 -u` to defeat OS-level pipe buffering), then immediately
+    starts `sky logs` against it and timestamps each line as it arrives
+    at the client (`while read line` instead of `awk` because `awk`
+    block-buffers its stdin and would mask the very property we are
+    testing). The receive timestamps of the first and last STREAM_TICK
+    lines must be at least 15 seconds apart — anything smaller means
+    the entire job's output landed in one burst at the end, i.e. some
+    component along the path (job runner, server, or client) is buffering.
+
+    Why this matters: the existing log smoke tests all run
+    `sky logs --status` or capture output with `$(sky logs ...)` after
+    the job has already finished, so they can't tell the difference
+    between a real streaming pipeline and one that simply hands the
+    full log file over once the job exits. A regression that breaks
+    incremental streaming (e.g. a too-large server-side flush buffer)
+    would look identical to the user when running `sky logs <cluster>
+    <job>` mid-run — no errors, just dead air for the entire job
+    runtime.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_logs_streaming_realtime',
+        [
+            # Provision the cluster with a no-op so the streaming job
+            # below doesn't pay provisioning latency on the timing-sensitive
+            # path.
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -- "true"',
+            # Submit the streaming job detached and capture its job id from
+            # the submit output, then start `sky logs` immediately so we
+            # are reading while the job is still running.
+            f'submit_out=$(sky exec -d {name} '
+            f'tests/test_yamls/streaming_logs.yaml 2>&1) && '
+            f'echo "$submit_out" && '
+            f'job_id=$(echo "$submit_out" | grep -oE '
+            f'"Job submitted, ID: [0-9]+" | awk \'{{print $4}}\') && '
+            f'sky logs {name} "$job_id" 2>&1 | '
+            f'while IFS= read -r line; do '
+            f'printf "%d %s\\n" "$(date +%s)" "$line"; '
+            f'done > /tmp/sky-logs-streaming-timing.log && '
+            f'cat /tmp/sky-logs-streaming-timing.log && '
+            f'ticks=$(grep STREAM_TICK '
+            f'/tmp/sky-logs-streaming-timing.log | awk \'{{print $1}}\') && '
+            f'first=$(echo "$ticks" | head -1) && '
+            f'last=$(echo "$ticks" | tail -1) && '
+            f'spread=$((last - first)) && '
+            f'echo "tick spread = $spread s" && '
+            f'test "$spread" -ge 15',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.scp
 def test_scp_logs():
     name = smoke_tests_utils.get_cluster_name()
