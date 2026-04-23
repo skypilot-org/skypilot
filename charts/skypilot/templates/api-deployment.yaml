@@ -257,6 +257,11 @@ spec:
             path: /api/health
             port: 46580
           periodSeconds: 30
+          {{- with .Values.apiService.probes }}
+          {{- if and .liveness .liveness.timeoutSeconds }}
+          timeoutSeconds: {{ .liveness.timeoutSeconds }}
+          {{- end }}
+          {{- end }}
         readinessProbe:
           httpGet:
             path: /api/health
@@ -275,6 +280,11 @@ spec:
           failureThreshold: 3
           periodSeconds: 5
           initialDelaySeconds: 5
+          {{- with .Values.apiService.probes }}
+          {{- if and .readiness .readiness.timeoutSeconds }}
+          timeoutSeconds: {{ .readiness.timeoutSeconds }}
+          {{- end }}
+          {{- end }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
