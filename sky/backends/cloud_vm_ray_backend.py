@@ -5598,9 +5598,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     # --- Utilities ---
 
-    def _handle_resize_pre_provision(self, handle: CloudVmRayResourceHandle,
-                                     task: task_lib.Task,
-                                     cluster_name: str) -> None:
+    def _handle_resize_pre_provision(
+        self,
+        handle: CloudVmRayResourceHandle,
+        task: task_lib.Task,
+        cluster_name: str,
+        cluster_status: Optional[status_lib.ClusterStatus] = None,
+    ) -> None:
         """Pre-provision steps for cluster resize.
 
         For scale-down: checks that no jobs are running, then terminates
@@ -5629,6 +5633,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         sky_logging.print(
             f'Resizing cluster {cluster_name!r} from {current_nodes} to '
             f'{requested_nodes} node(s) (-{to_remove} worker(s)).')
+
+        # Scale-down requires SSH to the head node to verify no running jobs.
+        # Reject early if the cluster is not UP rather than letting
+        # run_on_head hang/fail with an opaque SSH error.
+        if (cluster_status is not None and
+                cluster_status != status_lib.ClusterStatus.UP):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot scale down cluster {cluster_name!r}: the '
+                    f'cluster is in status {cluster_status.value!r}. '
+                    f'Start it first with: sky start {cluster_name}')
 
         # Check for running jobs.
         returncode, stdout, stderr = self.run_on_head(
@@ -5673,12 +5688,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # API and only remove the excess workers.
         launched = handle.launched_resources
         assert launched is not None and launched.cloud is not None
-        cloud_name = repr(launched.cloud)
+        # Convention in this codebase: use str(cloud).lower() to get the
+        # provider name expected by sky.provision (e.g. 'aws', 'gcp').
+        cloud_name = str(launched.cloud).lower()
         config_from_yaml = global_user_state.get_cluster_yaml_dict(
             handle.cluster_yaml)
-        provider_config = config_from_yaml.get('provider')
+        # get_cluster_yaml_dict can return None if the local cluster YAML is
+        # missing (e.g., ~/.sky/generated was wiped). Treat as empty config.
+        provider_config = (config_from_yaml or {}).get('provider')
 
-        logger.info(f'Terminating {to_remove} excess worker(s).')
+        logger.info(f'Terminating all workers of cluster {cluster_name!r} so '
+                    f'bulk provisioning can recreate {requested_nodes - 1} '
+                    f'worker(s).')
         provision_lib.terminate_instances(cloud_name,
                                           handle.cluster_name_on_cloud,
                                           provider_config,
@@ -5743,10 +5764,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert handle is not None
             # Cluster already exists.
             if resize:
-                # Resize mode: allow num_nodes to change. Handle
-                # scale-down by checking for running jobs and removing
-                # excess workers before provisioning.
-                self._handle_resize_pre_provision(handle, task, cluster_name)
+                # Resize mode: allow num_nodes to change, but still validate
+                # non-node hardware (instance type, accelerators, region,
+                # zone, ports, etc.) matches the existing cluster to prevent
+                # ending up with a mixed-resource cluster. We do this by
+                # temporarily overriding task.num_nodes to the current
+                # cluster size before calling check_resources_fit_cluster;
+                # this skips the num_nodes fit check while preserving all
+                # other resource checks.
+                original_num_nodes = task.num_nodes
+                try:
+                    task.num_nodes = handle.launched_nodes
+                    self.check_resources_fit_cluster(handle, task)
+                finally:
+                    task.num_nodes = original_num_nodes
+                # Then run resize-specific pre-provision logic (e.g. verify
+                # no running jobs and terminate workers for scale-down).
+                self._handle_resize_pre_provision(
+                    handle,
+                    task,
+                    cluster_name,
+                    cluster_status=prev_cluster_status)
             else:
                 self.check_resources_fit_cluster(handle, task)
 

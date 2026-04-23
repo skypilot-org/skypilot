@@ -273,6 +273,52 @@ def test_resize_scale_down_ssh_failure_aborts():
         backend._handle_resize_pre_provision(handle, task, 'test-cluster')
 
 
+def test_resize_scale_down_on_stopped_cluster_rejected():
+    """Scale-down on a non-UP cluster should fail fast rather than hang on
+    SSH. Addresses PR review comment on run_on_head + STOPPED."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    # Should not even attempt SSH when cluster is STOPPED.
+    backend.run_on_head = mock.MagicMock(side_effect=AssertionError(
+        'run_on_head must not be called on a non-UP cluster'))
+
+    with pytest.raises(ValueError, match=r"Cannot scale down.*'STOPPED'"):
+        backend._handle_resize_pre_provision(
+            handle,
+            task,
+            'test-cluster',
+            cluster_status=status_lib.ClusterStatus.STOPPED)
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+def test_resize_scale_down_handles_missing_cluster_yaml(mock_load_queue,
+                                                        mock_get_yaml,
+                                                        mock_terminate):
+    """If get_cluster_yaml_dict returns None (e.g. yaml file missing), the
+    resize path must not crash with AttributeError."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=4)
+    task = _make_mock_task(num_nodes=2)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = []
+    mock_get_yaml.return_value = None  # <- yaml missing
+
+    backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
+    # terminate_instances still called, with provider_config=None.
+    mock_terminate.assert_called_once_with(
+        mock.ANY,
+        handle.cluster_name_on_cloud,
+        None,
+        worker_only=True,
+    )
+
+
 # --- Scale-down: success cases (the happy path) ---
 
 
@@ -355,10 +401,12 @@ def test_resize_scale_down_to_one_node(mock_load_queue, mock_get_yaml,
 # --- _check_existing_cluster integration ---
 
 
+@mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.'
+            'check_resources_fit_cluster')
 @mock.patch('sky.backends.backend_utils.refresh_cluster_record')
 @mock.patch('sky.global_user_state.get_cluster_from_name')
 def test_check_existing_cluster_resize_uses_task_num_nodes(
-        mock_get_cluster, mock_refresh):
+        mock_get_cluster, mock_refresh, mock_check_fit):
     """When resize=True and cluster exists, ToProvisionConfig.num_nodes
     should be task.num_nodes (not handle.launched_nodes)."""
     backend = CloudVmRayBackend()
@@ -391,6 +439,16 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     mock_resource.cluster_config_overrides = None
     task.resources = {mock_resource}
 
+    # Capture task.num_nodes at the moment check_resources_fit_cluster is
+    # called. During resize, it must see handle.launched_nodes (2), not the
+    # new target 5, so only hardware (not node count) is validated.
+    observed_num_nodes = []
+
+    def _capture(_handle, _task, **_kwargs):
+        observed_num_nodes.append(_task.num_nodes)
+
+    mock_check_fit.side_effect = _capture
+
     with mock.patch(
             'sky.global_user_state.get_cluster_yaml_str') as mock_yaml_str:
         mock_yaml_str.return_value = None
@@ -402,6 +460,12 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
 
     assert config.num_nodes == 5, (f'Expected task.num_nodes=5 but got '
                                    f'{config.num_nodes}')
+    assert observed_num_nodes == [
+        2
+    ], (f'During resize, check_resources_fit_cluster should see '
+        f'num_nodes=handle.launched_nodes (2), got {observed_num_nodes}')
+    # Original task.num_nodes must be restored after the check.
+    assert task.num_nodes == 5
 
 
 @mock.patch('sky.backends.backend_utils.refresh_cluster_record')
