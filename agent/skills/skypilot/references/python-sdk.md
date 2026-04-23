@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, resize: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
