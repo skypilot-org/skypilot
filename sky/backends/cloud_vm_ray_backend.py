@@ -5659,6 +5659,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Terminate all worker nodes. Since we verified no jobs are
         # running, all workers are idle. The subsequent bulk_provision
         # will recreate only the workers needed for the new count.
+        #
+        # TODO(zhwu): this is not the most efficient approach — we tear down
+        # every worker and bulk_provision re-creates `requested_nodes - 1`
+        # from scratch, even for a small scale-down (e.g. 10 -> 9 still
+        # re-provisions 9 workers). We chose it for simplicity and cloud
+        # agnosticism: the provision-layer API
+        # (`provision_lib.terminate_instances`) only exposes a boolean
+        # `worker_only` flag, not "terminate these N specific instances",
+        # and implementing selective termination would require per-cloud
+        # logic to pick and terminate specific instance IDs/names. A future
+        # optimization would add a `terminate_instances(worker_ids=[...])`
+        # API and only remove the excess workers.
         launched = handle.launched_resources
         assert launched is not None and launched.cloud is not None
         cloud_name = repr(launched.cloud)
