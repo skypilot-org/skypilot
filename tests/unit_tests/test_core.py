@@ -1,8 +1,8 @@
 from unittest import mock
 
-import click
 import pytest
 
+from sky import admin_policy as sky_admin_policy
 from sky import clouds
 from sky import core
 from sky import exceptions
@@ -615,3 +615,134 @@ def test_launch_body_old_server_ignores_unknown_resize():
     dumped = body.model_dump()
     assert 'resize' not in dumped
     assert isinstance(body, pydantic.BaseModel)
+
+
+# ---------------------------------------------------------------------------
+# Resize confirmation prompts in sdk._launch
+# ---------------------------------------------------------------------------
+
+
+def _make_resize_confirm_env(monkeypatch, cluster_record, user_hash='u-me'):
+    """Stub out dependencies of sdk._launch so the confirmation block runs.
+
+    Returns the captured click.confirm call list and the sdk/sky modules.
+    """
+    # Imported locally to avoid pulling these heavy modules in at test
+    # collection time.
+    import sky as _sky  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk as _sdk
+
+    # Skip the validate() inside _launch.
+    monkeypatch.setattr('sky.client.sdk.validate', lambda *a, **kw: None)
+    # Stub the status RPC used inside the confirm block.
+    monkeypatch.setattr('sky.client.sdk.status', lambda *a, **kw: 'request-id')
+    monkeypatch.setattr('sky.client.sdk.get', lambda _rid: [cluster_record]
+                        if cluster_record else [])
+    monkeypatch.setattr('sky.client.sdk.common_utils.get_user_hash',
+                        lambda: user_hash)
+    monkeypatch.setattr('sky.client.sdk.common_utils.get_local_user_name',
+                        lambda: 'me')
+    monkeypatch.setattr('sky.client.sdk.optimize', lambda *a, **kw: 'req-opt')
+    monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                        lambda *_a, **_kw: None)
+    # Hard-stop before the actual launch HTTP call so we only exercise the
+    # confirmation logic.
+    monkeypatch.setattr(
+        'sky.client.sdk.client_common.upload_mounts_to_api_server',
+        lambda *a, **kw:
+        (_ for _ in ()).throw(RuntimeError('stop-after-confirm')))
+
+    calls = []
+
+    def fake_confirm(msg, *args, **kwargs):
+        calls.append(msg)
+
+    monkeypatch.setattr('click.confirm', fake_confirm)
+    monkeypatch.setattr('sky.client.sdk.click.confirm', fake_confirm)
+
+    return calls, _sdk, _sky
+
+
+def _run_launch_confirm(sdk_mod,
+                        sky_mod,
+                        cluster_name='my-cluster',
+                        num_nodes=3,
+                        resize=True):
+    dag = sky_mod.Dag()
+    with dag:
+        task = sky_mod.Task(run='echo hi')
+        task.num_nodes = num_nodes
+    request_options = sky_admin_policy.RequestOptions(
+        cluster_name=cluster_name,
+        idle_minutes_to_autostop=None,
+        down=False,
+        dryrun=False)
+    with pytest.raises(RuntimeError, match='stop-after-confirm'):
+        sdk_mod._launch(
+            dag,
+            cluster_name,
+            request_options,
+            resize=resize,
+            _need_confirmation=True,
+        )
+
+
+def test_launch_confirm_resize_scale_up(monkeypatch):
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 2,
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod, sky_mod, num_nodes=4)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 2 to 4 node' in msg
+    assert '+2 worker' in msg
+    assert 'scale up' in msg
+
+
+def test_launch_confirm_resize_scale_down(monkeypatch):
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 5,
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod, sky_mod, num_nodes=2)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'from 5 to 2 node' in msg
+    assert '-3 worker' in msg
+    assert 'scale down' in msg
+    assert 'terminated' in msg
+
+
+def test_launch_confirm_resize_noop(monkeypatch):
+    record = {
+        'status': status_lib.ClusterStatus.UP,
+        'user_hash': 'u-me',
+        'user_name': 'me',
+        'nodes': 3,
+    }
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch, record)
+    _run_launch_confirm(sdk_mod, sky_mod, num_nodes=3)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'already has 3 node' in msg
+    assert 'no-op' in msg
+
+
+def test_launch_confirm_resize_cluster_missing_uses_new_cluster_prompt(
+        monkeypatch):
+    """resize=True against a non-existent cluster should fall through to the
+    new-cluster prompt with a note that --resize is ignored."""
+    calls, sdk_mod, sky_mod = _make_resize_confirm_env(monkeypatch,
+                                                       cluster_record=None)
+    _run_launch_confirm(sdk_mod, sky_mod, num_nodes=4)
+    assert len(calls) == 1
+    msg = calls[0]
+    assert 'Launching a new cluster' in msg
+    assert '--resize will be ignored' in msg
