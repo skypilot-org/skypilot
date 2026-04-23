@@ -301,6 +301,8 @@ Follow updates:
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
+   Sky Batch <../examples/batch/index>
+   Sky Batch: Custom I/O Formats <../examples/batch/custom-formats>
    Job Groups <../examples/job-groups>
 
 .. toctree::
