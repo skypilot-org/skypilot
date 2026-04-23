@@ -516,14 +516,12 @@ run: echo "hello world"
     assert len(dag.tasks) == 1
 
 
-def test_process_mounts_stashes_blob_id_on_tasks(tmp_path, monkeypatch):
-    """Blob id passed in should be stashed onto each task in the returned dag.
-
-    This lets server-internal re-submissions (e.g. the jobs controller in
-    consolidation mode calling sky.launch against the local API server)
-    propagate the blob id onto the new request's DB row, so a replica that
-    dequeues the inner request can re-resolve the blob directory locally.
-    """
+def test_process_mounts_stashes_blob_id_on_tasks_in_consolidation_mode(
+        tmp_path, monkeypatch):
+    """In consolidation mode, the blob id must be stashed onto each task in
+    the returned dag. This lets the jobs controller's re-submission
+    propagate the blob id onto the new request so a replica dequeuing the
+    inner request can re-resolve the blob directory locally."""
     from sky.skylet import constants as skylet_constants
 
     api_server_dir = tmp_path / 'api_server_clients'
@@ -536,6 +534,7 @@ def test_process_mounts_stashes_blob_id_on_tasks(tmp_path, monkeypatch):
 
     monkeypatch.setattr('sky.server.common.resolve_blob_dir',
                         lambda bid, uh: str(blob_dir))
+    monkeypatch.setattr('sky.jobs.utils.is_consolidation_mode', lambda: True)
 
     task_yaml = '''
 name: test-task
@@ -555,6 +554,45 @@ run: echo "hello"
     assert len(dag.tasks) >= 1
     for task in dag.tasks:
         assert task.file_mounts_blob_id == blob_id
+
+
+def test_process_mounts_does_not_stash_blob_id_without_consolidation(
+        tmp_path, monkeypatch):
+    """When consolidation mode is off (e.g. remote-controller deployment),
+    the blob id must NOT be stashed onto the task. Stashing would leak an
+    id scoped to the main API server's blob storage into a controller VM
+    that uses a different blob storage, breaking its local re-submission."""
+    from sky.skylet import constants as skylet_constants
+
+    api_server_dir = tmp_path / 'api_server_clients'
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        api_server_dir)
+
+    blob_id = 'c' * 64
+    blob_dir = tmp_path / 'blobs' / blob_id
+    blob_dir.mkdir(parents=True)
+
+    monkeypatch.setattr('sky.server.common.resolve_blob_dir',
+                        lambda bid, uh: str(blob_dir))
+    monkeypatch.setattr('sky.jobs.utils.is_consolidation_mode', lambda: False)
+
+    task_yaml = '''
+name: test-task
+resources:
+  cloud: aws
+run: echo "hello"
+'''
+
+    env_vars = {skylet_constants.USER_ID_ENV_VAR: 'test-user'}
+
+    dag = common.process_mounts_in_task_on_api_server(
+        task=task_yaml,
+        env_vars=env_vars,
+        workdir_only=False,
+        file_mounts_blob_id=blob_id)
+
+    for task in dag.tasks:
+        assert task.file_mounts_blob_id is None
 
 
 def test_process_mounts_no_blob_id_leaves_tasks_unstashed(

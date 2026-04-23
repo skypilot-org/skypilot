@@ -117,13 +117,9 @@ def test_blob_id_empty_input(tmp_path):
 @mock.patch('sky.client.common.server_common.is_api_server_local',
             return_value=True)
 def test_upload_mounts_local_preserves_stashed_blob_id(_mock_is_local):
-    """Local server short-circuit must return a blob id stashed on the task.
-
-    This is what keeps the inner request (produced by a server-internal
-    re-submission, e.g. consolidation-mode jobs controller) carrying the
-    original blob id, so a replica dequeuing that request can re-resolve
-    the blob directory locally.
-    """
+    """Local server short-circuit must return whatever blob id was stashed
+    on the task. Server-side stashing is gated by
+    process_mounts_in_task_on_api_server; here we just reflect it."""
     blob_id = 'f' * 64
     dag = sky.Dag()
     t = sky.Task(name='t', run='echo hi')
