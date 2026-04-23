@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -121,6 +122,11 @@ P = ParamSpec('P')
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
+
+# Resolved once at import so `subprocess.Popen(executable=...)` gets an
+# absolute path — a required precondition for Python subprocess to route
+# through posix_spawn instead of fork_exec.
+_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -2598,17 +2604,52 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
+    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
+    # `uv_spawn`, which on Linux always uses fork().
+    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
+    # Python objects; if any sqlite3 connection/cursor is in that set, its
+    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # static allocator mutex. That mutex was held by another parent thread at
+    # the fork moment (aiosqlite worker), and the child only has one thread,
+    # so no one ever releases it. Child deadlocks before execv, leaks the
+    # parent's inherited fds (including every `.<request>.lock` flock), and
+    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
+    # parent SIGKILL.
+    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
+    # entirely.
+    if _KUBECTL_PATH is None or not os.path.dirname(_KUBECTL_PATH):
+        raise RuntimeError(
+            'kubectl not found on PATH with an absolute path; refusing to '
+            'fall back to fork-based spawn which risks the SQLite-mutex '
+            'ghost-worker deadlock.')
+    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
+
+    def _spawn_sync() -> subprocess.Popen:
+        return subprocess.Popen(
+            argv,
+            executable=_KUBECTL_PATH,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=False,
+        )
+
+    loop = asyncio.get_running_loop()
+    proc = await loop.run_in_executor(None, _spawn_sync)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+    # Wrap the sync Popen's stdout pipe as an asyncio StreamReader so the
+    # rest of this handler can stay async.
+    assert proc.stdout is not None
+    stdout_reader = asyncio.StreamReader(loop=loop)
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(stdout_reader, loop=loop),
+        proc.stdout)
 
     # Wait for port-forward to be ready and get the local port
     local_port = None
-    assert proc.stdout is not None
     while True:
-        stdout_line = await proc.stdout.readline()
+        stdout_line = await stdout_reader.readline()
         if stdout_line:
             decoded_line = stdout_line.decode()
             logger.info(f'kubectl port-forward stdout: {decoded_line}')
@@ -2650,7 +2691,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             logger.info('Terminating kubectl port-forward process')
             proc.terminate()
         except ProcessLookupError:
-            stdout = await proc.stdout.read()
+            stdout = await stdout_reader.read()
             logger.error('kubectl port-forward was terminated before the '
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout)}')
