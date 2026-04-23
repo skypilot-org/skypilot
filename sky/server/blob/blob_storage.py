@@ -107,8 +107,21 @@ class BlobStorage(abc.ABC):
         cache (extracted on demand from a shared zip) should detect their
         own cache-path prefix and trigger lazy extraction here.
 
-        Default: no-op, returns ``path`` unchanged. Safe to call on any
-        path — non-blob-cache paths are ignored.
+        Contract (MUST hold for every implementation):
+
+        * ``ensure_resolved(path) == path``. This method is a side-effect
+          trigger (materializing blob contents on the local host), not a
+          path rewriter. It MUST NOT canonicalize, expand, or otherwise
+          change the string. Consumers are free to ignore the return
+          value and keep using the input path. The returned-path form is
+          preserved only to leave room for future additive extensions —
+          changing the returned string today would silently diverge the
+          validator's view from the mounter's view.
+        * Safe to call on any path — paths outside the backend's
+          managed cache MUST be returned unchanged without side effects.
+        * Idempotent and safe under concurrent calls.
+
+        Default: no-op.
         """
         return path
 

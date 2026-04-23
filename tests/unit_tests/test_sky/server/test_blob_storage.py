@@ -186,3 +186,104 @@ def test_execute_file_mounts_skips_ensure_resolved_for_cloud_urls(recorder):
     """Cloud-store URLs must not be passed through ``ensure_resolved``."""
     _run_execute_file_mounts({'/remote/s3dst': 's3://some-bucket/path'})
     assert recorder.calls == []
+
+
+# --- Contract: ensure_resolved return value MUST equal input ---
+#
+# The ``BlobStorage.ensure_resolved`` hook is specified as a side-effect
+# trigger (materializing blob contents on the local host). Its return
+# value must equal the input so that validator and mounter observe the
+# same path. The following tests lock that contract in from the caller
+# side — a misbehaving backend that returns a different string must NOT
+# influence what downstream consumers act on.
+
+
+class _ReturnsDifferentPathBlobStorage(_RecordingBlobStorage):
+    """Backend that violates the contract by returning a different path.
+
+    Used only to prove downstream consumers ignore the return value.
+    """
+
+    def __init__(self, replacement: str):
+        super().__init__()
+        self._replacement = replacement
+
+    def ensure_resolved(self, path: str) -> str:
+        self.calls.append(path)
+        return self._replacement
+
+
+@pytest.fixture()
+def misbehaving_backend(monkeypatch, tmp_path):
+    # A valid, existing path used as the bogus replacement so that any
+    # downstream stat on it would still succeed — we want the test to
+    # fail loudly only if propagation happens, not for unrelated reasons.
+    replacement = tmp_path / 'NEVER_USED_BY_CALLER'
+    replacement.mkdir()
+    backend = _ReturnsDifferentPathBlobStorage(str(replacement))
+    monkeypatch.setattr(bs, 'get_blob_storage', lambda: backend)
+    return backend
+
+
+def test_validate_source_does_not_propagate_ensure_resolved_return(
+        tmp_path, misbehaving_backend):
+    """`_validate_source` returns the *original* source, not the hook output.
+
+    If future code accidentally threaded the hook's return value back out,
+    this test would fail by returning ``NEVER_USED_BY_CALLER``.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.data import storage as storage_lib
+
+    src_dir = tmp_path / 'src'
+    src_dir.mkdir()
+
+    returned_source, _ = storage_lib.Storage._validate_source(  # pylint: disable=protected-access
+        str(src_dir), storage_lib.StorageMode.COPY, True)
+
+    # Hook was called (side effect observed)...
+    assert misbehaving_backend.calls, 'ensure_resolved was not called'
+    # ...but the return is the original, not the hook replacement.
+    assert returned_source == str(src_dir)
+
+
+def test_execute_file_mounts_does_not_propagate_ensure_resolved_return(
+        tmp_path, misbehaving_backend):
+    """Rsync source must be the original path, not the hook return.
+
+    We capture what ``parallel_data_transfer_to_nodes`` is called with and
+    assert the ``source=`` argument is the dict value we put in, not the
+    string returned by the misbehaving backend.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.backends import cloud_vm_ray_backend
+
+    d = tmp_path / 'dir'
+    d.mkdir()
+    original_src = str(d)
+    file_mounts = {'/remote/dir': original_src}
+
+    backend_inst = cloud_vm_ray_backend.CloudVmRayBackend()
+    handle = mock.MagicMock()
+    handle.launched_resources.cloud = 'kubernetes'
+    handle.get_command_runners.return_value = []
+
+    with mock.patch.object(cloud_vm_ray_backend.backend_utils,
+                           'parallel_data_transfer_to_nodes') as mocked_sync, \
+         mock.patch.object(cloud_vm_ray_backend, 'rich_utils'), \
+         mock.patch.object(cloud_vm_ray_backend, 'cloud_stores'), \
+         mock.patch('os.system'):
+        try:
+            backend_inst._execute_file_mounts(  # pylint: disable=protected-access
+                handle, file_mounts)
+        except (TypeError, AssertionError, AttributeError):
+            pass
+
+    # Hook was invoked; backend returned a different string.
+    assert misbehaving_backend.calls
+    # Rsync was still handed the ORIGINAL src.
+    assert mocked_sync.call_args_list, 'rsync helper never called'
+    for call in mocked_sync.call_args_list:
+        assert call.kwargs.get('source') == original_src, (
+            f'rsync source was {call.kwargs.get("source")!r}, '
+            f'expected {original_src!r} (ensure_resolved return leaked)')
