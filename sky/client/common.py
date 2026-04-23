@@ -345,7 +345,14 @@ def upload_mounts_to_api_server(
     """
 
     if server_common.is_api_server_local():
-        return dag, None
+        # Propagate blob id if any
+        preserved_blob_id: Optional[str] = None
+        for task_ in dag.tasks:
+            tid = getattr(task_, 'file_mounts_blob_id', None)
+            if tid is not None:
+                preserved_blob_id = tid
+                break
+        return dag, preserved_blob_id
 
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))

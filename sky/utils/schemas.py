@@ -1145,6 +1145,9 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
+            'file_mounts_blob_id': {
+                'type': 'string',
+            },
             'config': _filter_schema(
                 get_config_schema(),
                 constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),

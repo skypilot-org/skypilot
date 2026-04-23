@@ -1063,6 +1063,10 @@ def process_mounts_in_task_on_api_server(
     yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
     dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
+    # Propagate blob id incase of resubmission in job controller
+    if file_mounts_blob_id is not None:
+        for task_in_dag in dag.tasks:
+            task_in_dag.file_mounts_blob_id = file_mounts_blob_id
     return dag
 
 

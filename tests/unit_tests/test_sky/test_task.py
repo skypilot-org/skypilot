@@ -1336,3 +1336,25 @@ def test_multinode_rwx_volume_passes():
         }
         t.resolve_and_validate_volumes()
         assert len(t.volume_mounts) == 1
+
+
+def test_file_mounts_blob_id_roundtrip():
+    """``file_mounts_blob_id`` should survive YAML round-trips."""
+    blob_id = 'a' * 64
+    t = task.Task(name='t', run='echo hi', _file_mounts_blob_id=blob_id)
+    assert t.file_mounts_blob_id == blob_id
+
+    config = t.to_yaml_config()
+    assert config.get('file_mounts_blob_id') == blob_id
+
+    t2 = task.Task.from_yaml_config(config)
+    assert t2.file_mounts_blob_id == blob_id
+
+
+def test_file_mounts_blob_id_default_none():
+    """User-authored Tasks have ``file_mounts_blob_id`` unset; the field must
+    not appear in the serialized YAML."""
+    t = task.Task(name='t', run='echo hi')
+    assert t.file_mounts_blob_id is None
+    config = t.to_yaml_config()
+    assert 'file_mounts_blob_id' not in config

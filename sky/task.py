@@ -312,6 +312,7 @@ class Task:
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
         _user_specified_yaml: Optional[str] = None,
+        _file_mounts_blob_id: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -469,6 +470,9 @@ class Task:
         # For internal use only.
         self.file_mounts_mapping: Optional[Dict[str,
                                                 str]] = _file_mounts_mapping
+        # Blob id of the uploaded file_mounts to handle server-internal task
+        # re-submissions (e.g. the jobs controller re-launch).
+        self.file_mounts_blob_id: Optional[str] = _file_mounts_blob_id
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             _volume_mounts)
 
@@ -759,6 +763,7 @@ class Task:
             event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            _file_mounts_blob_id=config.pop('file_mounts_blob_id', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
@@ -1978,6 +1983,7 @@ class Task:
             })
 
         add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('file_mounts_blob_id', self.file_mounts_blob_id)
         add_if_not_none('volumes', self.volumes)
         if self.volume_mounts is not None:
             config['volume_mounts'] = [

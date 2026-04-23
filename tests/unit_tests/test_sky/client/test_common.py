@@ -1,7 +1,10 @@
 """Unit tests for sky/client/common.py."""
 import os
 import re
+from unittest import mock
 
+import sky
+from sky.client import common as client_common
 from sky.client.common import _compute_zip_blob_id
 from sky.data import storage_utils
 
@@ -109,3 +112,37 @@ def test_blob_id_empty_input(tmp_path):
     hash_val = _compute_zip_blob_id(zip_path)
     assert len(hash_val) == 64
     assert re.fullmatch(r'[0-9a-f]{64}', hash_val)
+
+
+@mock.patch('sky.client.common.server_common.is_api_server_local',
+            return_value=True)
+def test_upload_mounts_local_preserves_stashed_blob_id(_mock_is_local):
+    """Local server short-circuit must return a blob id stashed on the task.
+
+    This is what keeps the inner request (produced by a server-internal
+    re-submission, e.g. consolidation-mode jobs controller) carrying the
+    original blob id, so a replica dequeuing that request can re-resolve
+    the blob directory locally.
+    """
+    blob_id = 'f' * 64
+    dag = sky.Dag()
+    t = sky.Task(name='t', run='echo hi')
+    t.file_mounts_blob_id = blob_id
+    dag.add(t)
+
+    out_dag, out_blob_id = client_common.upload_mounts_to_api_server(dag)
+    assert out_dag is dag
+    assert out_blob_id == blob_id
+
+
+@mock.patch('sky.client.common.server_common.is_api_server_local',
+            return_value=True)
+def test_upload_mounts_local_no_stash_returns_none(_mock_is_local):
+    """User-authored Tasks never set file_mounts_blob_id; the local
+    short-circuit must return None, preserving pre-fix behavior."""
+    dag = sky.Dag()
+    dag.add(sky.Task(name='t', run='echo hi'))
+
+    out_dag, out_blob_id = client_common.upload_mounts_to_api_server(dag)
+    assert out_dag is dag
+    assert out_blob_id is None
