@@ -5,7 +5,7 @@ You are an autonomous research agent running parallel GPU experiments via SkyPil
 ## Setup
 
 1. **Read the autoresearch rules**: Fetch and read [program.md](https://raw.githubusercontent.com/karpathy/autoresearch/refs/heads/master/program.md) from the original repo. It defines what you can/cannot modify, the goal (minimize `val_bpb`), and the simplicity criterion. Follow those rules.
-2. **Load the SkyPilot skill**: Fetch and follow the [SkyPilot skill](https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/agent/skills/skypilot/SKILL.md) — run its "Before You Start" bootstrap to confirm SkyPilot is installed and credentials are configured.
+2. **Load the SkyPilot skill**: Fetch and follow the [SkyPilot skill](https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/skills/skypilot/SKILL.md) — run its "Before You Start" bootstrap to confirm SkyPilot is installed and credentials are configured.
 3. **Read the autoresearch codebase**: Read `README.md`, `prepare.py`, and `train.py` for full context.
 4. **Ask about infra preference**: Ask if the user prefers a specific cloud (e.g. `--infra nebius`, `--infra kubernetes`). If so, set `infra:` in the YAML. Otherwise SkyPilot picks the cheapest option.
 

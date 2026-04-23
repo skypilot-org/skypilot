@@ -27,8 +27,7 @@ def _get_repo_root():
 
 
 REPO_ROOT = _get_repo_root()
-REFERENCES_DIR = os.path.join(REPO_ROOT, 'agent', 'skills', 'skypilot',
-                              'references')
+REFERENCES_DIR = os.path.join(REPO_ROOT, 'skills', 'skypilot', 'references')
 
 # ---------------------------------------------------------------------------
 # YAML Spec Generation
@@ -276,7 +275,7 @@ def generate_yaml_spec():
 
     header = ('<!-- AUTO-GENERATED from docs/source/reference/yaml-spec.rst '
               '-->\n'
-              '<!-- Run: python skills/skypilot/scripts/'
+              '<!-- Run: python agent/scripts/'
               'generate_references.py -->\n\n')
     output_path = os.path.join(REFERENCES_DIR, 'yaml-spec.md')
     full_content = (header + md_content).rstrip('\n') + '\n'
@@ -748,7 +747,7 @@ def main():
     generate_python_sdk()
     print()
 
-    print('Done! All references generated in agent/skills/skypilot/references/')
+    print('Done! All references generated in skills/skypilot/references/')
 
 
 if __name__ == '__main__':

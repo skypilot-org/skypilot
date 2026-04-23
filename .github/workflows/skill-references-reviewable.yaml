@@ -6,8 +6,8 @@ on:
         - master
         - 'releases/**'
       paths:
-        - 'skills/skypilot/scripts/generate_references.py'
-        - 'skills/skypilot/skills/skypilot/references/**'
+        - 'agent/scripts/generate_references.py'
+        - 'skills/skypilot/references/**'
         - 'docs/source/reference/yaml-spec.rst'
         - 'sky/client/cli/**'
         - 'sky/client/sdk.py'
@@ -27,7 +27,7 @@ jobs:
         run: python agent/scripts/generate_references.py
       - name: Check for diff
         run: |
-          if ! git diff --exit-code agent/skills/skypilot/references/; then
+          if ! git diff --exit-code skills/skypilot/references/; then
             echo "ERROR: Generated reference docs are out of date."
             echo "Run 'python agent/scripts/generate_references.py' and commit the results."
             exit 1

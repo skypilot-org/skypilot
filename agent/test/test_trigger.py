@@ -10,8 +10,8 @@ than in interactive Claude Code sessions. Running multiple times per query
 (--runs) helps account for the stochastic nature of LLM behavior.
 
 Usage:
-    python3 skills/test/test_trigger.py
-    python3 skills/test/test_trigger.py --timeout 60 --workers 5 --runs 3
+    python3 agent/test/test_trigger.py
+    python3 agent/test/test_trigger.py --timeout 60 --workers 5 --runs 3
 """
 
 import argparse

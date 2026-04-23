@@ -9,8 +9,8 @@
 #   - claude CLI installed and authenticated
 #
 # Usage (from repo root):
-#   bash skills/test/test.sh
-#   bash skills/test/test.sh --timeout 60 --workers 3
+#   bash agent/test/test.sh
+#   bash agent/test/test.sh --timeout 60 --workers 3
 
 set -euo pipefail
 

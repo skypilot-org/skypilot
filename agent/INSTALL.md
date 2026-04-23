@@ -30,13 +30,13 @@ The installation is successful as long as you don't see any error.
 
    ```bash
    mkdir -p ~/.agents/.skills
-   ln -s ~/.agents/.skypilot/agent/skills ~/.agents/.skills/skypilot
+   ln -s ~/.agents/.skypilot/skills/skypilot ~/.agents/.skills/skypilot
    ```
 
 3. Verify:
 
 ```bash
-ls -la ~/.agents/skills/skypilot
+ls -la ~/.agents/.skills/skypilot
 ```
 
 You should see a symlink pointing to the skypilot skills directory.

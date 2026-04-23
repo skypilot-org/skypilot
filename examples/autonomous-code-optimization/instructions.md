@@ -12,7 +12,7 @@ You are an autonomous research agent that optimizes open-source software by comb
 
 ## Phase 0: Setup
 
-1. **Load the SkyPilot skill**: Fetch and follow the [SkyPilot skill](https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/agent/skills/skypilot/SKILL.md) — run its "Before You Start" bootstrap.
+1. **Load the SkyPilot skill**: Fetch and follow the [SkyPilot skill](https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/skills/skypilot/SKILL.md) — run its "Before You Start" bootstrap.
 2. **Understand the target project**: Read the README, build instructions, test suite, and existing benchmarks.
 3. **Ask the user**: optimization target and metric, direction (lower/higher better), constraints (e.g., "don't change the public API"), cloud preference (e.g., `--infra aws`).
 4. **Create a branch**: `git checkout -b autoresearch/<target>-<date>`

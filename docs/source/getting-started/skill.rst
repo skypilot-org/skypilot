@@ -7,7 +7,7 @@ SkyPilot provides an official skill that teaches AI agents (Claude Code,
 Codex, etc.) how to use SkyPilot. With it installed, your agent can launch
 clusters, run jobs, serve models, and manage cloud resources effectively.
 
-See `SKILL.md <https://github.com/skypilot-org/skypilot/blob/master/agent/skills/skypilot/SKILL.md>`__.
+See `SKILL.md <https://github.com/skypilot-org/skypilot/blob/master/skills/skypilot/SKILL.md>`__.
 
 What you can do
 ---------------
@@ -58,6 +58,16 @@ Installation
     .. code-block:: bash
 
       npx skills add skypilot-org/skypilot
+
+  .. tab-item:: GitHub CLI
+
+    Install with the `gh skill <https://github.blog/changelog/2026-04-16-manage-agent-skills-with-github-cli/>`__ command (requires ``gh`` 2.90.0+):
+
+    .. code-block:: bash
+
+      gh skill install skypilot-org/skypilot
+
+    Target a specific agent with ``--agent claude-code``, ``--agent codex``, or ``--agent gemini``.
 
   .. tab-item:: Generic
 
