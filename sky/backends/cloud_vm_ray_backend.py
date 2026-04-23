@@ -5913,7 +5913,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Self-heal paths inside a blob-cache the active backend manages
         # (e.g. HA shared-FS plugin's per-replica local cache, populated
-        # lazily). No-op for paths it does not own.
+        # lazily). No-op for paths it does not own. Called for side effect
+        # only — return value is guaranteed to equal the input by contract.
         # Import inside function: avoid opening a new sky.backends ->
         # sky.server top-level dependency.
         # pylint: disable=import-outside-toplevel
@@ -5924,7 +5925,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         for dst, src in file_mounts.items():
             if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
-                full_src = blob_storage.ensure_resolved(full_src)
+                blob_storage.ensure_resolved(full_src)
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(
                     full_src), f'{full_src} does not exist. {file_mounts}'

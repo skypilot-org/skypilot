@@ -1146,9 +1146,10 @@ class Storage(object):
             full_src = os.path.abspath(os.path.expanduser(local_source))
             # Self-heal paths inside a blob-cache the active backend
             # manages (e.g. HA shared-FS plugin's per-replica local cache,
-            # populated lazily). No-op for paths it does not own. Return
-            # value MUST equal input by contract.
-            full_src = blob_storage.ensure_resolved(full_src)
+            # populated lazily). No-op for paths it does not own. Called
+            # for side effect only — return value is guaranteed to equal
+            # the input by contract.
+            blob_storage.ensure_resolved(full_src)
             # Only check if local source exists if it is synced to the bucket
             if not os.path.exists(full_src) and sync_on_reconstruction:
                 with ux_utils.print_exception_no_traceback():
