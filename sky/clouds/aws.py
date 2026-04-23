@@ -97,11 +97,11 @@ _EFA_DOCKER_RUN_OPTIONS = [
     '--ulimit memlock=-1:-1',
 ]
 
-# AWS EFA image name.
-# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
-# TODO(hailong): may need to update the version later.
-_EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
-' (Ubuntu 22.04) 20250808'
+# AWS EFA image name pattern.
+# AWS documents this wildcard in the DLAMI Ubuntu 22.04 AWSCLI Query.
+# AWS publishes these AMIs with a YYYYMMDD suffix.
+_EFA_IMAGE_NAME_PATTERN = ('Deep Learning Base OSS Nvidia Driver GPU AMI'
+                           ' (Ubuntu 22.04) ????????')
 
 # For functions that needs caching per AWS profile.
 _AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
@@ -144,7 +144,8 @@ def aws_profile_aware_lru_cache(*lru_cache_args,
             aws_profile = aws.get_workspace_profile()
             return cached_impl(aws_profile, *args, **kwargs)
 
-        wrapper.cache_clear = cached_impl.cache_clear  # type: ignore[attr-defined]
+        wrapper.cache_clear = (  # type: ignore[attr-defined]
+            cached_impl.cache_clear)
         return wrapper
 
     return decorator
@@ -162,17 +163,21 @@ def _get_efa_image_id(region_name: str) -> Optional[str]:
     """Get the EFA image id for the given region."""
     try:
         client = aws.client('ec2', region_name=region_name)
-        response = client.describe_images(Filters=[{
-            'Name': 'name',
-            'Values': [_EFA_IMAGE_NAME]
-        }])
+        response = client.describe_images(
+            Owners=['amazon'],
+            Filters=[{
+                'Name': 'name',
+                'Values': [_EFA_IMAGE_NAME_PATTERN]
+            }, {
+                'Name': 'state',
+                'Values': ['available']
+            }])
         if 'Images' not in response:
             return None
-        if len(response['Images']) == 0:
+        imgs = response['Images']
+        if len(imgs) == 0:
             return None
-        available_images = [
-            img for img in response['Images'] if img['State'] == 'available'
-        ]
+        available_images = [img for img in imgs if img['State'] == 'available']
         if len(available_images) == 0:
             return None
         sorted_images = sorted(available_images,
@@ -195,7 +200,8 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
             # TODO(cooperc): fix the types for mypy 1.16
-            # Boto3 type stubs expect Literal instance types; using str list here.
+            # Boto3 type stubs expect Literal instance types; using str list
+            # here.
             InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',

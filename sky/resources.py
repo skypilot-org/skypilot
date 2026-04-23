@@ -1400,24 +1400,50 @@ class Resources:
                         self._region: nebius_constants.INFINIBAND_IMAGE_ID
                     }
             elif self._image_id:
-                # Custom image specified - validate it's a docker image
-                # Check if any of the specified images are not docker images
+                # Custom image specified - validate network tier constraints.
+                docker_images = []
                 non_docker_images = []
                 for region, image_id in self._image_id.items():
-                    if not image_id.startswith('docker:'):
+                    if image_id.startswith('docker:'):
+                        docker_images.append(f'{image_id} (region: {region})')
+                    else:
                         non_docker_images.append(
                             f'{image_id} (region: {region})')
 
                 if non_docker_images:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'When using network_tier=BEST, image_id '
-                            f'must be a docker image. '
-                            f'Found non-docker images: '
-                            f'{", ".join(non_docker_images)}. '
-                            f'Please either: (1) use a docker image '
-                            f'(prefix with "docker:"), or '
-                            f'(2) leave image_id empty to use the default')
+                    if isinstance(self._cloud, clouds.AWS):
+                        if docker_images:
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'When using network_tier=BEST, image_id '
+                                    'must not mix docker and non-docker '
+                                    'images. '
+                                    'Found docker images: '
+                                    f'{", ".join(docker_images)}. '
+                                    'Found non-docker images: '
+                                    f'{", ".join(non_docker_images)}.')
+                        else:
+                            logger.warning(
+                                f'{colorama.Fore.YELLOW}'
+                                'When using network_tier=BEST with a custom '
+                                'image_id, SkyPilot will attach EFA network '
+                                'interfaces on EFA-supported instance types, '
+                                'but will not install or validate the image\'s '
+                                'networking setup. Found custom images: '
+                                f'{", ".join(non_docker_images)}. '
+                                'Make sure the image has the required '
+                                'networking stack.'
+                                f'{colorama.Style.RESET_ALL}')
+                    else:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'When using network_tier=BEST, image_id '
+                                f'must be a docker image. '
+                                f'Found non-docker images: '
+                                f'{", ".join(non_docker_images)}. '
+                                f'Please either: (1) use a docker image '
+                                f'(prefix with "docker:"), or '
+                                f'(2) leave image_id empty to use the default')
 
         if self._image_id is None:
             return
