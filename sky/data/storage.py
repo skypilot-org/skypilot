@@ -1139,6 +1139,14 @@ class Storage(object):
                         f'Found source={local_source}')
             # Local path, check if it exists
             full_src = os.path.abspath(os.path.expanduser(local_source))
+            # Self-heal paths inside a blob-cache the active backend manages
+            # (e.g. HA shared-FS plugin's per-replica local cache, populated
+            # lazily). No-op for paths it does not own.
+            # Import inside function: avoid opening a new sky.data ->
+            # sky.server top-level dependency.
+            # pylint: disable=import-outside-toplevel
+            from sky.server.blob import blob_storage as bs
+            full_src = bs.get_blob_storage().ensure_resolved(full_src)
             # Only check if local source exists if it is synced to the bucket
             if not os.path.exists(full_src) and sync_on_reconstruction:
                 with ux_utils.print_exception_no_traceback():

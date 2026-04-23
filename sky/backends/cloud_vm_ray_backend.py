@@ -5911,10 +5911,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_threads = subprocess_utils.get_max_workers_for_file_mounts(
             file_mounts, str(handle.launched_resources.cloud))
 
+        # Self-heal paths inside a blob-cache the active backend manages
+        # (e.g. HA shared-FS plugin's per-replica local cache, populated
+        # lazily). No-op for paths it does not own.
+        # Import inside function: avoid opening a new sky.backends ->
+        # sky.server top-level dependency.
+        # pylint: disable=import-outside-toplevel
+        from sky.server.blob import blob_storage as bs
+        blob_storage = bs.get_blob_storage()
+
         # Check the files and warn
         for dst, src in file_mounts.items():
             if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
+                full_src = blob_storage.ensure_resolved(full_src)
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(
                     full_src), f'{full_src} does not exist. {file_mounts}'

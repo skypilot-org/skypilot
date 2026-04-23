@@ -98,6 +98,20 @@ class BlobStorage(abc.ABC):
         """
         return True
 
+    def ensure_resolved(self, path: str) -> str:
+        """Ensure a blob-cache path is materialized on the current host.
+
+        Consumers (e.g. file-mount rsync, Storage source validation) call
+        this before any stat/open on a path that may point inside a
+        blob-cache directory. Implementations that use a per-host local
+        cache (extracted on demand from a shared zip) should detect their
+        own cache-path prefix and trigger lazy extraction here.
+
+        Default: no-op, returns ``path`` unchanged. Safe to call on any
+        path — non-blob-cache paths are ignored.
+        """
+        return path
+
     @abc.abstractmethod
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         """Return the base blobs directory for a user."""
