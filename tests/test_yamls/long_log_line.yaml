@@ -1,0 +1,13 @@
+name: long-log-line
+
+# Emits a very long single log line plus short bracket markers so
+# tests/smoke_tests/test_basic.py::test_cli_logs_streaming_long_line can
+# confirm that `sky logs` streams the whole line intact. ML training
+# workloads often dump JSON configs, tensor summaries, or progress-bar
+# frames that cross common scanner-buffer thresholds (256 KB, 1 MB).
+run: |
+  python3 -c "
+  print('LONG_LOG_LINE_START')
+  print('x' * 300000)
+  print('LONG_LOG_LINE_END')
+  "

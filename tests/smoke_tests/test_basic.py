@@ -1007,6 +1007,78 @@ def test_cli_logs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- CLI logs: streaming edge cases ----------
+# Exercises `sky logs <cluster> <job>` (i.e. streaming mode, not
+# `--status`) against two patterns that show up routinely in ML training
+# output but that prior smoke tests never covered:
+#
+#   1. A single log line far larger than any reasonable fixed-size scanner
+#      buffer. JSON configs, dataset summaries, tensor dumps, tokenizer
+#      vocabularies, and image-mode progress snapshots all easily clear
+#      256 KB on one line.
+#
+#   2. `\r`-only progress-bar updates (tqdm / keras / rich.progress). The
+#      server emits a single log "line" (server-side split is on `\n`),
+#      but the client has to recognise `\r` as an in-place terminator or
+#      the progress frames look hung until the bar is replaced by a
+#      `\n`-terminated summary line.
+#
+# Clients implementing the streaming read with a fixed-size line buffer
+# (e.g. Go's ``bufio.Scanner``, default 64 KB, or a hand-bounded 256 KB)
+# will silently truncate or fail on case (1); clients that split only
+# on `\n` will visually hang on case (2). Python's reference SDK uses
+# ``iter_content`` + ``str.splitlines`` which has neither limitation, so
+# historically this gap never surfaced in the OSS smoke tests.
+@pytest.mark.no_hyperbolic
+def test_cli_logs_streaming_long_line(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # wc -L prints the length of the single longest line in the stream.
+    # test -ge 300000 confirms the full 300 KB line survived streaming end
+    # to end; grep on the bracket markers confirms the lines around it
+    # weren't dropped in the process.
+    test = smoke_tests_utils.Test(
+        'cli_logs_streaming_long_line',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/long_log_line.yaml',
+            f'sky logs {name} 1 --status',
+            f'out=$(sky logs {name} 1) && '
+            f'echo "$out" | grep -q "LONG_LOG_LINE_START" && '
+            f'echo "$out" | grep -q "LONG_LOG_LINE_END" && '
+            f'longest=$(echo "$out" | awk \'{{ print length($0) }}\' '
+            f'| sort -rn | head -1) && '
+            f'test "$longest" -ge 300000',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_hyperbolic
+def test_cli_logs_streaming_progress_bar(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_logs_streaming_progress_bar',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/cr_progress_bar.yaml',
+            f'sky logs {name} 1 --status',
+            # Every frame must reach the client (the server writes them
+            # all into the log file; the client has to render them).
+            f'out=$(sky logs {name} 1) && '
+            f'for i in 0 1 2 3 4; do '
+            f'echo "$out" | grep -q "progress-frame-$i" || exit 1; '
+            f'done && '
+            # And the final \n-terminated summary line comes through.
+            f'echo "$out" | grep -q "PROGRESS_BAR_DONE"',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.scp
 def test_scp_logs():
     name = smoke_tests_utils.get_cluster_name()
