@@ -2617,7 +2617,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     # parent SIGKILL.
     # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
     # entirely.
-    if _KUBECTL_PATH is None or not os.path.dirname(_KUBECTL_PATH):
+    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
         raise RuntimeError(
             'kubectl not found on PATH with an absolute path; refusing to '
             'fall back to fork-based spawn which risks the SQLite-mutex '
@@ -2705,6 +2705,17 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
+        # Reap the kubectl child. `asyncio.create_subprocess_exec` had this
+        # handled by asyncio's child watcher; `subprocess.Popen` is outside
+        # that watcher so we must wait() ourselves or leave a zombie.
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
+                                   timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning(
+                'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
+            proc.kill()
+            await loop.run_in_executor(None, proc.wait)
 
 
 @app.websocket('/slurm-job-ssh-proxy')
