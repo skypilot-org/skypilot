@@ -504,84 +504,77 @@ def test_cli_resize_without_cluster_name_errors():
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def _stub_launch_preamble(monkeypatch):
+    """Stub the sdk.launch decorator preamble so tests can reach the guard
+    without hitting a real API server, and ensure an event loop exists for
+    Python 3.9 (sky.utils.context.SkyPilotContext.__init__ creates an
+    asyncio.Event, which requires a running/set loop on py3.9)."""
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    # Bypass the @check_server_healthy_or_start decorator's network call.
+    monkeypatch.setattr('sky.server.common.check_server_healthy_or_start_fn',
+                        lambda *a, **kw: None)
+
+
 @pytest.mark.parametrize('api_version', [None, 1, 24, 49])
-def test_sdk_launch_resize_errors_on_old_server(api_version):
+def test_sdk_launch_resize_errors_on_old_server(api_version,
+                                                _stub_launch_preamble,
+                                                monkeypatch):
     """sdk.launch(resize=True) should error if remote API version < 50."""
     import sky
     from sky import exceptions
     from sky.client import sdk
 
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+
     task = sky.Task(run='echo hi', num_nodes=2)
 
-    with mock.patch('sky.client.sdk.versions.get_remote_api_version',
-                    return_value=api_version):
-        with pytest.raises(exceptions.APINotSupportedError,
-                           match='Cluster resize'):
-            # Call the underlying function (before any @usage_lib_context or
-            # request-id wrapping) to exercise the guard directly.
-            sdk.launch(task, cluster_name='my-cluster', resize=True)
+    with pytest.raises(exceptions.APINotSupportedError, match='Cluster resize'):
+        sdk.launch(task, cluster_name='my-cluster', resize=True)
 
 
-def test_sdk_launch_resize_allowed_on_new_server(monkeypatch):
-    """sdk.launch(resize=True) should proceed when remote API version >= 50."""
+def test_sdk_launch_resize_allowed_on_new_server(_stub_launch_preamble,
+                                                 monkeypatch):
+    """sdk.launch(resize=True) should pass the guard when remote API version
+    >= 50. We short-circuit the real launch path with a sentinel so reaching
+    it proves the guard didn't raise."""
     import sky
     from sky.client import sdk
-
-    task = sky.Task(run='echo hi', num_nodes=2)
 
     monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
                         lambda: 50)
 
-    # Short-circuit the actual HTTP call so the test stays local: raise a
-    # sentinel inside _launch. Reaching this sentinel proves the resize guard
-    # did not error.
     sentinel = RuntimeError('reached _launch')
+    monkeypatch.setattr('sky.client.sdk._launch',
+                        mock.Mock(side_effect=sentinel))
 
-    def fake_launch(*_args, **_kwargs):
-        raise sentinel
-
-    monkeypatch.setattr('sky.client.sdk._launch', fake_launch)
-    monkeypatch.setattr(
-        'sky.utils.admin_policy_utils.apply_and_use_config_in_current_request',
-        lambda *a, **kw: _NullContext(kw.get('dag') or a[0]))
-
+    task = sky.Task(run='echo hi', num_nodes=2)
     with pytest.raises(RuntimeError, match='reached _launch'):
         sdk.launch(task, cluster_name='my-cluster', resize=True)
 
 
-def test_sdk_launch_no_resize_no_version_check(monkeypatch):
-    """When resize=False, no version check should be enforced."""
+def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
+                                                  monkeypatch):
+    """resize=False must never trigger the version guard, even against an
+    unknown (None) server version."""
     import sky
     from sky.client import sdk
 
-    task = sky.Task(run='echo hi', num_nodes=2)
-
-    # Even with a very old or unknown server, resize=False must not raise.
     monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
                         lambda: None)
 
     sentinel = RuntimeError('reached _launch')
-    monkeypatch.setattr('sky.client.sdk._launch', lambda *a, **kw:
-                        (_ for _ in ()).throw(sentinel))
-    monkeypatch.setattr(
-        'sky.utils.admin_policy_utils.apply_and_use_config_in_current_request',
-        lambda *a, **kw: _NullContext(kw.get('dag') or a[0]))
+    monkeypatch.setattr('sky.client.sdk._launch',
+                        mock.Mock(side_effect=sentinel))
 
+    task = sky.Task(run='echo hi', num_nodes=2)
     with pytest.raises(RuntimeError, match='reached _launch'):
         sdk.launch(task, cluster_name='my-cluster', resize=False)
-
-
-class _NullContext:
-    """Minimal context manager that yields a provided value."""
-
-    def __init__(self, value):
-        self._value = value
-
-    def __enter__(self):
-        return self._value
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
 
 
 def test_launch_body_accepts_resize_field():
@@ -607,8 +600,8 @@ def test_launch_body_old_server_ignores_unknown_resize():
     drop the unknown field (extra='ignore'), not raise."""
     import pydantic
 
-    # Old LaunchBody schema (pre-resize): same as current but without the
-    # resize field, inheriting the extra='ignore' config from BasePayload.
+    # Old LaunchBody schema (pre-resize): same shape minus the resize field,
+    # inheriting extra='ignore' from BasePayload.
     from sky.server.requests.payloads import RequestBody
 
     class OldLaunchBody(RequestBody):
@@ -619,8 +612,6 @@ def test_launch_body_old_server_ignores_unknown_resize():
     body = OldLaunchBody(task='task-yaml',
                          cluster_name='my-cluster',
                          resize=True)
-    # resize is not a field on the old model and must not leak through dump.
     dumped = body.model_dump()
     assert 'resize' not in dumped
-    # Must not raise; confirm the body is still valid.
     assert isinstance(body, pydantic.BaseModel)
