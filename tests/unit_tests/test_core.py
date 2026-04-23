@@ -497,3 +497,130 @@ def test_cli_resize_without_cluster_name_errors():
     assert result.exit_code != 0
     assert '--resize requires -c' in result.output or \
            '--resize requires -c' in str(result.exception)
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility tests for the resize field on /launch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('api_version', [None, 1, 24, 49])
+def test_sdk_launch_resize_errors_on_old_server(api_version):
+    """sdk.launch(resize=True) should error if remote API version < 50."""
+    import sky
+    from sky import exceptions
+    from sky.client import sdk
+
+    task = sky.Task(run='echo hi', num_nodes=2)
+
+    with mock.patch('sky.client.sdk.versions.get_remote_api_version',
+                    return_value=api_version):
+        with pytest.raises(exceptions.APINotSupportedError,
+                           match='Cluster resize'):
+            # Call the underlying function (before any @usage_lib_context or
+            # request-id wrapping) to exercise the guard directly.
+            sdk.launch(task, cluster_name='my-cluster', resize=True)
+
+
+def test_sdk_launch_resize_allowed_on_new_server(monkeypatch):
+    """sdk.launch(resize=True) should proceed when remote API version >= 50."""
+    import sky
+    from sky.client import sdk
+
+    task = sky.Task(run='echo hi', num_nodes=2)
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 50)
+
+    # Short-circuit the actual HTTP call so the test stays local: raise a
+    # sentinel inside _launch. Reaching this sentinel proves the resize guard
+    # did not error.
+    sentinel = RuntimeError('reached _launch')
+
+    def fake_launch(*_args, **_kwargs):
+        raise sentinel
+
+    monkeypatch.setattr('sky.client.sdk._launch', fake_launch)
+    monkeypatch.setattr(
+        'sky.utils.admin_policy_utils.apply_and_use_config_in_current_request',
+        lambda *a, **kw: _NullContext(kw.get('dag') or a[0]))
+
+    with pytest.raises(RuntimeError, match='reached _launch'):
+        sdk.launch(task, cluster_name='my-cluster', resize=True)
+
+
+def test_sdk_launch_no_resize_no_version_check(monkeypatch):
+    """When resize=False, no version check should be enforced."""
+    import sky
+    from sky.client import sdk
+
+    task = sky.Task(run='echo hi', num_nodes=2)
+
+    # Even with a very old or unknown server, resize=False must not raise.
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: None)
+
+    sentinel = RuntimeError('reached _launch')
+    monkeypatch.setattr('sky.client.sdk._launch', lambda *a, **kw:
+                        (_ for _ in ()).throw(sentinel))
+    monkeypatch.setattr(
+        'sky.utils.admin_policy_utils.apply_and_use_config_in_current_request',
+        lambda *a, **kw: _NullContext(kw.get('dag') or a[0]))
+
+    with pytest.raises(RuntimeError, match='reached _launch'):
+        sdk.launch(task, cluster_name='my-cluster', resize=False)
+
+
+class _NullContext:
+    """Minimal context manager that yields a provided value."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __enter__(self):
+        return self._value
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_launch_body_accepts_resize_field():
+    """New server should accept resize=True in the request body."""
+    from sky.server.requests import payloads
+
+    body = payloads.LaunchBody(task='task-yaml',
+                               cluster_name='my-cluster',
+                               resize=True)
+    assert body.resize is True
+
+
+def test_launch_body_defaults_resize_to_false():
+    """Old client payloads omitting resize should default to False."""
+    from sky.server.requests import payloads
+
+    body = payloads.LaunchBody(task='task-yaml', cluster_name='my-cluster')
+    assert body.resize is False
+
+
+def test_launch_body_old_server_ignores_unknown_resize():
+    """Simulate old server: a LaunchBody without the resize field must silently
+    drop the unknown field (extra='ignore'), not raise."""
+    import pydantic
+
+    # Old LaunchBody schema (pre-resize): same as current but without the
+    # resize field, inheriting the extra='ignore' config from BasePayload.
+    from sky.server.requests.payloads import RequestBody
+
+    class OldLaunchBody(RequestBody):
+        task: str
+        cluster_name: str
+
+    # New client sends resize=True; old server should ignore it.
+    body = OldLaunchBody(task='task-yaml',
+                         cluster_name='my-cluster',
+                         resize=True)
+    # resize is not a field on the old model and must not leak through dump.
+    dumped = body.model_dump()
+    assert 'resize' not in dumped
+    # Must not raise; confirm the body is still valid.
+    assert isinstance(body, pydantic.BaseModel)

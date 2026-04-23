@@ -683,6 +683,12 @@ def launch(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
+    if resize and (remote_api_version is None or remote_api_version < 50):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Cluster resize (--resize / resize=True) is not supported by '
+                'your API server. Please upgrade the API server to a version '
+                'that supports API_VERSION >= 50.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
