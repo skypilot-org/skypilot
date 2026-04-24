@@ -2909,7 +2909,14 @@ class ManagedJobCodeGen:
         client-side based on the selector args.
         """
         active_workspace = skypilot_config.get_active_workspace()
-        user_hash = common_utils.get_user_hash() if all else None
+
+        # ``user_hash`` is intentionally omitted below — the controller runs
+        # the generated code under ``_build()``, which exports
+        # ``USER_ID_ENV_VAR`` to the caller's hash. The dispatcher defaults
+        # ``user_hash=None``, and ``state.get_nonterminal_job_ids_by_name``
+        # falls back to ``common_utils.get_user_hash()`` (reading the env
+        # var) when ``user_hash`` is None — matching the old per-variant
+        # codegens, which also never passed it.
 
         # Client-side pick of which legacy variant to emit for controllers
         # running ``managed_job_version < 19``. Each variant preserves the
@@ -2976,7 +2983,6 @@ class ManagedJobCodeGen:
                 f'        graceful={graceful!r},\n'
                 f'        graceful_timeout={graceful_timeout!r},\n'
                 f'        current_workspace={active_workspace!r},\n'
-                f'        user_hash={user_hash!r},\n'
                 f'    )\n'
                 f'print(msg, end="", flush=True)\n')
         return cls._build(code)
