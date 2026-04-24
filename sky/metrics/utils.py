@@ -515,8 +515,12 @@ async def get_metrics_for_context(context: str) -> str:
         'container_memory_working_set_bytes{container!="",container!="POD"}',
         # GPU allocation metrics — pod requests + node capacity for nvidia/amd
         # GPUs. Enables cluster-wide % allocated computations.
-        'kube_pod_container_resource_requests{resource=~"nvidia.com/gpu|amd.com/gpu"}',  # pylint: disable=line-too-long
-        'kube_node_status_allocatable{resource=~"nvidia.com/gpu|amd.com/gpu"}',
+        # NOTE: kube-state-metrics sanitizes resource names by replacing
+        # `.` and `/` with `_`, so the label value is `nvidia_com_gpu` (not
+        # `nvidia.com/gpu`). Getting this wrong causes the match to return 0
+        # series while the scrape still succeeds.
+        'kube_pod_container_resource_requests{resource=~"nvidia_com_gpu|amd_com_gpu"}',  # pylint: disable=line-too-long
+        'kube_node_status_allocatable{resource=~"nvidia_com_gpu|amd_com_gpu"}',
     ]
 
     # TODO(rohan): don't hardcode the namespace and service name

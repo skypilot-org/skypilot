@@ -159,7 +159,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg_over_time((sum(kube_pod_container_resource_requests{resource=\"nvidia.com/gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia.com/gpu\", cluster=~\"$cluster\"}) * 100)[$__range:])",
+          "expr": "avg_over_time((sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) * 100)[$__range:])",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -301,7 +301,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia.com/gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia.com/gpu\", cluster=~\"$cluster\"}) * 100",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) * 100",
           "instant": false,
           "legendFormat": "GPU Allocation",
           "range": true,
