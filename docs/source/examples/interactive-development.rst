@@ -413,12 +413,9 @@ The job queue and logs are preserved across a resize.
 
 .. note::
 
-  Scale-down re-provisions all workers from scratch, so any local state
-  on the previous workers (e.g. files written outside a mounted
-  storage, caches, installed packages) is lost. **Pass the same YAML**
-  you used to launch the cluster so SkyPilot reruns ``setup`` on the
-  freshly provisioned workers. If you resize without a YAML, no
-  ``setup`` is executed on the new workers.
+  New workers start with a clean image. Pass the same YAML you
+  launched with so ``setup`` reruns on them; otherwise the new
+  workers have no setup applied.
 
 Restrictions:
 
