@@ -104,8 +104,10 @@ before proceeding, e.g.:
   Resizing cluster 'dev' from 4 to 8 node(s) (+4 worker(s), scale up). Proceed? [Y/n]
 
 The head node is always preserved during resize, so the job queue, logs,
-and any setup state on the head node survive. ``setup`` is re-run on
-newly added workers.
+and any setup state on the head node survive. Resize itself does not
+re-run ``setup`` — if you pass a task YAML (or inline command) with a
+``setup`` section to the resize command, that setup will run on all
+nodes; otherwise no setup is executed on the newly provisioned workers.
 
 Restrictions:
 
