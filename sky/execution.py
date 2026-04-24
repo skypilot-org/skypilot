@@ -384,19 +384,27 @@ def _execute_dag(
                     'All resources must have the same autostop config.')
         resource_autostop_config = resources[0].autostop_config
 
+        # Synthesize the legacy hook/hook_timeout pair from the first
+        # autostop-matching entry in resources.hooks — this keeps the existing
+        # set_autostop wire format working until the Proto v7 / set_hooks
+        # commit lands later in this PR.
+        hook: Optional[str] = None
+        hook_timeout: Optional[int] = None
+        for entry in (resources[0].hooks or []):
+            if 'autostop' in entry.get('events', []):
+                hook = entry['run']
+                hook_timeout = entry.get('timeout')
+                break
+
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-        hook: Optional[str] = None
-        hook_timeout: Optional[int] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
-                hook = resource_autostop_config.hook
-                hook_timeout = resource_autostop_config.hook_timeout
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.

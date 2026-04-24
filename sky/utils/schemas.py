@@ -161,6 +161,8 @@ _AUTOSTOP_SCHEMA = {
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
                 },
+                # TODO(zpoint): remove after v0.15.0 — routed into
+                # top-level resources.hooks for backward compatibility.
                 'hook': {
                     'type': 'string',
                 },
@@ -171,6 +173,39 @@ _AUTOSTOP_SCHEMA = {
             },
         },
     ],
+}
+
+# Supported events in resources.hooks[*].events.
+_HOOK_EVENTS = ['autostop', 'preemption', 'down']
+
+_HOOKS_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'object',
+        'required': ['run'],
+        'additionalProperties': False,
+        'properties': {
+            'run': {
+                'type': 'string',
+                'minLength': 1,
+            },
+            # `events` is optional. When absent, Resources fills the
+            # default list (all three events) at load time.
+            'events': {
+                'type': 'array',
+                'minItems': 1,
+                'uniqueItems': True,
+                'items': {
+                    'type': 'string',
+                    'enum': _HOOK_EVENTS,
+                },
+            },
+            'timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        },
+    },
 }
 
 
@@ -479,6 +514,7 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'hooks': _HOOKS_SCHEMA,
             'priority': {
                 'type': 'integer',
                 'minimum': constants.MIN_PRIORITY,
@@ -1640,6 +1676,9 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
+    # Controller lifecycle is SkyPilot-managed infrastructure; hooks are
+    # not user-configurable here. Reject at schema-validation time.
+    resources_schema['properties'].pop('hooks', None)
 
     def _get_controller_schema(extra_properties: Optional[Dict[str,
                                                                Any]] = None,):

@@ -591,15 +591,21 @@ def _start(
         controller_resources = controller_utils.get_controller_resources(
             controller, [])
         # All resources should have the same autostop config.
-        controller_autostop_config = list(
-            controller_resources)[0].autostop_config
+        controller_resource = list(controller_resources)[0]
+        controller_autostop_config = controller_resource.autostop_config
         if (controller_autostop_config is not None and
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
-            hook = controller_autostop_config.hook
-            hook_timeout = controller_autostop_config.hook_timeout
+            # Synthesize legacy hook/hook_timeout from the first
+            # autostop-matching hooks entry (backward-compat with the
+            # existing set_autostop wire format).
+            for entry in (controller_resource.hooks or []):
+                if 'autostop' in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.

@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import re
+import sys
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -70,8 +71,6 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-    hook: Optional[str] = None
-    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -82,10 +81,6 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
-        if self.hook is not None:
-            config['hook'] = self.hook
-        if self.hook_timeout is not None:
-            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -117,13 +112,30 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
-            if 'hook' in config:
-                autostop_config.hook = config['hook']
-            if 'hook_timeout' in config:
-                autostop_config.hook_timeout = config['hook_timeout']
+            # `hook` / `hook_timeout` are consumed by Resources before this
+            # method is called and routed into the top-level `hooks` list.
             return autostop_config
 
         return None
+
+
+# Events supported by resources.hooks[*].events (mirror of
+# sky.utils.schemas._HOOK_EVENTS).
+_HOOK_EVENTS = ('autostop', 'preemption', 'down')
+
+
+def _normalize_hook_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply load-time defaults to a single hook entry."""
+    result: Dict[str, Any] = {'run': entry['run']}
+    events = entry.get('events')
+    if not events:
+        events = list(_HOOK_EVENTS)
+    result['events'] = list(events)
+    if 'timeout' in entry and entry['timeout'] is not None:
+        result['timeout'] = entry['timeout']
+    else:
+        result['timeout'] = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+    return result
 
 
 class Resources:
@@ -143,7 +155,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 32  # add ephemeral_storage.
+    _VERSION = 33  # add _hooks list + scrub AutostopConfig.hook/hook_timeout.
 
     def __init__(
         self,
@@ -169,6 +181,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
+        hooks: Optional[List[Dict[str, Any]]] = None,
         priority: Optional[int] = None,
         priority_class: Optional[str] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
@@ -444,7 +457,8 @@ class Resources:
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
-        self._set_autostop_config(autostop)
+        self._hooks: Optional[List[Dict[str, Any]]] = None
+        self._set_autostop_config(autostop, extra_hooks=hooks)
         self._set_priority(priority)
         self._set_priority_class(priority_class)
         self._set_volumes(volumes)
@@ -744,6 +758,16 @@ class Resources:
         return self._autostop_config
 
     @property
+    def hooks(self) -> Optional[List[Dict[str, Any]]]:
+        """Lifecycle hooks set via `resources.hooks:`.
+
+        Each entry is a dict with keys `run`, `events`, `timeout` (all
+        filled with defaults at load time). Returns None when no hooks
+        were configured.
+        """
+        return self._hooks
+
+    @property
     def priority(self) -> Optional[int]:
         """The priority for this resource configuration.
 
@@ -968,8 +992,33 @@ class Resources:
     def _set_autostop_config(
         self,
         autostop: Union[bool, int, str, Dict[str, Any], None],
+        extra_hooks: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
+        legacy_hook_entry: Optional[Dict[str, Any]] = None
+        if isinstance(autostop, dict):
+            autostop = dict(autostop)  # avoid mutating caller
+            legacy_hook = autostop.pop('hook', None)
+            legacy_timeout = autostop.pop('hook_timeout', None)
+            if legacy_hook is not None:
+                # TODO(zpoint): remove after v0.15.0.
+                sys.stderr.write(
+                    'WARNING: autostop.hook / autostop.hook_timeout are '
+                    'deprecated. Use resources.hooks: [{run, events: '
+                    '[autostop], timeout}] instead (routed for you).\n')
+                legacy_hook_entry = _normalize_hook_entry({
+                    'run': legacy_hook,
+                    'events': ['autostop'],
+                    'timeout': legacy_timeout,
+                })
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+        collected: List[Dict[str, Any]] = []
+        if extra_hooks:
+            for entry in extra_hooks:
+                collected.append(_normalize_hook_entry(entry))
+        if legacy_hook_entry is not None:
+            collected.append(legacy_hook_entry)
+        self._hooks = collected if collected else None
 
     def _set_priority(self, priority: Optional[int]) -> None:
         """Sets the priority for this resource configuration.
@@ -2114,6 +2163,11 @@ class Resources:
         if self.autostop_config is not None:
             current_autostop_config = self.autostop_config.to_yaml_config()
 
+        hooks_sentinel = object()
+        hooks_override = override.pop('hooks', hooks_sentinel)
+        hooks_value = self._hooks if hooks_override is hooks_sentinel else (
+            hooks_override)
+
         override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
@@ -2142,6 +2196,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            hooks=hooks_value,
             priority=override.pop('priority', self.priority),
             priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
@@ -2473,6 +2528,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['hooks'] = config.pop('hooks', None)
         resources_fields['priority'] = config.pop('priority', None)
         resources_fields['priority_class'] = config.pop('priority_class', None)
         resources_fields['volumes'] = config.pop('volumes', None)
@@ -2560,6 +2616,8 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        if self._hooks:
+            config['hooks'] = [dict(h) for h in (self._hooks or [])]
 
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
@@ -2753,6 +2811,30 @@ class Resources:
 
         if version < 32:
             self._ephemeral_storage = None
+
+        if version < 33:
+            # Route legacy AutostopConfig.hook / hook_timeout attrs into the
+            # new _hooks list, and scrub them from AutostopConfig.
+            hooks = list(state.get('_hooks') or [])
+            autostop = state.get('_autostop_config')
+            legacy_hook = getattr(autostop, 'hook', None) if autostop else None
+            legacy_timeout = (getattr(autostop, 'hook_timeout', None)
+                              if autostop else None)
+            if legacy_hook is not None:
+                hooks.append(
+                    _normalize_hook_entry({
+                        'run': legacy_hook,
+                        'events': ['autostop'],
+                        'timeout': legacy_timeout,
+                    }))
+            if autostop is not None:
+                for attr in ('hook', 'hook_timeout'):
+                    if hasattr(autostop, attr):
+                        try:
+                            delattr(autostop, attr)
+                        except AttributeError:
+                            pass
+            state['_hooks'] = hooks or None
 
         self.__dict__.update(state)
 
