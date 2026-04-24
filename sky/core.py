@@ -654,12 +654,19 @@ def _start(
         # For controller clusters, hook comes from controller_autostop_config.
         # For regular clusters, hook is None so it will be inherited from the
         # existing config on the remote cluster.
+        hooks_list: Optional[List[Dict[str, Any]]] = None
+        if controller is not None and controller_resources:
+            # pylint: disable=unsubscriptable-object
+            hooks_list = list(controller_resources)[0].hooks
+        elif handle.launched_resources is not None:
+            hooks_list = handle.launched_resources.hooks
         backend.set_autostop(handle,
                              idle_minutes_to_autostop,
                              wait_for,
                              down,
                              hook=hook,
-                             hook_timeout=hook_timeout)
+                             hook_timeout=hook_timeout,
+                             hooks=hooks_list)
     return handle
 
 
@@ -860,7 +867,39 @@ def down(cluster_name: str,
                              terminate=True)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    _maybe_run_down_hooks(handle, backend, cluster_name)
     backend.teardown(handle, terminate=True, purge=purge)
+
+
+def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
+                          backend: 'backends.Backend',
+                          cluster_name: str) -> None:
+    """Runs ``down`` lifecycle hooks on the head before teardown.
+
+    Best-effort: if the head is unreachable or running the hooks fails,
+    we log a warning and proceed with teardown so users can never be
+    stuck. Per-node exactly-once semantics are enforced on the head
+    via the CAS in ``hook_executor.try_claim_teardown``.
+    """
+    # Only the VM/Ray backend is supported; other backends simply skip.
+    if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
+        return
+    codegen = ('from sky.skylet import autostop_lib, hook_executor\n'
+               'hooks = autostop_lib.get_hooks() or []\n'
+               'if any(\'down\' in (h.get(\'events\') '
+               'or hook_executor.EVENTS) for h in hooks):\n'
+               '    if hook_executor.try_claim_teardown(\'down\'):\n'
+               '        hook_executor.run(\'down\', hooks)\n')
+    try:
+        backend.run_on_head(
+            handle,
+            f'python3 -c {shlex.quote(codegen)}',
+            stream_logs=False,
+            require_outputs=False,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to run down hook on {cluster_name!r}: {e}. '
+                       'Proceeding with teardown.')
 
 
 @usage_lib.entrypoint
@@ -1045,12 +1084,15 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    hooks_list = (handle.launched_resources.hooks
+                  if handle.launched_resources is not None else None)
     backend.set_autostop(handle,
                          idle_minutes,
                          wait_for,
                          down,
                          hook=hook,
-                         hook_timeout=hook_timeout)
+                         hook_timeout=hook_timeout,
+                         hooks=hooks_list)
 
 
 # ==================
@@ -1306,10 +1348,24 @@ def tail_logs(cluster_name: str,
 def tail_autostop_logs(cluster_name: str,
                        follow: bool = True,
                        tail: int = 0) -> int:
-    """Tails the autostop hook logs of a cluster.
+    """Deprecated. Use :func:`tail_hook_logs` with ``event='autostop'``."""
+    return tail_hook_logs(cluster_name,
+                          event='autostop',
+                          follow=follow,
+                          tail=tail)
+
+
+@usage_lib.entrypoint
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails per-event lifecycle-hook logs of a cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of 'autostop', 'preemption', 'down'. When ``None``,
+            auto-selects whichever hook log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
@@ -1327,15 +1383,20 @@ def tail_autostop_logs(cluster_name: str,
     Returns:
         Return code 0 on success, non-zero on failure.
     """
-    # Check the status of the cluster.
+    if event is not None and event not in constants.HOOK_EVENTS:
+        raise ValueError(f'Invalid hook event {event!r}. Must be one of '
+                         f'{list(constants.HOOK_EVENTS)}.')
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        operation='tailing autostop logs',
+        operation='tailing hook logs',
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    returnval = backend.tail_hook_logs(handle,
+                                       event=event,
+                                       follow=follow,
+                                       tail=tail)
     return returnval
 
 

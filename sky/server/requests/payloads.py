@@ -414,8 +414,20 @@ class ProvisionLogsBody(RequestBody):
 
 
 class AutostopLogsBody(RequestBody):
-    """Autostop logs request body."""
+    """Autostop logs request body (deprecated alias for HookLogsBody)."""
     cluster_name: str
+    follow: bool = True
+    tail: int = 0
+
+
+class HookLogsBody(RequestBody):
+    """Per-event lifecycle-hook logs request body.
+
+    ``event`` is optional — when None, the server auto-selects
+    whichever per-event log exists on the cluster.
+    """
+    cluster_name: str
+    event: Optional[str] = None
     follow: bool = True
     tail: int = 0
 

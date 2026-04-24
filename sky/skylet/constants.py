@@ -162,6 +162,10 @@ SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
+# Lifecycle-hooks framework — per-event log directory on cluster nodes.
+HOOK_LOG_DIR = '.sky/hooks'
+HOOK_EVENTS = ('autostop', 'preemption', 'down')
+
 # Autostop hook timeout default (1 hour in seconds)
 DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
 

@@ -33,6 +33,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
     CLUSTER_AUTOSTOP_LOGS = 'autostop_logs'
+    CLUSTER_HOOK_LOGS = 'hook_logs'
     CLUSTER_COST_REPORT = 'cost_report'
     CLUSTER_EVENTS = 'cluster_events'
     # Storage requests

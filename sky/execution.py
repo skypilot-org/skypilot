@@ -588,7 +588,8 @@ def _execute_dag(
                                      wait_for,
                                      down,
                                      hook=hook,
-                                     hook_timeout=hook_timeout)
+                                     hook_timeout=hook_timeout,
+                                     hooks=resources[0].hooks)
 
         job_id = None
         if Stage.EXEC in stages:

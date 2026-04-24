@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -1134,34 +1135,52 @@ def tail_provision_logs(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails a per-event lifecycle-hook log on the cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of ``autostop``, ``preemption``, ``down``. When
+            None, auto-selects whichever log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
     Returns:
         Exit code 0 on streaming success; non-zero on failure.
-
-    Request Raises:
-        ValueError: if arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
-        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
     """
+    body = payloads.HookLogsBody(cluster_name=cluster_name,
+                                 event=event,
+                                 follow=follow,
+                                 tail=tail)
+    response = server_common.make_authenticated_request(
+        'POST', '/hook_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
+
+
+# TODO(zpoint): remove after v0.15.0 — deprecated alias for
+# tail_hook_logs(event='autostop').
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
+
+    Emits a stderr deprecation warning; behavior otherwise identical
+    to ``tail_hook_logs``. Removed in v0.15.0.
+    """
+    sys.stderr.write(
+        'WARNING: sky.tail_autostop_logs() is deprecated. Use '
+        'sky.tail_hook_logs(cluster_name, event=\'autostop\') instead.\n')
     body = payloads.AutostopLogsBody(cluster_name=cluster_name,
                                      follow=follow,
                                      tail=tail)
-
     response = server_common.make_authenticated_request(
         'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
     request_id: server_common.RequestId[int] = server_common.get_request_id(

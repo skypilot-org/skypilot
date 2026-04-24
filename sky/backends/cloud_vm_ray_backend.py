@@ -4823,10 +4823,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            handle: CloudVmRayResourceHandle,
                            follow: bool = True,
                            tail: int = 0) -> int:
-        """Tail the autostop hook logs.
+        """Deprecated. Use ``tail_hook_logs(handle, event='autostop')``."""
+        return self.tail_hook_logs(handle,
+                                   event='autostop',
+                                   follow=follow,
+                                   tail=tail)
+
+    def tail_hook_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       event: Optional[str] = None,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+        """Tail per-event lifecycle-hook logs.
 
         Args:
             handle: The handle to the cluster.
+            event: One of 'autostop', 'preemption', 'down'. When ``None``,
+                auto-selects whichever per-event log exists on the head.
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
@@ -4834,21 +4847,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             The exit code of the tail command.
         """
-        # Construct tail command for the autostop hook log
-        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
-        tail_cmd_parts = ['tail']
+        legacy_log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        new_log_dir = f'~/{constants.HOOK_LOG_DIR}'
+        tail_flags = []
         if tail > 0:
-            tail_cmd_parts.extend(['-n', str(tail)])
+            tail_flags.extend(['-n', str(tail)])
         if follow:
-            tail_cmd_parts.append('-f')
-        tail_cmd_parts.append(log_path)
+            tail_flags.append('-f')
+        tail_flag_str = ' '.join(tail_flags)
 
-        # Add fallback to show helpful message if file doesn't exist
-        tail_cmd = ' '.join(tail_cmd_parts)
-        error_msg = (f'Autostop hook log file not found at {log_path}. '
-                     f'The autostop hook may not have been executed yet.')
-        cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
-               f'else echo "{error_msg}"; exit 1; fi')
+        if event is None:
+            # Auto-select: pick whichever per-event log exists. Prefer
+            # recency via -t sort (newest first). Fall back to legacy path.
+            cmd = (f'if ls {new_log_dir}/*.log >/dev/null 2>&1; then '
+                   f'  latest=$(ls -t {new_log_dir}/*.log | head -n1); '
+                   f'  echo "=== $(basename $latest .log) ==="; '
+                   f'  tail {tail_flag_str} "$latest"; '
+                   f'elif [ -f {legacy_log_path} ]; then '
+                   f'  tail {tail_flag_str} {legacy_log_path}; '
+                   f'else '
+                   f'  echo "No hook has fired yet on this cluster."; exit 1; '
+                   f'fi')
+        else:
+            log_path = f'{new_log_dir}/{event}.log'
+            if event == 'autostop':
+                # Legacy-path fallback for clusters predating the hooks
+                # framework.
+                cmd = (
+                    f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                    f'{log_path}; '
+                    f'elif [ -f {legacy_log_path} ]; then tail {tail_flag_str} '
+                    f'{legacy_log_path}; '
+                    f'else echo "No {event} hook log found."; exit 1; fi')
+            else:
+                cmd = (f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                       f'{log_path}; '
+                       f'else echo "No {event} hook log found."; exit 1; fi')
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -5577,7 +5611,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      down: bool = False,
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
-                     hook_timeout: Optional[int] = None) -> None:
+                     hook_timeout: Optional[int] = None,
+                     hooks: Optional[List[Dict[str, Any]]] = None) -> None:
         if not handle.provision_runtime_metadata.has_skylet:
             return
         # The core.autostop() function should have already checked that the
@@ -5636,13 +5671,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.hook = hook
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
-
+                # v7+: send the full hooks list inline on the same RPC.
+                if hooks:
+                    request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
-                    hook_timeout)
+                    hook_timeout, hooks)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,

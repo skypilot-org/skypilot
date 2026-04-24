@@ -55,6 +55,10 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 down=request.down,
                 hook=hook,
                 hook_timeout=hook_timeout)
+            # v7+: full hooks list carried inline on the same RPC.
+            if request.hooks:
+                autostop_lib.set_hooks(
+                    autostop_lib.hooks_from_protobuf(request.hooks))
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

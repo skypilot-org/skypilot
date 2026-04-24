@@ -243,6 +243,57 @@ def get_last_active_time() -> float:
     return -1
 
 
+_EVENT_TO_PROTO: Dict[str, int] = {}
+_PROTO_TO_EVENT: Dict[int, str] = {}
+
+
+def _ensure_event_maps() -> None:
+    """Lazy-populate proto enum conversion maps.
+
+    Avoids importing generated proto at module import time (the
+    adaptor pattern already lazy-imports the bindings).
+    """
+    if _EVENT_TO_PROTO:
+        return
+    _EVENT_TO_PROTO.update({
+        'autostop': autostopv1_pb2.AUTOSTOP,
+        'preemption': autostopv1_pb2.PREEMPTION,
+        'down': autostopv1_pb2.DOWN,
+    })
+    _PROTO_TO_EVENT.update({v: k for k, v in _EVENT_TO_PROTO.items()})
+
+
+def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
+    """Convert a list of hook dicts into protobuf ``Hook`` messages."""
+    _ensure_event_maps()
+    out = []
+    for h in hooks:
+        events = [_EVENT_TO_PROTO[e] for e in (h.get('events') or [])]
+        msg = autostopv1_pb2.Hook(run=h['run'])
+        # events field is typed as Iterable[Event] in the .pyi but accepts
+        # ints at runtime (Event is an int-backed enum).
+        msg.events.extend(events)  # type: ignore[arg-type]
+        msg.timeout = h.get('timeout',
+                            constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+        out.append(msg)
+    return out
+
+
+def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
+    """Convert protobuf ``Hook`` messages back into hook dicts."""
+    _ensure_event_maps()
+    out: List[Dict[str, Any]] = []
+    for h in proto_hooks:
+        events = [_PROTO_TO_EVENT[e] for e in h.events if e in _PROTO_TO_EVENT]
+        out.append({
+            'run': h.run,
+            'events': events,
+            'timeout': h.timeout
+                       or constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS,
+        })
+    return out
+
+
 def set_hooks(hooks: Optional[List[Dict[str, Any]]]) -> None:
     """Store the cluster's lifecycle-hooks list.
 

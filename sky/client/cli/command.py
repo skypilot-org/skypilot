@@ -2511,7 +2511,15 @@ def queue(clusters: List[str],
 @click.option('--autostop',
               is_flag=True,
               default=False,
-              help='Stream the autostop hook logs from the cluster.')
+              help='Deprecated alias for --hook autostop.')
+@click.option('--hook',
+              'hook_event',
+              type=click.Choice(['autostop', 'preemption', 'down']),
+              default=None,
+              is_flag=False,
+              flag_value='',
+              help='Stream a per-event lifecycle-hook log from the cluster. '
+              'Omit the event name to auto-select whichever log exists.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2551,6 +2559,7 @@ def logs(
     job_ids: Tuple[str, ...],
     provision: bool,
     autostop: bool,  # pylint: disable=redefined-outer-name
+    hook_event: Optional[str],
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2581,9 +2590,22 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
 
-    5. If ``--autostop`` is specified, stream the autostop hook logs from the
-    cluster. This shows the output of the autostop hook script.
+    5. If ``--hook [event]`` is specified (or the permanent ``--autostop``
+    alias for ``--hook autostop``), stream the per-event lifecycle-hook
+    log. Omit the event name to auto-select whichever log exists.
     """
+    # --autostop is a deprecated alias for --hook autostop.
+    if autostop:
+        if hook_event is not None and hook_event != '' and hook_event != (
+                'autostop'):
+            raise click.UsageError(
+                f'--autostop cannot be combined with --hook {hook_event!r}.')
+        sys.stderr.write('WARNING: `sky logs --autostop` is deprecated. '
+                         'Use `sky logs --hook autostop` instead.\n')
+        hook_event = 'autostop'
+    # Sentinel `''` means --hook was passed without an event argument.
+    hook_auto_select = (hook_event == '')
+
     if worker is not None:
         if not provision:
             raise click.UsageError(
@@ -2591,18 +2613,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
-    if provision and autostop:
+    if provision and (hook_event is not None):
         raise click.UsageError(
-            '--provision and --autostop cannot be used together.')
+            '--provision and --hook/--autostop cannot be used together.')
 
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
 
-    if autostop and (sync_down or status or job_ids or worker is not None):
+    if hook_event is not None and (sync_down or status or job_ids or
+                                   worker is not None):
         raise click.UsageError(
-            '--autostop cannot be combined with job log options '
+            '--hook/--autostop cannot be combined with job log options '
             '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
@@ -2627,11 +2650,22 @@ def logs(
                                     tail=tail or 0))
 
     if autostop:
-        # Same as provision — autostop hook output is small.
+        # Deprecated alias for --hook autostop.
+        sys.stderr.write(
+            'WARNING: --autostop is deprecated. '
+            'Use --hook autostop instead.\n')
         sys.exit(
-            sdk.tail_autostop_logs(cluster_name=cluster,
-                                   follow=follow,
-                                   tail=tail or 0))
+            sdk.tail_hook_logs(cluster_name=cluster,
+                               event='autostop',
+                               follow=follow,
+                               tail=tail or 0))
+
+    if hook_event is not None:
+        sys.exit(
+            sdk.tail_hook_logs(cluster_name=cluster,
+                               event=None if hook_auto_select else hook_event,
+                               follow=follow,
+                               tail=tail or 0))
 
     if sync_down:
         with rich_utils.client_status(
