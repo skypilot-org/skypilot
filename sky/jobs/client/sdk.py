@@ -448,6 +448,10 @@ def tail_logs(name: Optional[str] = None,
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    # utils.stream_logs asserts tail > 0, so normalize 0 and negatives to None
+    # (the CLI does the same). Protects SDK callers from a remote assertion.
+    if tail is not None and tail <= 0:
+        tail = None
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -561,6 +565,11 @@ def download_logs(
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
 
+    # utils.stream_logs asserts tail > 0, so normalize 0 and negatives to None
+    # here. The CLI already does this, but callers using the SDK directly may
+    # pass 0 meaning "all lines" (matching the CLI default).
+    if tail is not None and tail <= 0:
+        tail = None
     body = payloads.JobsDownloadLogsBody(
         name=name,
         job_id=job_id,
