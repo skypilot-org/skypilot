@@ -815,8 +815,6 @@ class JobsDownloadLogsBody(RequestBody):
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY
-    # Number of lines to tail from the end of the log. None means all lines.
-    tail: Optional[int] = None
 
 
 class JobsPoolApplyBody(RequestBody):

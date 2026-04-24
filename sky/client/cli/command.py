@@ -5996,6 +5996,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """
     if tail < 0:
         raise click.UsageError('--tail must be a non-negative integer.')
+    if sync_down and tail > 0:
+        raise click.UsageError(
+            '--tail is not supported with --sync-down. Use '
+            '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
+            'or redirect stdout to save it to a file.')
     # tail=0 means "all lines" at the CLI layer; the SDK/API represent
     # "no limit" as None, so normalize here.
     tail_lines: Optional[int] = tail if tail > 0 else None
@@ -6007,8 +6012,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                     name=name,
                     job_id=job_id,
                     controller=controller,
-                    refresh=refresh,
-                    tail=tail_lines)
+                    refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
