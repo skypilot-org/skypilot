@@ -394,8 +394,8 @@ To see a typical workflow of working with clusters, you can refer to :ref:`quick
 
 .. _dev-resize:
 
-Resize (advanced)
------------------
+Advanced: Resize
+----------------
 
 Existing clusters can be scaled up or down to a different number of
 nodes without tearing them down. Pass ``--resize`` along with the YAML
