@@ -177,15 +177,29 @@ def set_autostop(idle_minutes: int,
         backend: Backend name.
         wait_for: Condition for resetting idleness timer.
         down: Whether to tear down (autodown) instead of stop.
-        hook: Hook script to execute before autostop.
-        hook_timeout: Timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+        hook: DEPRECATED single-hook string (pre-v7 wire). New callers
+            use set_hooks(...) with the full list. Kept so pre-v7
+            clients talking to a v7+ skylet still get their autostop
+            hook routed into the generalized hooks list.
+        hook_timeout: DEPRECATED timeout for the single hook.
     """
     boot_time = psutil.boot_time()
 
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
                                      down, hook, hook_timeout)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+
+    # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
+    # translate it into the generalized hooks list so hook_executor
+    # sees a single source of truth.
+    if hook:
+        set_hooks([{
+            'run': hook,
+            'events': ['autostop'],
+            'timeout': (hook_timeout or
+                        constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS),
+        }])
+
     logger.debug(
         f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
         f'wait_for {wait_for.value}, hook {"present" if hook else "none"}, '
@@ -379,9 +393,27 @@ class AutostopCodeGen:
                      wait_for: Optional[AutostopWaitFor],
                      down: bool = False,
                      hook: Optional[str] = None,
-                     hook_timeout: Optional[int] = None) -> str:
+                     hook_timeout: Optional[int] = None,
+                     hooks: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Render skylet-side autostop + hooks setup as a Python one-liner.
+
+        Dual-emits for mixed-version environments:
+          - skylet < 4 / 5: legacy signatures (no hook / waitless)
+          - skylet 5–6: single-hook form via `hook` / `hook_timeout`
+          - skylet ≥ 7: set_autostop + set_hooks(full list)
+        """
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
+        # Pre-v7 flattening: take the first autostop-matching hook.
+        flat_hook = hook
+        flat_timeout = hook_timeout
+        if flat_hook is None and hooks:
+            for entry in hooks:
+                if 'autostop' in (entry.get('events') or []):
+                    flat_hook = entry['run']
+                    flat_timeout = entry.get('timeout')
+                    break
+        hooks_payload = hooks or []
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -390,10 +422,14 @@ class AutostopCodeGen:
             '\nelif skylet_lib_version < 5: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down})'
+            '\nelif skylet_lib_version < 7: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down}, hook={flat_hook!r}, '
+            f'hook_timeout={flat_timeout})'
             '\nelse: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
-            f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
-            f'hook_timeout={hook_timeout})',
+            f'autostop_lib.{wait_for}, {down})'
+            f'\n autostop_lib.set_hooks({hooks_payload!r})',
         ]
         return cls._build(code)
 

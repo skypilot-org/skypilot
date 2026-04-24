@@ -5890,6 +5890,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
 
+            # Re-launch with changed resources.hooks: propagate the new list
+            # onto to_provision so the next SetAutostop RPC carries the
+            # up-to-date scripts / timeouts.
+            if one_task_resource.hooks != to_provision.hooks:
+                to_provision = to_provision.copy(hooks=one_task_resource.hooks)
+
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:
                 assert (resource.cluster_config_overrides ==
