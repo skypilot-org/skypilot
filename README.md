@@ -83,7 +83,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 Install with uv ([also supported](https://docs.skypilot.co/en/latest/getting-started/installation.html): pip, nightly, from source)
 ```bash
 # Choose your clouds:
-uv tool install --with pip "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
+uv pip install "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
 ```
 
 To use SkyPilot directly with your agent (Claude Code, Codex, etc.), install the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). Tell your agent:
@@ -114,7 +114,7 @@ SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and c
 
 ## Benefits of SkyPilot on Kubernetes
 
-SkyPilot makes Kubernetes more AI-native.
+SkyPilot makes Kubernetes AI-native.
 
 It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
 

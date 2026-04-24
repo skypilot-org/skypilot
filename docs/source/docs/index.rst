@@ -232,7 +232,7 @@ SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and c
 Benefits of SkyPilot on Kubernetes
 -----------------------------------
 
-SkyPilot makes Kubernetes more AI-native.
+SkyPilot makes Kubernetes AI-native.
 
 It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
 
