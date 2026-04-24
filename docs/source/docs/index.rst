@@ -210,8 +210,8 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
-Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect, Shadeform, Verda Cloud, VastData, Crusoe.
 
 .. raw:: html
 
@@ -264,7 +264,7 @@ Partners and integrations: `Community Spotlights <https://blog.skypilot.co/commu
 Follow updates:
 
 * `Slack <http://slack.skypilot.co>`_
-* `X / Twitter <https://twitter.com/skypilot_org>`_
+* `X <https://twitter.com/skypilot_org>`_
 * `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
 * `SkyPilot Blog <https://blog.skypilot.co/>`_ (`Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_)
 
