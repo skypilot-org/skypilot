@@ -38,6 +38,7 @@ from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
+from sky.adaptors import spheron as spheron_adaptor
 from sky.adaptors import vast
 from sky.adaptors import verda
 from sky.adaptors.verda import VerdaClient
@@ -447,6 +448,42 @@ def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         raise Exception('Failed to add SSH key to Shadeform')
 
     # Configure SSH info in the config
+    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
+
+    return configure_ssh_info(config)
+
+
+def setup_spheron_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Spheron.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Spheron account.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    ssh_key_id = None
+
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    try:
+        ssh_key_id = spheron_adaptor.add_ssh_key_to_spheron(public_key)
+
+    except ImportError as e:
+        raise exceptions.CloudUserIdentityError(
+            'Failed to add Spheron SSH key due to missing dependencies: '
+            f'{e}. Please install required packages.') from e
+
+    except Exception as e:
+        raise exceptions.CloudUserIdentityError(
+            'Failed to set up SSH authentication for Spheron. '
+            f'Please ensure your Spheron credentials are configured: {e}'
+        ) from e
+
+    if ssh_key_id is None:
+        raise exceptions.CloudUserIdentityError(
+            'Failed to retrieve SSH key ID from Spheron. '
+            'The key may exist in the account but has no id field.')
+
     config['auth']['ssh_public_key'] = public_key_path
     config['auth']['ssh_key_id'] = ssh_key_id
 
