@@ -19,6 +19,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import hook_executor
+from sky.skylet import preemption_poller
 from sky.skylet import services
 
 # Use the explicit logger name so that the logger is under the
@@ -89,6 +90,51 @@ def run_event_loop():
             event.run()
 
 
+def _detect_cloud_for_preemption_poller():
+    """Best-effort probe of the cluster's cloud identity.
+
+    Returns one of ``'aws'``, ``'gcp'``, ``'azure'``, or ``None`` when
+    the node isn't on a cloud VM (e.g., Kubernetes, Slurm, bare-metal).
+    Probes are cheap reads of the local metadata endpoints with tight
+    timeouts — a K8s pod with no metadata service gets ``None`` in ~1s.
+    """
+    import urllib.error  # pylint: disable=import-outside-toplevel
+    import urllib.request  # pylint: disable=import-outside-toplevel
+
+    # AWS IMDSv2: PUT /latest/api/token returns a token when on EC2.
+    try:
+        req = urllib.request.Request(
+            'http://169.254.169.254/latest/api/token',
+            method='PUT',
+            headers={'X-aws-ec2-metadata-token-ttl-seconds': '60'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200 and resp.read():
+                return 'aws'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    # GCP metadata server returns 200 with Metadata-Flavor: Google.
+    try:
+        req = urllib.request.Request(
+            'http://metadata.google.internal/computeMetadata/v1/instance/id',
+            headers={'Metadata-Flavor': 'Google'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200:
+                return 'gcp'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    # Azure IMDS: GET /metadata/instance with Metadata: true header.
+    try:
+        req = urllib.request.Request(
+            'http://169.254.169.254/metadata/instance?api-version=2021-02-01',
+            headers={'Metadata': 'true'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200:
+                return 'azure'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return None
+
+
 def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
     """Run preemption hooks on SIGTERM before the pod is SIGKILLed.
 
@@ -137,6 +183,17 @@ def main():
     hook_executor.clear_teardown_claim()
     if _should_install_preemption_sigterm_handler():
         signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Start per-cloud preemption poller. Skipped on Kubernetes and
+    # anywhere without a cloud metadata endpoint (the SIGTERM handler
+    # already covers K8s preemption via kubelet signals).
+    cloud = _detect_cloud_for_preemption_poller()
+    if cloud is not None:
+        logger.info(f'Starting VM preemption poller for cloud={cloud}')
+        preemption_poller.start(cloud)
+    else:
+        logger.info('No cloud metadata endpoint detected; '
+                    'VM preemption poller not started.')
 
     grpc_server = start_grpc_server(port=args.port)
     try:
