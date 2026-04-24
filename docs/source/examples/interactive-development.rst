@@ -409,8 +409,7 @@ that defines the cluster so ``setup`` runs on the new workers:
   # Scale down: re-provision workers at the new count.
   sky launch -c dev --resize --num-nodes 2 dev.yaml
 
-The head node is always preserved during resize, so the job queue,
-logs, and any state on the head node survive.
+The job queue and logs are preserved across a resize.
 
 .. note::
 
