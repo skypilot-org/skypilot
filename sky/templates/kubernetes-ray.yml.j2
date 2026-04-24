@@ -388,6 +388,9 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
+        terminationGracePeriodSeconds: {{ preemption_hook_timeout }}
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000

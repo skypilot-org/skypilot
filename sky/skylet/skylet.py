@@ -3,6 +3,8 @@
 import argparse
 import concurrent.futures
 import os
+import signal
+import sys
 import time
 
 import grpc
@@ -13,8 +15,10 @@ from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2_grpc
 from sky.schemas.generated import managed_jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2_grpc
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import events
+from sky.skylet import hook_executor
 from sky.skylet import services
 
 # Use the explicit logger name so that the logger is under the
@@ -85,6 +89,25 @@ def run_event_loop():
             event.run()
 
 
+def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
+    """Run preemption hooks on SIGTERM before the pod is SIGKILLed.
+
+    On Kubernetes the kubelet sends SIGTERM for preemption / eviction
+    / drain. We claim the preemption teardown slot via the file-lock
+    CAS so a concurrent `sky down` subprocess sees the claim and
+    skips its own hooks, then run any matching preemption hooks, then
+    exit cleanly within the pod's terminationGracePeriodSeconds.
+    """
+    logger.info('Skylet received SIGTERM; running preemption hooks.')
+    if hook_executor.try_claim_teardown(hook_executor.PREEMPTION):
+        try:
+            hook_executor.run(hook_executor.PREEMPTION,
+                              autostop_lib.get_hooks())
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Preemption hook execution failed: {e}')
+    sys.exit(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Start skylet daemon')
     parser.add_argument('--port',
@@ -93,6 +116,11 @@ def main():
                         help=f'gRPC port to listen on (default: '
                         f'{constants.SKYLET_GRPC_PORT})')
     args = parser.parse_args()
+
+    # Clear any stale teardown-claim marker from a prior crashed skylet so
+    # this fresh boot does not see a blocked slot.
+    hook_executor.clear_teardown_claim()
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     grpc_server = start_grpc_server(port=args.port)
     try:

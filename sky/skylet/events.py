@@ -19,6 +19,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import hook_executor
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -252,20 +253,23 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _execute_hook_if_present(self, autostop_config) -> None:
-        """Execute autostop hook if present in the config."""
-        hook = autostop_config.hook
-        hook_timeout = autostop_config.hook_timeout
-        if hook:
-            logger.info(f'Executing autostop hook before stopping cluster '
-                        f'(timeout: {hook_timeout}s)...')
-            hook_success = autostop_lib.execute_autostop_hook(
-                hook, hook_timeout)
-            if not hook_success:
-                logger.warning(
-                    'Autostop hook failed, but continuing with cluster stop. '
-                    'Check logs for details.')
-            else:
-                logger.info('Autostop hook completed successfully.')
+        """Run every stored autostop hook via hook_executor under CAS.
+
+        The CAS first-in-wins flag ensures we don't double-fire if
+        another teardown trigger (SIGTERM from preemption, etc.) has
+        already claimed this teardown.
+        """
+        del autostop_config  # kept for backward-compat of the signature
+        if not hook_executor.try_claim_teardown(hook_executor.AUTOSTOP):
+            logger.info('Teardown already claimed by '
+                        f'{hook_executor.current_teardown_event()!r}; skipping '
+                        'autostop hooks.')
+            return
+        hooks = autostop_lib.get_hooks()
+        if hooks:
+            logger.info(f'Executing {len(hooks)} stored lifecycle hook(s) for '
+                        'autostop.')
+            hook_executor.run(hook_executor.AUTOSTOP, hooks)
 
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==

@@ -827,6 +827,20 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace': namespace,
         }
 
+        # Pod-level terminationGracePeriodSeconds sized to the longest
+        # preemption hook so kubelet doesn't SIGKILL the skylet mid-hook.
+        # Autostop and `sky down` paths control their own timing so they
+        # don't need a grace-period override — hook-free pods stay on
+        # the K8s default (30s).
+        preemption_timeouts = [
+            entry.get('timeout',
+                      constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+            for entry in (resources.hooks or [])
+            if 'preemption' in (entry.get('events') or [])
+        ]
+        if preemption_timeouts:
+            deploy_vars['preemption_hook_timeout'] = max(preemption_timeouts)
+
         # Add ephemeral storage to deploy vars if specified.
         ephemeral_storage = resources.ephemeral_storage
         if ephemeral_storage is not None:
