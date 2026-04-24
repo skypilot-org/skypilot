@@ -162,17 +162,18 @@ def test_hook_k8s_preemption_sigterm():
             'timeout': 60,
         }],
     })
-    k8s_delete = (
-        f'kubectl delete pod -l skypilot-cluster-name={name} --context '
-        f'kind-skypilot --wait=false')
+    # The `skypilot-cluster-name` label includes the user-hash suffix,
+    # so grep the name-prefixed pod via `kubectl get pods -o name`
+    # instead of using a label selector.
+    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+                 f'2>/dev/null | grep {name} | head -n1')
+    k8s_delete = (f'pod=$({pod_query}) && '
+                  f'kubectl delete --context kind-skypilot --wait=false "$pod"')
     # During the grace period, `kubectl exec` into the terminating pod
     # and read the preemption log the skylet handler wrote.
-    read_log = (
-        f'sleep 3 && '
-        f'pod=$(kubectl get pod -l skypilot-cluster-name={name} --context '
-        f'kind-skypilot -o name | head -n1) && '
-        f'kubectl exec --context kind-skypilot "$pod" -- '
-        f'cat /home/sky/.sky/hooks/preemption.log')
+    read_log = (f'sleep 3 && pod=$({pod_query}) && '
+                f'kubectl exec --context kind-skypilot "$pod" -- '
+                f'cat /home/sky/.sky/hooks/preemption.log')
     test = smoke_tests_utils.Test(
         'test_hook_k8s_preemption_sigterm',
         [
