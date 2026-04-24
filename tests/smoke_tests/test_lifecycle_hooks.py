@@ -419,9 +419,8 @@ def test_hook_schema_rejects_unknown_event():
     test = smoke_tests_utils.Test(
         'test_hook_schema_rejects_unknown_event',
         [
-            f'! sky launch --dryrun {yaml_path} 2>&1 | '
-            f'tee /tmp/hook-err.log && '
-            f'grep -iE "hooks.*events|reboot" /tmp/hook-err.log',
+            f'out=$(sky launch --dryrun {yaml_path} 2>&1 || true); '
+            f'echo "$out" | grep -iE "hooks.*events|reboot"',
         ],
         teardown=None,
         timeout=120,
@@ -434,20 +433,24 @@ def test_hook_schema_rejects_unknown_event():
 # ---------------------------------------------------------------------------
 @pytest.mark.no_dependency
 def test_hook_controller_rejected():
-    cfg = textwrap.dedent("""\
-        jobs:
-          controller:
-            resources:
-              hooks:
-                - run: "echo on-controller"
-                  events: [down]
-        """)
+    cfg_path = tempfile.NamedTemporaryFile(mode='w',
+                                           suffix='.yaml',
+                                           delete=False).name
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                jobs:
+                  controller:
+                    resources:
+                      hooks:
+                        - run: "echo on-controller"
+                          events: [down]
+                """))
     test = smoke_tests_utils.Test(
         'test_hook_controller_rejected',
         [
-            f'cfg=$(mktemp) && cat > "$cfg" <<EOF\n{cfg}EOF\n'
-            'out=$(SKYPILOT_USER_CONFIG="$cfg" sky check 2>&1) || true; '
-            'echo "$out" | grep -iE "hooks|controller"',
+            f'out=$(SKYPILOT_CONFIG={cfg_path} sky check 2>&1 || true); '
+            f'echo "$out" | grep -iE "hooks|controller"',
         ],
         teardown=None,
         timeout=120,
@@ -551,10 +554,8 @@ def test_cli_hook_rejects_unknown_event():
     test = smoke_tests_utils.Test(
         'test_cli_hook_rejects_unknown_event',
         [
-            '! sky logs --hook reboot fake-cluster 2>&1 | '
-            'tee /tmp/hook-cli-err.log && '
-            'grep -iE "autostop|preemption|down|invalid" '
-            '/tmp/hook-cli-err.log',
+            'out=$(sky logs --hook reboot fake-cluster 2>&1 || true); '
+            'echo "$out" | grep -iE "autostop|preemption|down|invalid"',
         ],
         teardown=None,
         timeout=60,
