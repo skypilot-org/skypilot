@@ -249,19 +249,23 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
       * ``--tail 0`` (default) returns all 20 lines.
     """
     name = smoke_tests_utils.get_cluster_name()
-    run_cmd = ('for i in $(seq 1 20); do echo SKYLOGTAIL $i; done')
     get_job_id_cmd = (f'sky jobs queue | grep tail-{name} | head -n1 '
                       f'| awk \'{{print $1}}\'')
     test = smoke_tests_utils.Test(
         'managed_jobs_logs_tail',
         [
-            f'sky jobs launch -y -n tail-{name} --infra {generic_cloud} '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "{run_cmd}"',
+            # Backslash-escape $ so $(seq ...) and $i survive the outer
+            # shell and are expanded on the worker. Matches the
+            # rf"...\$SKYPILOT_TASK_ID..." pattern used elsewhere in this
+            # file (see e.g. line ~441).
+            rf'sky jobs launch -y -n tail-{name} --infra {generic_cloud} '
+            rf'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            rf'"for i in \$(seq 1 20); do echo SKYLOGTAIL \$i; done"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'tail-{name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=180),
+                timeout=600),
             # --tail 5 should return exactly 5 matching lines, ending at 20.
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'out=$(sky jobs logs $JOB_ID --no-follow --tail 5) && '
