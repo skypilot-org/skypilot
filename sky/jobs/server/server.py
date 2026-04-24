@@ -21,6 +21,14 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
+def _controller_refresh_need_long(refresh: bool) -> bool:
+    # refresh=True upgrades the request to LONG because it may restart the
+    # controller. In consolidation mode the controller is the API server
+    # itself and is_controller_accessible short-circuits, so refresh is a
+    # no-op — keep SHORT to avoid unnecessary LONG scheduling.
+    return refresh and not managed_jobs_utils.is_consolidation_mode()
+
+
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
@@ -52,12 +60,7 @@ async def launch(request: fastapi.Request,
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
-    # refresh=True upgrades the request to LONG because it may restart the
-    # controller. In consolidation mode the controller is the API server
-    # itself and is_controller_accessible short-circuits, so refresh is a
-    # no-op — keep SHORT to avoid unnecessary LONG scheduling.
-    needs_long = (jobs_queue_body.refresh and
-                  not managed_jobs_utils.is_consolidation_mode())
+    needs_long = _controller_refresh_need_long(jobs_queue_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_QUEUE,
@@ -73,12 +76,7 @@ async def queue(request: fastapi.Request,
 @router.post('/queue/v2')
 async def queue_v2(request: fastapi.Request,
                    jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
-    # refresh=True upgrades the request to LONG because it may restart the
-    # controller. In consolidation mode the controller is the API server
-    # itself and is_controller_accessible short-circuits, so refresh is a
-    # no-op — keep SHORT to avoid unnecessary LONG scheduling.
-    needs_long = (jobs_queue_body_v2.refresh and
-                  not managed_jobs_utils.is_consolidation_mode())
+    needs_long = _controller_refresh_need_long(jobs_queue_body_v2.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_QUEUE_V2,
@@ -127,11 +125,7 @@ async def logs(
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
     schedule_type = api_requests.ScheduleType.SHORT
-    # In consolidation mode, the jobs controller is the API server itself,
-    # so refresh is effectively a no-op (is_controller_accessible short-
-    # circuits). Keep the short path to avoid unnecessary LONG scheduling.
-    if jobs_logs_body.refresh and not managed_jobs_utils.is_consolidation_mode(
-    ):
+    if _controller_refresh_need_long(jobs_logs_body.refresh):
         # When refresh is specified, the job controller might be restarted,
         # which takes longer time to finish. We schedule it to long executor.
         schedule_type = api_requests.ScheduleType.LONG
@@ -178,12 +172,7 @@ async def download_logs(
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
     jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
-    # refresh=True upgrades the request to LONG because it may restart the
-    # controller. In consolidation mode the controller is the API server
-    # itself and is_controller_accessible short-circuits, so refresh is a
-    # no-op — keep SHORT to avoid unnecessary LONG scheduling.
-    needs_long = (jobs_download_logs_body.refresh and
-                  not managed_jobs_utils.is_consolidation_mode())
+    needs_long = _controller_refresh_need_long(jobs_download_logs_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_DOWNLOAD_LOGS,
