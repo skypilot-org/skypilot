@@ -564,6 +564,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _file_mounts_blob_id: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -739,6 +740,7 @@ def launch(
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
+            _file_mounts_blob_id,
         )
 
 
@@ -762,6 +764,7 @@ def _launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _file_mounts_blob_id: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -860,7 +863,14 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
+    file_mounts_blob_id: Optional[str] = None
+    if _file_mounts_blob_id is not None:
+        # Caller (e.g. job controller) has a blob for this dag's file mounts,
+        # skip the re-upload.
+        file_mounts_blob_id = _file_mounts_blob_id
+    else:
+        dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+            dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 

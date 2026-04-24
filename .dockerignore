@@ -5,6 +5,11 @@ docs
 examples
 llm
 tests
+# Re-include the files referenced by tests/smoke_tests/docker/Dockerfile_test
+# (entrypoint.sh and stop_sky_resource.sh); without this exemption, the
+# top-level `tests` ignore above makes Dockerfile_test unbuildable because
+# .dockerignore applies to every docker build invoked from the repo root.
+!tests/smoke_tests/docker
 .github
 sky/dashboard/node_modules
 sky/dashboard/.next

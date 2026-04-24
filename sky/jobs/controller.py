@@ -436,8 +436,17 @@ class JobController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id,
-            self._pool, self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            self._pool,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -1131,8 +1140,17 @@ class JobController:
             task_name, self._job_id)
 
         executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id, None,
-            self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            None,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -1870,32 +1888,23 @@ class ControllerManager:
                 # we continue to try cleaning up whatever else we can.
 
             # Clean up any files mounted from the local disk, such as two-hop
-            # file mounts.
-            for file_mount in (task.file_mounts or {}).values():
-                try:
-                    # Skip if we are using cloud storage as the source.
-                    if data_utils.is_cloud_store_url(file_mount):
-                        continue
-                    # Otherwise, we always cleanup local files since they are
-                    # no longer needed after task cleanup, the file can be:
-                    # - Two hop file mounts rsynced from the API server: refer
-                    #   translate_local_file_mounts_to_two_hop for more details.
-                    # - API server file mount cache in consolidation mode:
-                    #   actually there is a dummy two hop that rsync the files
-                    #   from ~/.sky/clients to ~/.sky/tmp/controller/{ID}
-                    #   on server, which isolates the file mounts between
-                    #   tasks. Here we assume the source is always isolated
-                    #   even if the dummy two hop is removed.
-                    # TODO(aylei): remove dummy two hop after we isolate the
-                    # file mount cache for tasks.
-                    path = os.path.expanduser(file_mount)
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Failed to clean up file mount {file_mount}: {e}')
+            # file mounts for non-consolidation mode.
+            # For consolidation mode, the file_mounts are shared across
+            # workloads and the lifecycle will be managed by API server.
+            if not managed_job_utils.is_consolidation_mode():
+                for file_mount in (task.file_mounts or {}).values():
+                    try:
+                        # Skip if we are using cloud storage as the source.
+                        if data_utils.is_cloud_store_url(file_mount):
+                            continue
+                        path = os.path.expanduser(file_mount)
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.warning(
+                            f'Failed to clean up file mount {file_mount}: {e}')
 
             if error is not None:
                 raise error

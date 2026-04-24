@@ -164,6 +164,11 @@ job_info_table = sqlalchemy.Table(
                       server_default=sqlalchemy.sql.expression.false()),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # In consolidation mode, managed jobs shares the filemount blob managed
+    # by API server. This id is a reference to the blob.
+    sqlalchemy.Column('file_mounts_blob_id',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 # Separate table for API access token IDs associated with managed jobs.
@@ -707,14 +712,16 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
-def set_job_info_without_job_id(name: str,
-                                workspace: str,
-                                entrypoint: str,
-                                pool: Optional[str],
-                                pool_hash: Optional[str],
-                                user_hash: Optional[str],
-                                execution: Optional[str] = None,
-                                is_batch: bool = False) -> int:
+def set_job_info_without_job_id(
+        name: str,
+        workspace: str,
+        entrypoint: str,
+        pool: Optional[str],
+        pool_hash: Optional[str],
+        user_hash: Optional[str],
+        execution: Optional[str] = None,
+        is_batch: bool = False,
+        file_mounts_blob_id: Optional[str] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -735,6 +742,7 @@ def set_job_info_without_job_id(name: str,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
+            file_mounts_blob_id=file_mounts_blob_id,
         )
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -1329,6 +1337,35 @@ def get_managed_jobs_total() -> int:
             sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
                              ).select_from(spot_table)).fetchone()
         return result[0] if result else 0
+
+
+def get_active_file_mounts_blob_ids() -> Set[str]:
+    """Return blob ids referenced by jobs still in a non-terminal state.
+
+    Used by the API server's blob GC so that a blob is not reclaimed while
+    any managed job (including queued / recovering / winding-down jobs) still
+    needs its contents.
+    """
+    engine = _db_manager.get_engine()
+    terminal_status_values = [
+        s.value for s in ManagedJobStatus.terminal_statuses()
+    ]
+    non_terminal_job_ids_subquery = (sqlalchemy.select(
+        spot_table.c.spot_job_id).where(
+            sqlalchemy.or_(
+                spot_table.c.status.is_(None),
+                sqlalchemy.not_(
+                    spot_table.c.status.in_(terminal_status_values)),
+            )).distinct())
+    query = sqlalchemy.select(
+        job_info_table.c.file_mounts_blob_id.distinct()).where(
+            sqlalchemy.and_(
+                job_info_table.c.file_mounts_blob_id.is_not(None),
+                job_info_table.c.spot_job_id.in_(non_terminal_job_ids_subquery),
+            ))
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return {row[0] for row in rows if row[0] is not None}
 
 
 def get_managed_jobs_highest_priority() -> int:
@@ -2394,6 +2431,18 @@ def get_workspace(job_id: int) -> str:
         if job_workspace is None:
             return constants.SKYPILOT_DEFAULT_WORKSPACE
         return job_workspace
+
+
+def get_file_mounts_blob_id(job_id: int) -> Optional[str]:
+    """Return the file_mounts_blob_id persisted for a job, if any."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(job_info_table.c.file_mounts_blob_id).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            return None
+        return row[0]
 
 
 async def get_latest_task_id_status_async(

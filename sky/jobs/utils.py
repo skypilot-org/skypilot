@@ -1137,6 +1137,56 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def cancel_managed_jobs(
+    *,
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    pool: Optional[str] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+    current_workspace: Optional[str] = None,
+    user_hash: Optional[str] = None,
+) -> str:
+    """Dispatch to the correct cancel variant based on selector args.
+
+    One of ``job_ids``/``name``/``pool``/``all``/``all_users`` should be set.
+    Precedence:
+
+      - ``all_users`` or ``all`` or ``job_ids`` -> ``cancel_jobs_by_id``
+      - ``name`` -> ``cancel_job_by_name``
+      - ``pool`` -> ``cancel_jobs_by_pool``
+
+    Single source of truth for the dispatch precedence. Direct callers
+    (including plugins registering a custom ``ManagedJobRunner``) invoke
+    this function; the codegen path
+    (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
+    name on controllers running ``MANAGED_JOBS_VERSION >= 19``.
+    """
+    if all_users or all or job_ids:
+        return cancel_jobs_by_id(
+            job_ids,
+            all_users=all_users,
+            current_workspace=current_workspace,
+            user_hash=user_hash,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    if name is not None:
+        return cancel_job_by_name(
+            name,
+            current_workspace=current_workspace,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    assert pool is not None, (job_ids, name, pool, all)
+    return cancel_jobs_by_pool(
+        pool,
+        current_workspace=current_workspace,
+    )
+
+
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -2837,70 +2887,104 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls,
-                          job_ids: Optional[List[int]],
-                          all_users: bool = False,
-                          graceful: bool = False,
-                          graceful_timeout: Optional[int] = None) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
-                            current_workspace={active_workspace!r})
-        else:
-            msg = utils.cancel_jobs_by_id(
-                {job_ids},
-                all_users={all_users},
-                current_workspace={active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
+    def cancel_managed_jobs(
+        cls,
+        *,
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        pool: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+    ) -> str:
+        """Unified cancel codegen.
 
-    @classmethod
-    def cancel_job_by_name(cls,
-                           job_name: str,
-                           graceful: bool = False,
-                           graceful_timeout: Optional[int] = None) -> str:
+        On controllers running ``MANAGED_JOBS_VERSION >= 19``, emits a
+        single call to ``utils.cancel_managed_jobs`` — the one dispatch
+        function that direct callers also use. On older controllers
+        (``< 19``) that don't have the dispatcher, falls back to a
+        targeted call to the underlying ``utils.cancel_jobs_by_id`` /
+        ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
+        client-side based on the selector args.
+        """
         active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
-            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        else:
-            msg = utils.cancel_job_by_name(
-                {job_name!r},
-                {active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
 
-    @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
-        """)
+        # ``user_hash`` is intentionally omitted below — the controller runs
+        # the generated code under ``_build()``, which exports
+        # ``USER_ID_ENV_VAR`` to the caller's hash. The dispatcher defaults
+        # ``user_hash=None``, and ``state.get_nonterminal_job_ids_by_name``
+        # falls back to ``common_utils.get_user_hash()`` (reading the env
+        # var) when ``user_hash`` is None — matching the old per-variant
+        # codegens, which also never passed it.
+
+        # Client-side pick of which legacy variant to emit for controllers
+        # running ``managed_job_version < 19``. Each variant preserves the
+        # per-version gating that its dedicated codegen method used before
+        # we consolidated everything into ``cancel_managed_jobs``: older
+        # controllers predate args like ``current_workspace``/``graceful``
+        # and must not receive them. Lines are at column 0 here; the final
+        # assembly indents them by 4 spaces so they nest under
+        # ``if managed_job_version < 19:`` in the generated code.
+        if all_users or all or job_ids:
+            legacy_call_lines = [
+                'if managed_job_version < 2:',
+                # #4787: all_users not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r})',
+                'elif managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        elif name is not None:
+            legacy_call_lines = [
+                'if managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_job_by_name({name!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            # cancel_jobs_by_pool had no historical version gating.
+            legacy_call_lines = [
+                f'msg = utils.cancel_jobs_by_pool({pool!r}, '
+                f'{active_workspace!r})',
+            ]
+
+        legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        code = (f'if managed_job_version < 19:\n'
+                f'{legacy_block}\n'
+                f'else:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'        name={name!r},\n'
+                f'        job_ids={job_ids!r},\n'
+                f'        pool={pool!r},\n'
+                f'        all={all!r},\n'
+                f'        all_users={all_users!r},\n'
+                f'        graceful={graceful!r},\n'
+                f'        graceful_timeout={graceful_timeout!r},\n'
+                f'        current_workspace={active_workspace!r},\n'
+                f'    )\n'
+                f'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod
