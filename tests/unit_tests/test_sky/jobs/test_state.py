@@ -346,3 +346,70 @@ def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
                     state.job_info_table.c.spot_job_id == job_id)).fetchone()
         assert row is not None
         assert row[0] == now
+
+
+def test_get_active_file_mounts_blob_ids(_mock_managed_jobs_db_conn):
+    engine = _mock_managed_jobs_db_conn
+
+    # Non-terminal job holding a blob -> should be returned.
+    active_job = state.set_job_info_without_job_id(
+        name='active',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-active',
+    )
+    _insert_task(engine, active_job, 0, status=ManagedJobStatus.RUNNING)
+
+    # Terminal job -> should NOT be returned even though it has a blob.
+    terminal_job = state.set_job_info_without_job_id(
+        name='done',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-done',
+    )
+    _insert_task(engine, terminal_job, 0, status=ManagedJobStatus.SUCCEEDED)
+
+    # Non-terminal job without a blob -> should NOT be returned.
+    no_blob_job = state.set_job_info_without_job_id(
+        name='no-blob',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+    )
+    _insert_task(engine, no_blob_job, 0, status=ManagedJobStatus.PENDING)
+
+    # Queued (non-terminal) job -> should be returned.
+    queued_job = state.set_job_info_without_job_id(
+        name='queued',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-queued',
+    )
+    _insert_task(engine, queued_job, 0, status=ManagedJobStatus.PENDING)
+
+    # Recovering job -> should be returned (long-tail case that motivated
+    # this ref tracking).
+    recovering_job = state.set_job_info_without_job_id(
+        name='recovering',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-recovering',
+    )
+    _insert_task(engine, recovering_job, 0, status=ManagedJobStatus.RECOVERING)
+
+    blob_ids = state.get_active_file_mounts_blob_ids()
+    assert blob_ids == {'blob-active', 'blob-queued', 'blob-recovering'}

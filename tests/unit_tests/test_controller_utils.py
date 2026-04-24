@@ -949,3 +949,43 @@ class TestIsJobsConsolidationMode:
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
             controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
             extra.assert_not_called()
+
+
+class TestTranslateLocalFileMountsForConsolidation:
+    """Consolidation-mode helper must not rewrite file_mount paths.
+
+    The file_mount values already point at the blob extraction directory on
+    the API server. Unlike the two-hop helper, no intermediate staging path
+    should be inserted.
+    """
+
+    def _make_task(self, file_mounts, workdir=None):
+        task = mock.Mock()
+        task.file_mounts = dict(file_mounts)
+        task.workdir = workdir
+        task.storage_mounts = None
+
+        def _set_file_mounts(new_mounts):
+            task.file_mounts = new_mounts
+
+        task.set_file_mounts.side_effect = _set_file_mounts
+        return task
+
+    def test_file_mounts_unchanged(self):
+        blob_path = '/var/lib/api/clients/u1/file_mounts/blobs/abc/data'
+        task = self._make_task({'/remote/data': blob_path})
+        controller_utils.translate_local_file_mounts_for_consolidation(task)
+        assert task.file_mounts == {'/remote/data': blob_path}
+        assert task.workdir is None
+
+    def test_workdir_folded_into_file_mounts(self):
+        blob_path = '/var/lib/api/clients/u1/file_mounts/blobs/abc/wd'
+        task = self._make_task({}, workdir=blob_path)
+        controller_utils.translate_local_file_mounts_for_consolidation(task)
+        assert task.workdir is None
+        assert task.file_mounts == {constants.SKY_REMOTE_WORKDIR: blob_path}
+
+    def test_rejects_cloud_store_url(self):
+        task = self._make_task({'/remote/data': 's3://bucket/path'})
+        with pytest.raises(exceptions.NotSupportedError):
+            controller_utils.translate_local_file_mounts_for_consolidation(task)

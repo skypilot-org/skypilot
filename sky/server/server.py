@@ -581,7 +581,12 @@ async def cleanup_unreferenced_file_mounts():
                 logger.debug('Another replica is running blob GC, skipping')
                 return
 
-            active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+            # A blob is kept alive by either an active API request (e.g. the
+            # submit request that is still running) or a non-terminal managed
+            # job that was started from it.
+            active_blob_ids = (
+                requests_lib.get_active_file_mounts_blob_ids() |
+                managed_job_state.get_active_file_mounts_blob_ids())
             grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
 
             for user_id in storage.list_users():

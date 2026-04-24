@@ -183,10 +183,11 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
                 task_, task_type='jobs')
     else:
         # We do not have any cloud storage available, so fall back to
-        # two-hop file_mount uploading.
+        # local file-mount staging.
         # Note: we can't easily hack sync_storage_mounts() to upload
         # directly to the controller, because the controller may not
         # even be up yet.
+        consolidation = managed_job_utils.is_consolidation_mode()
         for task_ in dag.tasks:
             if task_.storage_mounts and not storage_clouds:
                 # Technically, we could convert COPY storage_mounts that
@@ -198,9 +199,16 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
                     'storage is available. Please specify local '
                     'file_mounts only.')
 
-            # Merge file mounts from all tasks.
-            local_to_controller_file_mounts.update(
-                controller_utils.translate_local_file_mounts_to_two_hop(task_))
+            if consolidation:
+                # For consolidation mode, the referenced blob is already
+                # present in the host, skip two hop.
+                controller_utils.translate_local_file_mounts_for_consolidation(
+                    task_)
+            else:
+                # Merge file mounts from all tasks.
+                local_to_controller_file_mounts.update(
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task_))
 
     return local_to_controller_file_mounts
 
@@ -260,8 +268,11 @@ def _consolidated_launch(
     return job_ids, local_handle
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
-                              num_jobs: int) -> Optional[List[int]]:
+def _maybe_submit_job_locally(
+        prefix: str,
+        dag: 'sky.Dag',
+        num_jobs: int,
+        file_mounts_blob_id: Optional[str] = None) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -307,7 +318,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode,
-                is_batch=is_batch))
+                is_batch=is_batch,
+                file_mounts_blob_id=file_mounts_blob_id))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -511,6 +523,7 @@ def launch(
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
     stream_logs: bool = True,
+    file_mounts_blob_id: Optional[str] = None,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -733,7 +746,10 @@ def launch(
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
-    job_ids = _maybe_submit_job_locally(prefix, dag, num_jobs)
+    job_ids = _maybe_submit_job_locally(prefix,
+                                        dag,
+                                        num_jobs,
+                                        file_mounts_blob_id=file_mounts_blob_id)
     is_consolidation_mode = job_ids is not None
     if not is_consolidation_mode:
         job_ids = _submit_remotely(controller, dag, pool, num_jobs)
