@@ -151,30 +151,28 @@ def test_hook_events_default_to_all(generic_cloud: str):
 def test_hook_k8s_preemption_sigterm():
     name = smoke_tests_utils.get_cluster_name()
     marker = f'hook-preempt-{time.time()}'
+    # Hook writes to ~/.sky/hooks/preemption.log then sleeps 20s so
+    # the pod is still in the `Terminating` state while the test reads
+    # it via `kubectl exec`. Timeout 60s ensures K8s renders
+    # terminationGracePeriodSeconds >= 60 (PR1 commit 45a870e7b).
     yaml_path = _write_yaml({
         'hooks': [{
-            'run': f'echo {marker}',
+            'run': f'echo {marker} > ~/.sky/hooks/preemption.log && sleep 20',
             'events': ['preemption'],
-            'timeout': 30,
+            'timeout': 60,
         }],
     })
-    # On kind-skypilot, the head pod is named `<cluster-name>-head` or
-    # similar — discover by cluster-name label.
-    k8s_delete = (f'kubectl delete pod -l skypilot-cluster={name} --context '
-                  f'kind-skypilot --wait=false')
-    # The log lives in ~/.sky/hooks/preemption.log; after the pod is
-    # torn down we cannot query it, so we verify via a persistent
-    # log-shipping step: the hook echoes into a sidecar emptyDir
-    # mount, which we then read from the surviving worker. For a
-    # single-node kind cluster the preemption deletes the only node,
-    # so we assert only that SIGTERM fires (skylet log written before
-    # grace expires) — captured in the last `sky logs --hook
-    # preemption` that we can issue against the *freshly*-relaunched
-    # pod's persistent disk shouldn't be expected. Instead, we check
-    # kubectl logs of the dying pod for the marker.
-    kubectl_logs = (
-        f'kubectl logs -l skypilot-cluster={name} --context kind-skypilot '
-        f'--tail=200 --all-containers 2>/dev/null | grep "{marker}" || true')
+    k8s_delete = (
+        f'kubectl delete pod -l skypilot-cluster-name={name} --context '
+        f'kind-skypilot --wait=false')
+    # During the grace period, `kubectl exec` into the terminating pod
+    # and read the preemption log the skylet handler wrote.
+    read_log = (
+        f'sleep 3 && '
+        f'pod=$(kubectl get pod -l skypilot-cluster-name={name} --context '
+        f'kind-skypilot -o name | head -n1) && '
+        f'kubectl exec --context kind-skypilot "$pod" -- '
+        f'cat /home/sky/.sky/hooks/preemption.log')
     test = smoke_tests_utils.Test(
         'test_hook_k8s_preemption_sigterm',
         [
@@ -182,12 +180,8 @@ def test_hook_k8s_preemption_sigterm():
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # Trigger SIGTERM via pod delete; inside grace period the
-            # hook should fire.
             k8s_delete,
-            'sleep 15',
-            # Verify the hook output appears in the dying pod's logs.
-            f'out=$({kubectl_logs}) && echo "$out" | grep "{marker}"',
+            f'out=$({read_log}) && echo "$out" | grep "{marker}"',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
