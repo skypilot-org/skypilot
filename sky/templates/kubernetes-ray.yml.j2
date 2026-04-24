@@ -537,6 +537,23 @@ available_node_types:
         - name: ray-node
           imagePullPolicy: Always
           image: {{image_id}}
+          {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
+          # Forward kubelet SIGTERM to the skylet so it can run
+          # preemption lifecycle hooks. Skylet isn't PID 1 (the setup
+          # bash script is), so kubelet's TERM doesn't reach it
+          # without this preStop hook.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - |
+                  if [ -f /home/sky/.sky/skylet_pid ]; then
+                    kill -TERM $(cat /home/sky/.sky/skylet_pid) || true
+                    sleep {{ preemption_hook_timeout }}
+                  fi
+          {% endif %}
           env:
             - name: SKYPILOT_POD_NODE_TYPE
               valueFrom:
