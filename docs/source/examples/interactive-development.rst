@@ -8,7 +8,6 @@ SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps
 
 #. :ref:`Launch <dev-launch>`: Quickly get a cluster with GPUs or other resources with a single command.
 #. :ref:`Autostop <dev-autostop>`: Automatically stop the cluster after some idle time for cost savings.
-#. :ref:`Resize <dev-resize>`: Scale an existing cluster up or down without tearing it down.
 #. :ref:`Connect <dev-connect>`: Easily connect to the cluster using the cluster name:
 
    - :ref:`SSH <dev-ssh>`
@@ -77,45 +76,6 @@ Or add an additional flag :code:`-i` during the launch:
 For more details of auto stopping, check out: :ref:`auto-stop`. This feature is designed
 to prevent idle clusters from incurring unnecessary costs, ensuring your cluster
 stops automatically, whether it's overnight or throughout the weekend.
-
-
-.. _dev-resize:
-
-Resize
-------
-
-Existing clusters can be scaled up or down to a different number of
-nodes without tearing them down. Pass ``--resize`` along with the YAML
-that defines the cluster so ``setup`` runs on the new workers:
-
-.. code-block:: bash
-
-  # Scale up: add more workers and run setup on them.
-  sky launch -c dev --resize --num-nodes 8 dev.yaml
-
-  # Scale down: re-provision workers at the new count.
-  sky launch -c dev --resize --num-nodes 2 dev.yaml
-
-The head node is always preserved during resize, so the job queue,
-logs, and any state on the head node survive.
-
-.. note::
-
-  Scale-down re-provisions all workers from scratch, so any local state
-  on the previous workers (e.g. files written outside a mounted
-  storage, caches, installed packages) is lost. **Pass the same YAML**
-  you used to launch the cluster so SkyPilot reruns ``setup`` on the
-  freshly provisioned workers. If you resize without a YAML, no
-  ``setup`` is executed on the new workers.
-
-Restrictions:
-
-- The cluster must be in the ``UP`` state (run :code:`sky start <cluster>`
-  first if it is stopped).
-- Scale-down is rejected if any job is ``RUNNING``, ``SETTING_UP``, or
-  ``PENDING``. Cancel them first with :code:`sky cancel <cluster> -a`.
-- Only ``--num-nodes`` may change. Other hardware (instance type,
-  accelerators, region, zone, etc.) must match the existing cluster.
 
 
 .. _dev-connect:
@@ -430,3 +390,42 @@ Working with clusters
 ---------------------
 
 To see a typical workflow of working with clusters, you can refer to :ref:`quickstart`.
+
+
+.. _dev-resize:
+
+Resize (advanced)
+-----------------
+
+Existing clusters can be scaled up or down to a different number of
+nodes without tearing them down. Pass ``--resize`` along with the YAML
+that defines the cluster so ``setup`` runs on the new workers:
+
+.. code-block:: bash
+
+  # Scale up: add more workers and run setup on them.
+  sky launch -c dev --resize --num-nodes 8 dev.yaml
+
+  # Scale down: re-provision workers at the new count.
+  sky launch -c dev --resize --num-nodes 2 dev.yaml
+
+The head node is always preserved during resize, so the job queue,
+logs, and any state on the head node survive.
+
+.. note::
+
+  Scale-down re-provisions all workers from scratch, so any local state
+  on the previous workers (e.g. files written outside a mounted
+  storage, caches, installed packages) is lost. **Pass the same YAML**
+  you used to launch the cluster so SkyPilot reruns ``setup`` on the
+  freshly provisioned workers. If you resize without a YAML, no
+  ``setup`` is executed on the new workers.
+
+Restrictions:
+
+- The cluster must be in the ``UP`` state (run :code:`sky start <cluster>`
+  first if it is stopped).
+- Scale-down is rejected if any job is ``RUNNING``, ``SETTING_UP``, or
+  ``PENDING``. Cancel them first with :code:`sky cancel <cluster> -a`.
+- Only ``--num-nodes`` may change. Other hardware (instance type,
+  accelerators, region, zone, etc.) must match the existing cluster.
