@@ -580,6 +580,7 @@ def _execute_dag(
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
+            task_hooks = resources[0].hooks
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -589,7 +590,17 @@ def _execute_dag(
                                      down,
                                      hook=hook,
                                      hook_timeout=hook_timeout,
-                                     hooks=resources[0].hooks)
+                                     hooks=task_hooks)
+            elif task_hooks:
+                # Hooks can fire on preemption/down independent of
+                # autostop — persist them even when autostop is disabled.
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop=-1,
+                                     wait_for=None,
+                                     down=False,
+                                     hooks=task_hooks)
 
         job_id = None
         if Stage.EXEC in stages:

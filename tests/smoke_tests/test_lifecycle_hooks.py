@@ -116,11 +116,18 @@ def test_hook_events_default_to_all(generic_cloud: str):
             'run': 'echo default-events',
         }],
     })
-    inspect = ('python3 -c "from sky.skylet import autostop_lib; '
-               'hooks = autostop_lib.get_hooks() or []; '
-               'import json, sys; print(json.dumps(hooks)); '
-               'sys.exit(0 if hooks and sorted(hooks[0][\\"events\\"]) == '
-               '[\\"autostop\\",\\"down\\",\\"preemption\\"] else 1)"')
+    # Inspect the skylet sqlite DB directly — no need for `sky` module
+    # on the cluster side. The `~/.sky/skylet_config.db` file holds
+    # key='lifecycle_hooks' → JSON string of the normalized hooks list.
+    # Output looks like: [{"run": "...", "events": ["autostop",
+    # "preemption", "down"], "timeout": 3600}]. We verify all three
+    # events are present.
+    inspect = ('sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";" '
+               '| tee /tmp/hooks.json && '
+               'grep -q autostop /tmp/hooks.json && '
+               'grep -q preemption /tmp/hooks.json && '
+               'grep -q down /tmp/hooks.json')
     test = smoke_tests_utils.Test(
         'test_hook_events_default_to_all',
         [
