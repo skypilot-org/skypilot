@@ -755,10 +755,12 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal, recover_on_exit_codes)
+                         starting_signal, recover_on_exit_codes,
+                         file_mounts_blob_id)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
