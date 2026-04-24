@@ -2301,6 +2301,16 @@ def get_config_schema():
                                 },
                             },
                         },
+                        'quota': {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': False,
+                            'properties': {
+                                'queue': {
+                                    'type': 'string',
+                                },
+                            },
+                        },
                         'context_configs': {
                             'type': 'object',
                             'required': [],
@@ -2324,6 +2334,16 @@ def get_config_schema():
                                         'additionalProperties': False,
                                         'properties': {
                                             'local_queue_name': {
+                                                'type': 'string',
+                                            },
+                                        },
+                                    },
+                                    'quota': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'additionalProperties': False,
+                                        'properties': {
+                                            'queue': {
                                                 'type': 'string',
                                             },
                                         },

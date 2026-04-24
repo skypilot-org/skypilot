@@ -846,31 +846,33 @@ def get_effective_queue_name(
     """
     if workspace is None:
         workspace = get_active_workspace()
-    config = _get_loaded_config()
 
-    def _lookup_at(base_keys: Tuple[str, ...]) -> Optional[Any]:
-        for queue_keys in _QUEUE_NAME_KEYS:
-            value = config.get_nested(keys=base_keys + queue_keys,
-                                      default_value=None,
-                                      override_configs=override_configs)
-            if value is not None:
-                return value
-        return None
+    # `override_configs` are cloud-level; looking up relative to a scope
+    # (rather than prefixing the scope into `keys`) ensures they apply at
+    # the correct depth even when the scope is a workspace subtree.
+    scope_configs: List[config_utils.Config] = []
+    if workspace is not None:
+        ws_config = get_nested(keys=('workspaces', workspace),
+                               default_value=None)
+        if ws_config is not None:
+            scope_configs.append(config_utils.Config(ws_config))
+    scope_configs.append(config_utils.Config(_get_loaded_config()))
 
-    scope_prefixes: List[Tuple[str, ...]] = []
-    if workspace is not None and config.get_nested(
-            keys=('workspaces', workspace), default_value=None) is not None:
-        scope_prefixes.append(('workspaces', workspace))
-    scope_prefixes.append(())
-
-    for prefix in scope_prefixes:
+    for scope_config in scope_configs:
         if region is not None:
-            value = _lookup_at(prefix + (cloud, 'context_configs', region))
+            for queue_keys in _QUEUE_NAME_KEYS:
+                value = scope_config.get_nested(
+                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    default_value=None,
+                    override_configs=override_configs)
+                if value is not None:
+                    return value
+        for queue_keys in _QUEUE_NAME_KEYS:
+            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+                                            default_value=None,
+                                            override_configs=override_configs)
             if value is not None:
                 return value
-        value = _lookup_at(prefix + (cloud,))
-        if value is not None:
-            return value
     return None
 
 

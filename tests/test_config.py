@@ -1332,6 +1332,84 @@ def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
         workspace='workspaceA') == 'workspaceA-queue-via-quota'
 
 
+def test_get_effective_queue_name_workspace_override(monkeypatch,
+                                                     tmp_path) -> None:
+    """Cloud-level `override_configs` must apply inside workspace scope.
+
+    Regression test for a bug where `get_effective_queue_name` prefixed
+    the workspace path onto the lookup keys, so `override_configs` (which
+    mirror the cloud-level config schema and do not carry a `workspaces`
+    section) never took effect when the active workspace had its own
+    queue setting.
+    """
+    with open(tmp_path / 'ws_override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            kueue:
+                local_queue_name: global-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kueue:
+                        local_queue_name: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceA-contextA-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'ws_override.yaml')
+    skypilot_config.reload_config()
+
+    cloud_level_override = {
+        'kubernetes': {
+            'kueue': {
+                'local_queue_name': 'override-queue'
+            }
+        }
+    }
+
+    # Baseline: without override, the workspace's cloud-level value wins.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='workspaceA') == 'workspaceA-queue'
+
+    # Bug scenario: cloud-level override (no `workspaces` section) should
+    # replace the workspace's cloud-level value. Previously the override
+    # was merged at config-root depth and silently ignored.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA',
+        override_configs=cloud_level_override) == 'override-queue'
+
+    # Alias spelling in the override still overrides the legacy spelling
+    # at workspace scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA',
+        override_configs={
+            'kubernetes': {
+                'quota': {
+                    'queue': 'override-quota-q'
+                }
+            }
+        }) == 'override-quota-q'
+
+    # Context-level value at the workspace scope still wins over a
+    # cloud-level override, because per-context is a more specific scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_level_override) == 'workspaceA-contextA-queue'
+
+    # Override still applies when falling back to the global scope
+    # (workspace does not override the key).
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='nonexistent-ws',
+        override_configs=cloud_level_override) == 'override-queue'
+
+
 def _make_config(d: dict) -> config_utils.Config:
     """Helper to build a Config from a plain dict."""
     cfg = config_utils.Config()
