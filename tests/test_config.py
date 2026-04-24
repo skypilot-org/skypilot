@@ -1281,6 +1281,57 @@ def test_kubernetes_kueue_configs(monkeypatch, tmp_path) -> None:
     assert contexts[1] == 'contextB'
 
 
+def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
+    """`quota.queue` is accepted as an alias of `kueue.local_queue_name`."""
+    with open(tmp_path / 'quota_queue.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            quota:
+                queue: default-queue-via-quota
+            context_configs:
+                contextA:
+                    quota:
+                        queue: contextA-queue-via-quota
+                contextB:
+                    kueue:
+                        local_queue_name: contextB-queue-via-kueue
+                contextC:
+                    # Both set: quota.queue wins at the same scope.
+                    quota:
+                        queue: contextC-queue-via-quota
+                    kueue:
+                        local_queue_name: contextC-queue-via-kueue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    quota:
+                        queue: workspaceA-queue-via-quota
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'quota_queue.yaml')
+    skypilot_config.reload_config()
+
+    # Cloud-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='default') == 'default-queue-via-quota'
+    # Context-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextA',
+        workspace='default') == 'contextA-queue-via-quota'
+    # Context-level `kueue.local_queue_name` still works.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextB',
+        workspace='default') == 'contextB-queue-via-kueue'
+    # When both are set at the same scope, `quota.queue` wins.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextC',
+        workspace='default') == 'contextC-queue-via-quota'
+    # Workspace-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA') == 'workspaceA-queue-via-quota'
+
+
 def _make_config(d: dict) -> config_utils.Config:
     """Helper to build a Config from a plain dict."""
     cfg = config_utils.Config()
@@ -1298,10 +1349,16 @@ class TestRemoveQueueNameFromConfig:
                 'kueue': {
                     'local_queue_name': 'root-q'
                 },
+                'quota': {
+                    'queue': 'root-quota-q'
+                },
                 'context_configs': {
                     'ctx1': {
                         'kueue': {
                             'local_queue_name': 'ctx1-q'
+                        },
+                        'quota': {
+                            'queue': 'ctx1-quota-q'
                         }
                     }
                 }
@@ -1312,10 +1369,16 @@ class TestRemoveQueueNameFromConfig:
                         'kueue': {
                             'local_queue_name': 'ws1-q'
                         },
+                        'quota': {
+                            'queue': 'ws1-quota-q'
+                        },
                         'context_configs': {
                             'ctx2': {
                                 'kueue': {
                                     'local_queue_name': 'ws1-ctx2-q'
+                                },
+                                'quota': {
+                                    'queue': 'ws1-ctx2-quota-q'
                                 }
                             }
                         }
@@ -1328,12 +1391,17 @@ class TestRemoveQueueNameFromConfig:
                 current = skypilot_config.to_dict()
                 for keys in [
                     ('kubernetes', 'kueue', 'local_queue_name'),
+                    ('kubernetes', 'quota', 'queue'),
                     ('kubernetes', 'context_configs', 'ctx1', 'kueue',
                      'local_queue_name'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'quota', 'queue'),
                     ('workspaces', 'ws1', 'kubernetes', 'kueue',
                      'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'quota', 'queue'),
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'kueue', 'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'quota', 'queue'),
                 ]:
                     assert current.get_nested(
                         keys, 'NOT_SET') is None, (f'Expected None at {keys}')

@@ -1481,6 +1481,18 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
+    # when both are set.
+    'quota': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'queue': {
+                'type': 'string',
+            },
+        },
+    },
     'dws': {
         'type': 'object',
         'required': [],

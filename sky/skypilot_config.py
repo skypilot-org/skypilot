@@ -823,7 +823,55 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
-_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('kueue', 'local_queue_name')]
+_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
+    # Order matters: `get_effective_queue_name` returns the first hit at a
+    # given scope, so `quota.queue` wins over `kueue.local_queue_name` when
+    # both are set.
+    ('quota', 'queue'),
+    ('kueue', 'local_queue_name'),
+]
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    if workspace is None:
+        workspace = get_active_workspace()
+    config = _get_loaded_config()
+
+    def _lookup_at(base_keys: Tuple[str, ...]) -> Optional[Any]:
+        for queue_keys in _QUEUE_NAME_KEYS:
+            value = config.get_nested(keys=base_keys + queue_keys,
+                                      default_value=None,
+                                      override_configs=override_configs)
+            if value is not None:
+                return value
+        return None
+
+    scope_prefixes: List[Tuple[str, ...]] = []
+    if workspace is not None and config.get_nested(
+            keys=('workspaces', workspace), default_value=None) is not None:
+        scope_prefixes.append(('workspaces', workspace))
+    scope_prefixes.append(())
+
+    for prefix in scope_prefixes:
+        if region is not None:
+            value = _lookup_at(prefix + (cloud, 'context_configs', region))
+            if value is not None:
+                return value
+        value = _lookup_at(prefix + (cloud,))
+        if value is not None:
+            return value
+    return None
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
