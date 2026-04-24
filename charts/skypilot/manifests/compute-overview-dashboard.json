@@ -289,9 +289,9 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) * 100",
           "instant": false,
-          "legendFormat": "GPU Utilization",
+          "legendFormat": "GPU Allocation",
           "range": true,
           "refId": "A"
         },
@@ -301,9 +301,9 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) / sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"}) * 100",
+          "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
           "instant": false,
-          "legendFormat": "GPU Allocation",
+          "legendFormat": "GPU Utilization",
           "range": true,
           "refId": "B"
         }
