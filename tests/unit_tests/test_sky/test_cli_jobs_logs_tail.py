@@ -63,13 +63,19 @@ class TestJobsLogsTailSdk:
 
     def test_zero_raises(self):
         with pytest.raises(ValueError, match='positive integer'):
-            jobs_sdk.tail_logs(job_id=1, tail=0, follow=False, controller=False,
+            jobs_sdk.tail_logs(job_id=1,
+                               tail=0,
+                               follow=False,
+                               controller=False,
                                refresh=False)
 
     def test_negative_raises(self):
         with pytest.raises(ValueError, match='positive integer'):
-            jobs_sdk.tail_logs(job_id=1, tail=-5, follow=False,
-                               controller=False, refresh=False)
+            jobs_sdk.tail_logs(job_id=1,
+                               tail=-5,
+                               follow=False,
+                               controller=False,
+                               refresh=False)
 
     def test_none_does_not_raise(self):
         """tail=None is the 'no limit' sentinel — should not raise."""
@@ -77,12 +83,18 @@ class TestJobsLogsTailSdk:
             # Short-circuit the HTTP path so we only exercise validation.
             req.side_effect = RuntimeError('server call not expected')
             with pytest.raises(RuntimeError, match='server call not expected'):
-                jobs_sdk.tail_logs(job_id=1, tail=None, follow=False,
-                                   controller=False, refresh=False)
+                jobs_sdk.tail_logs(job_id=1,
+                                   tail=None,
+                                   follow=False,
+                                   controller=False,
+                                   refresh=False)
 
     def test_positive_does_not_raise(self):
         with mock.patch('sky.server.common.make_authenticated_request') as req:
             req.side_effect = RuntimeError('server call not expected')
             with pytest.raises(RuntimeError, match='server call not expected'):
-                jobs_sdk.tail_logs(job_id=1, tail=100, follow=False,
-                                   controller=False, refresh=False)
+                jobs_sdk.tail_logs(job_id=1,
+                                   tail=100,
+                                   follow=False,
+                                   controller=False,
+                                   refresh=False)

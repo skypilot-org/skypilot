@@ -249,8 +249,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
       * ``--tail 0`` (default) returns all 20 lines.
     """
     name = smoke_tests_utils.get_cluster_name()
-    run_cmd = (
-        'for i in $(seq 1 20); do echo SKYLOGTAIL $i; done')
+    run_cmd = ('for i in $(seq 1 20); do echo SKYLOGTAIL $i; done')
     get_job_id_cmd = (f'sky jobs queue | grep tail-{name} | head -n1 '
                       f'| awk \'{{print $1}}\'')
     test = smoke_tests_utils.Test(
