@@ -675,6 +675,16 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
+    # Scrape the in-release kube-state-metrics service for cluster-level GPU
+    # capacity + demand metrics (kube_pod_container_resource_requests,
+    # kube_node_status_allocatable). Required for the /gpu-metrics federate to
+    # forward allocation data upstream, and for the Compute Overview dashboard
+    # to render the Allocation gauge and timeseries.
+    - job_name: 'kube-state-metrics'
+      static_configs:
+        - targets: ['{{ include "skypilot.fullname" . }}-kube-state-metrics.{{ .Release.Namespace }}.svc.cluster.local:8080']
+      scrape_interval: 30s
+      scrape_timeout: 10s
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
       honor_labels: true
