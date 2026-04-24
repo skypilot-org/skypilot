@@ -84,30 +84,29 @@ stops automatically, whether it's overnight or throughout the weekend.
 Resize
 ------
 
-Existing clusters can be scaled up or down to a different number of nodes
-without tearing them down. Use :code:`sky launch --resize` with ``-c`` and
-``--num-nodes``:
+Existing clusters can be scaled up or down to a different number of
+nodes without tearing them down. Pass ``--resize`` along with the YAML
+that defines the cluster so ``setup`` runs on the new workers:
 
 .. code-block:: bash
 
-  # Scale up: add more worker nodes to the cluster.
-  sky launch -c dev --resize --num-nodes 8
+  # Scale up: add more workers and run setup on them.
+  sky launch -c dev --resize --num-nodes 8 dev.yaml
 
-  # Scale down: remove excess worker nodes from the cluster.
-  sky launch -c dev --resize --num-nodes 2
+  # Scale down: re-provision workers at the new count.
+  sky launch -c dev --resize --num-nodes 2 dev.yaml
 
-SkyPilot shows a confirmation prompt with the current and target node count
-before proceeding, e.g.:
+The head node is always preserved during resize, so the job queue,
+logs, and any state on the head node survive.
 
-.. code-block:: text
+.. note::
 
-  Resizing cluster 'dev' from 4 to 8 node(s) (+4 worker(s), scale up). Proceed? [Y/n]
-
-The head node is always preserved during resize, so the job queue, logs,
-and any setup state on the head node survive. Resize itself does not
-re-run ``setup`` — if you pass a task YAML (or inline command) with a
-``setup`` section to the resize command, that setup will run on all
-nodes; otherwise no setup is executed on the newly provisioned workers.
+  Scale-down re-provisions all workers from scratch, so any local state
+  on the previous workers (e.g. files written outside a mounted
+  storage, caches, installed packages) is lost. **Pass the same YAML**
+  you used to launch the cluster so SkyPilot reruns ``setup`` on the
+  freshly provisioned workers. If you resize without a YAML, no
+  ``setup`` is executed on the new workers.
 
 Restrictions:
 
