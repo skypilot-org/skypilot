@@ -80,7 +80,7 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Install with uv ([also supported:](https://docs.skypilot.co/en/latest/getting-started/installation.html): pip, from source)
+Install with uv ([also supported](https://docs.skypilot.co/en/latest/getting-started/installation.html): pip, nightly, from source)
 ```bash
 # Choose your clouds:
 uv tool install --with pip "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
