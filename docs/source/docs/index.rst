@@ -289,7 +289,6 @@ Follow updates:
    Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop
-   Resizing a Cluster <../reference/resize>
 
 .. toctree::
    :hidden:

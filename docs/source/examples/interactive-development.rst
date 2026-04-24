@@ -8,6 +8,7 @@ SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps
 
 #. :ref:`Launch <dev-launch>`: Quickly get a cluster with GPUs or other resources with a single command.
 #. :ref:`Autostop <dev-autostop>`: Automatically stop the cluster after some idle time for cost savings.
+#. :ref:`Resize <dev-resize>`: Scale an existing cluster up or down without tearing it down.
 #. :ref:`Connect <dev-connect>`: Easily connect to the cluster using the cluster name:
 
    - :ref:`SSH <dev-ssh>`
@@ -76,6 +77,44 @@ Or add an additional flag :code:`-i` during the launch:
 For more details of auto stopping, check out: :ref:`auto-stop`. This feature is designed
 to prevent idle clusters from incurring unnecessary costs, ensuring your cluster
 stops automatically, whether it's overnight or throughout the weekend.
+
+
+.. _dev-resize:
+
+Resize
+------
+
+Existing clusters can be scaled up or down to a different number of nodes
+without tearing them down. Use :code:`sky launch --resize` with ``-c`` and
+``--num-nodes``:
+
+.. code-block:: bash
+
+  # Scale up: add more worker nodes to the cluster.
+  sky launch -c dev --resize --num-nodes 8
+
+  # Scale down: remove excess worker nodes from the cluster.
+  sky launch -c dev --resize --num-nodes 2
+
+SkyPilot shows a confirmation prompt with the current and target node count
+before proceeding, e.g.:
+
+.. code-block:: text
+
+  Resizing cluster 'dev' from 4 to 8 node(s) (+4 worker(s), scale up). Proceed? [Y/n]
+
+The head node is always preserved during resize, so the job queue, logs,
+and any setup state on the head node survive. ``setup`` is re-run on
+newly added workers.
+
+Restrictions:
+
+- The cluster must be in the ``UP`` state (run :code:`sky start <cluster>`
+  first if it is stopped).
+- Scale-down is rejected if any job is ``RUNNING``, ``SETTING_UP``, or
+  ``PENDING``. Cancel them first with :code:`sky cancel <cluster> -a`.
+- Only ``--num-nodes`` may change. Other hardware (instance type,
+  accelerators, region, zone, etc.) must match the existing cluster.
 
 
 .. _dev-connect:
