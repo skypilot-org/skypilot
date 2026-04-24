@@ -17,9 +17,14 @@ reference is written and read atomically under the GIL, and only the
 default + plugin-provided runner are registered (sequentially), so no
 lock is needed.
 """
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+import typing
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
 
 from sky import sky_logging
+
+if typing.TYPE_CHECKING:
+    from sky import backends
+    from sky.jobs import utils as managed_job_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -30,8 +35,8 @@ class ManagedJobRunner(Protocol):
     def fetch_managed_job_table(
         self,
         *,
-        handle: Any,
-        backend: Any,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
         skip_finished: bool,
         accessible_workspaces: List[str],
         job_ids: Optional[List[int]],
@@ -45,14 +50,16 @@ class ManagedJobRunner(Protocol):
         fields: Optional[List[str]],
         sort_by: Optional[str],
         sort_order: Optional[str],
-    ) -> Tuple[List[Dict[str, Any]], int, Any, int, Dict[str, int]]:
+    ) -> Tuple[List[Dict[str, Any]], int,
+               'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
+                                                                        int]]:
         ...
 
     def cancel_managed_jobs(
         self,
         *,
-        handle: Any,
-        backend: Any,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
         all_users: bool,
         all: bool,  # pylint: disable=redefined-builtin
         job_ids: Optional[List[int]],
@@ -66,14 +73,14 @@ class ManagedJobRunner(Protocol):
     def tail_managed_job_logs(
         self,
         *,
-        handle: Any,
-        backend: Any,
+        handle: 'backends.CloudVmRayResourceHandle',
+        backend: 'backends.CloudVmRayBackend',
         job_id: Optional[int],
         job_name: Optional[str],
         follow: bool,
         controller: bool,
         tail: Optional[int],
-        task: Any,
+        task: Optional[Union[str, int]],
     ) -> int:
         ...
 
