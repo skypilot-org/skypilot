@@ -462,12 +462,8 @@ class StrategyExecutor:
                                                      f'{env_var}: {value}')
                                         os.environ[env_var] = value
 
-                            # Ensure blob extraction on the current replica
-                            # before client-side validate(), since HA failover
-                            # may land the controller on a replica that has
-                            # not extracted yet. Extraction paths are
-                            # deterministic, so the absolute paths baked into
-                            # task.workdir/file_mounts become valid locally.
+                            # HA failover may land the controller on new hosts,
+                            # ensure blob extraction on the current host
                             if self.file_mounts_blob_id is not None:
                                 # pylint: disable=import-outside-toplevel
                                 from sky.server import common as server_common
