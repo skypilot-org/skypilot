@@ -890,10 +890,13 @@ def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
                'or hook_executor.EVENTS) for h in hooks):\n'
                '    if hook_executor.try_claim_teardown(\'down\'):\n'
                '        hook_executor.run(\'down\', hooks)\n')
+    # Use SKY_PYTHON_CMD so the codegen sees the sky/ installation on the
+    # remote — plain `python3` may point at a minimal system interpreter.
+    cmd = f'{constants.SKY_PYTHON_CMD} -c {shlex.quote(codegen)}'
     try:
         backend.run_on_head(
             handle,
-            f'python3 -c {shlex.quote(codegen)}',
+            cmd,
             stream_logs=False,
             require_outputs=False,
         )
