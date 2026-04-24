@@ -10,6 +10,12 @@ in-process.
 At most one runner is registered at a time. The default is installed by
 ``sky.jobs.server.core`` at module import. Plugins override the default
 by calling ``register(MyRunner())`` in their ``install()`` phase.
+
+Thread-safety: ``register()`` is only expected to be called during
+server/plugin startup, before request handling begins. The module-level
+reference is written and read atomically under the GIL, and only the
+default + plugin-provided runner are registered (sequentially), so no
+lock is needed.
 """
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
