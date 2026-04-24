@@ -513,6 +513,10 @@ async def get_metrics_for_context(context: str) -> str:
         'node_cpu_seconds_total{mode="idle"}',
         'container_cpu_usage_seconds_total{container!="",container!="POD"}',
         'container_memory_working_set_bytes{container!="",container!="POD"}',
+        # GPU allocation metrics — pod requests + node capacity for nvidia/amd
+        # GPUs. Enables cluster-wide % allocated computations.
+        'kube_pod_container_resource_requests{resource=~"nvidia.com/gpu|amd.com/gpu"}',  # pylint: disable=line-too-long
+        'kube_node_status_allocatable{resource=~"nvidia.com/gpu|amd.com/gpu"}',
     ]
 
     # TODO(rohan): don't hardcode the namespace and service name
