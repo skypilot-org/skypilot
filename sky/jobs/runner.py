@@ -7,9 +7,11 @@ code and runs it on the controller via subprocess, while a plugin-provided
 runner might call the managed jobs DB directly when the controller is
 in-process.
 
-At most one runner is registered at a time. The default is installed by
-``sky.jobs.server.core`` at module import. Plugins override the default
-by calling ``register(MyRunner())`` in their ``install()`` phase.
+At most one runner is registered at a time. If nothing has registered,
+``current()`` lazily constructs ``_DefaultManagedJobRunner`` from
+``sky.jobs.server.core`` so there's always a usable runner regardless of
+import ordering. Plugins override the default by calling
+``register(MyRunner())`` in their ``install()`` phase.
 
 Thread-safety: ``register()`` is only expected to be called during
 server/plugin startup, before request handling begins. The module-level
@@ -91,8 +93,7 @@ _current: Optional[ManagedJobRunner] = None
 def register(runner: ManagedJobRunner) -> None:
     """Install ``runner`` as the currently-active managed job runner.
 
-    Last registration wins. The default runner is registered on import
-    of ``sky.jobs.server.core``; plugins override in ``install()``.
+    Last registration wins. Plugins override the default in ``install()``.
     """
     # pylint: disable=global-statement
     global _current
@@ -101,13 +102,16 @@ def register(runner: ManagedJobRunner) -> None:
 
 
 def current() -> ManagedJobRunner:
-    """Return the currently-registered runner.
+    """Return the registered runner, falling back to the default.
 
-    Raises ``AssertionError`` if no runner has been registered. That
-    should not happen in practice: importing ``sky.jobs.server.core``
-    registers the default runner as a side effect.
+    If nothing has been registered, constructs and installs
+    ``_DefaultManagedJobRunner`` so there's always a usable runner
+    regardless of import ordering.
     """
-    assert _current is not None, (
-        'No ManagedJobRunner has been registered. Importing '
-        'sky.jobs.server.core should register the default runner.')
+    # pylint: disable=global-statement
+    global _current
+    if _current is None:
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs.server.core import _DefaultManagedJobRunner
+        _current = _DefaultManagedJobRunner()
     return _current

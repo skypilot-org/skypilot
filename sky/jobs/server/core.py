@@ -352,10 +352,6 @@ class _DefaultManagedJobRunner:
                                              task=task)
 
 
-# Register the default runner so it's available before any plugin loads.
-managed_job_runner.register(_DefaultManagedJobRunner())
-
-
 def _consolidated_launch(
     controller: controller_utils.Controllers,
     controller_task: 'sky.Task',
