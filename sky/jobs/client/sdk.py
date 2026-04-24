@@ -538,7 +538,8 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+        local_dir: str = constants.SKY_LOGS_DIRECTORY,
+        tail: Optional[int] = None) -> Dict[int, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -549,6 +550,8 @@ def download_logs(
         refresh: Whether to restart the jobs controller if it is stopped.
         controller: Whether to sync down logs from the jobs controller.
         local_dir: Local directory to sync down logs.
+        tail: If set, only download the last ``tail`` lines of the log.
+            Useful for large logs where downloading the full file is slow.
 
     Returns:
         A dictionary mapping job ID to the local path.
@@ -564,6 +567,7 @@ def download_logs(
         refresh=refresh,
         controller=controller,
         local_dir=local_dir,
+        tail=tail,
     )
     response = server_common.make_authenticated_request(
         'POST',

@@ -1702,7 +1702,8 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY,
+        tail: Optional[int] = None) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -1741,7 +1742,8 @@ def download_logs(
                                               job_id=job_id,
                                               job_name=name,
                                               controller=controller,
-                                              local_dir=local_dir)
+                                              local_dir=local_dir,
+                                              tail=tail)
 
 
 @usage_lib.entrypoint

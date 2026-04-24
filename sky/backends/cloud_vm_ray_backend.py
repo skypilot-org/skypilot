@@ -4724,7 +4724,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
             controller: bool = False,
-            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+            local_dir: str = constants.SKY_LOGS_DIRECTORY,
+            tail: Optional[int] = None) -> Dict[str, str]:
         """Sync down logs for a managed job.
 
         Args:
@@ -4733,6 +4734,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_name: The job name to sync down logs for.
             controller: Whether to sync down logs for the controller.
             local_dir: The local directory to sync down logs to.
+            tail: If set, only download the last ``tail`` lines of the log.
+                Useful for multi-GB logs where the full download is slow.
 
         Returns:
             A dictionary mapping job_id to log path.
@@ -4905,7 +4908,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_name=None,
                 job_id=int(job_id),
                 follow=False,
-                controller=False)
+                controller=False,
+                tail=tail)
             # With the stdin=subprocess.DEVNULL, the ctrl-c will not
             # kill the process, so we need to handle it manually here.
             if threading.current_thread() is threading.main_thread():
