@@ -1,12 +1,13 @@
 """Autostop utilities."""
 import enum
+import json
 import os
 import pickle
 import shlex
 import subprocess
 import time
 import typing
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -29,6 +30,7 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 _AUTOSTOP_CONFIG_KEY = 'autostop_config'
+_HOOKS_CONFIG_KEY = 'lifecycle_hooks'
 
 # This key-value is stored inside the 'configs' sqlite3 database, because both
 # user-issued commands (this module) and the Skylet process running the
@@ -225,6 +227,31 @@ def get_last_active_time() -> float:
     if result is not None:
         return float(result)
     return -1
+
+
+def set_hooks(hooks: Optional[List[Dict[str, Any]]]) -> None:
+    """Store the cluster's lifecycle-hooks list.
+
+    Called during launch via the AutostopCodeGen RPC. The list is
+    read by hook_executor when any teardown event fires.
+    """
+    if hooks:
+        configs.set_config(_HOOKS_CONFIG_KEY, json.dumps(hooks))
+    else:
+        # Empty payload clears the key.
+        configs.set_config(_HOOKS_CONFIG_KEY, '')
+
+
+def get_hooks() -> List[Dict[str, Any]]:
+    """Load the stored lifecycle-hooks list, or [] if never set."""
+    raw = configs.get_config(_HOOKS_CONFIG_KEY)
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError) as e:
+        logger.warning(f'Could not decode stored hooks: {e}')
+        return []
 
 
 def set_last_active_time_to_now() -> None:
