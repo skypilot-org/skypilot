@@ -257,6 +257,19 @@ class _DefaultManagedJobRunner:
     ) -> Tuple[List[Dict[str, Any]], int,
                'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
                                                                         int]]:
+        """Fetch the managed jobs table from the jobs controller.
+
+        Returns:
+            A tuple of (jobs, total, result_type, total_no_filter,
+            status_counts):
+              jobs: The paginated managed job records matching the filters.
+              total: Total jobs matching the filters (before pagination).
+              result_type: DICT when the controller returned a dict with
+                  aggregate counts, LIST for legacy flat-list payloads.
+              total_no_filter: Total jobs without any filters applied.
+              status_counts: Mapping of job status -> count across all jobs
+                  matching the filters.
+        """
         with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
             code = managed_job_utils.ManagedJobCodeGen.get_job_table(
                 skip_finished, accessible_workspaces, job_ids, workspace_match,
