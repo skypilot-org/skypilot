@@ -817,6 +817,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
+    file_mounts_blob_id: Optional[str] = None
     if _file_mounts_blob_id is not None:
         # Caller (e.g. job controller) has a blob for this dag's file mounts,
         # skip the re-upload.
