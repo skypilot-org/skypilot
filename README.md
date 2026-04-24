@@ -80,15 +80,10 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Install with uv:
+Install with uv ([also supported:](https://docs.skypilot.co/en/latest/getting-started/installation.html): pip, from source)
 ```bash
 # Choose your clouds:
 uv tool install --with pip "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
-```
-To get the latest features and fixes, use the nightly build or [install from source](https://docs.skypilot.co/en/latest/getting-started/installation.html):
-```bash
-# Choose your clouds:
-uv tool install --with pip "skypilot-nightly[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
 ```
 
 To use SkyPilot directly with your agent (Claude Code, Codex, etc.), install the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). Tell your agent:
@@ -211,7 +206,8 @@ Follow updates:
 - [Slack](http://slack.skypilot.co)
 - [X](https://twitter.com/skypilot_org)
 - [LinkedIn](https://www.linkedin.com/company/skypilot-oss/)
-- [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
+- [YouTube](https://www.youtube.com/@skypilot-org)
+- [SkyPilot Blog](https://blog.skypilot.co/)
 
 ## Questions and feedback
 We are excited to hear your feedback:

@@ -266,7 +266,8 @@ Follow updates:
 * `Slack <http://slack.skypilot.co>`_
 * `X <https://twitter.com/skypilot_org>`_
 * `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
-* `SkyPilot Blog <https://blog.skypilot.co/>`_ (`Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_)
+* `YouTube <https://www.youtube.com/@skypilot-org>`_
+* `SkyPilot Blog <https://blog.skypilot.co/>`_
 
 .. toctree::
    :hidden:
