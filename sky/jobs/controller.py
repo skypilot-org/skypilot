@@ -436,8 +436,17 @@ class JobController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id,
-            self._pool, self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            self._pool,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -1131,8 +1140,17 @@ class JobController:
             task_name, self._job_id)
 
         executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id, None,
-            self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            None,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -1870,7 +1888,7 @@ class ControllerManager:
                 # we continue to try cleaning up whatever else we can.
 
             # Clean up any files mounted from the local disk, such as two-hop
-            # file mounts for non-consolidatoin mode.
+            # file mounts for non-consolidation mode.
             # For consolidation mode, the file_mounts are shared across
             # workloads and the lifecycle will be managed by API server.
             if not managed_job_utils.is_consolidation_mode():

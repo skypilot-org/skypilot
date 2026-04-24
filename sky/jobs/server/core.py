@@ -200,15 +200,13 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
                     'file_mounts only.')
 
             if consolidation:
-                # For consolidation mode, the referenced blob is already
-                # present in the host, skip two hop.
-                controller_utils.translate_local_file_mounts_for_consolidation(
-                    task_)
-            else:
-                # Merge file mounts from all tasks.
-                local_to_controller_file_mounts.update(
-                    controller_utils.translate_local_file_mounts_to_two_hop(
-                        task_))
+                # Controller and job cluster share the API server host, so
+                # there is no cluster hop and the filemounts are already
+                # resolved on this host, skip two hop.
+                continue
+
+            local_to_controller_file_mounts.update(
+                controller_utils.translate_local_file_mounts_to_two_hop(task_))
 
     return local_to_controller_file_mounts
 

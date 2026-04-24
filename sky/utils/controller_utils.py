@@ -955,25 +955,6 @@ def translate_local_file_mounts_to_two_hop(
     return first_hop_file_mounts
 
 
-def translate_local_file_mounts_for_consolidation(
-        task: 'task_lib.Task') -> None:
-    """Prepare a task's local file mounts for consolidation-mode launch."""
-    file_mounts = dict(task.file_mounts or {})
-    if task.workdir is not None and isinstance(task.workdir, str):
-        file_mounts[constants.SKY_REMOTE_WORKDIR] = task.workdir
-        task.workdir = None
-
-    for job_cluster_path, local_path in file_mounts.items():
-        if data_utils.is_cloud_store_url(
-                local_path) or data_utils.is_cloud_store_url(job_cluster_path):
-            raise exceptions.NotSupportedError(
-                'Cloud-based file_mounts are specified, but no cloud storage '
-                'is available. Please specify local file_mounts only.')
-
-    if file_mounts:
-        task.set_file_mounts(file_mounts)
-
-
 # (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   task_type: str) -> None:
