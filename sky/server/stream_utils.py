@@ -124,8 +124,8 @@ async def wait_for_request_to_start(
         elif plain_logs and waiting_msg != last_waiting_msg:
             # Only log when waiting message changes.
             last_waiting_msg = waiting_msg
-            # Use smaller padding (1024 bytes) to force browser rendering
-            yield f'{waiting_msg}' + ' ' * 4096 + '\n'
+            # Padding forces browser rendering of the streamed chunk.
+            yield waiting_msg + ' ' * 4096 + '\n'
         # Sleep shortly to avoid storming the DB and CPU and allow other
         # coroutines to run.
         # TODO(aylei): we should use a better mechanism to avoid busy
@@ -134,6 +134,9 @@ async def wait_for_request_to_start(
         await asyncio.sleep(backoff.current_backoff())
         status_with_msg = await requests_lib.get_request_status_async(
             request_id, include_msg=True)
+        if status_with_msg is None:
+            # Request record vanished (e.g. deleted while polling).
+            break
         req_status = status_with_msg.status
         req_msg = status_with_msg.status_msg
         if not follow:
