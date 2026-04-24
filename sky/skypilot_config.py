@@ -859,18 +859,23 @@ def get_effective_queue_name(
     scope_configs.append(config_utils.Config(_get_loaded_config()))
 
     for scope_config in scope_configs:
+        if override_configs is not None:
+            # Merge overrides once per scope so the per-key lookups below
+            # don't re-run `_recursive_update` for every spelling.
+            scope_config = config_utils.Config(
+                scope_config.get_nested(keys=(),
+                                        default_value={},
+                                        override_configs=override_configs))
         if region is not None:
             for queue_keys in _QUEUE_NAME_KEYS:
                 value = scope_config.get_nested(
                     keys=(cloud, 'context_configs', region) + queue_keys,
-                    default_value=None,
-                    override_configs=override_configs)
+                    default_value=None)
                 if value is not None:
                     return value
         for queue_keys in _QUEUE_NAME_KEYS:
             value = scope_config.get_nested(keys=(cloud,) + queue_keys,
-                                            default_value=None,
-                                            override_configs=override_configs)
+                                            default_value=None)
             if value is not None:
                 return value
     return None
