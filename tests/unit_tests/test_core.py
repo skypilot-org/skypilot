@@ -439,13 +439,14 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
     mock_resource.cluster_config_overrides = None
     task.resources = {mock_resource}
 
-    # Capture task.num_nodes at the moment check_resources_fit_cluster is
-    # called. During resize, it must see handle.launched_nodes (2), not the
-    # new target 5, so only hardware (not node count) is validated.
-    observed_num_nodes = []
+    # Capture the task and kwargs passed to check_resources_fit_cluster.
+    # During resize, task.num_nodes must still be the user's target (5 — so
+    # any validation error reports the real request, not the override), and
+    # skip_num_nodes_check=True must be passed so num_nodes is not compared.
+    observed = []
 
-    def _capture(_handle, _task, **_kwargs):
-        observed_num_nodes.append(_task.num_nodes)
+    def _capture(_handle, _task, **kwargs):
+        observed.append((_task.num_nodes, kwargs))
 
     mock_check_fit.side_effect = _capture
 
@@ -460,11 +461,15 @@ def test_check_existing_cluster_resize_uses_task_num_nodes(
 
     assert config.num_nodes == 5, (f'Expected task.num_nodes=5 but got '
                                    f'{config.num_nodes}')
-    assert observed_num_nodes == [
-        2
-    ], (f'During resize, check_resources_fit_cluster should see '
-        f'num_nodes=handle.launched_nodes (2), got {observed_num_nodes}')
-    # Original task.num_nodes must be restored after the check.
+    assert len(observed) == 1
+    seen_num_nodes, seen_kwargs = observed[0]
+    assert seen_num_nodes == 5, (
+        f'During resize, check_resources_fit_cluster must still see the '
+        f'user-requested num_nodes (5) so error messages are accurate, '
+        f'got {seen_num_nodes}')
+    assert seen_kwargs.get('skip_num_nodes_check') is True, (
+        f'check_resources_fit_cluster must be called with '
+        f'skip_num_nodes_check=True during resize, got kwargs={seen_kwargs}')
     assert task.num_nodes == 5
 
 

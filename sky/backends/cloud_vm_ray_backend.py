@@ -2969,6 +2969,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         check_ports: bool = False,
+        skip_num_nodes_check: bool = False,
     ) -> resources_lib.Resources:
         """Check if resources requested by the task fit the cluster.
 
@@ -2976,6 +2977,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster.
         If multiple resources are specified, this checking will pass when
         at least one resource fits the cluster.
+
+        Args:
+            handle: Existing cluster handle.
+            task: Task whose resources are validated.
+            check_ports: If True, also check that requested ports fit.
+            skip_num_nodes_check: If True, only validate hardware (instance
+                type, accelerators, region, zone, etc.) and ignore
+                ``task.num_nodes`` vs ``handle.launched_nodes``. Used during
+                resize, where num_nodes is allowed to differ by design.
+                Error messages still show the original ``task.num_nodes`` so
+                users see their actual request.
 
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
@@ -2998,11 +3010,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
         requested_resource_list = []
+        # For the validation comparison, optionally treat the node count as
+        # matching (resize) while still reporting the user's real num_nodes
+        # in any error message below.
+        fit_num_nodes = (handle.launched_nodes
+                         if skip_num_nodes_check else task.num_nodes)
         for resource in task.resources:
-            if (task.num_nodes <= handle.launched_nodes and
+            if (fit_num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
-                        requested_num_nodes=task.num_nodes,
+                        requested_num_nodes=fit_num_nodes,
                         check_ports=check_ports)):
                 valid_resource = resource
                 break
@@ -5620,19 +5637,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Scale-up or no-op: nothing to do pre-provision.
             if requested_nodes > current_nodes:
                 delta = requested_nodes - current_nodes
-                sky_logging.print(
-                    f'Resizing cluster {cluster_name!r} from '
-                    f'{current_nodes} to {requested_nodes} node(s) '
-                    f'(+{delta} worker(s)).')
+                logger.info(f'Resizing cluster {cluster_name!r} from '
+                            f'{current_nodes} to {requested_nodes} node(s) '
+                            f'(+{delta} worker(s)).')
             else:
-                sky_logging.print(f'Cluster {cluster_name!r} already has '
-                                  f'{current_nodes} node(s). Nothing to do.')
+                logger.info(f'Cluster {cluster_name!r} already has '
+                            f'{current_nodes} node(s). Nothing to do.')
             return
 
         to_remove = current_nodes - requested_nodes
-        sky_logging.print(
-            f'Resizing cluster {cluster_name!r} from {current_nodes} to '
-            f'{requested_nodes} node(s) (-{to_remove} worker(s)).')
+        logger.info(f'Resizing cluster {cluster_name!r} from {current_nodes} '
+                    f'to {requested_nodes} node(s) (-{to_remove} worker(s)).')
 
         # Scale-down requires SSH to the head node to verify no running jobs.
         # Reject early if the cluster is not UP rather than letting
@@ -5767,17 +5782,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Resize mode: allow num_nodes to change, but still validate
                 # non-node hardware (instance type, accelerators, region,
                 # zone, ports, etc.) matches the existing cluster to prevent
-                # ending up with a mixed-resource cluster. We do this by
-                # temporarily overriding task.num_nodes to the current
-                # cluster size before calling check_resources_fit_cluster;
-                # this skips the num_nodes fit check while preserving all
-                # other resource checks.
-                original_num_nodes = task.num_nodes
-                try:
-                    task.num_nodes = handle.launched_nodes
-                    self.check_resources_fit_cluster(handle, task)
-                finally:
-                    task.num_nodes = original_num_nodes
+                # ending up with a mixed-resource cluster.
+                self.check_resources_fit_cluster(handle,
+                                                 task,
+                                                 skip_num_nodes_check=True)
                 # Then run resize-specific pre-provision logic (e.g. verify
                 # no running jobs and terminate workers for scale-down).
                 self._handle_resize_pre_provision(
