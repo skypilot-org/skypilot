@@ -981,6 +981,7 @@ def write_cluster_config(
             default_value=None)
         if auto_mounts_config:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
+            attached_auto_mount_volumes: Set[str] = set()
             for entry in auto_mounts_config:
                 volume_name = entry['volume_name']
                 mount_paths = entry.get('mount_paths', [])
@@ -1029,6 +1030,22 @@ def write_cluster_config(
                         source='auto_mounts config',
                         volume_desc=f'auto-mount volume {volume_name!r}')
                     volume_mount_vars.append(vol_info)
+                    attached_auto_mount_volumes.add(volume_name)
+            # Mirror the explicit `volume_mounts` path (see
+            # `VolumeMount.pre_mount`): record the attachment timestamp and
+            # IN_USE status so the Volumes dashboard surfaces the "Last
+            # Use" column correctly for auto-mounted volumes. Run this
+            # after the loop so that a conflict raised by
+            # `conflict_checker.check` leaves volume metadata untouched.
+            # Skip on dryrun so `sky launch --dryrun` does not mutate
+            # volume metadata.
+            if not dryrun and attached_auto_mount_volumes:
+                now = int(time.time())
+                for vol_name in attached_auto_mount_volumes:
+                    global_user_state.update_volume(
+                        vol_name,
+                        last_attached_at=now,
+                        status=status_lib.VolumeStatus.IN_USE)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),

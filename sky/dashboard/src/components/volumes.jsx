@@ -21,7 +21,7 @@ import {
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { RotateCwIcon, Trash2Icon } from 'lucide-react';
+import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import {
@@ -38,7 +38,7 @@ import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { usePluginComponents } from '@/plugins/PluginProvider';
+import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { trackVolumeAction } from '@/lib/analytics';
@@ -54,9 +54,13 @@ export function Volumes() {
   const [volumeToDelete, setVolumeToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showPurgeUI, setShowPurgeUI] = useState(false);
+  const [purgeConfirmed, setPurgeConfirmed] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
   const [activeTab, setActiveTab] = useState('volumes');
+  const [volumesData, setVolumesData] = useState([]);
   const pluginTabs = usePluginComponents('volumes.tabs');
 
   const handleTabChange = useCallback(
@@ -98,6 +102,8 @@ export function Volumes() {
     setVolumeToDelete(volume);
     setShowDeleteConfirmDialog(true);
     setDeleteError(null);
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
   };
 
   const handleDeleteVolumeConfirm = async () => {
@@ -113,6 +119,8 @@ export function Volumes() {
       }
       setShowDeleteConfirmDialog(false);
       setVolumeToDelete(null);
+      setShowPurgeUI(false);
+      setPurgeConfirmed(false);
       handleRefresh();
     } catch (error) {
       setDeleteError(error);
@@ -121,10 +129,40 @@ export function Volumes() {
     }
   };
 
+  const handlePurgeVolumeConfirm = async () => {
+    if (!volumeToDelete) return;
+
+    setPurgeLoading(true);
+    setDeleteError(null);
+
+    try {
+      const result = await deleteVolume(volumeToDelete.name, { purge: true });
+      if (!result.success) {
+        throw new Error(result.msg);
+      }
+      setShowDeleteConfirmDialog(false);
+      setVolumeToDelete(null);
+      setShowPurgeUI(false);
+      setPurgeConfirmed(false);
+      handleRefresh();
+    } catch (error) {
+      setDeleteError(error);
+    } finally {
+      setPurgeLoading(false);
+    }
+  };
+
   const handleCancelDelete = () => {
     setShowDeleteConfirmDialog(false);
     setVolumeToDelete(null);
     setDeleteError(null);
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
+  };
+
+  const handleBackFromPurge = () => {
+    setShowPurgeUI(false);
+    setPurgeConfirmed(false);
   };
 
   useEffect(() => {
@@ -195,6 +233,14 @@ export function Volumes() {
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
               {!isMobile && <span>Refresh</span>}
             </button>
+            <PluginSlot
+              name="volumes.header-actions"
+              context={{
+                onVolumeChange: handleRefresh,
+                volumes: volumesData,
+              }}
+              wrapperClassName="contents"
+            />
           </div>
         )}
       </div>
@@ -207,6 +253,7 @@ export function Volumes() {
             setLoading={setLoading}
             refreshDataRef={refreshDataRef}
             onDeleteVolume={handleDeleteVolumeClick}
+            onDataChange={setVolumesData}
             preloadingComplete={preloadingComplete}
           />
 
@@ -217,41 +264,189 @@ export function Volumes() {
           >
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Delete Volume</DialogTitle>
+                <DialogTitle>
+                  {showPurgeUI ? 'Force remove volume' : 'Delete Volume'}
+                </DialogTitle>
                 <DialogDescription>
-                  Are you sure you want to delete volume &quot;
-                  {volumeToDelete?.name || 'this volume'}&quot;? This action
-                  cannot be undone.
+                  {showPurgeUI ? (
+                    <>
+                      Remove &quot;
+                      {volumeToDelete?.name || 'this volume'}&quot; from
+                      SkyPilot records. The underlying volume will not be
+                      deleted.
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to delete volume &quot;
+                      {volumeToDelete?.name || 'this volume'}&quot;? This action
+                      cannot be undone.
+                    </>
+                  )}
                 </DialogDescription>
               </DialogHeader>
 
-              <ErrorDisplay
-                error={deleteError}
-                title="Deletion Failed"
-                onDismiss={() => setDeleteError(null)}
-              />
+              {!showPurgeUI && volumeToDelete?.config?.use_existing && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-sky-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-sky-900">
+                    This volume was imported from an existing{' '}
+                    {volumeToDelete?.type === 'k8s-pvc' ? 'PVC' : 'resource'}.
+                    Deleting it only removes it from SkyPilot
+                    {volumeToDelete?.type === 'k8s-pvc' &&
+                    volumeToDelete?.name_on_cloud ? (
+                      <>
+                        ; the underlying PVC{' '}
+                        <code className="bg-sky-100 px-1 rounded">
+                          {volumeToDelete.name_on_cloud}
+                        </code>
+                        {volumeToDelete.namespace &&
+                          volumeToDelete.namespace !== '-' && (
+                            <>
+                              {' '}
+                              in namespace{' '}
+                              <code className="bg-sky-100 px-1 rounded">
+                                {volumeToDelete.namespace}
+                              </code>
+                            </>
+                          )}{' '}
+                        will be left intact.
+                      </>
+                    ) : (
+                      <>; the underlying resource will be left intact.</>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!showPurgeUI && (
+                <ErrorDisplay
+                  error={deleteError}
+                  title="Deletion Failed"
+                  onDismiss={() => setDeleteError(null)}
+                />
+              )}
+
+              {showPurgeUI && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 my-3 flex items-start gap-2">
+                  <AlertTriangleIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800 space-y-2">
+                    <p className="m-0">
+                      Removing the SkyPilot entry means this volume will no
+                      longer appear here, but{' '}
+                      {volumeToDelete?.type === 'k8s-pvc' &&
+                      volumeToDelete?.name_on_cloud ? (
+                        <>
+                          the Kubernetes PVC{' '}
+                          <code className="bg-amber-100 px-1 rounded">
+                            {volumeToDelete.name_on_cloud}
+                          </code>
+                          {volumeToDelete.namespace &&
+                            volumeToDelete.namespace !== '-' && (
+                              <>
+                                {' '}
+                                in namespace{' '}
+                                <code className="bg-amber-100 px-1 rounded">
+                                  {volumeToDelete.namespace}
+                                </code>
+                              </>
+                            )}{' '}
+                          may still exist and continue consuming resources.
+                          Delete it manually with{' '}
+                          <code className="bg-amber-100 px-1 rounded">
+                            kubectl delete pvc
+                            {volumeToDelete.namespace &&
+                            volumeToDelete.namespace !== '-'
+                              ? ` -n ${volumeToDelete.namespace}`
+                              : ''}{' '}
+                            {volumeToDelete.name_on_cloud}
+                          </code>{' '}
+                          once it&apos;s no longer in use.
+                        </>
+                      ) : (
+                        <>
+                          the underlying cloud resource may still exist and
+                          continue consuming resources. Clean it up manually
+                          once it&apos;s no longer in use.
+                        </>
+                      )}
+                    </p>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={purgeConfirmed}
+                        onChange={(e) => setPurgeConfirmed(e.target.checked)}
+                        disabled={purgeLoading}
+                        className="cursor-pointer"
+                      />
+                      <span>
+                        I understand force removal may not delete the underlying
+                        volume
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
 
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={handleCancelDelete}
-                  disabled={deleteLoading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDeleteVolumeConfirm}
-                  disabled={deleteLoading}
-                >
-                  {deleteLoading ? 'Deleting...' : 'Delete'}
-                </Button>
+                {!showPurgeUI && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={handleCancelDelete}
+                      disabled={deleteLoading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDeleteVolumeConfirm}
+                      disabled={deleteLoading}
+                    >
+                      {deleteLoading
+                        ? 'Deleting...'
+                        : deleteError
+                          ? 'Retry Delete'
+                          : 'Delete'}
+                    </Button>
+                    {deleteError && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowPurgeUI(true)}
+                        disabled={deleteLoading}
+                        className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                      >
+                        Force remove
+                      </Button>
+                    )}
+                  </>
+                )}
+                {showPurgeUI && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={handleBackFromPurge}
+                      disabled={purgeLoading}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      onClick={handlePurgeVolumeConfirm}
+                      disabled={!purgeConfirmed || purgeLoading}
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                    >
+                      {purgeLoading ? 'Removing...' : 'Force Remove'}
+                    </Button>
+                  </>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </>
       ) : (
-        <PluginSlot name="volumes.tab-content" context={{ activeTab }} />
+        <PluginSlot
+          name="volumes.tab-content"
+          context={{ activeTab, onTabChange: handleTabChange }}
+        />
       )}
     </>
   );
@@ -262,6 +457,7 @@ function VolumesTable({
   setLoading,
   refreshDataRef,
   onDeleteVolume,
+  onDataChange,
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
@@ -280,15 +476,21 @@ function VolumesTable({
     try {
       const volumesData = await dashboardCache.get(getVolumes);
       setData(volumesData);
+      if (onDataChange) {
+        onDataChange(volumesData);
+      }
     } catch (error) {
       console.error('Failed to fetch volumes:', error);
       setData([]);
+      if (onDataChange) {
+        onDataChange([]);
+      }
     } finally {
       setLoading(false);
       setLocalLoading(false);
       setIsInitialLoad(false);
     }
-  }, [setLoading]);
+  }, [setLoading, onDataChange]);
 
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
@@ -383,6 +585,152 @@ function VolumesTable({
     }
   };
 
+  const pluginColumns = useTableColumns('volumes');
+
+  const sortableHeader = (label, sortKey) => (
+    <TableHead
+      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+      onClick={() => requestSort(sortKey)}
+    >
+      {label}
+      {getSortDirection(sortKey)}
+    </TableHead>
+  );
+
+  const baseColumns = [
+    {
+      id: 'name',
+      order: 0,
+      renderHeader: () => sortableHeader('Name', 'name'),
+      renderCell: (volume) => (
+        <TableCell>
+          <Link
+            href={`/volumes/${encodeURIComponent(volume.name)}`}
+            className="text-blue-600"
+          >
+            {volume.name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'infra',
+      order: 10,
+      renderHeader: () => sortableHeader('Infra', 'infra'),
+      renderCell: (volume) => <TableCell>{volume.infra || 'N/A'}</TableCell>,
+    },
+    {
+      id: 'status',
+      order: 20,
+      renderHeader: () => sortableHeader('Status', 'status'),
+      renderCell: (volume) => (
+        <TableCell>
+          <StatusBadge
+            status={volume.status}
+            statusTooltip={volume.error_message || volume.status}
+          />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'size',
+      order: 30,
+      renderHeader: () => sortableHeader('Size', 'size'),
+      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+    },
+    {
+      id: 'user_name',
+      order: 40,
+      renderHeader: () => sortableHeader('User', 'user_name'),
+      renderCell: (volume) => (
+        <TableCell>{volume.user_name || 'N/A'}</TableCell>
+      ),
+    },
+    {
+      id: 'last_attached_at',
+      order: 50,
+      renderHeader: () => sortableHeader('Last Use', 'last_attached_at'),
+      renderCell: (volume) => (
+        <TableCell>{formatTimestamp(volume.last_attached_at)}</TableCell>
+      ),
+    },
+    {
+      id: 'type',
+      order: 60,
+      renderHeader: () => sortableHeader('Type', 'type'),
+      renderCell: (volume) => <TableCell>{volume.type || 'N/A'}</TableCell>,
+    },
+    {
+      id: 'usedby_clusters',
+      order: 70,
+      renderHeader: () => sortableHeader('Used By', 'usedby_clusters'),
+      renderCell: (volume) => (
+        <TableCell>
+          <UsedByCell
+            clusters={volume.usedby_clusters}
+            pods={volume.usedby_pods}
+          />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'actions',
+      order: 1000,
+      renderHeader: () => <TableHead>Actions</TableHead>,
+      renderCell: (volume) => (
+        <TableCell>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDeleteVolume(volume)}
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            title="Delete volume"
+          >
+            <Trash2Icon className="w-4 h-4" />
+          </Button>
+        </TableCell>
+      ),
+    },
+  ];
+
+  const pluginColumnDefs = pluginColumns.map((col) => ({
+    id: col.id,
+    order: col.header.order,
+    isPlugin: true,
+    renderHeader: () => {
+      const baseClasses = col.header.sortKey
+        ? 'sortable whitespace-nowrap cursor-pointer hover:bg-gray-50'
+        : 'whitespace-nowrap';
+      const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+      return (
+        <TableHead
+          className={className}
+          onClick={
+            col.header.sortKey
+              ? () => requestSort(col.header.sortKey)
+              : undefined
+          }
+        >
+          {col.header.label}
+          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+        </TableHead>
+      );
+    },
+    renderCell: (volume) => {
+      const cellContent = col.cell.render(volume, { item: volume });
+      return (
+        <TableCell className={col.cell.className || ''}>
+          {cellContent}
+        </TableCell>
+      );
+    },
+  }));
+
+  const visibleColumns = [...baseColumns, ...pluginColumnDefs].sort(
+    (a, b) => a.order - b.order
+  );
+  const totalColSpan = visibleColumns.length;
+
   return (
     <div>
       <Card>
@@ -390,62 +738,16 @@ function VolumesTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('size')}
-                >
-                  Size{getSortDirection('size')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('user_name')}
-                >
-                  User{getSortDirection('user_name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('last_attached_at')}
-                >
-                  Last Use{getSortDirection('last_attached_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('type')}
-                >
-                  Type{getSortDirection('type')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('usedby_clusters')}
-                >
-                  Used By{getSortDirection('usedby_clusters')}
-                </TableHead>
-                <TableHead>Actions</TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
-                    colSpan={11}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -457,50 +759,17 @@ function VolumesTable({
               ) : paginatedData.length > 0 ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
-                    <TableCell>
-                      <Link
-                        href={`/volumes/${encodeURIComponent(volume.name)}`}
-                        className="text-blue-600"
-                      >
-                        {volume.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{volume.infra || 'N/A'}</TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        status={volume.status}
-                        statusTooltip={volume.error_message || volume.status}
-                      />
-                    </TableCell>
-                    <TableCell>{formatSize(volume.size)}</TableCell>
-                    <TableCell>{volume.user_name || 'N/A'}</TableCell>
-                    <TableCell>
-                      {formatTimestamp(volume.last_attached_at)}
-                    </TableCell>
-                    <TableCell>{volume.type || 'N/A'}</TableCell>
-                    <TableCell>
-                      <UsedByCell
-                        clusters={volume.usedby_clusters}
-                        pods={volume.usedby_pods}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onDeleteVolume(volume)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        title="Delete volume"
-                      >
-                        <Trash2Icon className="w-4 h-4" />
-                      </Button>
-                    </TableCell>
+                    {visibleColumns.map((col) =>
+                      React.cloneElement(col.renderCell(volume), {
+                        key: col.id,
+                      })
+                    )}
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={11}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     No volumes found
@@ -693,5 +962,6 @@ VolumesTable.propTypes = {
     current: PropTypes.func,
   }).isRequired,
   onDeleteVolume: PropTypes.func.isRequired,
+  onDataChange: PropTypes.func,
   preloadingComplete: PropTypes.bool.isRequired,
 };

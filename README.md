@@ -25,7 +25,7 @@
 </p>
 
 <h3 align="center">
-    Run AI on Any Infrastructure
+    Manage all your AI compute
 </h3>
 
 <div align="center">
@@ -73,10 +73,10 @@ SkyPilot **unifies multiple clusters, clouds, and hardware**:
 - [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
 - [Team deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html) and resource sharing
 
-SkyPilot **cuts your cloud costs & maximizes GPU availability**:
+SkyPilot **maximizes GPU fleet utilization**:
 * Autostop: automatic cleanup of idle resources
-* [Spot instance support](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#running-on-spot-instances): 3-6x cost savings, with preemption auto-recovery
-* Intelligent scheduling: automatically run on the cheapest & most available infra
+* Binpacking: workload binpacking on shared clusters
+* Intelligent scheduler: automatically schedule on the most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 

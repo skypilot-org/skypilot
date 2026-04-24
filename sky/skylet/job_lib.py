@@ -1223,7 +1223,8 @@ class JobLibCodeGen:
                                     metadata_jsons: List[str],
                                     is_primary_in_job_groups: List[bool],
                                     execution: str,
-                                    num_jobs: int = 1) -> str:
+                                    num_jobs: int = 1,
+                                    is_batch: bool = False) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
         pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
         user_hash_str = f'{user_hash!r}' if user_hash is not None else 'None'
@@ -1236,6 +1237,36 @@ class JobLibCodeGen:
                               ']')
         is_primary_in_job_groups_str = ('[' + ','.join(
             str(is_primary) for is_primary in is_primary_in_job_groups) + ']')
+        # Build the set_job_info_without_job_id call, gating the is_batch
+        # parameter behind a SKYLET_VERSION check so that old controllers
+        # (< 35) that don't have the parameter still work for non-batch
+        # jobs, and batch jobs get a clear error instead of silently
+        # succeeding as an empty task.
+        base_kwargs = (f'name={name!r},'
+                       f'workspace={workspace!r},'
+                       f'entrypoint={entrypoint!r},'
+                       f'pool={pool_str},'
+                       f'pool_hash={pool_hash_str},'
+                       f'user_hash={user_hash_str},'
+                       f'execution={execution!r}')
+        if is_batch:
+            set_job_info_code = (
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
+                '\n    raise RuntimeError('
+                '"The jobs controller does not support batch jobs. '
+                'Please update it with: sky jobs controller up --yes")'
+                '\n  job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs},'
+                f'is_batch={is_batch!r})')
+        else:
+            set_job_info_code = (
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
+                '\n    job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs})'
+                '\n  else:'
+                '\n    job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs},'
+                f'is_batch={is_batch!r})')
         code = [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',
@@ -1245,15 +1276,7 @@ class JobLibCodeGen:
             f'\nmetadata_jsons = {metadata_jsons_str}',
             f'\nis_primary_in_job_groups = {is_primary_in_job_groups_str}',
             '\njob_ids = []',
-            '\nfor _ in range(num_jobs):'
-            '\n  job_id = managed_job_state.set_job_info_without_job_id('
-            f'name={name!r},'
-            f'workspace={workspace!r},'
-            f'entrypoint={entrypoint!r},'
-            f'pool={pool_str},'
-            f'pool_hash={pool_hash_str},'
-            f'user_hash={user_hash_str},'
-            f'execution={execution!r})',
+            '\nfor _ in range(num_jobs):' + set_job_info_code,
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
             '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long

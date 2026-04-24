@@ -117,9 +117,18 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 
 def _delete_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
-    """Deletes a PVC volume."""
+    """Deletes a PVC volume.
+
+    If the volume was registered with ``use_existing=True``, the underlying
+    PVC is left intact (SkyPilot did not create it, and another SkyPilot
+    instance may also have it registered).
+    """
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
+    if config.config.get('use_existing'):
+        logger.info(f'Leaving PVC {pvc_name} in namespace {namespace} intact '
+                    f'(use_existing=True)')
+        return config
     kubernetes_utils.delete_k8s_resource_with_retry(
         delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
             context).delete_namespaced_persistent_volume_claim(

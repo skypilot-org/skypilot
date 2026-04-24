@@ -1162,7 +1162,7 @@ def cancel_managed_jobs(
     (including plugins registering a custom ``ManagedJobRunner``) invoke
     this function; the codegen path
     (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
-    name on controllers running ``MANAGED_JOBS_VERSION >= 18``.
+    name on controllers running ``MANAGED_JOBS_VERSION >= 19``.
     """
     if all_users or all or job_ids:
         return cancel_jobs_by_id(
@@ -1429,6 +1429,16 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+        # Batch coordinator jobs run inline on the controller — no
+        # separate cluster is provisioned. Stream controller logs instead
+        # of trying to find a worker cluster handle.
+        if managed_job_state.is_batch_job(job_id):
+            return stream_logs(job_id,
+                               job_name=None,
+                               controller=True,
+                               follow=follow,
+                               tail=tail)
+
         backend = backends.CloudVmRayBackend()
         latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -2334,6 +2344,10 @@ def format_job_table(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
+        Jobs that appear on multiple workers (e.g. batch coordinators
+        that orchestrate across the whole pool) are excluded — they
+        should not display a single ``(worker=N)`` annotation.
+
         Args:
             pool_status: List of pool status dictionaries with replica_info.
 
@@ -2341,6 +2355,7 @@ def format_job_table(
             Dictionary mapping job_id to replica_id (worker ID).
         """
         job_to_worker: Dict[int, int] = {}
+        multi_worker_jobs: Set[int] = set()
         if pool_status is None:
             return job_to_worker
         for pool in pool_status:
@@ -2349,7 +2364,11 @@ def format_job_table(
                 used_by = replica.get('used_by')
                 if used_by is not None:
                     for job_id in used_by:
+                        if job_id in job_to_worker:
+                            multi_worker_jobs.add(job_id)
                         job_to_worker[job_id] = replica.get('replica_id')
+        for job_id in multi_worker_jobs:
+            del job_to_worker[job_id]
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
@@ -2373,6 +2392,23 @@ def format_job_table(
         if show_all:
             user_cols.append('USER_ID')
 
+    def _fmt_batch_progress(task_or_tasks) -> str:
+        """Format batch progress as 'completed/total' or '-' if not a batch."""
+        if isinstance(task_or_tasks, list):
+            t = task_or_tasks[0]
+        else:
+            t = task_or_tasks
+        total = t.get('batch_total_batches')
+        if not total:
+            return '-'
+        status = t.get('status')
+        if (isinstance(status, managed_job_state.ManagedJobStatus) and
+                status == managed_job_state.ManagedJobStatus.WINDING_DOWN):
+            return 'Winding down'
+        completed = t.get('batch_completed_batches') or 0
+        pct = int(completed * 100 / total)
+        return f'{pct}% {completed}/{total}'
+
     columns = [
         'ID',
         'TASK',
@@ -2385,6 +2421,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'PROGRESS',
         'POOL',
     ]
     if show_all:
@@ -2516,6 +2553,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                _fmt_batch_progress(job_tasks),
                 pool,
             ]
             if show_all:
@@ -2579,6 +2617,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                _fmt_batch_progress(task),
                 pool,
             ]
             if show_all:
@@ -2783,6 +2822,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out batch fields for older controllers (< 18)
+        _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
+        if managed_job_version < 18 and _fields is not None:
+            _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -2857,10 +2900,10 @@ class ManagedJobCodeGen:
     ) -> str:
         """Unified cancel codegen.
 
-        On controllers running ``MANAGED_JOBS_VERSION >= 18``, emits a
+        On controllers running ``MANAGED_JOBS_VERSION >= 19``, emits a
         single call to ``utils.cancel_managed_jobs`` — the one dispatch
         function that direct callers also use. On older controllers
-        (``< 18``) that don't have the dispatcher, falls back to a
+        (``< 19``) that don't have the dispatcher, falls back to a
         targeted call to the underlying ``utils.cancel_jobs_by_id`` /
         ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
         client-side based on the selector args.
@@ -2869,13 +2912,13 @@ class ManagedJobCodeGen:
         user_hash = common_utils.get_user_hash() if all else None
 
         # Client-side pick of which legacy variant to emit for controllers
-        # running ``managed_job_version < 18``. Each variant preserves the
+        # running ``managed_job_version < 19``. Each variant preserves the
         # per-version gating that its dedicated codegen method used before
         # we consolidated everything into ``cancel_managed_jobs``: older
         # controllers predate args like ``current_workspace``/``graceful``
         # and must not receive them. Lines are at column 0 here; the final
         # assembly indents them by 4 spaces so they nest under
-        # ``if managed_job_version < 18:`` in the generated code.
+        # ``if managed_job_version < 19:`` in the generated code.
         if all_users or all or job_ids:
             legacy_call_lines = [
                 'if managed_job_version < 2:',
@@ -2921,7 +2964,7 @@ class ManagedJobCodeGen:
             ]
 
         legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
-        code = (f'if managed_job_version < 18:\n'
+        code = (f'if managed_job_version < 19:\n'
                 f'{legacy_block}\n'
                 f'else:\n'
                 f'    msg = utils.cancel_managed_jobs(\n'

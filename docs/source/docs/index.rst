@@ -1,5 +1,7 @@
-SkyPilot: Run AI on Any Infrastructure
-======================================
+.. rst-class:: hero-title
+
+SkyPilot: Manage all your AI compute
+=========================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
   :width: 50%
@@ -70,11 +72,11 @@ SkyPilot **unifies multiple clusters, clouds, and hardware**:
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
 - :ref:`Team deployment <sky-api-server>` and resource sharing
 
-SkyPilot **cuts your cloud costs & maximizes GPU availability**:
+SkyPilot **maximizes GPU fleet utilization**:
 
 * Autostop: automatic cleanup of idle resources
-* :ref:`Spot instance support <spot-jobs>`: 3-6x cost savings, with preemption auto-recovery
-* Intelligent scheduling: automatically run on the cheapest & most available infra
+* Binpacking: workload binpacking on shared clusters
+* Intelligent scheduler: automatically schedule on the most available infra
 
 .. raw:: html
 
@@ -227,21 +229,21 @@ Getting started
 
 SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and clusters.
 
-Can I use SkyPilot on Kubernetes?
-----------------------------------
+Benefits of SkyPilot on Kubernetes
+-----------------------------------
 
-Yes. SkyPilot makes Kubernetes easy for AI teams via AI-native optimizations.
+SkyPilot makes Kubernetes more AI-native.
 
 It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
 
 - AI-friendly interface to launch jobs and deployments
 - Much simplified interactive dev for K8s (SSH / sync code / connect IDE to pods)
 
-...and **optimizing GPU costs, utilization, and scaling**:
+...and **optimizing GPU scheduling, utilization, and scaling**:
 
 - Advanced scheduling: Gang scheduling, multi-node jobs, and queueing
-- Multi-cluster support: One entrypoint to use compute across one or many clusters
-- Multi-cloud bursting: Get global GPU capacity without pre-provisioning clusters
+- Multi-cluster support: Bring all your clusters under one control plane
+- Multi-cloud support: One consistent interface to manage many providers
 
 See :ref:`SkyPilot vs Vanilla Kubernetes <sky-compare>` and this `blog post <https://blog.skypilot.co/ai-on-kubernetes/>`_ for more details.
 
@@ -265,14 +267,6 @@ Follow updates:
 * `X / Twitter <https://twitter.com/skypilot_org>`_
 * `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
 * `SkyPilot Blog <https://blog.skypilot.co/>`_ (`Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_)
-
-Read the research:
-
-* `SkyPilot paper <https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf>`_ and `talk <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_ (NSDI 2023)
-* `Sky Computing whitepaper <https://arxiv.org/abs/2205.07147>`_
-* `Sky Computing vision paper <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ (HotOS 2021)
-* `SkyServe: AI serving across regions and clouds <https://arxiv.org/pdf/2411.01438>`_ (EuroSys 2025)
-* `Managed jobs spot instance policy <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`_ (NSDI 2024)
 
 .. toctree::
    :hidden:

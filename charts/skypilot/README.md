@@ -5,6 +5,6 @@
 [![Join Slack](https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack)](http://slack.skypilot.co)
 [![Downloads](https://img.shields.io/pypi/dm/skypilot)](https://github.com/skypilot-org/skypilot/releases)
 
-## Run AI on Any Infra — Unified, Faster, Cheaper
+## Manage All Your AI Compute — Unified, Faster, Cheaper
 
 ### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)

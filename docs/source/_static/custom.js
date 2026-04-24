@@ -72,10 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const mdUrl = pagePath + '.md';
 
     // SVG icons.
-    const copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    const arrowIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
-    const chevronIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
-    const checkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    const copyIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const arrowIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
+    const chevronIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    const checkIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
     // Build the split button widget.
     const wrapper = document.createElement('div');
@@ -90,9 +90,14 @@ document.addEventListener('DOMContentLoaded', () => {
             `<button class="copy-page-item" data-action="open">${arrowIcon} Open Markdown</button>` +
         `</div>`;
 
-    // Insert after the h1 — position absolutely relative to h1's section.
-    h1.style.position = 'relative';
-    h1.appendChild(wrapper);
+    // Wrap the h1 and the button as flex siblings so the title gets its own
+    // flex track and the button sits beside it without competing for the h1's
+    // inline width.
+    const titleRow = document.createElement('div');
+    titleRow.className = 'bd-title-row';
+    h1.parentNode.insertBefore(titleRow, h1);
+    titleRow.appendChild(h1);
+    titleRow.appendChild(wrapper);
 
     const mainBtn = wrapper.querySelector('.copy-page-main');
     const toggleBtn = wrapper.querySelector('.copy-page-toggle');
