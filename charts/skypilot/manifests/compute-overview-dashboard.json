@@ -173,7 +173,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "GPU utilization and allocation percentage over time. When no cluster is selected, series are averaged across all clusters (labeled 'in-cluster' when the cluster label is empty).",
+      "description": "GPU allocation and utilization percentage over time. When no cluster is selected, series are averaged across all clusters (labeled 'in-cluster' when the cluster label is empty).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -308,7 +308,7 @@
           "refId": "B"
         }
       ],
-      "title": "Utilization & Allocation Over Time",
+      "title": "Allocation & Utilization Over Time",
       "type": "timeseries"
     },
     {
