@@ -223,6 +223,7 @@
               }
             ]
           },
+          "decimals": 1,
           "unit": "percent"
         },
         "overrides": [
@@ -268,8 +269,7 @@
       "options": {
         "legend": {
           "calcs": [
-            "mean",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "list",
           "placement": "bottom",
