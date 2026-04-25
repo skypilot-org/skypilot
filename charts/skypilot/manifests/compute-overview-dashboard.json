@@ -82,10 +82,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg_over_time(avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})[$__range:])",
+          "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -156,10 +156,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg_over_time((sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100)[$__range:])",
+          "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -173,7 +173,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "GPU allocation and utilization percentage over time. When no cluster is selected, series are averaged across all clusters (labeled 'in-cluster' when the cluster label is empty).",
+      "description": "GPU allocation and utilization percentage over time, aggregated across all clusters matching the cluster filter.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -286,7 +286,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
           "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
@@ -298,7 +298,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
           "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
@@ -364,7 +364,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
           "expr": "sum(DCGM_FI_DEV_POWER_USAGE{cluster=~\"$cluster\"}) / 1000",
@@ -437,7 +437,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "$datasource"
           },
           "editorMode": "code",
           "expr": "avg(DCGM_FI_DEV_GPU_TEMP{cluster=~\"$cluster\"})",
