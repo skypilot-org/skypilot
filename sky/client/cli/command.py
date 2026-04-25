@@ -5961,11 +5961,18 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means all lines. Useful for large logs '
+          '(e.g. multi-GB) where downloading the full file is slow.'))
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool,
+              controller: bool, refresh: bool, sync_down: bool, tail: int,
               task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
@@ -5987,6 +5994,16 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
+    if tail < 0:
+        raise click.UsageError('--tail must be a non-negative integer.')
+    if sync_down and tail > 0:
+        raise click.UsageError(
+            '--tail is not supported with --sync-down. Use '
+            '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
+            'or redirect stdout to save it to a file.')
+    # tail=0 means "all lines" at the CLI layer; the SDK/API represent
+    # "no limit" as None, so normalize here.
+    tail_lines: Optional[int] = tail if tail > 0 else None
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -6013,6 +6030,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh,
+                                                tail=tail_lines,
                                                 task=parsed_task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:

@@ -716,12 +716,10 @@ class Kubernetes(clouds.Cloud):
                 default_value=None))
 
         k8s_kueue_local_queue_name = (
-            skypilot_config.get_effective_workspace_region_config(
+            skypilot_config.get_effective_queue_name(
                 # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
-                keys=('kueue', 'local_queue_name'),
-                default_value=None,
                 override_configs=resources.cluster_config_overrides))
 
         # Check DWS configuration for GKE.

@@ -57,7 +57,7 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 
 ## Overview
 
-SkyPilot **is easy to use for AI teams**:
+SkyPilot **is easy to use for AI users**:
 - Quickly spin up compute on your own infra
 - Environment and job as code — simple and portable
 - Easy job management: queue, run, and auto-recover many jobs
@@ -70,7 +70,7 @@ SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 - One interface to use reserved GPUs, Kubernetes clusters, Slurm clusters, or 20+ clouds
-- [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
+- [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with smart failover
 - [Team deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html) and resource sharing
 
 SkyPilot **maximizes GPU fleet utilization**:
@@ -80,15 +80,10 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Install with pip:
+Install with uv ([also supported](https://docs.skypilot.co/en/latest/getting-started/installation.html): pip, nightly, from source)
 ```bash
 # Choose your clouds:
-pip install -U "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
-```
-To get the latest features and fixes, use the nightly build or [install from source](https://docs.skypilot.co/en/latest/getting-started/installation.html):
-```bash
-# Choose your clouds:
-pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
+uv pip install "skypilot[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform,verda]"
 ```
 
 To use SkyPilot directly with your agent (Claude Code, Codex, etc.), install the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). Tell your agent:
@@ -112,10 +107,27 @@ Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphe
 
 
 ## Getting started
-You can find our documentation [here](https://docs.skypilot.co/).
-- [Installation](https://docs.skypilot.co/en/latest/getting-started/installation.html)
-- [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html)
-- [CLI reference](https://docs.skypilot.co/en/latest/reference/cli.html)
+
+[Install SkyPilot](https://docs.skypilot.co/en/latest/getting-started/installation.html) in 1 minute. Then, launch your first cluster in 2 minutes in [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html).
+
+SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and clusters.
+
+## Benefits of SkyPilot on Kubernetes
+
+SkyPilot makes Kubernetes AI-native.
+
+It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
+
+- AI-friendly interface to launch jobs and deployments
+- Much simplified interactive dev for K8s (SSH / sync code / connect IDE to pods)
+
+...and **optimizing GPU scheduling, utilization, and scaling**:
+
+- Advanced scheduling: Gang scheduling, multi-node jobs, and queueing
+- Multi-cluster support: Bring all your clusters under one control plane
+- Multi-cloud support: One consistent interface to manage many providers
+
+See [SkyPilot vs Vanilla Kubernetes](https://docs.skypilot.co/en/latest/reference/kubernetes/skypilot-and-vanilla-k8s.html) and this [blog post](https://blog.skypilot.co/ai-on-kubernetes/) for more details.
 
 ## SkyPilot in 1 minute
 
@@ -183,7 +195,7 @@ Latest featured examples:
 
 Source files can be found in [`llm/`](https://github.com/skypilot-org/skypilot/tree/master/llm) and [`examples/`](https://github.com/skypilot-org/skypilot/tree/master/examples).
 
-## More information
+## Learn more
 To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
 
 SkyPilot adopters: [Testimonials and Case Studies](https://blog.skypilot.co/case-studies/)
@@ -192,18 +204,10 @@ Partners and integrations: [Community Spotlights](https://blog.skypilot.co/commu
 
 Follow updates:
 - [Slack](http://slack.skypilot.co)
-- [X / Twitter](https://twitter.com/skypilot_org)
+- [X](https://twitter.com/skypilot_org)
 - [LinkedIn](https://www.linkedin.com/company/skypilot-oss/)
-- [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
-
-Read the research:
-- [SkyPilot paper](https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf) and [talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng) (NSDI 2023)
-- [Sky Computing whitepaper](https://arxiv.org/abs/2205.07147)
-- [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
-- [SkyServe: AI serving across regions and clouds](https://arxiv.org/pdf/2411.01438) (EuroSys 2025)
-- [Managed jobs spot instance policy](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
-
-SkyPilot was initially started at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley and has since gained many industry contributors. To read about the project's origin and vision, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html).
+- [YouTube](https://www.youtube.com/@skypilot-org)
+- [SkyPilot Blog](https://blog.skypilot.co/)
 
 ## Questions and feedback
 We are excited to hear your feedback:

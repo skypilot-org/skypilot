@@ -823,7 +823,62 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
-_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('kueue', 'local_queue_name')]
+_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
+    # Order matters: `get_effective_queue_name` returns the first hit at a
+    # given scope, so `quota.queue` wins over `kueue.local_queue_name` when
+    # both are set.
+    ('quota', 'queue'),
+    ('kueue', 'local_queue_name'),
+]
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    if workspace is None:
+        workspace = get_active_workspace()
+
+    # `override_configs` are cloud-level; looking up relative to a scope
+    # (rather than prefixing the scope into `keys`) ensures they apply at
+    # the correct depth even when the scope is a workspace subtree.
+    scope_configs: List[config_utils.Config] = []
+    if workspace is not None:
+        ws_config = get_nested(keys=('workspaces', workspace),
+                               default_value=None)
+        if ws_config is not None:
+            scope_configs.append(config_utils.Config(ws_config))
+    scope_configs.append(config_utils.Config(_get_loaded_config()))
+
+    for scope_config in scope_configs:
+        if override_configs is not None:
+            # Merge overrides once per scope so the per-key lookups below
+            # don't re-run `_recursive_update` for every spelling.
+            scope_config = config_utils.Config(
+                scope_config.get_nested(keys=(),
+                                        default_value={},
+                                        override_configs=override_configs))
+        if region is not None:
+            for queue_keys in _QUEUE_NAME_KEYS:
+                value = scope_config.get_nested(
+                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    default_value=None)
+                if value is not None:
+                    return value
+        for queue_keys in _QUEUE_NAME_KEYS:
+            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+                                            default_value=None)
+            if value is not None:
+                return value
+    return None
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:

@@ -235,6 +235,65 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_logs_tail(generic_cloud: str):
+    """Tests `sky jobs logs --tail N` on a managed job.
+
+    Launches a job whose run-script emits a deterministic, uniquely tagged
+    line (``SKYLOGTAIL <i>``) 20 times. After the job succeeds, validates:
+      * ``--tail 5`` returns exactly 5 matching lines.
+      * the last-N-lines requested are the *trailing* lines (line 20).
+      * ``--tail`` + ``-s`` is rejected at the CLI layer.
+      * ``--tail 0`` (default) returns all 20 lines.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    get_job_id_cmd = (f'sky jobs queue | grep tail-{name} | head -n1 '
+                      f'| awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_logs_tail',
+        [
+            # Backslash-escape $ so $(seq ...) and $i survive the outer
+            # shell and are expanded on the worker. Matches the
+            # rf"...\$SKYPILOT_TASK_ID..." pattern used elsewhere in this
+            # file (see e.g. line ~441).
+            rf'sky jobs launch -y -n tail-{name} --infra {generic_cloud} '
+            rf'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            rf'"for i in \$(seq 1 20); do echo SKYLOGTAIL \$i; done"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'tail-{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            # --tail 5 should return exactly 5 matching lines, ending at 20.
+            f'JOB_ID=$({get_job_id_cmd}) && '
+            f'out=$(sky jobs logs $JOB_ID --no-follow --tail 5) && '
+            f'echo "$out" && '
+            f'count=$(echo "$out" | grep -c "^.*SKYLOGTAIL ") && '
+            f'test "$count" = "5" && '
+            f'echo "$out" | grep -q "SKYLOGTAIL 20" && '
+            f'! (echo "$out" | grep -q "SKYLOGTAIL 1$")',
+            # --tail 0 (default) should return all 20 lines.
+            f'JOB_ID=$({get_job_id_cmd}) && '
+            f'out=$(sky jobs logs $JOB_ID --no-follow) && '
+            f'count=$(echo "$out" | grep -c "SKYLOGTAIL ") && '
+            f'test "$count" = "20"',
+            # --tail + -s is rejected at the CLI layer.
+            f'JOB_ID=$({get_job_id_cmd}) && '
+            f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
+            f'grep "tail is not supported with --sync-down"',
+            # --tail with a negative value is rejected.
+            f'(sky jobs logs --tail -1 1 2>&1 || true) | '
+            f'grep "non-negative integer"',
+        ],
+        f'sky jobs cancel -y -n tail-{name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances

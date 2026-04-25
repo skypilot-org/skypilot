@@ -210,8 +210,8 @@ SkyPilot **maximizes GPU fleet utilization**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
-Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect, Shadeform, Verda Cloud, VastData, Crusoe.
 
 .. raw:: html
 
@@ -232,7 +232,7 @@ SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and c
 Benefits of SkyPilot on Kubernetes
 -----------------------------------
 
-SkyPilot makes Kubernetes more AI-native.
+SkyPilot makes Kubernetes AI-native.
 
 It turbocharges your existing Kubernetes clusters by **accelerating AI/ML velocity**:
 
@@ -264,9 +264,10 @@ Partners and integrations: `Community Spotlights <https://blog.skypilot.co/commu
 Follow updates:
 
 * `Slack <http://slack.skypilot.co>`_
-* `X / Twitter <https://twitter.com/skypilot_org>`_
+* `X <https://twitter.com/skypilot_org>`_
 * `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
-* `SkyPilot Blog <https://blog.skypilot.co/>`_ (`Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_)
+* `YouTube <https://www.youtube.com/@skypilot-org>`_
+* `SkyPilot Blog <https://blog.skypilot.co/>`_
 
 .. toctree::
    :hidden:
