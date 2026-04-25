@@ -934,7 +934,8 @@ def deploy_single_cluster(cluster_name,
             --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
             --set 'toolkit.env[2].value=nvidia' \\
             --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
-            --set 'devicePlugin.env[0].value=all' &&
+            --set 'devicePlugin.env[0].value=all' \\
+            --set 'devicePlugin.enableHostPID=true' &&
             echo 'Waiting for GPU operator installation...' &&
             while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
