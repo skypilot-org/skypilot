@@ -85,6 +85,12 @@ function JobDetails() {
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
+  // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
+  // click refresh ...)" hint is misleading — the plugin's component
+  // streams live. Hide it. (ControllerLogsSection makes the same check
+  // independently for the controller-logs heading.)
+  const logsSlotHasPlugin =
+    usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
 
@@ -644,10 +650,12 @@ function JobDetails() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <span className="text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
+                    {!logsSlotHasPlugin && (
+                      <span className="text-xs text-gray-500">
+                        (Logs are not streaming; click refresh to fetch the
+                        latest logs.)
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center space-x-3">
                     <Tooltip
@@ -748,6 +756,8 @@ function ControllerLogsSection({
   poolsData,
 }) {
   const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
+  const controllerLogsSlotHasPlugin =
+    usePluginComponents('jobs.detail.controllerlogs').length > 0;
 
   // Initialize state from localStorage
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -783,9 +793,12 @@ function ControllerLogsSection({
               <ChevronRightIcon className="w-5 h-5 mr-2" />
             )}
             <h3 className="text-lg font-semibold">Controller Logs</h3>
-            <span className="ml-2 text-xs text-gray-500">
-              (Logs are not streaming; click refresh to fetch the latest logs.)
-            </span>
+            {!controllerLogsSlotHasPlugin && (
+              <span className="ml-2 text-xs text-gray-500">
+                (Logs are not streaming; click refresh to fetch the latest
+                logs.)
+              </span>
+            )}
           </button>
           {isExpanded && (
             <div className="flex items-center space-x-3">
