@@ -1194,6 +1194,9 @@ function JobDetailsContent({
     // Plugin override: a registered plugin component owns the entire log
     // panel (its own streamer, its own rendering). We pass enough context
     // (jobId, taskId, status) for the plugin to drive `/jobs/logs` itself.
+    // Pass `onNodesExtracted` too so the plugin can populate the
+    // node-filter dropdown (the OSS `useLogStreamer` no longer runs to
+    // discover node names when the plugin is in charge).
     return (
       <PluginSlot
         name="jobs.detail.logs"
@@ -1205,6 +1208,7 @@ function JobDetailsContent({
           isRecovering,
           selectedNode,
           isController: false,
+          onNodesExtracted,
         }}
         fallback={defaultLogsContent}
       />
