@@ -25,6 +25,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatAutostop,
   LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
@@ -49,31 +50,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    if (autostop > 0 && autostop % 60 === 0) {
-      autostopStr = autostop / 60 + 'h';
-    } else {
-      autostopStr = autostop + 'm';
-    }
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
 
 function ClusterDetails() {
   const router = useRouter();

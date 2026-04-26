@@ -203,8 +203,12 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             autostop = controller_record.get('autostop', None)
             autostop_str = ''
             if autostop is not None:
+                if autostop > 0 and autostop % 60 == 0:
+                    idle_str = f'{autostop // 60}h'
+                else:
+                    idle_str = f'{autostop}min'
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop}min)'
+                                f'idle for {idle_str})'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
