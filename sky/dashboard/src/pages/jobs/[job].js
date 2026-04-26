@@ -87,10 +87,11 @@ function JobDetails() {
   const [logNodes, setLogNodes] = useState([]);
   // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
   // click refresh ...)" hint is misleading — the plugin's component
-  // streams live. Hide it. (ControllerLogsSection makes the same check
-  // independently for the controller-logs heading.)
-  const logsSlotHasPlugin =
-    usePluginComponents('jobs.detail.logs').length > 0;
+  // streams live. Hide it. (ControllerLogsSection re-checks for its
+  // heading independently.)
+  const logsSlotPluginComponentsTop =
+    usePluginComponents('jobs.detail.logs');
+  const logsSlotHasPlugin = logsSlotPluginComponentsTop.length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
 
