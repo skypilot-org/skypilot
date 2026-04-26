@@ -315,7 +315,11 @@ def _get_autostop(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     separation = ''
     if cluster_record['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
-        autostop_str = str(cluster_record['autostop']) + 'm'
+        autostop_minutes = cluster_record['autostop']
+        if autostop_minutes > 0 and autostop_minutes % 60 == 0:
+            autostop_str = f'{autostop_minutes // 60}h'
+        else:
+            autostop_str = f'{autostop_minutes}m'
         separation = ' '
 
     if cluster_record['to_down']:

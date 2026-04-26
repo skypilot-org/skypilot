@@ -56,7 +56,11 @@ const formatAutostop = (autostop, toDown) => {
   let separation = '';
 
   if (autostop >= 0) {
-    autostopStr = autostop + 'm';
+    if (autostop > 0 && autostop % 60 === 0) {
+      autostopStr = autostop / 60 + 'h';
+    } else {
+      autostopStr = autostop + 'm';
+    }
     separation = ' ';
   }
 
