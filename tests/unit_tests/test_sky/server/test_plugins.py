@@ -43,7 +43,7 @@ def test_load_plugins_registers_and_installs(monkeypatch, tmp_path):
     monkeypatch.setattr(plugins, '_PLUGINS', {})
 
     app = FastAPI()
-    ctx = plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER,
+    ctx = plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
                                    app=app)
 
     plugins.load_plugins(ctx)
@@ -63,7 +63,7 @@ def test_load_plugins_filters_by_context(monkeypatch, tmp_path):
     controller_calls = {'count': 0}
 
     class ApiOnlyPlugin(plugins.BasePlugin):
-        load_contexts = frozenset({plugins.PluginContext.API_SERVER})
+        load_contexts = frozenset({plugins.PluginContext.UVICORN})
 
         def install(self, extension_context):
             api_calls['count'] += 1
@@ -98,7 +98,7 @@ def test_load_plugins_filters_by_context(monkeypatch, tmp_path):
     # API_SERVER context: only ApiOnlyPlugin runs.
     monkeypatch.setattr(plugins, '_PLUGINS', {})
     plugins.load_plugins(
-        plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER))
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN))
     assert api_calls['count'] == 1
     assert controller_calls['count'] == 0
     loaded = plugins.get_plugins()

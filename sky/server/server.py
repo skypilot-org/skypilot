@@ -946,7 +946,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # duplicate app initialization.
 if __name__ == 'sky.server.server':
     plugins.load_plugins(
-        plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER,
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
                                  app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
@@ -3205,7 +3205,7 @@ if __name__ == '__main__':
     # be installed twice in main process (second time with the uvicorn app).
     # This is okay since plugin install is considered idempotent.
     plugins.load_plugins(
-        plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER))
+        plugins.ExtensionContext(context=plugins.PluginContext.MAIN))
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.

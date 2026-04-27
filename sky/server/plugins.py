@@ -43,10 +43,16 @@ class PluginContext(enum.Enum):
     types they want to be installed in. Plugins that don't override
     ``load_contexts`` load in every context (backward compatible).
     """
-    # The API server process (both the main process and uvicorn workers).
-    # Plugins can branch on ``ExtensionContext.app`` to distinguish whether
-    # they are running where the FastAPI app is available.
-    API_SERVER = 'api_server'
+    # The API server's main process (the entrypoint that runs bootstrap:
+    # DB init, request reset, RBAC pre-load, then uvicorn.run). No FastAPI
+    # ``app`` is exposed here. Use this for plugins that need to register
+    # backends BEFORE main-process bootstrap consumes them (e.g. HAPlugin).
+    MAIN = 'main'
+    # A uvicorn worker process (or the main process when uvicorn runs
+    # in-process with ``--deploy=false`` / single worker, on the second
+    # plugin load). Has the FastAPI ``app`` available; use this for
+    # registering routes / middleware.
+    UVICORN = 'uvicorn'
     # A request executor worker subprocess that runs sky API request bodies.
     EXECUTOR = 'executor'
     # A jobs/serve controller process, including the codegen prefix that runs
@@ -113,7 +119,7 @@ class ExtensionContext:
     def __init__(
         self,
         # Default exists for backward compatibility.
-        context: PluginContext = PluginContext.API_SERVER,
+        context: PluginContext = PluginContext.MAIN,
         app: Optional[FastAPI] = None,
     ):
         self.context = context
@@ -540,8 +546,9 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             if not issubclass(plugin_cls, BasePlugin):
                 continue
             # RBAC is an API-server concern; skip plugins that don't load
-            # there, even if they declare rbac_rules.
-            if not plugin_cls.should_load(PluginContext.API_SERVER):
+            # in either API-server context, even if they declare rbac_rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
                 continue
             parameters = plugin_config.get('parameters') or {}
             plugin = plugin_cls(**parameters)
