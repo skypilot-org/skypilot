@@ -97,7 +97,16 @@ def _detect_cloud_for_preemption_poller():
     the node isn't on a cloud VM (e.g., Kubernetes, Slurm, bare-metal).
     Probes are cheap reads of the local metadata endpoints with tight
     timeouts — a K8s pod with no metadata service gets ``None`` in ~1s.
+
+    K8s short-circuit: every K8s pod has ``KUBERNETES_SERVICE_HOST``
+    set automatically by kubelet. We return ``None`` immediately on
+    that signal so EKS pods (where the EC2 IMDS may be reachable from
+    the underlying node) don't misdetect as AWS and start a poller
+    that races the K8s preStop bridge.
     """
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return None
+
     import urllib.error  # pylint: disable=import-outside-toplevel
     import urllib.request  # pylint: disable=import-outside-toplevel
 
