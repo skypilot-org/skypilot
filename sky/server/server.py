@@ -1983,15 +1983,25 @@ async def download(download_body: payloads.DownloadBody,
 @app.get('/download_zip')
 async def download_zip(
         zip_id: str,
+        request: fastapi.Request,
         filename: Optional[str] = None) -> fastapi.responses.FileResponse:
     """Streams a previously-prepared zip from POST /download?mode=link.
 
     Used by the dashboard to do a native browser-streamed download
     instead of buffering the whole zip in JS memory via resp.blob().
-    The zip is only readable by the user who created it (the path is
-    rooted at api_server_user_logs_dir_prefix(<user_hash>)).
+
+    The matching POST writes the zip to
+    ``api_server_user_logs_dir_prefix(env_vars[USER_ID_ENV_VAR])``.
+    For dashboard requests the env_var matches
+    ``request.state.auth_user.id``, so we look up there. Falls back to
+    the local user hash for unauthenticated single-tenant runs.
     """
-    user_hash = common_utils.get_user_hash()
+    user_hash = None
+    auth_user = getattr(request.state, 'auth_user', None)
+    if auth_user is not None and getattr(auth_user, 'id', None):
+        user_hash = auth_user.id
+    if user_hash is None:
+        user_hash = common_utils.get_user_hash()
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     user_dir = pathlib.Path(logs_dir_on_api_server).expanduser().resolve()
     # Validate zip_id: only hex from uuid4(), reject anything else.
