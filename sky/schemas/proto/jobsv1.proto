@@ -136,6 +136,9 @@ message TailLogsRequest {
   optional int64 managed_job_id = 2;
   bool follow = 3;
   int32 tail = 4;
+  // Skip the last `tail_offset` lines from EOF before applying `tail`.
+  // Added in SKYLET_VERSION 37; older skylets ignore the field.
+  int32 tail_offset = 5;
 }
 
 message TailLogsResponse {

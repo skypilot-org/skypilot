@@ -4624,6 +4624,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_id: Optional[int] = None,
             follow: bool = True,
             tail: int = 0,
+            tail_offset: Optional[int] = None,
             require_outputs: bool = False,
             stream_logs: bool = True,
             process_stream: bool = False) -> Union[int, Tuple[int, str, str]]:
@@ -4636,6 +4637,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
+            tail_offset: Skip this many lines from EOF before applying
+                ``tail``. Used for paginated backfill (e.g. dashboard
+                scroll-up). 0 / None means no offset.
             require_outputs: Whether to return the stdout/stderr of the command.
             stream_logs: Whether to stream the logs to stdout/stderr.
             process_stream: Whether to process the stream.
@@ -4644,6 +4648,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        offset = tail_offset if tail_offset is not None else 0
         if handle.is_grpc_enabled_with_flag:
             last_exit_code = 0
             try:
@@ -4651,7 +4656,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     job_id=job_id,
                     managed_job_id=managed_job_id,
                     follow=follow,
-                    tail=tail)
+                    tail=tail,
+                    tail_offset=offset)
                 for resp in backend_utils.invoke_skylet_streaming_with_retries(
                         lambda: SkyletClient(handle.get_grpc_channel()
                                             ).tail_logs(request, timeout=None)):
@@ -4666,10 +4672,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     return last_exit_code
                 raise e
 
-        code = job_lib.JobLibCodeGen.tail_logs(job_id,
-                                               managed_job_id=managed_job_id,
-                                               follow=follow,
-                                               tail=tail)
+        code = job_lib.JobLibCodeGen.tail_logs(
+            job_id,
+            managed_job_id=managed_job_id,
+            follow=follow,
+            tail=tail,
+            tail_offset=offset if offset > 0 else None)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')

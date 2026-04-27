@@ -176,16 +176,18 @@ class FailAllInProgressJobsResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class TailLogsRequest(_message.Message):
-    __slots__ = ("job_id", "managed_job_id", "follow", "tail")
+    __slots__ = ("job_id", "managed_job_id", "follow", "tail", "tail_offset")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     MANAGED_JOB_ID_FIELD_NUMBER: _ClassVar[int]
     FOLLOW_FIELD_NUMBER: _ClassVar[int]
     TAIL_FIELD_NUMBER: _ClassVar[int]
+    TAIL_OFFSET_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     managed_job_id: int
     follow: bool
     tail: int
-    def __init__(self, job_id: _Optional[int] = ..., managed_job_id: _Optional[int] = ..., follow: bool = ..., tail: _Optional[int] = ...) -> None: ...
+    tail_offset: int
+    def __init__(self, job_id: _Optional[int] = ..., managed_job_id: _Optional[int] = ..., follow: bool = ..., tail: _Optional[int] = ..., tail_offset: _Optional[int] = ...) -> None: ...
 
 class TailLogsResponse(_message.Message):
     __slots__ = ("log_line", "exit_code")
