@@ -419,6 +419,11 @@ def _get_cloud_dependencies_installation_commands(
         if sc.lower() in constants.STORAGE_ONLY_CLOUDS:
             python_packages.update(dependencies.extras_require[sc.lower()])
 
+    # Pin click<8.3.0: typer>=0.25.0 requires click>=8.2.1 with no upper
+    # bound, which lets uv resolve click to 8.3.x. click 8.3.0+ breaks Ray
+    # CLI on the controller via copy.deepcopy on Click's Sentinel values.
+    # See https://github.com/ray-project/ray/issues/56747.
+    python_packages.add('click<8.3.0')
     packages_string = ' '.join(
         [f'"{package}"' for package in sorted(python_packages)])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
