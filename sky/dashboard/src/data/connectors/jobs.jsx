@@ -833,13 +833,72 @@ export async function handleJobAction(action, jobId, cluster) {
  *    dialog, so multi-GB zips don't have to fit in JS heap (the previous
  *    `await resp.blob()` path OOMed the tab around 2-4 GB).
  */
+// Long-poll /jobs/download_logs by hand instead of using apiClient.fetch.
+// For multi-GB running jobs sync_down can take 5+ minutes — well past
+// the ~100s edge timeouts (Cloudflare 524 etc.) of a single GET.
+// Retry the polling GET when we hit a 5xx so the user-visible request
+// resumes waiting on the SAME server-side request_id until it
+// completes. (sync_down already passes follow=False, so the underlying
+// stream_logs reads to EOF and exits — it just takes a while.)
+async function downloadLogsWithRetry(body, maxAttempts = 30) {
+  // Step 1: dispatch the request and grab its server-side ID.
+  const baseUrl = window.location.origin;
+  const userInfo = await (async () => {
+    // Mirror what apiClient.fetch does — the env_vars path matters.
+    const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
+      () => null
+    );
+    if (r && r.ok) return r.json();
+    return { id: 'local', name: 'local' };
+  })();
+  const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/download_logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...body,
+      env_vars: {
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: userInfo.id,
+        SKYPILOT_USER: userInfo.name,
+      },
+    }),
+  });
+  if (!dispatch.ok) {
+    throw new Error(`download_logs dispatch failed: ${dispatch.status}`);
+  }
+  const requestId = dispatch.headers.get('X-Skypilot-Request-ID');
+  if (!requestId) {
+    throw new Error('download_logs dispatch missing X-Skypilot-Request-ID');
+  }
+
+  // Step 2: long-poll /api/get, retrying on edge-timeout responses.
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const r = await fetch(
+      `${baseUrl}${ENDPOINT}/api/get?request_id=${requestId}`
+    );
+    // 524 Cloudflare timeout / 502/503/504 transient — retry against
+    // the same request_id; the server's long-poll resumes waiting.
+    if (r.status === 524 || r.status === 502 || r.status === 503 ||
+        r.status === 504) {
+      continue;
+    }
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`/api/get ${r.status}: ${text}`);
+    }
+    const data = await r.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  }
+  throw new Error('download_logs timed out after retries');
+}
+
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
   controller = false,
 }) {
   try {
-    const mapping = await apiClient.fetch('/jobs/download_logs', {
+    const mapping = await downloadLogsWithRetry({
       job_id: jobId,
       name: name,
       controller: controller,
