@@ -347,6 +347,7 @@ class _DefaultManagedJobRunner:
         follow: bool,
         controller: bool,
         tail: Optional[int],
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]],
     ) -> int:
         return backend.tail_managed_job_logs(handle,
@@ -355,6 +356,7 @@ class _DefaultManagedJobRunner:
                                              follow=follow,
                                              controller=controller,
                                              tail=tail,
+                                             tail_offset=tail_offset,
                                              task=task)
 
 
@@ -1541,6 +1543,7 @@ def tail_logs(name: Optional[str],
               controller: bool,
               refresh: bool,
               tail: Optional[int] = None,
+              tail_offset: Optional[int] = None,
               task: Optional[Union[str, int]] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
@@ -1588,6 +1591,7 @@ def tail_logs(name: Optional[str],
         follow=follow,
         controller=controller,
         tail=tail,
+        tail_offset=tail_offset,
         task=task,
     )
 

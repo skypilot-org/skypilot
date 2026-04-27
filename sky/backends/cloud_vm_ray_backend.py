@@ -4757,12 +4757,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               controller: bool = False,
                               follow: bool = True,
                               tail: Optional[int] = None,
+                              tail_offset: Optional[int] = None,
                               task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail, task)
+            job_name, job_id, follow, controller, tail, tail_offset, task)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

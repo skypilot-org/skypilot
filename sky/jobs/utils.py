@@ -1199,6 +1199,7 @@ def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
         tail: Optional[int] = None,
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
@@ -1206,6 +1207,9 @@ def stream_logs_by_id(
         job_id: The job ID to stream logs for.
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
+        tail_offset: Skip the last ``tail_offset`` lines before applying
+            ``tail``. Used by the dashboard live-tail UI to fetch a window
+            of older history without re-reading the whole file.
         task: Task identifier to view logs for a specific task in a JobGroup.
             If an int, it is treated as a task ID. If a str, it is treated as
             a task name. If None, logs for all tasks are shown.
@@ -1437,7 +1441,8 @@ def stream_logs_by_id(
                                job_name=None,
                                controller=True,
                                follow=follow,
-                               tail=tail)
+                               tail=tail,
+                               tail_offset=tail_offset)
 
         backend = backends.CloudVmRayBackend()
         latest_task_id, managed_job_status = (
@@ -1510,7 +1515,8 @@ def stream_logs_by_id(
                                            job_id=job_id_to_tail,
                                            managed_job_id=job_id,
                                            follow=follow,
-                                           tail=tail_param)
+                                           tail=tail_param,
+                                           tail_offset=tail_offset)
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -1657,6 +1663,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None,
+                tail_offset: Optional[int] = None,
                 task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
@@ -1737,11 +1744,21 @@ def stream_logs(job_id: Optional[int],
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
-            read_from: Union[TextIO, Deque[str]] = f
+            read_from: Union[TextIO, Deque[str], List[str]] = f
             if tail is not None:
                 assert tail > 0
-                # Read only the last 'tail' lines efficiently using deque
-                read_from = collections.deque(f, maxlen=tail)
+                offset: int = (tail_offset if tail_offset is not None and
+                               tail_offset > 0 else 0)
+                if offset > 0:
+                    # Read the last `tail + offset` lines, then drop the
+                    # last `offset` of those — this returns a window of
+                    # `tail` lines ending `offset` lines before EOF.
+                    window = list(collections.deque(f, maxlen=tail + offset))
+                    # pylint: disable=invalid-unary-operand-type
+                    read_from = window[:-offset]
+                else:
+                    # Read only the last 'tail' lines efficiently using deque
+                    read_from = collections.deque(f, maxlen=tail)
             for line in read_from:
                 print(line, end='')
             # Flush.
@@ -1794,7 +1811,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow, tail, task)
+    return stream_logs_by_id(job_id, follow, tail, tail_offset, task)
 
 
 def dump_managed_job_queue(
@@ -3054,6 +3071,7 @@ class ManagedJobCodeGen:
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None,
+                    tail_offset: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
@@ -3064,10 +3082,15 @@ class ManagedJobCodeGen:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
-        else:
+        elif managed_job_version < 20:
+            # Versions before 20 did not support tail_offset parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r},
+                                    tail_offset={tail_offset!r}, task={task!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

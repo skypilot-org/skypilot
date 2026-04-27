@@ -417,6 +417,7 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
+              tail_offset: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None,
               task: Optional[Union[str, int]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
@@ -451,6 +452,9 @@ def tail_logs(name: Optional[str] = None,
     if tail is not None and tail <= 0:
         raise ValueError(
             f'tail must be None or a positive integer, got {tail}.')
+    if tail_offset is not None and tail_offset < 0:
+        raise ValueError(f'tail_offset must be None or a non-negative integer, '
+                         f'got {tail_offset}.')
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -458,6 +462,7 @@ def tail_logs(name: Optional[str] = None,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        tail_offset=tail_offset,
         task=task,
     )
     response = server_common.make_authenticated_request(
