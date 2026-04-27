@@ -1,7 +1,7 @@
 .. _batch-custom-formats:
 
-Sky Batch: Custom I/O Formats
-==============================
+Custom I/O Formats
+==================
 
 Sky Batch ships with built-in formats (:code:`JsonReader`, :code:`JsonWriter`, :code:`ImageWriter`), but you can define your own without modifying SkyPilot source code.
 
