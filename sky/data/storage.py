@@ -4908,6 +4908,32 @@ class S3Store(S3CompatibleStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
+    def mount_cached_sidecar_script(
+            self,
+            internal_mount_path: str,
+            config: Optional[MountCachedConfig] = None) -> str:
+        """Returns a bash script that runs rclone in foreground at the
+        given internal mount path. Suitable as the entrypoint of a
+        Kubernetes native sidecar container."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cmd_fg = mounting_utils.get_mount_cached_cmd(
+            rclone_config,
+            rclone_profile_name,
+            self.bucket.name,
+            internal_mount_path,
+            config,
+            foreground=True,
+        )
+        return mounting_utils.get_mount_cached_sidecar_script(
+            install_cmd=install_cmd,
+            mount_cmd_foreground=mount_cmd_fg,
+            internal_mount_path=internal_mount_path,
+        )
+
 
 @register_s3_compatible_store
 class R2Store(S3CompatibleStore):

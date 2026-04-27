@@ -1573,6 +1573,27 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         ],
     },
+    # Run rclone for MOUNT_CACHED storages in a Kubernetes native sidecar
+    # (initContainer with restartPolicy: Always) instead of inside the
+    # user container. Sidecars are SIGTERM'd after main containers, so
+    # rclone outlives user python on pod teardown — fixes the
+    # FUSE-zombie / pinned-VRAM bug seen on AL2023 / kernel 6.1.
+    # Requires K8s >= 1.28 and a cluster that allows privileged
+    # containers (the sidecar uses Bidirectional mount propagation).
+    # Defaults to false; opt-in for now.
+    'mount_cached_sidecar': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'enabled': {
+                'type': 'boolean',
+            },
+            # TODO(kevin): expose `termination_grace_period_seconds` once
+            # there is a real need to tune it. For now we hardcode 60s in
+            # the template (see sky/templates/kubernetes-ray.yml.j2).
+        },
+    },
 }
 
 

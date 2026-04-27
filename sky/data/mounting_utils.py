@@ -501,13 +501,19 @@ def get_cos_mount_cmd(rclone_config: str,
 
 
 def get_mount_cached_cmd(
-        rclone_config: str,
-        rclone_profile_name: str,
-        bucket_name: str,
-        mount_path: str,
-        mount_cached_config: Optional['storage.MountCachedConfig'] = None
+    rclone_config: str,
+    rclone_profile_name: str,
+    bucket_name: str,
+    mount_path: str,
+    mount_cached_config: Optional['storage.MountCachedConfig'] = None,
+    foreground: bool = False,
 ) -> str:
-    """Returns a command to mount a bucket using rclone with vfs cache."""
+    """Returns a command to mount a bucket using rclone with vfs cache.
+
+    When `foreground` is True, the rclone process runs in the foreground
+    (no `--daemon` flag, logs to stderr) so it can serve as the entrypoint
+    of a Kubernetes native sidecar container.
+    """
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
                                 f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
@@ -540,6 +546,35 @@ def get_mount_cached_cmd(
     if sequential_upload and mount_cached_config.transfers is None:
         mount_cached_config.transfers = 1
 
+    # In sidecar/foreground mode the rclone process is PID 1 of its
+    # container; it must not daemonize, and stdout/stderr should reach
+    # kubelet for log capture. In SSH/background mode the process is
+    # detached from the invoking shell and logs go to a file.
+    if foreground:
+        daemon_flag = ''
+        log_redirect = ''
+        log_flag = '--log-level INFO '
+        # `--allow-non-empty` is required in sidecar mode and is the
+        # result of a real-world stumble — without it, rclone fails with
+        # "Fatal error: failed to mount FUSE fs: directory already
+        # mounted". Why: the shared FUSE mount point is exposed to the
+        # sidecar via a Kubernetes emptyDir volume. Kubelet bind-mounts
+        # that volume into the sidecar at the FUSE target path, so by
+        # the time the sidecar's rclone runs, the path is already a
+        # mount (the kubelet bind). rclone's safety check refuses to
+        # stack on an existing mount; `--allow-non-empty` overrides
+        # that. The FUSE mount then propagates back through the host
+        # (Bidirectional) and into the main container (HostToContainer).
+        # The flag is *only* set in foreground/sidecar mode — the
+        # SSH/background path mounts on a plain dir and must keep the
+        # safety check.
+        nonempty_flag = '--allow-non-empty '
+    else:
+        daemon_flag = '--daemon --daemon-wait 10 '
+        log_redirect = ' > /dev/null 2>&1'
+        log_flag = f'--log-file {log_file_path} --log-level INFO '
+        nonempty_flag = ''
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
@@ -548,11 +583,9 @@ def get_mount_cached_cmd(
         f'{configure_rclone_profile} && '
         'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
-        # '--daemon' keeps the mounting process running in the background.
-        # fail in 10 seconds if mount cannot complete by then,
-        # which should be plenty of time.
-        '--daemon --daemon-wait 10 '
-        f'--log-file {log_file_path} --log-level INFO '
+        f'{daemon_flag}'
+        f'{nonempty_flag}'
+        f'{log_flag}'
         # '--dir-cache-time' sets how long directory listings are cached before
         # rclone checks the remote storage for changes again. A shorter
         # interval allows for faster detection of new or updated files on the
@@ -567,12 +600,66 @@ def get_mount_cached_cmd(
         # Recommended by rclone documentation for buckets like s3.
         '--vfs-fast-fingerprint '
         # Other customizable rclone flags. Refer to `MountCachedConfig`.
-        f'{mount_cached_config.to_rclone_flags()} '
-        # This command produces children processes, which need to be
-        # detached from the current process's terminal. The command doesn't
-        # produce any output, so we aren't dropping any logs.
-        '> /dev/null 2>&1')
+        f'{mount_cached_config.to_rclone_flags()}'
+        f'{log_redirect}')
     return mount_cmd
+
+
+def get_mount_cached_sidecar_script(install_cmd: str, mount_cmd_foreground: str,
+                                    internal_mount_path: str) -> str:
+    """Returns a bash script suitable as a Kubernetes sidecar entrypoint.
+
+    The script installs rclone (if missing), prepares the mount point,
+    and `exec`s the foreground rclone mount command so it becomes PID 1
+    of the container. When the container receives SIGTERM during pod
+    teardown, rclone responds by flushing the vfs cache and unmounting
+    cleanly — preventing the FUSE-zombie/VRAM-pin issue.
+
+    Args:
+        install_cmd: Command to install rclone (e.g.
+          `get_rclone_install_cmd()`).
+        mount_cmd_foreground: The foreground rclone mount command produced
+          by `get_mount_cached_cmd(..., foreground=True)`.
+        internal_mount_path: The path inside the sidecar container where
+          rclone should mount the bucket. The same emptyDir volume is
+          mounted at the user-visible path inside the main container with
+          mountPropagation=HostToContainer, so the FUSE mount becomes
+          visible there via Bidirectional propagation.
+    """
+    # The sidecar runs as root (privileged + runAsUser: 0 in the pod
+    # spec — see kubernetes-ray.yml.j2). The runAsUser: 0 part is *not*
+    # cosmetic; it was the result of working through this list of real
+    # failures, in order, on AL2023 / kernel 6.1:
+    #
+    #   (1) Without `--allow-other` the user container (running as a
+    #       different uid than the sidecar) can't read the FUSE mount.
+    #   (2) `--allow-other` is rejected by libfuse3 unless either the
+    #       caller is root OR `/etc/fuse.conf` has `user_allow_other`.
+    #   (3) Trying to write `user_allow_other` from a non-root sidecar
+    #       fails with EACCES on `/etc/fuse.conf` even with privileged
+    #       (privileged grants caps but does NOT change the uid).
+    #   (4) Switching to `sudo tee /etc/fuse.conf` then collided with
+    #       the dpkg conffile prompt during the in-container `apt-get
+    #       install fuse3` (the modified `/etc/fuse.conf` confuses dpkg
+    #       on package configure → "end of file on stdin at conffile
+    #       prompt" → fuse3 install aborts → fusermount3 not setuid →
+    #       mount fails with EPERM).
+    #
+    # `runAsUser: 0` short-circuits all four problems: root never needs
+    # `user_allow_other`, mount() succeeds via CAP_SYS_ADMIN regardless
+    # of fusermount's setuid bit, and we can leave `/etc/fuse.conf`
+    # alone so dpkg never prompts. So the script body below stays
+    # minimal — install rclone if missing, mkdir, exec the foreground
+    # rclone mount.
+    return textwrap.dedent(f"""
+        #!/usr/bin/env bash
+        set -euo pipefail
+        if ! command -v rclone >/dev/null 2>&1; then
+            {install_cmd}
+        fi
+        mkdir -p {shlex.quote(internal_mount_path)}
+        exec bash -c {shlex.quote(mount_cmd_foreground)}
+    """).strip()
 
 
 def get_oci_mount_cmd(mount_path: str,

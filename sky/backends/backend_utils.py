@@ -656,6 +656,7 @@ def write_cluster_config(
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
+    mount_cached_sidecars: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -1160,6 +1161,11 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+
+            # MOUNT_CACHED native-sidecar mounts (Kubernetes only).
+            # Empty list means: do not render the rclone sidecar block.
+            # See sky/templates/kubernetes-ray.yml.j2.
+            'mount_cached_sidecars': mount_cached_sidecars or [],
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.

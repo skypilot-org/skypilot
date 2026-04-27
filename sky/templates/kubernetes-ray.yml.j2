@@ -388,6 +388,15 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if mount_cached_sidecars %}
+        # Give the rclone sidecar(s) time to flush vfs cache and unmount
+        # cleanly on pod teardown. Without this grace window, kubelet
+        # SIGKILLs every PID in the pod in the same tick and FUSE
+        # requests in flight from user python are stranded forever
+        # (especially on AL2023 / kernel 6.1).
+        # TODO(kevin): make this user-tunable when there is a real need.
+        terminationGracePeriodSeconds: 60
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -466,6 +475,16 @@ available_node_types:
             path: {{k8s_fusermount_shared_dir}}
             type: DirectoryOrCreate
         {% endif %}
+        {% for sidecar in mount_cached_sidecars %}
+        # Shared mountpoint for the rclone sidecar (mounted at the
+        # internal path with mountPropagation=Bidirectional) and the
+        # ray-node main container (mounted at the user-visible path
+        # with mountPropagation=HostToContainer). When rclone creates
+        # the FUSE mount inside the sidecar, propagation makes it
+        # visible to the main container at the user path.
+        - name: {{sidecar.volume_name}}
+          emptyDir: {}
+        {% endfor %}
         {% if high_availability %}
         - name: {{k8s_high_availability_deployment_volume_mount_name}}
           persistentVolumeClaim:
@@ -529,6 +548,70 @@ available_node_types:
         {% if k8s_enable_docker_build %}
         - name: buildkit-sock
           emptyDir: {}
+        {% endif %}
+        {% if mount_cached_sidecars %}
+        # Native sidecars (initContainers with restartPolicy: Always) for
+        # MOUNT_CACHED rclone mounts. Kubernetes guarantees these are
+        # SIGTERM'd AFTER all main containers on pod teardown, so rclone
+        # outlives user python and FUSE requests drain cleanly. The
+        # privileged + Bidirectional propagation pair lets the FUSE
+        # mount made inside the sidecar become visible to ray-node via
+        # HostToContainer propagation.
+        initContainers:
+        {% for sidecar in mount_cached_sidecars %}
+        - name: {{sidecar.name}}
+          image: {{image_id}}
+          imagePullPolicy: Always
+          restartPolicy: Always
+          securityContext:
+            # privileged + runAsUser: 0 are BOTH required and were
+            # arrived at after working through these real failures on
+            # AL2023 / kernel 6.1, in order:
+            #
+            #   (a) `mountPropagation: Bidirectional` requires the
+            #       container to be privileged (Kubernetes admission
+            #       check). Without privileged, the FUSE mount made
+            #       inside the sidecar would not propagate back to the
+            #       host or into the main container.
+            #   (b) Even with privileged, the sidecar would otherwise
+            #       run as the image's default uid (1000 in the
+            #       skypilot-gpu image). That hit a chain of issues
+            #       that only ended at root:
+            #         * libfuse3 rejects `--allow-other` for non-root
+            #           unless /etc/fuse.conf contains
+            #           `user_allow_other`.
+            #         * Writing /etc/fuse.conf from uid 1000 fails
+            #           (privileged grants capabilities but not uid 0,
+            #           so file-permission checks still apply).
+            #         * Using sudo to write /etc/fuse.conf creates a
+            #           dpkg conffile conflict during the in-container
+            #           `apt-get install fuse3` ("end of file on stdin
+            #           at conffile prompt") which leaves fuse3 in a
+            #           half-configured state, and fusermount3 then
+            #           fails with EPERM.
+            #       runAsUser: 0 sidesteps all three: root needs no
+            #       user_allow_other, mount() works via CAP_SYS_ADMIN
+            #       regardless of fusermount's setuid bit, and we never
+            #       have to touch /etc/fuse.conf.
+            privileged: true
+            runAsUser: 0
+          command:
+            - /bin/bash
+            - -c
+            - |
+{{ sidecar.sidecar_script | indent(14, True) }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - 'fusermount3 -uz {{sidecar.internal_path}} || fusermount -uz {{sidecar.internal_path}} || umount -l {{sidecar.internal_path}} || true'
+          volumeMounts:
+            - name: {{sidecar.volume_name}}
+              mountPath: {{sidecar.internal_path}}
+              mountPropagation: Bidirectional
+        {% endfor %}
         {% endif %}
         containers:
         - name: ray-node
@@ -1300,6 +1383,14 @@ available_node_types:
             {% if volume_mount.sub_path %}
             subPath: {{volume_mount.sub_path}}
             {% endif %}
+          {% endfor %}
+          {% for sidecar in mount_cached_sidecars %}
+          # MOUNT_CACHED sidecar shared mountpoint. Propagation must be
+          # HostToContainer so the FUSE mount established by the sidecar
+          # at the host's view of this volume becomes visible here.
+          - name: {{sidecar.volume_name}}
+            mountPath: {{sidecar.user_path}}
+            mountPropagation: HostToContainer
           {% endfor %}
           resources:
             requests:

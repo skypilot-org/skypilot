@@ -297,6 +297,69 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
+def _build_mount_cached_sidecar_specs(
+    task: 'task_lib.Task',
+    to_provision: 'resources_lib.Resources',
+) -> List[Dict[str, Any]]:
+    """Build the rclone-as-native-sidecar specs for a Kubernetes pod.
+
+    Returns the list of sidecar specs. Empty unless:
+      * the cluster runs on Kubernetes,
+      * `kubernetes.mount_cached_sidecar.enabled` is true in the
+        active SkyPilot config,
+      * the task has at least one MOUNT_CACHED storage whose store
+        implements `mount_cached_sidecar_script`.
+
+    Putting rclone in a K8s native sidecar (initContainer with
+    restartPolicy: Always) ensures rclone outlives user python on pod
+    teardown so FUSE state drains cleanly instead of leaving a stuck
+    conn that pins GPU VRAM.
+    """
+    if not isinstance(to_provision.cloud, clouds.Kubernetes):
+        return []
+    if not task.storage_mounts:
+        return []
+    sidecar_cfg = skypilot_config.get_nested(
+        ('kubernetes', 'mount_cached_sidecar'), None)
+    if not sidecar_cfg or not sidecar_cfg.get('enabled', False):
+        return []
+
+    specs: List[Dict[str, Any]] = []
+    for idx, (user_path, storage_obj) in enumerate(task.storage_mounts.items()):
+        if storage_obj.mode != storage_lib.StorageMode.MOUNT_CACHED:
+            continue
+        storage_obj.construct()
+        if not storage_obj.stores:
+            continue
+        store = next(iter(storage_obj.stores.values()))
+        if store is None:
+            continue
+        sidecar_builder = getattr(store, 'mount_cached_sidecar_script', None)
+        if sidecar_builder is None:
+            # Store hasn't implemented sidecar mounting yet; fall back
+            # to the existing post-launch SSH mount path for this one.
+            logger.debug(
+                f'mount_cached sidecar skipped for {user_path} '
+                f'({type(store).__name__}); falling back to SSH mount.')
+            continue
+        internal_path = f'/var/lib/skypilot/mounts/{idx}'
+        try:
+            script = sidecar_builder(
+                internal_path, config=storage_obj.resolve_mount_cached_config())
+        except exceptions.NotSupportedError as e:
+            logger.debug(f'mount_cached sidecar skipped for {user_path}: {e}')
+            continue
+        specs.append({
+            'idx': idx,
+            'name': f'rclone-mount-{idx}',
+            'volume_name': f'mount-cached-{idx}',
+            'user_path': user_path,
+            'internal_path': internal_path,
+            'sidecar_script': script,
+        })
+    return specs
+
+
 def write_ray_up_script_with_patched_launch_hash_fn(
     cluster_config_path: Optional[str],
     ray_up_kwargs: Dict[str, bool],
@@ -953,6 +1016,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         volume_mounts: Optional[List[volume_lib.VolumeMount]],
+        mount_cached_sidecars: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1068,6 +1132,7 @@ class RetryingVmProvisioner(object):
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
+                        mount_cached_sidecars=mount_cached_sidecars,
                     )
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
@@ -1735,6 +1800,12 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud.check_features_are_supported(
                     to_provision, requested_features)
 
+                # Build native-sidecar specs for MOUNT_CACHED storages on K8s
+                # when the user has opted in via
+                # `kubernetes.mount_cached_sidecar.enabled`.
+                mount_cached_sidecars = (_build_mount_cached_sidecar_specs(
+                    task, to_provision))
+
                 config_dict = self._retry_zones(
                     to_provision,
                     num_nodes,
@@ -1748,6 +1819,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     volume_mounts=task.volume_mounts,
+                    mount_cached_sidecars=mount_cached_sidecars,
                 )
                 if dryrun:
                     return config_dict
@@ -6052,6 +6124,34 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for path, storage_mount in storage_mounts.items()
             if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
         }
+
+        # When MOUNT_CACHED mounts are served by a Kubernetes native
+        # sidecar (per-store opt-in via
+        # `kubernetes.mount_cached_sidecar.enabled`), the mount has
+        # already been established by the sidecar at pod start. Skip the
+        # post-launch SSH-based mount step for those entries — running it
+        # would race with the sidecar's mount and double-mount the same
+        # path.
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            sidecar_cfg = skypilot_config.get_nested(
+                ('kubernetes', 'mount_cached_sidecar'), None)
+            if sidecar_cfg and sidecar_cfg.get('enabled', False):
+                filtered = {}
+                for path, storage_mount in storage_mounts.items():
+                    if (storage_mount.mode ==
+                            storage_lib.StorageMode.MOUNT_CACHED):
+                        storage_mount.construct()
+                        store = (next(iter(storage_mount.stores.values()))
+                                 if storage_mount.stores else None)
+                        if store is not None and getattr(
+                                store, 'mount_cached_sidecar_script',
+                                None) is not None:
+                            logger.debug(
+                                f'Skipping SSH mount for {path}: handled by '
+                                f'rclone sidecar.')
+                            continue
+                    filtered[path] = storage_mount
+                storage_mounts = filtered
 
         # Handle cases when there aren't any Storages with either MOUNT or
         # MOUNT_CACHED mode.
