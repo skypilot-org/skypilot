@@ -4,6 +4,7 @@ import {
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
+  ENDPOINT,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
@@ -825,8 +826,12 @@ export async function handleJobAction(action, jobId, cluster) {
 /**
  * Downloads managed job logs as a zip via the API server.
  * Flow:
- * 1) POST /jobs/download_logs to fetch logs from the remote cluster to API server
- * 2) POST /download to stream a zip back to the browser and trigger download
+ * 1) POST /jobs/download_logs - copy logs from cluster to API server tmp dir
+ * 2) POST /download?mode=link - server zips and returns {zip_id, filename}
+ * 3) Navigate <a download> to GET /download_zip?zip_id=...
+ *    The browser streams the response straight to disk via the OS save
+ *    dialog, so multi-GB zips don't have to fit in JS heap (the previous
+ *    `await resp.blob()` path OOMed the tab around 2-4 GB).
  */
 export async function downloadManagedJobLogs({
   jobId = null,
@@ -834,7 +839,6 @@ export async function downloadManagedJobLogs({
   controller = false,
 }) {
   try {
-    // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
     const mapping = await apiClient.fetch('/jobs/download_logs', {
       job_id: jobId,
       name: name,
@@ -848,27 +852,34 @@ export async function downloadManagedJobLogs({
       return;
     }
 
-    // Step 2: request the zip and trigger browser download
-    const resp = await apiClient.fetchImmediate('/download?relative=items', {
-      folder_paths: folderPaths,
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Download failed: ${resp.status} ${text}`);
-    }
-    const blob = await resp.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
     const logType = controller ? 'controller-logs' : 'logs';
     const filename = `managed-${namePart}-${logType}-${ts}.zip`;
+
+    // mode=link: server prepares the zip and returns its id instead of
+    // streaming the bytes back over fetch.
+    const resp = await apiClient.fetchImmediate(
+      '/download?relative=items&mode=link',
+      { folder_paths: folderPaths }
+    );
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Download failed: ${resp.status} ${text}`);
+    }
+    const meta = await resp.json();
+    const baseUrl = window.location.origin;
+    const url =
+      `${baseUrl}${ENDPOINT}/download_zip` +
+      `?zip_id=${encodeURIComponent(meta.zip_id)}` +
+      `&filename=${encodeURIComponent(filename)}`;
+
+    const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.URL.revokeObjectURL(url);
     trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);

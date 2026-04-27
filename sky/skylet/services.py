@@ -322,7 +322,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             for line in log_lib.buffered_iter_with_timeout(
                     buffer,
                     log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
-                                           request.follow, request.tail),
+                                           request.follow, request.tail,
+                                           request.tail_offset),
                     DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
                 yield jobsv1_pb2.TailLogsResponse(log_line=line)
 
