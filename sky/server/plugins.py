@@ -110,7 +110,12 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, context: PluginContext, app: Optional[FastAPI] = None):
+    def __init__(
+        self,
+        # Default exists for backward compatibility.
+        context: PluginContext = PluginContext.API_SERVER,
+        app: Optional[FastAPI] = None,
+    ):
         self.context = context
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
