@@ -92,6 +92,37 @@ function JobDetails() {
   const logsSlotHasPlugin =
     usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
+  // Track download-in-flight per kind ('logs' / 'controller' / per-task)
+  // so we can disable the button + spin the icon while the zip is being
+  // assembled on the server. Without feedback, users click and assume
+  // nothing is happening because the browser only shows the file in the
+  // download bar a second or two later.
+  const [logsDownloading, setLogsDownloading] = useState(false);
+  const [controllerDownloading, setControllerDownloading] = useState(false);
+  const downloadLogsZip = async () => {
+    if (logsDownloading) return;
+    setLogsDownloading(true);
+    try {
+      await downloadManagedJobLogs({
+        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+        controller: false,
+      });
+    } finally {
+      setLogsDownloading(false);
+    }
+  };
+  const downloadControllerLogsZip = async () => {
+    if (controllerDownloading) return;
+    setControllerDownloading(true);
+    try {
+      await downloadManagedJobLogs({
+        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+        controller: true,
+      });
+    } finally {
+      setControllerDownloading(false);
+    }
+  };
   const isMobile = useMobile();
 
   // Telemetry state
@@ -592,21 +623,23 @@ function JobDetails() {
                   </div>
                   <div className="flex items-center space-x-3">
                     <Tooltip
-                      content="Download all job logs (zip)"
+                      content={
+                        logsDownloading
+                          ? 'Preparing zip… download will start shortly'
+                          : 'Download all job logs (zip)'
+                      }
                       className="text-muted-foreground"
                     >
                       <button
-                        onClick={() =>
-                          downloadManagedJobLogs({
-                            jobId: parseInt(
-                              Array.isArray(jobId) ? jobId[0] : jobId
-                            ),
-                            controller: false,
-                          })
-                        }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        onClick={downloadLogsZip}
+                        disabled={logsDownloading}
+                        className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
                       >
-                        <Download className="w-4 h-4" />
+                        {logsDownloading ? (
+                          <CircularProgress size={16} />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
                       </button>
                     </Tooltip>
                     <Tooltip
@@ -760,6 +793,19 @@ function ControllerLogsSection({
   const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
   const controllerLogsSlotHasPlugin =
     usePluginComponents('jobs.detail.controllerlogs').length > 0;
+  const [downloading, setDownloading] = useState(false);
+  const downloadControllerZip = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadManagedJobLogs({
+        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+        controller: true,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // Initialize state from localStorage
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -805,19 +851,23 @@ function ControllerLogsSection({
           {isExpanded && (
             <div className="flex items-center space-x-3">
               <Tooltip
-                content="Download full controller logs"
+                content={
+                  downloading
+                    ? 'Preparing zip… download will start shortly'
+                    : 'Download full controller logs'
+                }
                 className="text-muted-foreground"
               >
                 <button
-                  onClick={() =>
-                    downloadManagedJobLogs({
-                      jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
-                      controller: true,
-                    })
-                  }
-                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  onClick={downloadControllerZip}
+                  disabled={downloading}
+                  className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
                 >
-                  <Download className="w-4 h-4" />
+                  {downloading ? (
+                    <CircularProgress size={16} />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
                 </button>
               </Tooltip>
               <Tooltip
