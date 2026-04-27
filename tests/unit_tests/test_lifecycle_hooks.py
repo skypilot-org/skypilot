@@ -24,6 +24,7 @@ import threading
 
 import pytest
 
+from sky.clouds import kubernetes as k8s_cloud
 from sky.resources import Resources
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -442,3 +443,78 @@ def test_hook_executor_empty_and_no_match_are_noops(hook_executor, monkeypatch):
 
 def test_skylet_lib_version_bumped_to_7():
     assert constants.SKYLET_LIB_VERSION >= 7
+
+
+# ---------------------------------------------------------------------------
+# K8s preemption-grace rendering
+# ---------------------------------------------------------------------------
+
+
+def test_preemption_grace_is_sum_of_timeouts():
+    """hook_executor runs hooks sequentially, so the rendered grace
+    period must be the SUM of preemption-hook timeouts, not the max.
+    """
+
+    timeout = k8s_cloud._compute_preemption_hook_timeout([
+        {
+            'run': 'a',
+            'events': ['preemption'],
+            'timeout': 30
+        },
+        {
+            'run': 'b',
+            'events': ['preemption'],
+            'timeout': 45
+        },
+        {
+            'run': 'c',
+            'events': ['preemption'],
+            'timeout': 25
+        },
+    ])
+    assert timeout == 100
+
+
+def test_preemption_grace_ignores_non_preemption_events():
+
+    timeout = k8s_cloud._compute_preemption_hook_timeout([
+        {
+            'run': 'a',
+            'events': ['autostop'],
+            'timeout': 30
+        },
+        {
+            'run': 'b',
+            'events': ['down'],
+            'timeout': 45
+        },
+        {
+            'run': 'c',
+            'events': ['preemption'],
+            'timeout': 60
+        },
+    ])
+    assert timeout == 60
+
+
+def test_preemption_grace_none_when_no_preemption_hook():
+
+    assert k8s_cloud._compute_preemption_hook_timeout(None) is None
+    assert k8s_cloud._compute_preemption_hook_timeout([]) is None
+    assert k8s_cloud._compute_preemption_hook_timeout([{
+        'run': 'a',
+        'events': ['autostop'],
+        'timeout': 30
+    }]) is None
+
+
+def test_preemption_grace_default_timeout_when_unset():
+    """An entry without explicit ``timeout`` falls back to the default."""
+
+    timeout = k8s_cloud._compute_preemption_hook_timeout([
+        {
+            'run': 'a',
+            'events': ['preemption']
+        },
+    ])
+    assert timeout == constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS

@@ -49,6 +49,27 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
 
+def _compute_preemption_hook_timeout(
+        hooks: Optional[List[Dict[str, Any]]]) -> Optional[int]:
+    """Sum of timeouts for all preemption-event hooks.
+
+    Returns ``None`` when no hook declares the ``preemption`` event,
+    so the caller can omit ``terminationGracePeriodSeconds`` from the
+    pod spec entirely (K8s falls back to its 30 s default).
+
+    Why sum rather than max: ``hook_executor.run`` executes matching
+    hooks sequentially, so the wall-clock cost is the sum of per-hook
+    timeouts. Using max would let kubelet SIGKILL the skylet
+    mid-execution after the first hook's timeout expires.
+    """
+    timeouts = [
+        entry.get('timeout', constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+        for entry in (hooks or [])
+        if 'preemption' in (entry.get('events') or [])
+    ]
+    return sum(timeouts) if timeouts else None
+
+
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
@@ -827,19 +848,15 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace': namespace,
         }
 
-        # Pod-level terminationGracePeriodSeconds sized to the longest
-        # preemption hook so kubelet doesn't SIGKILL the skylet mid-hook.
-        # Autostop and `sky down` paths control their own timing so they
-        # don't need a grace-period override — hook-free pods stay on
-        # the K8s default (30s).
-        preemption_timeouts = [
-            entry.get('timeout',
-                      constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
-            for entry in (resources.hooks or [])
-            if 'preemption' in (entry.get('events') or [])
-        ]
-        if preemption_timeouts:
-            deploy_vars['preemption_hook_timeout'] = max(preemption_timeouts)
+        # Pod-level terminationGracePeriodSeconds rendered from any
+        # preemption hooks the resources declare (see
+        # `_compute_preemption_hook_timeout`).  Autostop and `sky down`
+        # paths control their own timing so they don't need a
+        # grace-period override — hook-free pods stay on the K8s
+        # default (30s).
+        preemption_timeout = _compute_preemption_hook_timeout(resources.hooks)
+        if preemption_timeout is not None:
+            deploy_vars['preemption_hook_timeout'] = preemption_timeout
 
         # Add ephemeral storage to deploy vars if specified.
         ephemeral_storage = resources.ephemeral_storage

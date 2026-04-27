@@ -538,10 +538,20 @@ available_node_types:
           imagePullPolicy: Always
           image: {{image_id}}
           {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
-          # Forward kubelet SIGTERM to the skylet so it can run
-          # preemption lifecycle hooks. Skylet isn't PID 1 (the setup
-          # bash script is), so kubelet's TERM doesn't reach it
-          # without this preStop hook.
+          # Forward kubelet SIGTERM to whichever sky-hook daemon owns
+          # this pod (skylet on the head, worker_hook_handler on
+          # workers). Skylet isn't PID 1 in the pod (the setup bash
+          # script is) so kubelet's SIGTERM doesn't reach it without
+          # this preStop hook.
+          #
+          # Discovery uses pgrep over the daemon's module name so we
+          # are robust against:
+          #   - PID-file boot race (file written after process start)
+          #   - HA stale PID after skylet crash + restart
+          #   - PID reuse on uncleanly-shut daemons
+          #
+          # Polling loop replaces a blocking sleep so the pod doesn't
+          # sit in Terminating after the hook has already finished.
           lifecycle:
             preStop:
               exec:
@@ -549,9 +559,16 @@ available_node_types:
                 - /bin/sh
                 - -c
                 - |
-                  if [ -f /home/sky/.sky/skylet_pid ]; then
-                    kill -TERM $(cat /home/sky/.sky/skylet_pid) || true
-                    sleep {{ preemption_hook_timeout }}
+                  PID=$(pgrep -of 'sky\.skylet\.(skylet|worker_hook_handler)' || true)
+                  if [ -n "$PID" ]; then
+                    kill -TERM "$PID" 2>/dev/null || true
+                    # Wait up to grace seconds for the daemon to exit.
+                    i=0
+                    while [ $i -lt {{ preemption_hook_timeout }} ]; do
+                      kill -0 "$PID" 2>/dev/null || break
+                      sleep 1
+                      i=$((i+1))
+                    done
                   fi
           {% endif %}
           env:
