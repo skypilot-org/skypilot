@@ -489,3 +489,9 @@ Sky Batch automatically handles failures:
     writer.cleanup(job_id="42")  # Remove temporary batch files
 
   The job ID is printed in the failure message, so you can copy-paste directly. You can omit the ``cleanup()`` call to keep the temporary files for debugging.
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   custom-formats
