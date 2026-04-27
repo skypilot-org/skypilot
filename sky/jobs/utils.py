@@ -1195,6 +1195,66 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
+# ~64 KB blocks are large enough that even short-line logs collect the
+# requested tail in one or two reads, but small enough that we don't
+# pull megabytes when the user only asked for tail=200.
+_TAIL_BLOCK_SIZE = 64 * 1024
+
+
+def _tail_lines_from_end(path: str, tail: int,
+                         offset: int) -> Tuple[List[str], int]:
+    """Read the last ``tail`` lines from ``path``, skipping ``offset`` lines.
+
+    Reads the file backwards in fixed-size blocks instead of iterating the
+    whole file like ``collections.deque(f, maxlen=tail)`` does. For multi-
+    GB log files this is the difference between ~10s and ~1ms per request,
+    so the dashboard live-tail can issue cheap repeated reads even when a
+    customer's job log is 10 GB+.
+
+    Args:
+        path: File path to tail.
+        tail: Number of lines to return (positive).
+        offset: Skip this many lines from EOF before taking ``tail``.
+
+    Returns:
+        ``(lines, end_pos)`` — the requested lines (each with trailing
+        newline if present in the source), and the byte position the
+        backward scan started from. Callers that follow the file should
+        seek to ``end_pos`` to avoid re-emitting bytes already returned.
+    """
+    assert tail > 0
+    needed = tail + max(offset, 0)
+    chunks: List[bytes] = []
+    line_count = 0
+    pos = 0
+    end_pos = 0
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        end_pos = f.tell()
+        pos = end_pos
+        while pos > 0 and line_count <= needed:
+            read_size = min(_TAIL_BLOCK_SIZE, pos)
+            pos -= read_size
+            f.seek(pos)
+            chunk = f.read(read_size)
+            chunks.append(chunk)
+            line_count += chunk.count(b'\n')
+    data = b''.join(reversed(chunks))
+    text = data.decode('utf-8', errors='replace')
+    lines = text.splitlines(keepends=True)
+    # If we stopped before reaching offset 0, the first decoded line is
+    # almost certainly partial (we landed in the middle of a line). Drop
+    # it so callers see only complete lines.
+    if pos > 0 and lines:
+        lines = lines[1:]
+    if offset > 0:
+        if offset >= len(lines):
+            return [], end_pos
+        # pylint: disable=invalid-unary-operand-type
+        lines = lines[:-offset]
+    return lines[-tail:], end_pos
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1741,30 +1801,35 @@ def stream_logs(job_id: Optional[int],
         # This code is based on log_lib.tail_logs. We can't use that code
         # exactly because state works differently between managed jobs and
         # normal jobs.
-        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
-            # Note: we do not need to care about start_stream_at here, since
-            # that should be in the job log printed above.
-            read_from: Union[TextIO, Deque[str], List[str]] = f
-            if tail is not None:
-                assert tail > 0
-                offset: int = (tail_offset if tail_offset is not None and
-                               tail_offset > 0 else 0)
-                if offset > 0:
-                    # Read the last `tail + offset` lines, then drop the
-                    # last `offset` of those — this returns a window of
-                    # `tail` lines ending `offset` lines before EOF.
-                    window = list(collections.deque(f, maxlen=tail + offset))
-                    # pylint: disable=invalid-unary-operand-type
-                    read_from = window[:-offset]
-                else:
-                    # Read only the last 'tail' lines efficiently using deque
-                    read_from = collections.deque(f, maxlen=tail)
-            for line in read_from:
+        offset_arg = (tail_offset
+                      if tail_offset is not None and tail_offset > 0 else 0)
+        # Phase 1: emit the historical window. For tail!=None we use a
+        # backward-seek read so cost is O(tail) instead of O(file_size);
+        # otherwise stream the whole file (this is the legacy `tail=None`
+        # behavior used by `sky jobs logs --controller`).
+        end_pos = 0
+        if tail is not None:
+            assert tail > 0
+            tail_lines, end_pos = _tail_lines_from_end(controller_log_path,
+                                                       tail, offset_arg)
+            for line in tail_lines:
                 print(line, end='')
-            # Flush.
             print(end='', flush=True)
+        else:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                for line in f:
+                    print(line, end='')
+                end_pos = f.tell()
+                print(end='', flush=True)
 
-            if follow:
+        # Phase 2: optionally follow new bytes from where the tail read
+        # stopped. Reopen so the prior file handle (which may have been
+        # binary in the seek branch) doesn't leak.
+        if follow:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                f.seek(end_pos)
                 while True:
                     # Print all new lines, if there are any.
                     line = f.readline()
@@ -1790,8 +1855,8 @@ def stream_logs(job_id: Optional[int],
                 # Wait for final logs to be written.
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
-            # Print any remaining logs including incomplete line.
-            print(f.read(), end='', flush=True)
+                # Print any remaining logs including incomplete line.
+                print(f.read(), end='', flush=True)
 
         if follow:
             return ux_utils.finishing_message(
