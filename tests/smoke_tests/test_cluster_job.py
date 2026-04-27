@@ -1242,7 +1242,8 @@ def test_task_labels_kubernetes():
                     '--selector inlinelabel1=inlinevalue1 '
                     '--selector inlinelabel2=inlinevalue2 '
                     '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                    f'grep \'^{name}\'')
+                    f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
+                )
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
@@ -1431,9 +1432,11 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
-                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "pvc for volume existing0 not deleted" && exit 1; else echo "pvc for volume existing0 deleted"; fi && '
+                # existing0 was imported with use_existing=True; the underlying PVC is preserved on delete.
+                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -z "$pvc" ]; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
                 'pvc=$(echo "$pvcs" | grep "pvc1"); if [ -n "$pvc" ]; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
-                'pvc=$(echo "$pvcs" | grep "vol-existing1"); if [ -n "$pvc" ]; then echo "pvc for volume vol-existing1 not deleted" && exit 1; else echo "pvc for volume vol-existing1 deleted"; fi && '
+                # vol-existing1 wraps an imported PVC named "existing1" (matched by label); that PVC is preserved on delete.
+                'pvc=$(echo "$pvcs" | grep "existing1"); if [ -z "$pvc" ]; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi && '
                 f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
             ),
         ],
@@ -3454,10 +3457,11 @@ def test_kubernetes_ssh_proxy_performance():
             f'OUTPUT=$(cat) && '
             f'echo "$OUTPUT" && '
             f'echo "Validating performance metrics..." && '
-            f'MEAN=$(echo "$OUTPUT" | grep "Mean:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
-            f'MEDIAN=$(echo "$OUTPUT" | grep "Median:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
-            f'STDDEV=$(echo "$OUTPUT" | grep "Std Dev:" | awk \'{{print $3}}\' | sed \'s/s$//\') && '
-            f'SUCCESS=$(echo "$OUTPUT" | grep "Success rate:" | awk \'{{print $3}}\' | sed \'s/%$//\') && '
+            f'CMD_OUT=$(echo "$OUTPUT" | sed -n \'/COMMAND EXECUTION/,/^$/p\') && '
+            f'MEAN=$(echo "$CMD_OUT" | grep "Mean:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'MEDIAN=$(echo "$CMD_OUT" | grep "Median:" | awk \'{{print $2}}\' | sed \'s/s$//\') && '
+            f'STDDEV=$(echo "$CMD_OUT" | grep "Std Dev:" | awk \'{{print $3}}\' | sed \'s/s$//\') && '
+            f'SUCCESS=$(echo "$CMD_OUT" | grep "Success rate:" | awk \'{{print $3}}\' | sed \'s/%$//\') && '
             f'echo "Mean: $MEAN, Median: $MEDIAN, Std Dev: $STDDEV, Success: $SUCCESS%" && '
             f'if [ "$(echo "$MEAN < 0.01" | bc -l)" -eq 1 ]; then echo "Mean latency OK: ${{MEAN}}s"; else echo "Mean latency too high: ${{MEAN}}s"; exit 1; fi && '
             f'if [ "$(echo "$MEDIAN < 0.01" | bc -l)" -eq 1 ]; then echo "Median latency OK: ${{MEDIAN}}s"; else echo "Median latency too high: ${{MEDIAN}}s"; exit 1; fi && '

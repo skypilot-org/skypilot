@@ -195,6 +195,20 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 f'{valid_regex}')
 
 
+def cluster_name_looks_like_file_path(cluster_name: Optional[str]) -> bool:
+    """Returns True if the cluster name looks like a file path.
+
+    This detects a common user mistake: typing 'sky launch -c job.yaml'
+    instead of 'sky launch -c mycluster job.yaml'.
+    """
+    if cluster_name is None:
+        return False
+
+    file_extensions = ('.yaml', '.yml', '.json')
+    return (cluster_name.lower().endswith(file_extensions) or
+            os.path.isfile(os.path.expanduser(cluster_name)))
+
+
 def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
     """Errors out on invalid recipe names.
 
@@ -899,23 +913,34 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                 known_fields = set(e.schema.get('properties', {}).keys())
                 assert isinstance(e.instance,
                                   dict), 'Instance must be a dictionary'
+                sub_msgs = []
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'Instead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
+                            sub_msgs.append(
+                                f'Instead of {field!r}, did you mean '
+                                f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'Found unsupported field {field!r}.'
+                            sub_msgs.append(
+                                f'Found unsupported field {field!r}.')
+                err_msg += ' '.join(sub_msgs)
         else:
-            message = e.message
+            # When the error came from an anyOf/oneOf branch, jsonschema's
+            # default message is the unhelpful "X is not valid under any of
+            # the given schemas" with json_path truncated at the branch
+            # boundary. best_match recurses into the sub-error context for
+            # anyOf/oneOf nodes specifically (see its docstring) and
+            # surfaces the deepest, most-specific sub-error.
+            best = jsonschema.exceptions.best_match([e])
+            message = best.message
             # Object in jsonschema is represented as dict in Python. Replace
             # 'object' with 'dict' for better readability.
             message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + message +
-                       f'. Check problematic field(s): {e.json_path}')
+                       f'. Check problematic field(s): {best.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():

@@ -41,8 +41,14 @@ def generate_llms_txt(app: Sphinx, exception: Exception) -> None:
     output_path = Path(app.outdir) / "llms.txt"
     output_path.write_text(llms_content)
 
-    # Update source copy
+    # Update source copy — skip if unchanged so the next incremental build
+    # does not see llms.txt as a new source modification.
     source_path = Path(app.srcdir) / "llms.txt"
+    try:
+        if source_path.read_text() == llms_content:
+            return
+    except (FileNotFoundError, UnicodeDecodeError):
+        pass
     source_path.write_text(llms_content)
 
 

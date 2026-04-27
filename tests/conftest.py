@@ -18,6 +18,7 @@ from smoke_tests.docker import docker_utils
 
 from sky import cloud_stores
 from sky import sky_logging
+from sky import skypilot_config
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -159,6 +160,10 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='Only run tests for TPU.')
+    parser.addoption('--batch',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for sky batch.')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -239,6 +244,14 @@ def pytest_addoption(parser):
               'ensure the tests will not be skipped but no actual effect)'),
     )
     parser.addoption(
+        '--serve-consolidation',
+        action='store_true',
+        default=False,
+        help=('If set, the tests will be run in serve consolidation mode '
+              '(The config change is made in buildkite so this is a flag to '
+              'ensure the tests will not be skipped but no actual effect)'),
+    )
+    parser.addoption(
         '--grpc',
         action='store_true',
         default=False,
@@ -294,6 +307,7 @@ def pytest_configure(config):
     config.addinivalue_line(
         'markers', 'no_auto_retry: mark test to disable automatic retries '
         'in Buildkite CI (manual retries still allowed)')
+    config.addinivalue_line('markers', 'batch: mark test as sky batch specific')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -359,6 +373,8 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
+    skip_marks['batch'] = pytest.mark.skip(
+        reason='skipped, because --batch option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
     skip_marks['no_remote_server'] = pytest.mark.skip(
@@ -413,6 +429,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+        if (not 'batch' in item.keywords) and config.getoption('--batch'):
+            item.add_marker(skip_marks['batch'])
         if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
             item.add_marker(skip_marks['postgres'])
 
@@ -879,6 +897,14 @@ def prepare_env_file(request):
     If the env-file option is a local directory or file, use it directly.
     Otherwise, treat it as a cloud storage URL (e.g., s3://bucket/path) and
     download from storage.
+
+    When the env file contains a service account token, we call
+    ``sdk.api_login`` so that ``~/.sky/user_hash`` is set to the server-side
+    SA identity.  This is necessary because test helpers compute the on-cloud
+    cluster name client-side via ``get_user_hash()``, which must match the
+    user-id the server embeds in pod/service labels.  The original user_hash
+    file is restored after the session so subsequent tests on the same agent
+    are not affected.
     """
     env_file_path = request.config.getoption('--env-file')
     if env_file_path is None:
@@ -893,4 +919,47 @@ def prepare_env_file(request):
     os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = local_file_path
     if has_api_server:
         os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+
+    # When a service account token is present, run api_login to sync the
+    # local ~/.sky/user_hash with the server-side SA identity.  We back up
+    # the original file so that it can be restored after the session.
+    user_hash_file = common_utils.USER_HASH_FILE
+    # Use a PID-stamped backup name to avoid clashing with parallel workers.
+    user_hash_backup = f'{user_hash_file}.bak.{os.getpid()}'
+    user_hash_existed = os.path.exists(user_hash_file)
+    config = skypilot_config.parse_and_validate_config_file(local_file_path)
+    sa_token = config.get_nested(('api_server', 'service_account_token'),
+                                 default_value=None)
+    if sa_token:
+        endpoint = config.get_nested(('api_server', 'endpoint'),
+                                     default_value=None)
+        if endpoint is None:
+            logger.warning('SA token detected but no endpoint found in config. '
+                           'Skipping api_login to avoid interactive prompt.')
+        else:
+            # Back up the existing user_hash file
+            if user_hash_existed:
+                shutil.move(user_hash_file, user_hash_backup)
+                logger.info(f'Backed up {user_hash_file} -> {user_hash_backup}')
+            try:
+                import sky.client.sdk as sdk  # pylint: disable=import-outside-toplevel
+                sdk.api_login(endpoint, service_account_token=sa_token)
+                logger.info(
+                    'SA token detected; ran api_login to sync user_hash '
+                    f'(now: {common_utils.get_user_hash()})')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'api_login with SA token failed: {e}. '
+                               'Tests computing name_on_cloud may use the '
+                               'wrong user hash.')
+
     yield local_file_path
+
+    # Restore the original user_hash file so subsequent tests on this
+    # agent are not affected.
+    if os.path.exists(user_hash_backup):
+        shutil.move(user_hash_backup, user_hash_file)
+        logger.info(f'Restored {user_hash_backup} -> {user_hash_file}')
+    elif not user_hash_existed and os.path.exists(user_hash_file):
+        # api_login created the file; remove it to avoid polluting the env.
+        os.remove(user_hash_file)
+        logger.info(f'Removed {user_hash_file} (created during test session)')

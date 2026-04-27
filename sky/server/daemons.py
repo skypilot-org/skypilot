@@ -6,7 +6,7 @@ import shutil
 import sys
 import time
 import typing
-from typing import Callable
+from typing import Callable, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -61,10 +61,19 @@ def _rotate_daemon_log(log_path: str) -> None:
         pass
 
 
-# Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
-# Each executor process imports this module during executor_initializer(),
-# so this captures the user's original env setting.
-_user_disabled_usage_collection = env_options.Options.DISABLE_LOGGING.get()
+# Populated lazily on the first run_event() call per process.
+#
+# Why not snapshot at import time: importing this module can happen before
+# the process has finished its startup initialization, so an import-time
+# read of env_options.Options.DISABLE_LOGGING may not reflect the final
+# intended value.
+#
+# Why not read inside the event: run_event() overrides DISABLE_LOGGING to
+# silence per-daemon usage messages, so a read at gate time would always
+# see the override rather than the user's original setting.
+#
+# Initializing inside run_event, before the override, threads the needle.
+_user_disabled_usage_collection: Optional[bool] = None
 
 
 def _default_should_skip():
@@ -109,6 +118,12 @@ class InternalRequestDaemon:
 
     def run_event(self):
         """Run the event."""
+        global _user_disabled_usage_collection
+        # Capture the original DISABLE_LOGGING value once per process,
+        # before we override it below.
+        if _user_disabled_usage_collection is None:
+            _user_disabled_usage_collection = (
+                env_options.Options.DISABLE_LOGGING.get())
 
         # Disable logging for periodic refresh to avoid the usage message being
         # sent multiple times.

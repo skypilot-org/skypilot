@@ -117,9 +117,18 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 
 def _delete_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
-    """Deletes a PVC volume."""
+    """Deletes a PVC volume.
+
+    If the volume was registered with ``use_existing=True``, the underlying
+    PVC is left intact (SkyPilot did not create it, and another SkyPilot
+    instance may also have it registered).
+    """
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
+    if config.config.get('use_existing'):
+        logger.info(f'Leaving PVC {pvc_name} in namespace {namespace} intact '
+                    f'(use_existing=True)')
+        return config
     kubernetes_utils.delete_k8s_resource_with_retry(
         delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
             context).delete_namespaced_persistent_volume_claim(
@@ -667,6 +676,19 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
         pvc_storage_class = getattr(pvc_obj.spec, 'storage_class_name', None)
         if pvc_storage_class:
             config.config['storage_class_name'] = pvc_storage_class
+
+    # Populate access_mode from PVC (immutable, so PVC is source of truth)
+    pvc_access_modes = getattr(pvc_obj.spec, 'access_modes', None)
+    if pvc_access_modes:
+        pvc_access_mode = pvc_access_modes[0]
+        current_access_mode = config.config.get('access_mode')
+        if current_access_mode != pvc_access_mode:
+            if current_access_mode is not None:
+                logger.debug(
+                    f'PVC {pvc_name} has access mode {pvc_access_mode} '
+                    f'but config access_mode is {current_access_mode}, '
+                    f'overriding with the PVC access mode.')
+            config.config['access_mode'] = pvc_access_mode
 
     # Populate size if not set (prefer bound capacity, fallback to requested)
     pvc_size = None

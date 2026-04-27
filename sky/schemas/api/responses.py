@@ -88,6 +88,8 @@ class APIHealthResponse(ResponseBaseModel):
     latest_version: Optional[str] = None
     # Whether external proxy auth is enabled
     external_proxy_auth_enabled: bool = False
+    # Whether telemetry/usage collection is enabled
+    telemetry_enabled: bool = True
 
 
 class StatusResponse(ResponseBaseModel):
@@ -225,6 +227,11 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Whether this job is a batch coordinator (ds.map())
+    is_batch: Optional[bool] = None
+    # Batch progress fields (NULL for non-batch jobs)
+    batch_total_batches: Optional[int] = None
+    batch_completed_batches: Optional[int] = None
     # Network endpoint information (extracted from cluster handle)
     # List of (internal_ip, external_ip) tuples for all nodes
     internal_external_ips: Optional[List[Tuple[str, str]]] = None

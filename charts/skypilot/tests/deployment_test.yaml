@@ -329,9 +329,15 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: state-volume
+            mountPath: /root/sky_logs
+            subPath: sky_logs
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
             mountPath: /root/sky_logs/jobs_controller
             subPath: sky_logs/jobs_controller
-      - contains:
+      - notContains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: state-volume
@@ -354,6 +360,12 @@ tests:
             name: state-volume
             mountPath: /root/sky_logs/managed_jobs
             subPath: sky_logs/managed_jobs
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs
+            subPath: sky_logs
 
   - it: should honor fullnameOverride for deployment names and labels
     set:
