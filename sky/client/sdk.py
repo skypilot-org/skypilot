@@ -632,7 +632,8 @@ def launch(
         resize: if True, resize the existing cluster to the ``num_nodes``
           specified in the task. Supports both scaling up (adding workers)
           and scaling down (removing workers). Scale-down requires no
-          running jobs on the cluster.
+          running jobs on the cluster. If True, requires ``cluster_name``
+          to be set.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -670,6 +671,11 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if resize and cluster_name is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'resize=True requires cluster_name to be set to an existing '
+                'cluster.')
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 

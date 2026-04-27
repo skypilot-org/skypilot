@@ -1189,7 +1189,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     default=False,
     required=False,
     help=('Resize an existing cluster to --num-nodes. Supports both '
-          'scaling up (adding workers) and scaling down (removing workers). '
+          'scale-up (adding workers) and scale-down (removing workers). '
           'Scale-down requires no running jobs. '
           'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
