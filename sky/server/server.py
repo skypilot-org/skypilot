@@ -1409,13 +1409,17 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    # Write chunk to a unique private path first, so concurrent uploads for
+    # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = base_dir / f'{zip_name}.zip'
+        final_path = base_dir / f'{zip_name}.zip'
+        zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
         chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+        final_path = chunk_dir / f'part{chunk_index}'
+        zip_file_path = chunk_dir / f'part{chunk_index}.tmp.{uuid.uuid4().hex}'
 
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
@@ -1437,11 +1441,22 @@ async def _receive_and_assemble_chunks(
                     f'{common_utils.format_exception(e)}'))
 
     def get_missing_chunks(total_chunks: int) -> Set[str]:
-        return set(f'part{i}' for i in range(total_chunks)) - set(
-            p.name for p in chunk_dir.glob('part*'))
+        existing = set()
+        for p in chunk_dir.glob('part*'):
+            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
+            # belong to in-flight concurrent writers.  Only renamed
+            # final names ``part{N}`` count toward completion.
+            name = p.name
+            suffix = name[len('part'):] if name.startswith('part') else ''
+            if suffix.isdigit():
+                existing.add(name)
+        return set(f'part{i}' for i in range(total_chunks)) - existing
+
+    # Rename the writer-unique tmp file to its final name.
+    os.rename(str(zip_file_path), str(final_path))
+    zip_file_path = final_path
 
     if total_chunks > 1:
-        zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
             return payloads.UploadZipFileResponse(
@@ -1557,27 +1572,26 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
+    # Receive the chunk WITHOUT holding the upload lock. Each chunk
+    # is received to a private path first to avoid concurrent uploads
+    # interleave with each other.
+    staging_dir = storage.get_staging_dir(user_id, upload_id)
+    result = await _receive_and_assemble_chunks(
+        base_dir=staging_dir,
+        zip_name='staging',
+        request=request,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+        extract=storage.extract_on_upload(),
+        assemble=storage.assemble_on_upload())
+    if result is not None:
+        return result
+
+    # Atomic publish
     async with storage.acquire_upload_lock(user_id, upload_id):
-        # Re-check after acquiring the lock: another upload may have
-        # completed while we were waiting.
         if target_dir.exists():
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
-
-        # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = storage.get_staging_dir(user_id, upload_id)
-        result = await _receive_and_assemble_chunks(
-            base_dir=staging_dir,
-            zip_name='staging',
-            request=request,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            extract=storage.extract_on_upload(),
-            assemble=storage.assemble_on_upload())
-        if result is not None:
-            return result
-        # Atomic rename of the extracted staging dir to the final
-        # directory (same filesystem).
         await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
