@@ -20,7 +20,7 @@ workers:
   cloud: aws
   cpus: 8
   memory: 16
-  use_go_client: false
+  use_go_client: true
   reuse: true
   cleanup: false
 
@@ -46,7 +46,7 @@ generators:
     workload: workloads/basic.sh
     threads_per_worker: 8
     repeats: 2
-    phases: [cluster]
+    phases: [cluster, jobs]
     timeout_per_run_s: 3600
 
   - name: api-read-qps
