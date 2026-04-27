@@ -628,6 +628,10 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Skip the last `tail_offset` lines from the end of the file before
+    # taking `tail` lines. Used by the dashboard live-tail UI to fetch
+    # progressively older windows without re-reading the whole file.
+    tail_offset: Optional[int] = None
     # Task identifier: int for task_id, str for task_name
     task: Optional[Union[str, int]] = None
 

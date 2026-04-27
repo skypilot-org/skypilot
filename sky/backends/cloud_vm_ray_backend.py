@@ -4567,6 +4567,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_id: Optional[int] = None,
             follow: bool = True,
             tail: int = 0,
+            tail_offset: Optional[int] = None,
             require_outputs: bool = False,
             stream_logs: bool = True,
             process_stream: bool = False) -> Union[int, Tuple[int, str, str]]:
@@ -4587,6 +4588,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             The exit code of the tail command. Returns code 100 if the job has
             failed. See exceptions.JobExitCode for possible return codes.
         """
+        # TODO(zhwu): Plumb tail_offset through gRPC TailLogsRequest and
+        # JobLibCodeGen.tail_logs (gated on SKYLET_VERSION) once the
+        # dashboard needs paginated backfill for non-managed cluster jobs.
+        # Today it is only honored by the managed-job controller-log read
+        # path in jobs/utils.py::stream_logs.
+        del tail_offset
         if handle.is_grpc_enabled_with_flag:
             last_exit_code = 0
             try:
@@ -4692,12 +4699,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               controller: bool = False,
                               follow: bool = True,
                               tail: Optional[int] = None,
+                              tail_offset: Optional[int] = None,
                               task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail, task)
+            job_name, job_id, follow, controller, tail, tail_offset, task)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
