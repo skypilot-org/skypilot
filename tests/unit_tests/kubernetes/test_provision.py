@@ -1803,6 +1803,30 @@ class TestProvisionFailureBlocks:
         assert ('http://api.example.com/dashboard/infra/my-cluster-context'
                 in result)
 
+    def test_hint_falls_back_when_url_resolution_fails(self,
+                                                       mock_format_resource,
+                                                       monkeypatch):
+        """If get_server_url raises, the hint should still render (with a
+        generic fallback) rather than crash the failure-rendering path."""
+
+        def _boom():
+            raise RuntimeError('no api server endpoint configured')
+
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            _boom)
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        # Generic fallback text used when URL resolution fails.
+        assert 'SkyPilot dashboard infra page' in result
+        # Placeholder must not leak through.
+        assert '{dashboard_url}' not in result
+
     def test_no_hint_for_unknown_k8s_failure(self, mock_format_resource):
         """K8s block with no recognized failure substring gets no hint."""
         resource = self._make_k8s_resource()

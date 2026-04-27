@@ -226,17 +226,23 @@ def _get_kubernetes_hint(reason: str,
                          context: Optional[str] = None) -> Optional[str]:
     """Return a hint for the given Kubernetes failure reason, or None.
 
-    Hints may contain a `{dashboard_url}` placeholder, which is substituted
+    Hints may contain a literal `{dashboard_url}` token, which is replaced
     with the SkyPilot dashboard infra page URL — scoped to the failing
-    context when one is available.
+    context when one is available. If URL resolution fails for any reason,
+    the token is replaced with a generic fallback so we never raise from
+    failure-rendering code (which would mask the original provision error).
     """
     for substrings, hint in _KUBERNETES_FAILURE_HINTS:
         if any(s in reason for s in substrings):
             if '{dashboard_url}' in hint:
-                starting_page = f'infra/{context}' if context else 'infra'
-                dashboard_url = server_common.get_dashboard_url(
-                    server_common.get_server_url(), starting_page=starting_page)
-                hint = hint.format(dashboard_url=dashboard_url)
+                try:
+                    starting_page = (f'infra/{context}' if context else 'infra')
+                    dashboard_url = server_common.get_dashboard_url(
+                        server_common.get_server_url(),
+                        starting_page=starting_page)
+                except Exception:  # pylint: disable=broad-except
+                    dashboard_url = 'the SkyPilot dashboard infra page'
+                hint = hint.replace('{dashboard_url}', dashboard_url)
             return hint
     return None
 
