@@ -56,6 +56,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
+from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -215,15 +216,27 @@ _KUBERNETES_FAILURE_HINTS = [
      'Verify the image tag exists and registry credentials are configured.'),
     (['OOMKilled'], 'The container ran out of memory. '
      'Try requesting more with `memory: <size>` in resources.'),
-    (['Insufficient'], 'The cluster does not have enough free resources. '
-     'Check node allocations with `kubectl describe nodes`.'),
+    (['Insufficient'],
+     'The cluster does not have enough free resources. View node '
+     'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
 ]
 
 
-def _get_kubernetes_hint(reason: str) -> Optional[str]:
-    """Return a hint for the given Kubernetes failure reason, or None."""
+def _get_kubernetes_hint(reason: str,
+                         context: Optional[str] = None) -> Optional[str]:
+    """Return a hint for the given Kubernetes failure reason, or None.
+
+    Hints may contain a `{dashboard_url}` placeholder, which is substituted
+    with the SkyPilot dashboard infra page URL — scoped to the failing
+    context when one is available.
+    """
     for substrings, hint in _KUBERNETES_FAILURE_HINTS:
         if any(s in reason for s in substrings):
+            if '{dashboard_url}' in hint:
+                starting_page = f'infra/{context}' if context else 'infra'
+                dashboard_url = server_common.get_dashboard_url(
+                    server_common.get_server_url(), starting_page=starting_page)
+                hint = hint.format(dashboard_url=dashboard_url)
             return hint
     return None
 
@@ -239,9 +252,9 @@ def _format_provision_failure_blocks(
                                                        simplified_only=True)[0]
         reason = str(exception)
         lines.append(f'\u2717 {infra} \u2014 {resource_str}')
-        lines.append(f'  {reason}')
+        lines.append(textwrap.indent(reason, '  '))
         if isinstance(resource.cloud, clouds.Kubernetes):
-            hint = _get_kubernetes_hint(reason)
+            hint = _get_kubernetes_hint(reason, context=resource.region)
             if hint:
                 lines.append(f'  Hint: {hint}')
         lines.append('')
@@ -980,7 +993,7 @@ class RetryingVmProvisioner(object):
         else:
             message += (f'{to_provision.cloud} for {requested_resources}. ')
         if last_error_reason:
-            message += f'Reason: {last_error_reason}'
+            message = message.rstrip() + f'\nReason: {last_error_reason}'
         return message
 
     def _retry_zones(  # pylint: disable=line-too-long

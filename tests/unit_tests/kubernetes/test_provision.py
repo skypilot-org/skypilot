@@ -1743,10 +1743,13 @@ def mock_format_resource(monkeypatch):
 class TestProvisionFailureBlocks:
     """Tests for _format_provision_failure_blocks."""
 
-    def _make_k8s_resource(self, infra_str='Kubernetes (in-cluster)'):
+    def _make_k8s_resource(self,
+                           infra_str='Kubernetes (in-cluster)',
+                           region='in-cluster'):
         resource = mock.MagicMock()
         resource.infra.formatted_str.return_value = infra_str
         resource.cloud = clouds.Kubernetes()
+        resource.region = region
         return resource
 
     def _make_aws_resource(self, infra_str='AWS (us-east-1)'):
@@ -1783,6 +1786,23 @@ class TestProvisionFailureBlocks:
         assert 'Hint:' in result
         assert 'memory' in result.lower()
 
+    def test_hint_for_insufficient_includes_url_and_kubectl(
+            self, mock_format_resource, monkeypatch):
+        """Insufficient hint links the dashboard infra page scoped to the
+        failing context and also mentions `kubectl describe nodes`."""
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            lambda: 'http://api.example.com')
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        assert ('http://api.example.com/dashboard/infra/my-cluster-context'
+                in result)
+
     def test_no_hint_for_unknown_k8s_failure(self, mock_format_resource):
         """K8s block with no recognized failure substring gets no hint."""
         resource = self._make_k8s_resource()
@@ -1796,7 +1816,7 @@ class TestProvisionFailureBlocks:
         """Hints don't fire for non-k8s clouds even if substring matches.
 
         Prevents AWS messages like 'InsufficientInstanceCapacity' from
-        triggering the k8s 'kubectl describe nodes' hint.
+        triggering the k8s insufficient-resources hint.
         """
         resource = self._make_aws_resource()
         exc = sky_exceptions.ResourcesUnavailableError(
@@ -1804,7 +1824,7 @@ class TestProvisionFailureBlocks:
         result = cloud_vm_ray_backend._format_provision_failure_blocks(
             {resource: exc})
         assert 'Hint:' not in result
-        assert 'kubectl' not in result
+        assert 'dashboard' not in result
 
     def test_multiple_failures_mixed_clouds(self, mock_format_resource):
         r1 = self._make_k8s_resource()
