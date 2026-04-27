@@ -1195,66 +1195,6 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
-# ~64 KB blocks are large enough that even short-line logs collect the
-# requested tail in one or two reads, but small enough that we don't
-# pull megabytes when the user only asked for tail=200.
-_TAIL_BLOCK_SIZE = 64 * 1024
-
-
-def _tail_lines_from_end(path: str, tail: int,
-                         offset: int) -> Tuple[List[str], int]:
-    """Read the last ``tail`` lines from ``path``, skipping ``offset`` lines.
-
-    Reads the file backwards in fixed-size blocks instead of iterating the
-    whole file like ``collections.deque(f, maxlen=tail)`` does. For multi-
-    GB log files this is the difference between ~10s and ~1ms per request,
-    so the dashboard live-tail can issue cheap repeated reads even when a
-    customer's job log is 10 GB+.
-
-    Args:
-        path: File path to tail.
-        tail: Number of lines to return (positive).
-        offset: Skip this many lines from EOF before taking ``tail``.
-
-    Returns:
-        ``(lines, end_pos)`` — the requested lines (each with trailing
-        newline if present in the source), and the byte position the
-        backward scan started from. Callers that follow the file should
-        seek to ``end_pos`` to avoid re-emitting bytes already returned.
-    """
-    assert tail > 0
-    needed = tail + max(offset, 0)
-    chunks: List[bytes] = []
-    line_count = 0
-    pos = 0
-    end_pos = 0
-    with open(path, 'rb') as f:
-        f.seek(0, os.SEEK_END)
-        end_pos = f.tell()
-        pos = end_pos
-        while pos > 0 and line_count <= needed:
-            read_size = min(_TAIL_BLOCK_SIZE, pos)
-            pos -= read_size
-            f.seek(pos)
-            chunk = f.read(read_size)
-            chunks.append(chunk)
-            line_count += chunk.count(b'\n')
-    data = b''.join(reversed(chunks))
-    text = data.decode('utf-8', errors='replace')
-    lines = text.splitlines(keepends=True)
-    # If we stopped before reaching offset 0, the first decoded line is
-    # almost certainly partial (we landed in the middle of a line). Drop
-    # it so callers see only complete lines.
-    if pos > 0 and lines:
-        lines = lines[1:]
-    if offset > 0:
-        if offset >= len(lines):
-            return [], end_pos
-        # pylint: disable=invalid-unary-operand-type
-        lines = lines[:-offset]
-    return lines[-tail:], end_pos
-
-
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1810,8 +1750,8 @@ def stream_logs(job_id: Optional[int],
         end_pos = 0
         if tail is not None:
             assert tail > 0
-            tail_lines, end_pos = _tail_lines_from_end(controller_log_path,
-                                                       tail, offset_arg)
+            tail_lines, end_pos = log_lib.tail_lines_from_end(
+                controller_log_path, tail, offset_arg)
             for line in tail_lines:
                 print(line, end='')
             print(end='', flush=True)
