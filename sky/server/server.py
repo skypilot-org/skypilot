@@ -1996,10 +1996,19 @@ async def download_zip(
     ``request.state.auth_user.id``, so we look up there. Falls back to
     the local user hash for unauthenticated single-tenant runs.
     """
+    # The matching POST writes the zip under
+    # api_server_user_logs_dir_prefix(env_vars[USER_ID_ENV_VAR]).
+    # The dashboard sets env_vars[USER_ID_ENV_VAR] = userInfo.id from
+    # /internal/dashboard/users/role — which is the user's raw NAME
+    # (e.g. "skypilot-system"), not the md5-hashed `auth_user.id`
+    # (e.g. "ebee332f"). We match by name first, falling back to the
+    # hashed id and finally the local user hash for CLI runs that
+    # somehow reached this endpoint.
     user_hash = None
     auth_user = getattr(request.state, 'auth_user', None)
-    if auth_user is not None and getattr(auth_user, 'id', None):
-        user_hash = auth_user.id
+    if auth_user is not None:
+        user_hash = (getattr(auth_user, 'name', None) or
+                     getattr(auth_user, 'id', None))
     if user_hash is None:
         user_hash = common_utils.get_user_hash()
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
