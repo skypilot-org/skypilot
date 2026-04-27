@@ -1380,13 +1380,16 @@ async def _receive_and_assemble_chunks(
     chunk_index: int,
     total_chunks: int,
     extract: bool = True,
+    assemble: bool = True,
 ) -> Optional[payloads.UploadZipFileResponse]:
-    """Receive chunks, assemble into a zip file, and extract.
+    """Receive chunks, optionally assemble into a zip file, and extract.
 
     Returns:
         None if the upload is completed,
         A response to tell the client to upload more chunks otherwise.
     """
+    if extract and not assemble:
+        raise ValueError('extract=True requires assemble=True')
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
     # test.
@@ -1444,21 +1447,23 @@ async def _receive_and_assemble_chunks(
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        zip_file_path = base_dir / f'{zip_name}.zip'
-        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
-            for chunk in range(total_chunks):
-                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
-                    while True:
-                        # Use 64KB buffer to avoid memory overflow, same size
-                        # as shutil.copyfileobj.
-                        data = await f.read(64 * 1024)
-                        if not data:
-                            break
-                        await zip_file.write(data)
+        if assemble:
+            zip_file_path = base_dir / f'{zip_name}.zip'
+            async with aiofiles.open(zip_file_path, 'wb') as zip_file:
+                for chunk in range(total_chunks):
+                    async with aiofiles.open(chunk_dir / f'part{chunk}',
+                                             'rb') as f:
+                        while True:
+                            # Use 64KB buffer to avoid memory overflow, same
+                            # size as shutil.copyfileobj.
+                            data = await f.read(64 * 1024)
+                            if not data:
+                                break
+                            await zip_file.write(data)
     logger.info(f'Uploaded zip file: {zip_file_path}')
     if extract:
         await unzip_file(zip_file_path, base_dir)
-    if total_chunks > 1:
+    if total_chunks > 1 and assemble:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return None
 
@@ -1567,7 +1572,8 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
             request=request,
             chunk_index=chunk_index,
             total_chunks=total_chunks,
-            extract=storage.extract_on_upload())
+            extract=storage.extract_on_upload(),
+            assemble=storage.assemble_on_upload())
         if result is not None:
             return result
         # Atomic rename of the extracted staging dir to the final

@@ -98,6 +98,10 @@ class BlobStorage(abc.ABC):
         """
         return True
 
+    def assemble_on_upload(self) -> bool:
+        """Whether to concatenate chunks into a single zip during upload."""
+        return True
+
     @abc.abstractmethod
     def blobs_dir(self, user_id: str) -> pathlib.Path:
         """Return the base blobs directory for a user."""
