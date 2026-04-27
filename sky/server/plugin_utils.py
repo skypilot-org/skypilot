@@ -51,12 +51,17 @@ def _build_guarded_install_script(wheels: List[Tuple[str, str]]) -> str:
         # remote_wheel starts with '~' which must be left unquoted so the
         # shell expands it; the filename portion cannot contain shell
         # metacharacters by PEP 427.
+        # Pin click<8.3.0 alongside the plugin wheel: click 8.3.0+ breaks
+        # Ray CLI via copy.deepcopy on Click's Sentinel values
+        # (https://github.com/ray-project/ray/issues/56747). Plugin wheels
+        # may transitively pull a newer click and silently upgrade it,
+        # which breaks ray on the controller.
         install_blocks.append(f"""\
   if grep -Fxq {q_wheel} "$_sky_stamp"; then
     echo "Plugin wheel {wheel_name} already installed, skipping."
   else
     echo "Installing plugin wheel {wheel_name}..."
-    {constants.SKY_UV_PIP_CMD} install {remote_wheel}
+    {constants.SKY_UV_PIP_CMD} install {remote_wheel} "click<8.3.0"
     _sky_record {q_prefix} {q_wheel}
   fi""")
 
