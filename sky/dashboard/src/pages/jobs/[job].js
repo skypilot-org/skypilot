@@ -531,76 +531,9 @@ function JobDetails() {
               </div>
             )}
 
-            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
-            {isGrafanaAvailable && hasAnyTaskWithTelemetry && (
-              <TelemetrySection
-                clusterNameOnCloud={telemetryClusterName}
-                displayName={
-                  isMultiTask
-                    ? `${telemetryTask?.task || telemetryTask?.name || detailJobData.name} (Task ${telemetryTaskIndex})`
-                    : telemetryTask?.task ||
-                      telemetryTask?.name ||
-                      detailJobData.name
-                }
-                storageKey={TELEMETRY_EXPANDED_KEY}
-                hasGpu={hasAccelerator(telemetryTask?.accelerators)}
-                noMetricsMessage={
-                  telemetryTask?.pool
-                    ? 'Telemetry is not available for pool jobs.'
-                    : !telemetryTask?.full_infra?.includes('Kubernetes')
-                      ? 'Telemetry is only available for Kubernetes tasks.'
-                      : 'No telemetry available for this task.'
-                }
-                headerExtra={
-                  isMultiTask && (
-                    <Select
-                      onValueChange={(value) =>
-                        setTelemetryTaskIndex(parseInt(value, 10))
-                      }
-                      value={String(telemetryTaskIndex)}
-                    >
-                      <SelectTrigger
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Task"
-                        className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm ml-4"
-                      >
-                        <SelectValue placeholder="Select Task" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tasksWithTelemetry.map(
-                          ({ index, task, hasMetrics }) => (
-                            <SelectItem
-                              key={index}
-                              value={String(index)}
-                              disabled={!hasMetrics}
-                            >
-                              Task {index}
-                              {task.task ? `: ${task.task}` : ''}
-                              {!hasMetrics ? ' (no metrics)' : ''}
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectContent>
-                    </Select>
-                  )
-                }
-              />
-            )}
-
-            {/* Plugin Slot: Job Infra Nodes */}
-            <PluginSlot
-              name="jobs.detail.nodes"
-              context={{
-                clusterName: detailJobData.current_cluster_name,
-                clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
-                nodeNames: detailJobData.node_names,
-                infra: detailJobData.full_infra,
-                status: detailJobData.status,
-              }}
-              wrapperClassName="mt-6"
-            />
-
-            {/* Logs Section */}
+            {/* Logs Section — moved up so the live tail is visible
+                 right under the job summary instead of below
+                 Telemetry / Infra Nodes panels. */}
             <div id="logs-section" className="mt-6">
               <Card>
                 <div className="flex items-center justify-between px-4 pt-4">
@@ -714,6 +647,75 @@ function JobDetails() {
                 </div>
               </Card>
             </div>
+
+            {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
+            {isGrafanaAvailable && hasAnyTaskWithTelemetry && (
+              <TelemetrySection
+                clusterNameOnCloud={telemetryClusterName}
+                displayName={
+                  isMultiTask
+                    ? `${telemetryTask?.task || telemetryTask?.name || detailJobData.name} (Task ${telemetryTaskIndex})`
+                    : telemetryTask?.task ||
+                      telemetryTask?.name ||
+                      detailJobData.name
+                }
+                storageKey={TELEMETRY_EXPANDED_KEY}
+                hasGpu={hasAccelerator(telemetryTask?.accelerators)}
+                noMetricsMessage={
+                  telemetryTask?.pool
+                    ? 'Telemetry is not available for pool jobs.'
+                    : !telemetryTask?.full_infra?.includes('Kubernetes')
+                      ? 'Telemetry is only available for Kubernetes tasks.'
+                      : 'No telemetry available for this task.'
+                }
+                headerExtra={
+                  isMultiTask && (
+                    <Select
+                      onValueChange={(value) =>
+                        setTelemetryTaskIndex(parseInt(value, 10))
+                      }
+                      value={String(telemetryTaskIndex)}
+                    >
+                      <SelectTrigger
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Task"
+                        className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm ml-4"
+                      >
+                        <SelectValue placeholder="Select Task" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tasksWithTelemetry.map(
+                          ({ index, task, hasMetrics }) => (
+                            <SelectItem
+                              key={index}
+                              value={String(index)}
+                              disabled={!hasMetrics}
+                            >
+                              Task {index}
+                              {task.task ? `: ${task.task}` : ''}
+                              {!hasMetrics ? ' (no metrics)' : ''}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )
+                }
+              />
+            )}
+
+            {/* Plugin Slot: Job Infra Nodes */}
+            <PluginSlot
+              name="jobs.detail.nodes"
+              context={{
+                clusterName: detailJobData.current_cluster_name,
+                clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
+                nodeNames: detailJobData.node_names,
+                infra: detailJobData.full_infra,
+                status: detailJobData.status,
+              }}
+              wrapperClassName="mt-6"
+            />
 
             {/* Plugin Slot: Job Detail Events */}
             <PluginSlot
