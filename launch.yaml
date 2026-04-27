@@ -20,7 +20,8 @@ workers:
   cloud: aws
   cpus: 8
   memory: 16
-  reuse: false
+  use_go_client: false
+  reuse: true
   cleanup: false
 
 # Wall-clock fence for QPS + long_conn generators. Shell generators run to
@@ -29,10 +30,10 @@ duration_s: 600
 
 victim_pool:
   enabled: true
-  count: 2
+  count: 1
   cloud: kubernetes
-  cpus: 2
-  memory: 4
+  cpus: 8
+  memory: 16
   name_prefix: bench-victim
   provision: true
   teardown: false
@@ -40,22 +41,21 @@ victim_pool:
 generators:
   # Heavy lifecycle pressure (slow, closed-loop). Optional — uncomment to
   # layer it on top of the other generators.
-  # - name: shell-lifecycle
-  #   type: shell
-  #   workload: workloads/basic.sh
-  #   threads_per_worker: 10
-  #   repeats: 1
-  #   phases: [cluster]
-  #   timeout_per_run_s: 3600
+  - name: shell-lifecycle
+    type: shell
+    workload: workloads/basic.sh
+    threads_per_worker: 8
+    repeats: 2
+    phases: [cluster]
+    timeout_per_run_s: 3600
 
-  # Constant-rate short reads (open-loop, won't stall on slow ops above).
   - name: api-read-qps
     type: qps
-    target_qps: 30
-    max_inflight_per_worker: 20
+    target_qps: 40
     operations:
-      - op: status
-        weight: 5
+      - {op: status,        weight: 7}
+      - {op: cluster_queue, weight: 1}
+      - {op: tail_logs,     weight: 2}
 
   # Concurrent long-lived sessions to victims.
   - name: long-connections
@@ -77,14 +77,3 @@ generators:
   #                       server's SSH proxy path end-to-end)
   #   - kind=sky_logs   → `sky logs <victim> --no-follow` via SDK
   #                       (measures the /logs endpoint)
-  - name: ssh-bench
-    type: ssh_bench
-    connect_timeout_s: 15
-    op_timeout_s: 60
-    ops:
-      - kind: ssh
-        concurrency_per_worker: 8
-        total_connections: 2000
-      - kind: sky_logs
-        concurrency_per_worker: 8
-        total_connections: 2000

@@ -41,6 +41,12 @@ class Workers:
     image: Optional[str] = None
     reuse: bool = False
     cleanup: bool = True
+    # Install the SkyPilot Go CLI on each worker and prepend ~/.sky/bin to
+    # PATH so shell workloads / login / ssh-priming use the Go binary. The
+    # Python SDK (pip install skypilot-nightly) is still installed because
+    # benchmark_worker.py generators rely on `import sky`.
+    use_go_client: bool = False
+    go_client_version: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -70,9 +76,21 @@ class ShellGeneratorSpec:
     type: str = 'shell'
 
 
+# Ops that always target a victim cluster — the parser sets needs_victim=True
+# for these so config authors don't have to remember to toggle it.
+_VICTIM_OPS = frozenset({
+    'job_status',
+    'cluster_queue',  # sky queue <cluster>
+    'tail_logs',  # sky logs <cluster> --no-follow
+    'exec',  # sky exec <cluster> "echo hello"
+})
+
+_ALL_QPS_OPS = frozenset({'status', 'jobs_queue'}) | _VICTIM_OPS
+
+
 @dataclasses.dataclass
 class QpsOp:
-    op: str  # status | jobs_queue | job_status
+    op: str  # see _ALL_QPS_OPS
     weight: float = 1.0
     needs_victim: bool = False
 
@@ -174,10 +192,15 @@ def _parse_generator(d: Dict[str, Any]) -> GeneratorSpec:
         )
     if t == 'qps':
         ops = [
-            QpsOp(op=o['op'],
-                  weight=float(o.get('weight', 1.0)),
-                  needs_victim=bool(o.get('needs_victim', False)))
-            for o in d['operations']
+            QpsOp(
+                op=o['op'],
+                weight=float(o.get('weight', 1.0)),
+                # Force needs_victim=True for ops that unconditionally target
+                # a victim cluster (sky queue / sky logs / sky exec / job
+                # status on a cluster). User can't opt out.
+                needs_victim=bool(o.get('needs_victim', False)) or
+                o['op'] in _VICTIM_OPS,
+            ) for o in d['operations']
         ]
         return QpsGeneratorSpec(
             name=name,
@@ -226,8 +249,7 @@ def _parse_generator(d: Dict[str, Any]) -> GeneratorSpec:
                                 entry.get('concurrency_per_worker',
                                           default_conc)),
                             total_connections=int(
-                                entry.get('total_connections',
-                                          default_total)),
+                                entry.get('total_connections', default_total)),
                         ))
         return SshBenchGeneratorSpec(
             name=name,
@@ -260,6 +282,8 @@ def load_from_yaml(path: str) -> BenchmarkConfig:
         image=workers_d.get('image'),
         reuse=bool(workers_d.get('reuse', False)),
         cleanup=bool(workers_d.get('cleanup', True)),
+        use_go_client=bool(workers_d.get('use_go_client', False)),
+        go_client_version=workers_d.get('go_client_version'),
     )
 
     vp_d = raw.get('victim_pool') or {}
@@ -356,9 +380,10 @@ def _validate(cfg: BenchmarkConfig) -> None:
         if not g.operations:
             raise ValueError(f'qps generator {g.name}: no operations')
         for op in g.operations:
-            if op.op not in ('status', 'jobs_queue', 'job_status'):
+            if op.op not in _ALL_QPS_OPS:
                 raise ValueError(
-                    f'qps generator {g.name}: unknown op {op.op!r}')
+                    f'qps generator {g.name}: unknown op {op.op!r} '
+                    f'(supported: {sorted(_ALL_QPS_OPS)})')
     for g in cfg.long_conn_generators():
         for p in g.protocols:
             if p.kind not in ('ssh_idle', 'logs_follow'):

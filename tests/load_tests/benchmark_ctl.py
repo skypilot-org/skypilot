@@ -282,6 +282,22 @@ def _build_worker_bash(cfg: BenchmarkConfig, worker_id: int, n_workers: int,
         f'sky status {v} >/dev/null 2>&1 || '
         f'echo "[warn] prime ssh config for {v} failed"' for v in victims)
     prime_block = prime_lines if victims else 'true  # no victims to prime'
+    # Optionally install the SkyPilot Go CLI on the worker and prepend its
+    # bin dir to PATH so all subsequent `sky` invocations (login, status,
+    # workload scripts) use the Go binary. The Python SDK install above is
+    # still needed for generators that do `import sky`.
+    if cfg.workers.use_go_client:
+        version_arg = (f' -s -- --version {cfg.workers.go_client_version}'
+                       if cfg.workers.go_client_version else '')
+        go_install_block = (
+            'curl -fsSL '
+            'https://skypilot-cli.s3.us-west-2.amazonaws.com/install.sh '
+            f'| bash{version_arg}\n        '
+            'export PATH="$HOME/.sky/bin:$PATH"\n        '
+            'echo "[go-client] using $(command -v sky) "'
+            '"($(sky --version 2>&1 | head -1))"')
+    else:
+        go_install_block = 'true  # go client disabled'
     result_file = f'~/benchmark_results/results_w{worker_id}.json'
     # NOTE: no `set -e`. We intentionally let every step proceed so that
     # even if an intermediate step fails, the result markers are still
@@ -299,6 +315,7 @@ def _build_worker_bash(cfg: BenchmarkConfig, worker_id: int, n_workers: int,
         echo {cfg_b64} | base64 -d > ~/sky_workdir/bench_config.yaml
         python -c "import sky" 2>/dev/null || \\
             pip install "skypilot-nightly[aws,kubernetes]" >/dev/null 2>&1
+        {go_install_block}
         {login_cmd}
         # Prime SSH config for each victim (needed for raw-ssh long connections).
         {prime_block}
@@ -557,7 +574,7 @@ def _print_qps_section(name: str, per_worker: List[Dict[str, Any]]) -> None:
 
 
 def _print_ssh_bench_section(name: str, per_worker: List[Dict[str,
-                                                               Any]]) -> None:
+                                                              Any]]) -> None:
     print(f'\n── SSH bench generator: {name} ──')
     # Group records by op kind.
     ok_by_kind: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -574,14 +591,14 @@ def _print_ssh_bench_section(name: str, per_worker: List[Dict[str,
     for w in per_worker:
         all_kinds.update((w['summary'].get('per_op') or {}).keys())
     for kind in sorted(all_kinds):
-        attempts = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
-            'attempts', 0) for w in per_worker)
-        succeeded = sum(((w['summary'].get('per_op') or {}).get(kind) or
-                         {}).get('succeeded', 0) for w in per_worker)
-        failed = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
-            'failed', 0) for w in per_worker)
-        budget = sum(((w['summary'].get('per_op') or {}).get(kind) or {}).get(
-            'budget_this_worker', 0) for w in per_worker)
+        attempts = sum(((w['summary'].get('per_op') or {}).get(kind) or {}
+                       ).get('attempts', 0) for w in per_worker)
+        succeeded = sum(((w['summary'].get('per_op') or {}).get(kind) or {}
+                        ).get('succeeded', 0) for w in per_worker)
+        failed = sum(((w['summary'].get('per_op') or {}).get(kind) or {}
+                     ).get('failed', 0) for w in per_worker)
+        budget = sum(((w['summary'].get('per_op') or {}).get(kind) or {}
+                     ).get('budget_this_worker', 0) for w in per_worker)
         first = next(
             (((w['summary'].get('per_op') or {}).get(kind) or {})
              for w in per_worker
@@ -697,7 +714,8 @@ def print_report(workers: List[Dict[str, Any]], cfg: BenchmarkConfig) -> None:
             for w in by_gen[g.name])
         for g in cfg.long_conn_generators())
     ssh_bench_slots = sum(
-        sum(op.concurrency_per_worker for op in g.ops)
+        sum(op.concurrency_per_worker
+            for op in g.ops)
         for g in cfg.ssh_bench_generators()) * cfg.workers.count
     print(f'\n{"─"*72}')
     print(f'Combined pressure: {shell_threads} shell threads + '

@@ -175,16 +175,48 @@ class QpsGenerator(GeneratorBase):
         try:
             if op == 'status':
                 rid = sky_sdk.status()
+                sky_sdk.get(rid)
             elif op == 'jobs_queue':
                 rid = sky_jobs_sdk.queue(refresh=False, skip_finished=True)
-            elif op == 'job_status':
+                sky_sdk.get(rid)
+            elif op in ('job_status', 'cluster_queue'):
                 if not victim:
-                    raise RuntimeError('job_status requires a victim cluster '
-                                       '(set needs_victim: true)')
+                    raise RuntimeError(f'{op} requires a victim cluster')
                 rid = sky_sdk.queue(cluster_name=victim, all_users=False)
+                sky_sdk.get(rid)
+            elif op == 'tail_logs':
+                if not victim:
+                    raise RuntimeError('tail_logs requires a victim cluster')
+                # sky logs <cluster> --no-follow. tail_logs with
+                # preload_content=False returns an iterator that yields log
+                # chunks until the server closes the stream. Drain it here
+                # — the wall-clock measured is the full log-fetch round
+                # trip through the API server, matching CLI behaviour.
+                it = sky_sdk.tail_logs(cluster_name=victim,
+                                       job_id=None,
+                                       follow=False,
+                                       preload_content=False)
+                try:
+                    for chunk in it:
+                        if self.stopped or chunk is None:
+                            break
+                finally:
+                    try:
+                        it.close()  # type: ignore[attr-defined]
+                    except Exception:  # noqa: BLE001
+                        pass
+            elif op == 'exec':
+                if not victim:
+                    raise RuntimeError('exec requires a victim cluster')
+                # sky exec <cluster> "echo hello". Build a trivial Task and
+                # submit via sdk.exec → request id → sky.get(rid) to wait
+                # for the server-side submission to complete.
+                import sky  # noqa: WPS433 — lazy, only for exec op
+                task = sky.Task(name='bench-qps-exec', run='echo hello')
+                rid = sky_sdk.exec(task, cluster_name=victim)
+                sky_sdk.get(rid)
             else:
                 raise RuntimeError(f'unknown op: {op}')
-            sky_sdk.get(rid)
             success = True
         except Exception as e:  # noqa: BLE001
             error = f'{type(e).__name__}: {e}'
