@@ -4,6 +4,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -48,10 +49,19 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
+# Cluster-autoscaler caps graceful pod termination at this many
+# seconds by default (--max-graceful-termination-sec=600). Rendering a
+# higher `terminationGracePeriodSeconds` doesn't extend the autoscaler's
+# willingness to wait — it just SIGKILLs at 600 anyway. Keep our render
+# inside that envelope so a "hooks took longer than expected" failure
+# mode falls inside the kubelet's deterministic SIGKILL rather than
+# the autoscaler's.
+_PREEMPTION_GRACE_CAP_SECONDS = 600
+
 
 def _compute_preemption_hook_timeout(
         hooks: Optional[List[Dict[str, Any]]]) -> Optional[int]:
-    """Sum of timeouts for all preemption-event hooks.
+    """Sum of timeouts for all preemption-event hooks, capped.
 
     Returns ``None`` when no hook declares the ``preemption`` event,
     so the caller can omit ``terminationGracePeriodSeconds`` from the
@@ -59,15 +69,37 @@ def _compute_preemption_hook_timeout(
 
     Why sum rather than max: ``hook_executor.run`` executes matching
     hooks sequentially, so the wall-clock cost is the sum of per-hook
-    timeouts. Using max would let kubelet SIGKILL the skylet
+    timeouts. Using max would let kubelet SIGKILL the daemon
     mid-execution after the first hook's timeout expires.
+
+    Why we cap at 600s: cluster-autoscaler's
+    ``--max-graceful-termination-sec`` defaults to 600. A render larger
+    than that is silently truncated by the autoscaler on scale-down,
+    so the daemon would be SIGKILLed mid-hook anyway. We log a stderr
+    warning when the raw sum exceeds the cap so users can shrink their
+    timeouts (or the operator can raise ``--max-graceful-termination-sec``
+    on their cluster).
     """
     timeouts = [
         entry.get('timeout', constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
         for entry in (hooks or [])
         if 'preemption' in (entry.get('events') or [])
     ]
-    return sum(timeouts) if timeouts else None
+    if not timeouts:
+        return None
+    raw = sum(timeouts)
+    if raw > _PREEMPTION_GRACE_CAP_SECONDS:
+        cap = _PREEMPTION_GRACE_CAP_SECONDS
+        sys.stderr.write(
+            f'WARNING: preemption-hook timeouts sum to {raw}s, but '
+            f'cluster-autoscaler caps graceful pod termination at '
+            f'{cap}s by default. Capping '
+            f'terminationGracePeriodSeconds at {cap}s. '
+            f'Reduce per-hook timeouts or raise '
+            f'--max-graceful-termination-sec on your cluster if longer '
+            f'hooks are required.\n')
+        return _PREEMPTION_GRACE_CAP_SECONDS
+    return raw
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])

@@ -5672,7 +5672,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
                 # v7+: send the full hooks list inline on the same RPC.
-                if hooks:
+                # Three states for the `hooks` arg:
+                #   None  → legacy/no-hook-aware caller; don't touch stored
+                #   []    → caller explicitly clears stored hooks
+                #   [...] → replace stored hooks with this list
+                if hooks is None:
+                    pass  # leave stored hooks alone
+                elif not hooks:
+                    request.clear_hooks = True
+                else:
                     request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))

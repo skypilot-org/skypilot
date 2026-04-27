@@ -39,7 +39,7 @@ class Hook(_message.Message):
     def __init__(self, run: _Optional[str] = ..., events: _Optional[_Iterable[_Union[Event, str]]] = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class SetAutostopRequest(_message.Message):
-    __slots__ = ("idle_minutes", "backend", "wait_for", "down", "hook", "hook_timeout", "hooks")
+    __slots__ = ("idle_minutes", "backend", "wait_for", "down", "hook", "hook_timeout", "hooks", "clear_hooks")
     IDLE_MINUTES_FIELD_NUMBER: _ClassVar[int]
     BACKEND_FIELD_NUMBER: _ClassVar[int]
     WAIT_FOR_FIELD_NUMBER: _ClassVar[int]
@@ -47,6 +47,7 @@ class SetAutostopRequest(_message.Message):
     HOOK_FIELD_NUMBER: _ClassVar[int]
     HOOK_TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     HOOKS_FIELD_NUMBER: _ClassVar[int]
+    CLEAR_HOOKS_FIELD_NUMBER: _ClassVar[int]
     idle_minutes: int
     backend: str
     wait_for: AutostopWaitFor
@@ -54,7 +55,8 @@ class SetAutostopRequest(_message.Message):
     hook: str
     hook_timeout: int
     hooks: _containers.RepeatedCompositeFieldContainer[Hook]
-    def __init__(self, idle_minutes: _Optional[int] = ..., backend: _Optional[str] = ..., wait_for: _Optional[_Union[AutostopWaitFor, str]] = ..., down: bool = ..., hook: _Optional[str] = ..., hook_timeout: _Optional[int] = ..., hooks: _Optional[_Iterable[_Union[Hook, _Mapping]]] = ...) -> None: ...
+    clear_hooks: bool
+    def __init__(self, idle_minutes: _Optional[int] = ..., backend: _Optional[str] = ..., wait_for: _Optional[_Union[AutostopWaitFor, str]] = ..., down: bool = ..., hook: _Optional[str] = ..., hook_timeout: _Optional[int] = ..., hooks: _Optional[_Iterable[_Union[Hook, _Mapping]]] = ..., clear_hooks: bool = ...) -> None: ...
 
 class SetAutostopResponse(_message.Message):
     __slots__ = ()

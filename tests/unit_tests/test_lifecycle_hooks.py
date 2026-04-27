@@ -508,8 +508,9 @@ def test_preemption_grace_none_when_no_preemption_hook():
     }]) is None
 
 
-def test_preemption_grace_default_timeout_when_unset():
-    """An entry without explicit ``timeout`` falls back to the default."""
+def test_preemption_grace_default_timeout_when_unset(capsys):
+    """An entry without explicit ``timeout`` falls back to the default,
+    which exceeds the autoscaler cap and therefore returns the cap."""
 
     timeout = k8s_cloud._compute_preemption_hook_timeout([
         {
@@ -517,4 +518,54 @@ def test_preemption_grace_default_timeout_when_unset():
             'events': ['preemption']
         },
     ])
-    assert timeout == constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+    assert timeout == k8s_cloud._PREEMPTION_GRACE_CAP_SECONDS
+
+
+def test_preemption_grace_capped_at_autoscaler_limit(capsys):
+    """Sum > cap → cap is returned + a stderr warning fires (C7)."""
+    timeout = k8s_cloud._compute_preemption_hook_timeout([
+        {
+            'run': 'a',
+            'events': ['preemption'],
+            'timeout': 400
+        },
+        {
+            'run': 'b',
+            'events': ['preemption'],
+            'timeout': 400
+        },
+    ])
+    assert timeout == k8s_cloud._PREEMPTION_GRACE_CAP_SECONDS
+    captured = capsys.readouterr()
+    assert 'cluster-autoscaler' in captured.err.lower()
+    assert '800s' in captured.err
+
+
+def test_preemption_grace_no_cap_when_under_limit():
+    """Sum ≤ cap → exact sum, no warning."""
+    timeout = k8s_cloud._compute_preemption_hook_timeout([
+        {
+            'run': 'a',
+            'events': ['preemption'],
+            'timeout': 60
+        },
+        {
+            'run': 'b',
+            'events': ['preemption'],
+            'timeout': 60
+        },
+    ])
+    assert timeout == 120
+
+
+def test_skylet_cloud_detect_short_circuits_on_kubernetes(monkeypatch):
+    """S2: ``KUBERNETES_SERVICE_HOST`` short-circuits the metadata
+    probe so EKS pods (which can reach EC2 IMDS) don't misdetect as
+    AWS and start a poller alongside the K8s preStop bridge."""
+    from sky.skylet import skylet
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '10.0.0.1')
+    # Even if all three IMDS probes would otherwise return 200, the
+    # short-circuit should return None before any HTTP call.
+    monkeypatch.setattr('urllib.request.urlopen',
+                        lambda *a, **kw: 1 / 0)  # would crash if called
+    assert skylet._detect_cloud_for_preemption_poller() is None

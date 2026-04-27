@@ -56,7 +56,14 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 hook=hook,
                 hook_timeout=hook_timeout)
             # v7+: full hooks list carried inline on the same RPC.
-            if request.hooks:
+            # `clear_hooks=True` means "drop any stored hooks" — needed
+            # because proto3 `repeated` has no presence, so an empty
+            # list on the wire is otherwise indistinguishable from
+            # "field omitted". Without this, a re-launch with no
+            # hooks would leave stale stored hooks firing forever.
+            if request.clear_hooks:
+                autostop_lib.set_hooks([])
+            elif request.hooks:
                 autostop_lib.set_hooks(
                     autostop_lib.hooks_from_protobuf(request.hooks))
             return autostopv1_pb2.SetAutostopResponse()

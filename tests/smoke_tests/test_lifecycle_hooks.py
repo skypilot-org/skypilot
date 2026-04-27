@@ -563,3 +563,135 @@ def test_cli_hook_rejects_unknown_event():
         timeout=60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# =========================================================================
+# Edge-case coverage (review-driven)
+# =========================================================================
+
+
+# ---------------------------------------------------------------------------
+# C1 — re-launch with `hooks: []` clears the stored hooks list (proto3 has
+#      no presence on `repeated`, so we explicitly send clear_hooks=True).
+# ---------------------------------------------------------------------------
+@_no_autostop
+def test_hook_clear_via_relaunch(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_with_hook = _write_yaml({
+        'hooks': [{
+            'run': 'echo first-hook',
+            'events': ['down'],
+        }],
+    })
+    yaml_without_hook = _write_yaml({})  # empty resources, no hooks
+    inspect = ('sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    test = smoke_tests_utils.Test(
+        'test_hook_clear_via_relaunch',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_with_hook}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # First launch — verify hook is stored
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep first-hook',
+            # Re-launch without hooks — sky launch picks up the new YAML
+            f'sky launch -y -c {name} --fast {yaml_without_hook}',
+            # Verify the stored hooks list is empty (NOT first-hook)
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'! echo "$out" | grep first-hook',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# C6 — hook with a literal newline in `run` survives worker config sync.
+#      Without base64 encoding, the heredoc would treat the newline as a
+#      shell line break (and any "EOF" as a heredoc terminator).
+# ---------------------------------------------------------------------------
+@_no_autostop
+def test_hook_newline_in_run_survives_resync(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # Multi-line `run` exercises both the launch-time write
+    # (start_worker_hook_handler base64) and re-launch re-sync
+    # (`_resync_worker_hooks_config` base64). Embedding "EOF" tests that
+    # we don't accidentally early-terminate a heredoc.
+    multiline_run = ('echo line1\n'
+                     'echo line2\n'
+                     'EOF\n'
+                     'echo done')
+    yaml_path = _write_yaml({
+        'hooks': [{
+            'run': multiline_run,
+            'events': ['down'],
+        }],
+    })
+    inspect = ('cat ~/.sky/hooks/config.json 2>/dev/null || '
+               'sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    test = smoke_tests_utils.Test(
+        'test_hook_newline_in_run_survives_resync',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # All four marker lines must round-trip intact via JSON.
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep line1 && '
+            f'echo "$out" | grep line2 && '
+            f'echo "$out" | grep EOF && '
+            f'echo "$out" | grep done',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# C7 — preemption-hook timeout sum > 600s triggers the autoscaler-cap
+#      warning + is capped at 600s.
+# ---------------------------------------------------------------------------
+@pytest.mark.kubernetes
+def test_hook_grace_capped_at_autoscaler_limit():
+    name = smoke_tests_utils.get_cluster_name()
+    # Two hooks × 400s timeout = 800s sum, > 600s cap → warning expected
+    yaml_path = _write_yaml({
+        'hooks': [
+            {
+                'run': 'true',
+                'events': ['preemption'],
+                'timeout': 400
+            },
+            {
+                'run': 'true',
+                'events': ['preemption'],
+                'timeout': 400
+            },
+        ],
+    })
+    test = smoke_tests_utils.Test(
+        'test_hook_grace_capped_at_autoscaler_limit',
+        [
+            # Capture stderr; verify the cap warning fired.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra kubernetes --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
+            f'echo "$s" | grep -i "cluster-autoscaler" && '
+            f'echo "$s" | grep -i "Capping"',
+            # Pod's terminationGracePeriodSeconds is 600 (capped), not 800.
+            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'2>/dev/null | grep {name} | head -n1) && '
+            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'[ "$val" = "600" ]',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)

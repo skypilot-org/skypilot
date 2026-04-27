@@ -42,6 +42,13 @@ message SetAutostopRequest {
   optional int32 hook_timeout = 6;
   // v7+: generalized lifecycle-hooks list.
   repeated Hook hooks = 7;
+  // v7+: explicitly clear stored hooks. Required because proto3
+  // `repeated` has no presence — empty `hooks` is wire-indistinguishable
+  // from "field omitted". Without this the skylet cannot tell apart
+  // "this client doesn't know about hooks" from "user removed all
+  // hooks", and a re-launch that drops hooks would leave stale entries
+  // in skylet sqlite firing forever.
+  bool clear_hooks = 8;
 }
 
 message SetAutostopResponse {}
