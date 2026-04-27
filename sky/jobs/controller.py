@@ -2389,7 +2389,8 @@ async def main(controller_uuid: str):
 
     context_utils.hijack_sys_attrs()
 
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.CONTROLLER))
 
     controller = ControllerManager(controller_uuid)
 

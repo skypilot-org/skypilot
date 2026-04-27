@@ -1,10 +1,11 @@
 """Load plugins for the SkyPilot API server."""
 import abc
 import dataclasses
+import enum
 import importlib
 import os
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, FrozenSet, List, Optional, Tuple
 
 from fastapi import FastAPI
 
@@ -33,6 +34,29 @@ _PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
 _REMOTE_PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
+
+
+class PluginContext(enum.Enum):
+    """The process context in which plugins are being loaded.
+
+    Used by plugins to declare via ``BasePlugin.load_contexts`` which process
+    types they want to be installed in. Plugins that don't override
+    ``load_contexts`` load in every context (backward compatible).
+    """
+    # The API server process (both the main process and uvicorn workers).
+    # Plugins can branch on ``ExtensionContext.app`` to distinguish whether
+    # they are running where the FastAPI app is available.
+    API_SERVER = 'api_server'
+    # A request executor worker subprocess that runs sky API request bodies.
+    EXECUTOR = 'executor'
+    # A jobs/serve controller process, including the codegen prefix that runs
+    # on the remote managed-jobs controller cluster.
+    CONTROLLER = 'controller'
+
+
+# All known contexts. Used as the default for ``BasePlugin.load_contexts`` so
+# that plugins which don't opt in stay loaded in every context.
+ALL_PLUGIN_CONTEXTS: FrozenSet[PluginContext] = frozenset(PluginContext)
 
 
 class ManagedSecretsProvider(abc.ABC):
@@ -86,7 +110,8 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, app: Optional[FastAPI] = None):
+    def __init__(self, context: PluginContext, app: Optional[FastAPI] = None):
+        self.context = context
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
         self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
@@ -190,6 +215,21 @@ class RBACRule:
 
 class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
+
+    # Process contexts in which this plugin should be loaded. Defaults to all
+    # known contexts so existing plugins keep loading everywhere. Override in
+    # subclasses to restrict, e.g. to skip the controller process:
+    #
+    #     class CredentialsPlugin(BasePlugin):
+    #         load_contexts = frozenset({
+    #             PluginContext.API_SERVER, PluginContext.EXECUTOR,
+    #         })
+    load_contexts: ClassVar[FrozenSet[PluginContext]] = ALL_PLUGIN_CONTEXTS
+
+    @classmethod
+    def should_load(cls, context: PluginContext) -> bool:
+        """Return whether this plugin should be loaded in the given context."""
+        return context in cls.load_contexts
 
     @property
     def name(self) -> Optional[str]:
@@ -453,6 +493,10 @@ def load_plugins(extension_context: ExtensionContext):
         if not issubclass(plugin_cls, BasePlugin):
             raise TypeError(
                 f'Plugin {class_path} must inherit from BasePlugin.')
+        if not plugin_cls.should_load(extension_context.context):
+            logger.debug(f'Skipping plugin {class_path}: not enabled for '
+                         f'context {extension_context.context.value}')
+            continue
         parameters = plugin_config.get('parameters') or {}
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
@@ -495,6 +539,10 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             module = importlib.import_module(module_path)
             plugin_cls = getattr(module, class_name)
             if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # there, even if they declare rbac_rules.
+            if not plugin_cls.should_load(PluginContext.API_SERVER):
                 continue
             parameters = plugin_config.get('parameters') or {}
             plugin = plugin_cls(**parameters)

@@ -945,7 +945,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 # TODO(aylei): move uvicorn app out of the top-level module to avoid
 # duplicate app initialization.
 if __name__ == 'sky.server.server':
-    plugins.load_plugins(plugins.ExtensionContext(app=app))
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER,
+                                 app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -3202,7 +3204,8 @@ if __name__ == '__main__':
     # will also run uvicorn server when num_worker=1 and then the plugins will
     # be installed twice in main process (second time with the uvicorn app).
     # This is okay since plugin install is considered idempotent.
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.API_SERVER))
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
