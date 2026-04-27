@@ -222,13 +222,7 @@ class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
 
     # Process contexts in which this plugin should be loaded. Defaults to all
-    # known contexts so existing plugins keep loading everywhere. Override in
-    # subclasses to restrict, e.g. to skip the controller process:
-    #
-    #     class CredentialsPlugin(BasePlugin):
-    #         load_contexts = frozenset({
-    #             PluginContext.API_SERVER, PluginContext.EXECUTOR,
-    #         })
+    # known contexts so existing plugins keep loading everywhere.
     load_contexts: ClassVar[FrozenSet[PluginContext]] = ALL_PLUGIN_CONTEXTS
 
     @classmethod
