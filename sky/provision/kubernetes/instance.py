@@ -1622,6 +1622,27 @@ def _delete_cluster_services(cluster_name: str, namespace: str,
                        f'{cluster_name}: {e}')
 
 
+def _pod_has_prestop_hook(namespace: str, context: Optional[str],
+                          pod_name: str) -> bool:
+    """Returns True if any container in the pod has a lifecycle.preStop hook.
+
+    When the user supplies a preStop (e.g. via `kubernetes.pod_config` to drain
+    rclone before SIGKILL), force-delete with grace=0 would skip the hook and
+    defeat the point. We let the kubelet honor the pod's
+    terminationGracePeriodSeconds in that case.
+    """
+    try:
+        pod = kubernetes.core_api(context).read_namespaced_pod(
+            name=pod_name, namespace=namespace)
+    except kubernetes.api_exception():
+        return False
+    for container in (pod.spec.containers or []):
+        if container.lifecycle is not None and \
+                container.lifecycle.pre_stop is not None:
+            return True
+    return False
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
@@ -1642,13 +1663,18 @@ def _terminate_node(namespace: str,
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
     # Note - some misbehaving pods may not terminate gracefully if they have
-    # open file descriptors. We force delete pods to avoid this.
+    # open file descriptors. We force delete pods to avoid this. If the pod
+    # opted into a preStop hook (e.g. to drain a FUSE mount cleanly), honor
+    # the pod's terminationGracePeriodSeconds instead.
+    grace_period_seconds: Optional[int] = 0
+    if _pod_has_prestop_hook(namespace, context, pod_name):
+        grace_period_seconds = None
     kubernetes_utils.delete_k8s_resource_with_retry(
         delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
             name=pod_name,
             namespace=namespace,
             _request_timeout=config_lib.DELETION_TIMEOUT,
-            grace_period_seconds=0),
+            grace_period_seconds=grace_period_seconds),
         resource_type='pod',
         resource_name=pod_name)
 
