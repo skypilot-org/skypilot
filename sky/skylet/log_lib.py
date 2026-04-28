@@ -590,7 +590,8 @@ def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              tail_offset: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -653,7 +654,8 @@ def tail_logs(job_id: Optional[int],
         if tail > 0:
             with open(log_path, 'r', newline='', encoding='utf-8') as peek:
                 head_lines_of_log_file = _peek_head_lines(peek)
-            tail_lines, end_pos = tail_lines_from_end(log_path, tail)
+            tail_lines, end_pos = tail_lines_from_end(log_path, tail,
+                                                      tail_offset)
             start_streaming = _should_stream_the_whole_tail_lines(
                 head_lines_of_log_file, tail_lines, start_stream_at)
             for line in tail_lines:
@@ -675,7 +677,7 @@ def tail_logs(job_id: Optional[int],
             if tail > 0:
                 with open(log_path, 'r', encoding='utf-8') as peek:
                     head_lines_of_log_file = _peek_head_lines(peek)
-                tail_lines, _ = tail_lines_from_end(log_path, tail)
+                tail_lines, _ = tail_lines_from_end(log_path, tail, tail_offset)
                 start_streaming = _should_stream_the_whole_tail_lines(
                     head_lines_of_log_file, tail_lines, start_stream_at)
                 for line in tail_lines:
@@ -705,7 +707,8 @@ def tail_logs_iter(job_id: Optional[int],
                    log_dir: Optional[str],
                    managed_job_id: Optional[int] = None,
                    follow: bool = True,
-                   tail: int = 0) -> Iterator[str]:
+                   tail: int = 0,
+                   tail_offset: int = 0) -> Iterator[str]:
     """Tail the logs of a job. This is mostly the same as tail_logs, but
     returns an iterator instead of printing to stdout/stderr."""
     if job_id is None:
@@ -761,7 +764,8 @@ def tail_logs_iter(job_id: Optional[int],
         if tail > 0:
             with open(log_path, 'r', newline='', encoding='utf-8') as peek:
                 head_lines_of_log_file = _peek_head_lines(peek)
-            tail_lines, end_pos = tail_lines_from_end(log_path, tail)
+            tail_lines, end_pos = tail_lines_from_end(log_path, tail,
+                                                      tail_offset)
             start_streaming = _should_stream_the_whole_tail_lines(
                 head_lines_of_log_file, tail_lines, start_stream_at)
             for line in tail_lines:
@@ -782,7 +786,7 @@ def tail_logs_iter(job_id: Optional[int],
             if tail > 0:
                 with open(log_path, 'r', encoding='utf-8') as peek:
                     head_lines_of_log_file = _peek_head_lines(peek)
-                tail_lines, _ = tail_lines_from_end(log_path, tail)
+                tail_lines, _ = tail_lines_from_end(log_path, tail, tail_offset)
                 start_streaming = _should_stream_the_whole_tail_lines(
                     head_lines_of_log_file, tail_lines, start_stream_at)
                 for line in tail_lines:

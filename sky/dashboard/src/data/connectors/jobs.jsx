@@ -827,11 +827,8 @@ export async function handleJobAction(action, jobId, cluster) {
  * Downloads managed job logs as a zip via the API server.
  * Flow:
  * 1) POST /jobs/download_logs - copy logs from cluster to API server tmp dir
- * 2) POST /download?mode=link - server zips and returns {zip_id, filename}
- * 3) Navigate <a download> to GET /download_zip?zip_id=...
- *    The browser streams the response straight to disk via the OS save
- *    dialog, so multi-GB zips don't have to fit in JS heap (the previous
- *    `await resp.blob()` path OOMed the tab around 2-4 GB).
+ * 2) POST /download - server zips and streams it back as a binary response
+ * 3) Save the response blob via `<a download>` (createObjectURL).
  */
 // Long-poll /jobs/download_logs by hand instead of using apiClient.fetch.
 // For multi-GB running jobs sync_down can take 5+ minutes — well past
@@ -892,179 +889,48 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
   throw new Error('download_logs timed out after retries');
 }
 
-async function downloadManagedJobLogsViaZip({
-  jobId,
-  name,
-  controller,
-  namePart,
-  logType,
-  ts,
-}) {
-  const filename = `managed-${namePart}-${logType}-${ts}.zip`;
-  const mapping = await downloadLogsWithRetry({
-    job_id: jobId,
-    name: name,
-    controller: controller,
-    refresh: false,
-  });
-  const folderPaths = Object.values(mapping || {});
-  if (!folderPaths.length) {
-    showToast('No logs found to download.', 'warning');
-    return;
-  }
-  const resp = await apiClient.fetchImmediate(
-    '/download?relative=items&mode=link',
-    { folder_paths: folderPaths }
-  );
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Download failed: ${resp.status} ${text}`);
-  }
-  const meta = await resp.json();
-  const baseUrl = window.location.origin;
-  const url =
-    `${baseUrl}${ENDPOINT}/download_zip` +
-    `?zip_id=${encodeURIComponent(meta.zip_id)}` +
-    `&filename=${encodeURIComponent(filename)}`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  trackJobAction('download_logs', { controller });
-}
-
-// Job statuses for which the worker cluster is no longer running and
-// the live tail_logs path returns nothing. Falls back to sync_down +
-// zip for these — that path reads the cached log on the controller
-// (synced before the worker was torn down).
-const TERMINAL_JOB_STATUSES = new Set([
-  'SUCCEEDED',
-  'FAILED',
-  'FAILED_SETUP',
-  'FAILED_PRECHECKS',
-  'FAILED_NO_RESOURCE',
-  'FAILED_CONTROLLER',
-  'FAILED_DRIVER',
-  'CANCELLED',
-  'CANCELLING',
-]);
-
-function isTerminalStatus(status) {
-  if (!status) return false;
-  const s = String(status).toUpperCase();
-  // Status may be 'ManagedJobStatus.SUCCEEDED' or just 'SUCCEEDED'.
-  const tail = s.includes('.') ? s.split('.').pop() : s;
-  return TERMINAL_JOB_STATUSES.has(tail);
-}
-
+// Prepare a zip via sync_down + /download, read the response as a
+// blob, and save via createObjectURL. The wait scales with rsync time
+// on the worker, so multi-GB running logs can take a few minutes —
+// downloadLogsWithRetry tolerates Cloudflare 524 during that window.
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
   controller = false,
-  jobStatus = null,
 }) {
   try {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
     const logType = controller ? 'controller-logs' : 'logs';
-    // For terminal jobs the streaming /jobs/logs path returns nothing
-    // (the worker cluster is gone and tail_logs has no source). Fall
-    // back to sync_down_managed_job_logs which reads the cached log
-    // synced to the controller's tmp dir before the worker shut
-    // down — bytes are zipped on disk and streamed via /download_zip.
-    if (isTerminalStatus(jobStatus)) {
-      return await downloadManagedJobLogsViaZip({
-        jobId,
-        name,
-        controller,
-        namePart,
-        logType,
-        ts,
-      });
-    }
-    const filename = `managed-${namePart}-${logType}-${ts}.log`;
+    const filename = `managed-${namePart}-${logType}-${ts}.zip`;
 
-    // Dispatch a /jobs/logs request (tail=0, follow=false) and stream
-    // its growing log file straight back to the browser via
-    // /api/stream?download=...  This avoids the synchronous rsync of
-    // the entire worker log to a temp dir before zipping — bytes start
-    // flowing as soon as the underlying tail_logs reads its first
-    // chunk from the worker, so the user sees the OS save dialog right
-    // away instead of staring at a spinner for several minutes.
-    const baseUrl = window.location.origin;
-    const userInfo = await (async () => {
-      const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
-        () => null
-      );
-      if (r && r.ok) return r.json();
-      return { id: 'local', name: 'local' };
-    })();
-    const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        job_id: jobId,
-        name: name,
-        controller: controller,
-        follow: false,
-        tail: 0,
-        env_vars: {
-          SKYPILOT_IS_FROM_DASHBOARD: 'true',
-          SKYPILOT_USER_ID: userInfo.id,
-          SKYPILOT_USER: userInfo.name,
-        },
-      }),
+    const mapping = await downloadLogsWithRetry({
+      job_id: jobId,
+      name: name,
+      controller: controller,
+      refresh: false,
     });
-    if (!dispatch.ok) {
-      throw new Error(
-        `Could not start log download: ${dispatch.status} ${await dispatch.text()}`
-      );
+    const folderPaths = Object.values(mapping || {});
+    if (!folderPaths.length) {
+      showToast('No logs found to download.', 'warning');
+      return;
     }
-    const requestId = dispatch.headers.get('X-Skypilot-Request-ID');
-    if (!requestId) {
-      throw new Error('Missing X-Skypilot-Request-ID on /jobs/logs response');
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Download failed: ${resp.status} ${text}`);
     }
-    // Drain the dispatch body in the background. We CANNOT cancel it —
-    // the API server interprets connection close as a client
-    // disconnect and cancels the running tail_logs task, leaving
-    // /api/stream with only a partial log. We also can't ignore it —
-    // the response is a chunked stream and unread bytes will back up
-    // the OS socket buffer, eventually blocking server writes.
-    // Reading and discarding keeps the request alive without holding
-    // the bytes in JS memory.
-    (async () => {
-      const reader = dispatch.body?.getReader();
-      if (!reader) return;
-      try {
-        while (true) {
-          const { done } = await reader.read();
-          if (done) break;
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          /* ignore */
-        }
-      }
-    })();
-
-    const url =
-      `${baseUrl}${ENDPOINT}/api/stream` +
-      `?request_id=${encodeURIComponent(requestId)}` +
-      `&format=plain` +
-      `&download=${encodeURIComponent(filename)}`;
-
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    window.URL.revokeObjectURL(url);
     trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);
