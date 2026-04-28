@@ -26,6 +26,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import time
 from typing import Dict, Optional, TextIO
 import urllib.parse
@@ -665,6 +666,106 @@ def test_slurm_storage_mounts_cached(image_id: Optional[str]):
                 timeout=20 * 60,  # 20 mins
             )
             smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_ensure_no_fd_leak_fusermount_server():
+    """Verify fusermount-server closes /dev/fuse fds after MOUNT_CACHED mounts.
+
+    Each MOUNT_CACHED mount passes a /dev/fuse fd to the client via SCM_RIGHTS.
+    A prior bug (fixed in #9463) left the server's copy open, leaking one fd
+    per mount. This test launches two clusters, checks the fd count after each,
+    and asserts no /dev/fuse fds are leaked.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    cloud = 'kubernetes'
+    yaml_content = textwrap.dedent(f"""\
+        resources:
+          cloud: kubernetes
+          cpus: 2+
+
+        file_mounts:
+          /data:
+            name: {storage_name}
+            source: ~/tmp-workdir
+            mode: MOUNT_CACHED
+
+        run: |
+          ls /data
+          echo "MOUNT_READY"
+          sleep infinity
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+        name1 = f'{name}-1'
+        name2 = f'{name}-2'
+
+        # Count /dev/fuse fds in the fusermount-server pod on the same node
+        # as a given workload pod. Uses per-fd readlink with timeout to avoid
+        # blocking on stuck fds.
+        # Look up the workload pod via the skypilot-cluster-name
+        # annotation (raw cluster name, no hash suffix).
+        get_node = (
+            'NODE=$(kubectl get pods -o'
+            ' custom-columns=NAME:.metadata.name,'
+            'NODE:.spec.nodeName,'
+            'ANN:.metadata.annotations.skypilot-cluster-name'
+            ' --no-headers |'
+            """ awk -v n="{cluster}" '$NF==n{{print $2}}' |"""
+            ' head -1) && echo "node=$NODE"')
+        get_fuse_pod = (
+            'FUSE_POD=$(kubectl get pods -n skypilot-system'
+            ' -l app=fusermount-server'
+            ' --field-selector spec.nodeName=$NODE'
+            ' -o jsonpath=\'{{.items[0].metadata.name}}\') &&'
+            ' echo "fuse_pod=$FUSE_POD"')
+        count_fuse_fds = (
+            'COUNT=$(kubectl exec -n skypilot-system $FUSE_POD --'
+            ' sh -c \''
+            'c=0; for i in $(seq 0 50); do'
+            ' [ -e /proc/1/fd/$i ] &&'
+            ' t=$(timeout 1 readlink /proc/1/fd/$i 2>/dev/null) &&'
+            ' case "$t" in *fuse*) c=$((c+1));; esac;'
+            ' done; echo $c\') &&'
+            ' echo "fuse_fd_count=$COUNT" &&'
+            ' [ "$COUNT" -eq 0 ]')
+        fuse_fd_check = (f'{get_node} && {get_fuse_pod} && {count_fuse_fds}')
+
+        wait_mount = ('for i in $(seq 1 60); do'
+                      ' sky logs {cluster} 1 --no-follow 2>&1'
+                      ' | grep -q MOUNT_READY'
+                      ' && break || sleep 5;'
+                      ' done')
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, name),
+            # Launch first cluster with MOUNT_CACHED
+            f'sky launch -y -c {name1} -d {yaml_path}',
+            wait_mount.format(cluster=name1),
+            # After first mount: assert 0 leaked fuse fds
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, fuse_fd_check.format(cluster=name1)),
+            # Launch second cluster with MOUNT_CACHED
+            f'sky launch -y -c {name2} -d {yaml_path}',
+            wait_mount.format(cluster=name2),
+            # After second mount: still 0 leaked fuse fds
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, fuse_fd_check.format(cluster=name2)),
+        ]
+        clean_command = (
+            f'sky down -y {name1} {name2}; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+            f'sky storage delete -y {storage_name}')
+        test = smoke_tests_utils.Test(
+            'kubernetes_ensure_no_fd_leak_fusermount_server',
+            test_commands,
+            clean_command,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
