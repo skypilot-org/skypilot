@@ -881,6 +881,11 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
       r.status === 503 ||
       r.status === 504
     ) {
+      // Linear backoff capped at 5s. Cloudflare 524 self-paces at
+      // ~100s so most attempts gain nothing, but a server-side 502/503
+      // hiccup would otherwise hammer the API server back-to-back.
+      const backoffMs = Math.min(1000 * (attempt + 1), 5000);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
       continue;
     }
     if (!r.ok) {

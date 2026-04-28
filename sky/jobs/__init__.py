@@ -1,7 +1,6 @@
 """Managed jobs."""
 import pathlib
 
-from sky.jobs.client.sdk import _JobLogStreamingEmptyError
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs

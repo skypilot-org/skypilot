@@ -97,7 +97,6 @@ function JobDetails() {
   // nothing is happening because the browser only shows the file in the
   // download bar a second or two later.
   const [logsDownloading, setLogsDownloading] = useState(false);
-  const [controllerDownloading, setControllerDownloading] = useState(false);
   const downloadLogsZip = async () => {
     if (logsDownloading) return;
     setLogsDownloading(true);
@@ -110,20 +109,6 @@ function JobDetails() {
       });
     } finally {
       setLogsDownloading(false);
-    }
-  };
-  const downloadControllerLogsZip = async () => {
-    if (controllerDownloading) return;
-    setControllerDownloading(true);
-    try {
-      const detail = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
-      await downloadManagedJobLogs({
-        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
-        controller: true,
-        jobStatus: detail?.status,
-      });
-    } finally {
-      setControllerDownloading(false);
     }
   };
   const isMobile = useMobile();

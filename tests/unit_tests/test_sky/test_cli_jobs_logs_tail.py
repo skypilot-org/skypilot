@@ -29,11 +29,10 @@ class TestJobsLogsTailCli:
              ) as stream_mock:
             tail_mock.return_value = 0
             download_mock.return_value = {}
-            # Raise the "empty stream" sentinel so the CLI falls back
-            # to legacy download_logs (and download_mock gets called).
-            stream_mock.side_effect = (
-                command.managed_jobs._JobLogStreamingEmptyError(  # pylint: disable=protected-access
-                    'no bytes from streaming path; using fallback in test'))
+            # Streaming returns None to signal "empty, fall back" so the
+            # CLI then calls legacy download_logs (and download_mock gets
+            # called).
+            stream_mock.return_value = None
             result = self.runner.invoke(command.jobs_logs, args)
             return result, tail_mock, download_mock
 

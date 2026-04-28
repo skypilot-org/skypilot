@@ -446,16 +446,14 @@ def _is_default_tail() -> bool:
     --tail from the implicit 1000-line default. The hint and the
     sync-down compatibility branch both depend on this signal.
     """
-    try:
-        ctx = click.get_current_context(silent=True)
-        if ctx is None:
-            return False
-        src = ctx.get_parameter_source('tail')
-        return src == click.core.ParameterSource.DEFAULT
-    except Exception:  # pylint: disable=broad-except
-        # ParameterSource was added in click 8.0; older clicks fall
-        # back to "treat as explicit" so the hint is suppressed.
+    if not hasattr(click.core, 'ParameterSource'):
+        # click < 8.0 — treat as explicit so the hint is suppressed.
         return False
+    ctx = click.get_current_context(silent=True)
+    if ctx is None:
+        return False
+    return ctx.get_parameter_source(
+        'tail') == click.core.ParameterSource.DEFAULT
 
 
 def _print_default_tail_hint(tail: Optional[int]) -> None:
@@ -6073,10 +6071,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                         job_id=job_id,
                         controller=controller,
                         refresh=refresh)
-            except managed_jobs._JobLogStreamingEmptyError:  # pylint: disable=protected-access
-                logger.info('Streaming returned empty (likely a terminal '
-                            'job with worker torn down); falling back to '
-                            'sync-down.')
+                if log_local_path_dict is None:
+                    logger.info('Streaming returned empty (likely a terminal '
+                                'job with worker torn down); falling back to '
+                                'sync-down.')
             except Exception as e:  # pylint: disable=broad-except
                 logger.info(
                     f'Streaming download failed ({type(e).__name__}: {e}); '

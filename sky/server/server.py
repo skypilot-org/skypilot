@@ -1964,14 +1964,18 @@ async def download(download_body: payloads.DownloadBody,
             'X-Home-Path': str(pathlib.Path.home())
         }
 
-        # Return the zip file as a download
+        # Return the zip file as a download. starlette.background.BackgroundTask
+        # (singular) runs after the response body is sent. The earlier
+        # `BackgroundTasks().add_task(...)` form was a bug — `.add_task`
+        # returns None, so the unlink never ran and prepared zips
+        # accumulated on disk per download.
         return fastapi.responses.FileResponse(
             path=zip_path,
             filename=zip_filename,
             media_type='application/zip',
             headers=headers,
-            background=fastapi.BackgroundTasks().add_task(
-                lambda: zip_path.unlink(missing_ok=True)))
+            background=starlette.background.BackgroundTask(zip_path.unlink,
+                                                           missing_ok=True))
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
@@ -2363,11 +2367,13 @@ async def stream(
             user_supplied_request_id
             if user_supplied_request_id else request_id)
     if download is not None:
-        # Sanitize the filename (no path separators, no quotes).
-        safe_filename = (download.replace('"',
-                                          '').replace('/',
-                                                      '_').replace('\\',
-                                                                   '_'))[:200]
+        # Sanitize the filename to prevent header injection (CR/LF) and
+        # path traversal (slashes, ..). Restrict to a conservative
+        # ASCII set so we don't have to worry about UTF-8 truncation
+        # landing mid-codepoint.
+        safe_filename = re.sub(r'[^A-Za-z0-9._-]+', '_', download)[:200]
+        if not safe_filename:
+            safe_filename = 'download'
         if compress == 'gz' and not safe_filename.endswith('.gz'):
             safe_filename = f'{safe_filename}.gz'
         headers['Content-Disposition'] = (

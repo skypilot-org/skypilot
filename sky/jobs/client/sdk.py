@@ -36,13 +36,6 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-class _JobLogStreamingEmptyError(RuntimeError):
-    """Raised when the streaming log download returned zero bytes — the
-    caller (typically the CLI) should fall back to the sync-down/rsync
-    path. Common for terminal jobs whose worker cluster is already
-    torn down: the underlying tail_logs has no source to read."""
-
-
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
@@ -551,12 +544,17 @@ def wait(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs_streaming(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Optional[Dict[int, str]]:
     """Download a managed job's log as a gzipped file via streaming.
+
+    Returns None when the server stream is empty (e.g. terminal job
+    whose worker cluster is gone) — the caller should fall back to
+    ``download_logs``.
 
     This dispatches the same /jobs/logs (tail=None, follow=False) path
     that the live-tail UI uses, then attaches to /api/stream with
@@ -644,15 +642,14 @@ def download_logs_streaming(
                 bytes_written += len(chunk)
 
     if bytes_written == 0:
-        # Server sent nothing (e.g., terminal job, worker cluster gone).
-        # Remove the empty file and signal the caller to fall back.
+        # Server sent nothing (e.g., terminal job, worker cluster gone) —
+        # the underlying tail_logs has no source. Remove the empty file
+        # and return None so the caller falls back to sync-down/rsync.
         try:
             local_path.unlink()
         except OSError:
             pass
-        raise _JobLogStreamingEmptyError(
-            f'No streaming log bytes for job {job_label}; '
-            f'fall back to sync-down path.')
+        return None
 
     key = int(job_id) if job_id is not None else 0
     return {key: str(local_path)}
