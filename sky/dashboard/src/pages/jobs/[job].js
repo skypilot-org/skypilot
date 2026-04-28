@@ -89,8 +89,7 @@ function JobDetails() {
   // click refresh ...)" hint is misleading — the plugin's component
   // streams live. Hide it. (ControllerLogsSection makes the same check
   // independently for the controller-logs heading.)
-  const logsSlotHasPlugin =
-    usePluginComponents('jobs.detail.logs').length > 0;
+  const logsSlotHasPlugin = usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   // Track download-in-flight per kind ('logs' / 'controller' / per-task)
   // so we can disable the button + spin the icon while the zip is being
@@ -103,9 +102,7 @@ function JobDetails() {
     if (logsDownloading) return;
     setLogsDownloading(true);
     try {
-      const detail = jobData?.jobs?.find(
-        (j) => String(j.id) === String(jobId)
-      );
+      const detail = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: false,
@@ -119,9 +116,7 @@ function JobDetails() {
     if (controllerDownloading) return;
     setControllerDownloading(true);
     try {
-      const detail = jobData?.jobs?.find(
-        (j) => String(j.id) === String(jobId)
-      );
+      const detail = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: true,

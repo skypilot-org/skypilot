@@ -27,6 +27,7 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
+import zlib
 
 import aiofiles
 import anyio
@@ -2232,7 +2233,7 @@ async def stream(
     # flowing the moment the underlying request emits its first chunk,
     # so the user sees the OS save dialog immediately instead of
     # waiting for sync_down to complete.
-    download: Optional[str] = None,
+    download: Optional[str] = None,  # pylint: disable=redefined-outer-name
     # When 'gz', gzip-stream the bytes inline and adjust the saved
     # filename to end in .gz. Text logs compress ~10-30x, which makes
     # multi-GB downloads dramatically faster and smaller; macOS Finder
@@ -2395,7 +2396,6 @@ async def stream(
         # before saving — defeating the bandwidth/disk savings. The
         # downloaded file is a real .log.gz that double-clicks open
         # on macOS / extracts trivially with `gunzip` on Linux.
-        import zlib
         media_type = 'application/gzip'
         # zlib.MAX_WBITS | 16 = gzip wrapper.
         compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)

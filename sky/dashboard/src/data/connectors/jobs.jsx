@@ -875,8 +875,12 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
     );
     // 524 Cloudflare timeout / 502/503/504 transient — retry against
     // the same request_id; the server's long-poll resumes waiting.
-    if (r.status === 524 || r.status === 502 || r.status === 503 ||
-        r.status === 504) {
+    if (
+      r.status === 524 ||
+      r.status === 502 ||
+      r.status === 503 ||
+      r.status === 504
+    ) {
       continue;
     }
     if (!r.ok) {
