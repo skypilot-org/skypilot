@@ -255,8 +255,7 @@ def _parse_secret_name(raw_name: str):
     function, so we strip here to avoid the prefix accumulating across
     YAML round-trips.
     """
-    if raw_name.startswith('secrets:'):
-        raw_name = raw_name[len('secrets:'):]
+    raw_name = common_utils.removeprefix(raw_name, 'secrets:')
     for prefix in ('personal.', 'workspace.', 'global.'):
         if raw_name.startswith(prefix):
             return raw_name[len(prefix):], prefix[:-1]
