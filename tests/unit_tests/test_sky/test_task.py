@@ -1368,8 +1368,8 @@ def test_managed_secret_refs_round_trip_with_inline_secrets():
 def test_managed_secret_name_with_scope_and_secrets_prefix():
     """``_parse_secret_name`` strips ``secrets:`` and a scope prefix together."""
     # pylint: disable=protected-access
-    from sky.task import (
-        _parse_secret_name)  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from sky.task import _parse_secret_name
     assert _parse_secret_name('foo') == ('foo', None)
     assert _parse_secret_name('secrets:foo') == ('foo', None)
     assert _parse_secret_name('personal.foo') == ('foo', 'personal')
