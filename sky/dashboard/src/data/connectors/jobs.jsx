@@ -892,81 +892,55 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
   throw new Error('download_logs timed out after retries');
 }
 
+// Default OSS download flow: prepare a zip via sync_down + /download
+// then navigate to /download_zip for native browser-streamed save.
+// Works for both running and terminal jobs; the wait scales with
+// rsync time on the worker, so multi-GB running logs can take a few
+// minutes. Plugins (e.g. consolidation_optimizer) can register a
+// faster handler at the `jobs.detail.downloadbutton` slot.
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
   controller = false,
+  // Accepted for compatibility with plugin overrides; OSS default
+  // ignores it because the zip path works regardless of status.
+  // eslint-disable-next-line no-unused-vars
+  jobStatus = null,
 }) {
   try {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
     const logType = controller ? 'controller-logs' : 'logs';
-    const filename = `managed-${namePart}-${logType}-${ts}.log`;
+    const filename = `managed-${namePart}-${logType}-${ts}.zip`;
 
-    // Dispatch a /jobs/logs request (tail=0, follow=false) and stream
-    // its growing log file straight back to the browser via
-    // /api/stream?download=...  This avoids the synchronous rsync of
-    // the entire worker log to a temp dir before zipping — bytes start
-    // flowing as soon as the underlying tail_logs reads its first
-    // chunk from the worker, so the user sees the OS save dialog right
-    // away instead of staring at a spinner for several minutes.
-    const baseUrl = window.location.origin;
-    const userInfo = await (async () => {
-      const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
-        () => null
-      );
-      if (r && r.ok) return r.json();
-      return { id: 'local', name: 'local' };
-    })();
-    const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        job_id: jobId,
-        name: name,
-        controller: controller,
-        follow: false,
-        tail: 0,
-        env_vars: {
-          SKYPILOT_IS_FROM_DASHBOARD: 'true',
-          SKYPILOT_USER_ID: userInfo.id,
-          SKYPILOT_USER: userInfo.name,
-        },
-      }),
+    const mapping = await downloadLogsWithRetry({
+      job_id: jobId,
+      name: name,
+      controller: controller,
+      refresh: false,
     });
-    if (!dispatch.ok) {
-      throw new Error(
-        `Could not start log download: ${dispatch.status} ${await dispatch.text()}`
-      );
+    const folderPaths = Object.values(mapping || {});
+    if (!folderPaths.length) {
+      showToast('No logs found to download.', 'warning');
+      return;
     }
-    const requestId = dispatch.headers.get('X-Skypilot-Request-ID');
-    if (!requestId) {
-      throw new Error('Missing X-Skypilot-Request-ID on /jobs/logs response');
+    const resp = await apiClient.fetchImmediate(
+      '/download?relative=items&mode=link',
+      { folder_paths: folderPaths }
+    );
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Download failed: ${resp.status} ${text}`);
     }
-    // Cancel the dispatched request body — we'll re-attach to it via
-    // /api/stream below. Without this the response body sits open
-    // until the request completes, which on multi-GB logs ties up the
-    // browser's per-host connection pool.
-    try {
-      dispatch.body?.cancel();
-    } catch {
-      /* ignore */
-    }
-
-    // compress=gz: text logs compress 10-30x, so multi-GB downloads
-    // come down dramatically. The server gzips inline; the browser
-    // saves a real .log.gz file (macOS/Linux file managers
-    // auto-extract; gunzip works everywhere).
+    const meta = await resp.json();
+    const baseUrl = window.location.origin;
     const url =
-      `${baseUrl}${ENDPOINT}/api/stream` +
-      `?request_id=${encodeURIComponent(requestId)}` +
-      `&format=plain` +
-      `&compress=gz` +
-      `&download=${encodeURIComponent(filename)}`;
-
+      `${baseUrl}${ENDPOINT}/download_zip` +
+      `?zip_id=${encodeURIComponent(meta.zip_id)}` +
+      `&filename=${encodeURIComponent(filename)}`;
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${filename}.gz`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();

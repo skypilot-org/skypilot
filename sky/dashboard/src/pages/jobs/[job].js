@@ -622,26 +622,40 @@ function JobDetails() {
                     )}
                   </div>
                   <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content={
-                        logsDownloading
-                          ? 'Preparing zip… download will start shortly'
-                          : 'Download all job logs (zip)'
+                    <PluginSlot
+                      name="jobs.detail.downloadbutton"
+                      context={{
+                        jobId: parseInt(
+                          Array.isArray(jobId) ? jobId[0] : jobId
+                        ),
+                        controller: false,
+                        jobStatus: detailJobData?.status,
+                        downloading: logsDownloading,
+                        onDownloadingChange: setLogsDownloading,
+                      }}
+                      fallback={
+                        <Tooltip
+                          content={
+                            logsDownloading
+                              ? 'Preparing zip… download will start shortly'
+                              : 'Download all job logs (zip)'
+                          }
+                          className="text-muted-foreground"
+                        >
+                          <button
+                            onClick={downloadLogsZip}
+                            disabled={logsDownloading}
+                            className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                          >
+                            {logsDownloading ? (
+                              <CircularProgress size={16} />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
+                        </Tooltip>
                       }
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={downloadLogsZip}
-                        disabled={logsDownloading}
-                        className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
-                      >
-                        {logsDownloading ? (
-                          <CircularProgress size={16} />
-                        ) : (
-                          <Download className="w-4 h-4" />
-                        )}
-                      </button>
-                    </Tooltip>
+                    />
                     <Tooltip
                       content="Refresh logs"
                       className="text-muted-foreground"
@@ -850,26 +864,39 @@ function ControllerLogsSection({
           </button>
           {isExpanded && (
             <div className="flex items-center space-x-3">
-              <Tooltip
-                content={
-                  downloading
-                    ? 'Preparing zip… download will start shortly'
-                    : 'Download full controller logs'
+              <PluginSlot
+                name="jobs.detail.downloadbutton"
+                context={{
+                  jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+                  controller: true,
+                  jobStatus:
+                    jobData?.status ?? jobData?.jobs?.[0]?.status,
+                  downloading,
+                  onDownloadingChange: setDownloading,
+                }}
+                fallback={
+                  <Tooltip
+                    content={
+                      downloading
+                        ? 'Preparing zip… download will start shortly'
+                        : 'Download full controller logs'
+                    }
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={downloadControllerZip}
+                      disabled={downloading}
+                      className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                    >
+                      {downloading ? (
+                        <CircularProgress size={16} />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
+                    </button>
+                  </Tooltip>
                 }
-                className="text-muted-foreground"
-              >
-                <button
-                  onClick={downloadControllerZip}
-                  disabled={downloading}
-                  className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
-                >
-                  {downloading ? (
-                    <CircularProgress size={16} />
-                  ) : (
-                    <Download className="w-4 h-4" />
-                  )}
-                </button>
-              </Tooltip>
+              />
               <Tooltip
                 content="Refresh controller logs"
                 className="text-muted-foreground"
