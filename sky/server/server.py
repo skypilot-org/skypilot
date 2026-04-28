@@ -1955,18 +1955,6 @@ async def download(download_body: payloads.DownloadBody,
             'X-Home-Path': str(pathlib.Path.home())
         }
 
-        # Two response modes:
-        # - mode=link (dashboard): return JSON with a one-shot GET URL.
-        #   The browser then navigates to it via <a download>, which
-        #   streams the response directly to disk — no JS-side blob,
-        #   so multi-GB downloads don't OOM the browser tab.
-        # - default (CLI / older clients): stream the zip back inline.
-        #   The CLI consumes the body chunk-by-chunk, no memory issue.
-        if request.query_params.get('mode') == 'link':
-            return fastapi.responses.JSONResponse({
-                'zip_id': log_id,
-                'filename': zip_filename,
-            })
         # Return the zip file as a download
         return fastapi.responses.FileResponse(
             path=zip_path,
@@ -1978,55 +1966,6 @@ async def download(download_body: payloads.DownloadBody,
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
-
-
-@app.get('/download_zip')
-async def download_zip(
-        zip_id: str,
-        request: fastapi.Request,
-        filename: Optional[str] = None) -> fastapi.responses.FileResponse:
-    """Streams a previously-prepared zip from POST /download?mode=link.
-
-    Used by the dashboard to do a native browser-streamed download
-    instead of buffering the whole zip in JS memory via resp.blob().
-
-    The matching POST writes the zip to
-    ``api_server_user_logs_dir_prefix(env_vars[USER_ID_ENV_VAR])``.
-    For dashboard requests the env_var matches
-    ``request.state.auth_user.id``, so we look up there. Falls back to
-    the local user hash for unauthenticated single-tenant runs.
-    """
-    # The matching POST writes the zip under
-    # api_server_user_logs_dir_prefix(env_vars[USER_ID_ENV_VAR]).
-    # The dashboard sets env_vars[USER_ID_ENV_VAR] = userInfo.id from
-    # /internal/dashboard/users/role — which is the user's raw NAME
-    # (e.g. "skypilot-system"), not the md5-hashed `auth_user.id`
-    # (e.g. "ebee332f"). We match by name first, falling back to the
-    # hashed id and finally the local user hash for CLI runs that
-    # somehow reached this endpoint.
-    user_hash = None
-    auth_user = getattr(request.state, 'auth_user', None)
-    if auth_user is not None:
-        user_hash = (getattr(auth_user, 'name', None) or
-                     getattr(auth_user, 'id', None))
-    if user_hash is None:
-        user_hash = common_utils.get_user_hash()
-    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
-    user_dir = pathlib.Path(logs_dir_on_api_server).expanduser().resolve()
-    # Validate zip_id: only hex from uuid4(), reject anything else.
-    if not all(c in '0123456789abcdef' for c in zip_id) or not zip_id:
-        raise fastapi.HTTPException(status_code=400, detail='Invalid zip_id.')
-    zip_path = user_dir / f'folder_{zip_id}.zip'
-    if not zip_path.exists():
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail='Zip not found (already downloaded or expired).')
-    return fastapi.responses.FileResponse(
-        path=zip_path,
-        filename=filename or f'folder_{zip_id}.zip',
-        media_type='application/zip',
-        background=fastapi.BackgroundTasks().add_task(
-            lambda: zip_path.unlink(missing_ok=True)))
 
 
 # TODO(aylei): run it asynchronously after global_user_state support async op

@@ -827,11 +827,12 @@ export async function handleJobAction(action, jobId, cluster) {
  * Downloads managed job logs as a zip via the API server.
  * Flow:
  * 1) POST /jobs/download_logs - copy logs from cluster to API server tmp dir
- * 2) POST /download?mode=link - server zips and returns {zip_id, filename}
- * 3) Navigate <a download> to GET /download_zip?zip_id=...
- *    The browser streams the response straight to disk via the OS save
- *    dialog, so multi-GB zips don't have to fit in JS heap (the previous
- *    `await resp.blob()` path OOMed the tab around 2-4 GB).
+ * 2) POST /download - server zips and streams it back as a binary response
+ * 3) Save the response blob via `<a download>` (createObjectURL).
+ *
+ * The blob path is bounded by JS heap (~2-4 GB on typical Chrome
+ * tabs); the consolidation_optimizer plugin overrides this slot with a
+ * native-browser-streamed flow that handles arbitrarily large logs.
  */
 // Long-poll /jobs/download_logs by hand instead of using apiClient.fetch.
 // For multi-GB running jobs sync_down can take 5+ minutes — well past
@@ -892,12 +893,13 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
   throw new Error('download_logs timed out after retries');
 }
 
-// Default OSS download flow: prepare a zip via sync_down + /download
-// then navigate to /download_zip for native browser-streamed save.
-// Works for both running and terminal jobs; the wait scales with
-// rsync time on the worker, so multi-GB running logs can take a few
-// minutes. Plugins (e.g. consolidation_optimizer) can register a
-// faster handler at the `jobs.detail.downloadbutton` slot.
+// Default OSS download flow: prepare a zip via sync_down + /download,
+// read the response as a blob, and save via createObjectURL. The wait
+// scales with rsync time on the worker, so multi-GB running logs can
+// take a few minutes (downloadLogsWithRetry tolerates Cloudflare 524
+// during that window). Plugins (e.g. consolidation_optimizer) can
+// register a faster, OOM-safe handler at the
+// `jobs.detail.downloadbutton` slot.
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
@@ -924,26 +926,22 @@ export async function downloadManagedJobLogs({
       showToast('No logs found to download.', 'warning');
       return;
     }
-    const resp = await apiClient.fetchImmediate(
-      '/download?relative=items&mode=link',
-      { folder_paths: folderPaths }
-    );
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
+    });
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Download failed: ${resp.status} ${text}`);
     }
-    const meta = await resp.json();
-    const baseUrl = window.location.origin;
-    const url =
-      `${baseUrl}${ENDPOINT}/download_zip` +
-      `?zip_id=${encodeURIComponent(meta.zip_id)}` +
-      `&filename=${encodeURIComponent(filename)}`;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    window.URL.revokeObjectURL(url);
     trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);
