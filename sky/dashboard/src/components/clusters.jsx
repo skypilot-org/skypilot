@@ -20,6 +20,7 @@ import {
   REFRESH_INTERVAL,
   TimestampWithTooltip,
   LastUpdatedTimestamp,
+  formatAutostop,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -101,27 +102,6 @@ const PROPERTY_OPTIONS = [
     value: 'labels',
   },
 ];
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    autostopStr = autostop + 'm';
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
 
 // Helper function to format username for display (reuse from users.jsx)
 const formatUserDisplay = (username, userId) => {
