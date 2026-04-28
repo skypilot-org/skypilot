@@ -46,7 +46,7 @@ class PluginContext(enum.Enum):
     # The API server's main process (the entrypoint that runs bootstrap:
     # DB init, request reset, RBAC pre-load, then uvicorn.run). No FastAPI
     # ``app`` is exposed here. Use this for plugins that need to register
-    # backends BEFORE main-process bootstrap consumes them (e.g. HAPlugin).
+    # backends BEFORE main-process bootstrap consumes them.
     MAIN = 'main'
     # A uvicorn worker process (or the main process when uvicorn runs
     # in-process with ``--deploy=false`` / single worker, on the second
