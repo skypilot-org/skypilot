@@ -439,6 +439,44 @@ _RELOAD_ZSH_CMD = 'source ~/.zshrc'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 
+def _is_default_tail() -> bool:
+    """Return True iff --tail was not explicitly set on the CLI.
+
+    Used by `sky logs` / `sky jobs logs` to distinguish a user-supplied
+    --tail from the implicit 1000-line default. The hint and the
+    sync-down compatibility branch both depend on this signal.
+    """
+    try:
+        ctx = click.get_current_context(silent=True)
+        if ctx is None:
+            return False
+        src = ctx.get_parameter_source('tail')
+        return src == click.core.ParameterSource.DEFAULT
+    except Exception:  # pylint: disable=broad-except
+        # ParameterSource was added in click 8.0; older clicks fall
+        # back to "treat as explicit" so the hint is suppressed.
+        return False
+
+
+def _print_default_tail_hint(tail: Optional[int]) -> None:
+    """Print a one-line stderr hint when default --tail is truncating output.
+
+    The default of 1000 lines is a behavior change in 0.12.0 — long-time
+    users running `sky logs <cluster> <id>` may not realize they're seeing
+    only the most-recent 1000 lines. Print a tiny hint to stderr so the
+    truncation is at least visible. Suppressed when the user explicitly
+    passed --tail (any value, including 0/-1) to keep their pipelines quiet.
+    """
+    if not _is_default_tail():
+        return
+    if tail is None or tail <= 0:
+        return
+    click.echo(
+        f'Showing the last {tail} lines (default). '
+        f'Pass --tail 0 to print the entire log.',
+        err=True)
+
+
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                               value: str):
     """A callback for installing shell completion for click."""
@@ -2653,6 +2691,7 @@ def logs(
     # 0 or any negative value means "all lines"; SDK expects None for
     # "no limit"; the cluster SDK already uses 0 to mean "unbounded".
     tail_arg: int = tail if tail > 0 else 0
+    _print_default_tail_hint(tail_arg)
     sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail_arg))
 
 
@@ -5997,7 +6036,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
-    if sync_down and tail > 0:
+    if sync_down and tail > 0 and not _is_default_tail():
+        # Only error when the user *explicitly* passed --tail with
+        # --sync-down. The default value of 1000 is silently treated as
+        # "all" for sync-down so existing `sky jobs logs --sync-down <id>`
+        # invocations don't break after the default change.
         raise click.UsageError(
             '--tail is not supported with --sync-down. Use '
             '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
@@ -6005,6 +6048,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # 0 or any negative value means "all lines" at the CLI layer; the
     # SDK/API represent "no limit" as None, so normalize here.
     tail_lines: Optional[int] = tail if tail > 0 else None
+    if sync_down and _is_default_tail():
+        # Default tail with --sync-down means "all".
+        tail_lines = None
+    if not sync_down:
+        _print_default_tail_hint(tail_lines)
     try:
         if sync_down:
             # Try streaming + gzip first — for RUNNING jobs this is
