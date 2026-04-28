@@ -69,6 +69,18 @@ apiService:
   # The default value is 60 seconds.
   terminationGracePeriodSeconds: 60
 
+  # Tunable parameters for the API server liveness and readiness probes. Only
+  # `timeoutSeconds` is exposed here; other probe fields (periodSeconds,
+  # failureThreshold, etc.) are kept at their chart defaults.
+  # Under heavy request load the `/api/health` handler can occasionally exceed
+  # the default 1s probe timeout and cause the pod to be restarted; bump these
+  # values (e.g. to 3-5) if you see the pod flapping on probes.
+  probes:
+    liveness:
+      timeoutSeconds: 1
+    readiness:
+      timeoutSeconds: 1
+
   # Set ~/.sky/config.yaml content on the API server
   # This value is IGNORED during an helm upgrade if there is an existing config
   # due to the potential accidental loss of existing config. Use the SkyPilot dashboard to update the config.

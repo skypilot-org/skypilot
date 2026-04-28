@@ -274,6 +274,13 @@ RAY_INSTALLATION_COMMANDS = (
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
     f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
+    # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
+    # issues with Sentinel values. We force this even when ray is already
+    # installed (e.g. baked into the SkyPilot AMI), since the ray-version
+    # idempotency guard below would otherwise skip the install and leave
+    # click at whatever the AMI shipped.
+    # See: https://github.com/ray-project/ray/issues/56747
+    f'{SKY_UV_PIP_CMD} install "click<8.3.0"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -292,7 +299,9 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # pylint: disable=line-too-long
+    # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
+    # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:

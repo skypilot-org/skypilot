@@ -156,6 +156,10 @@ def test_concurrent_file_mounts_launch(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Write random content so the blob hash is unique per test run,
+        # avoiding false "already exists" from a previous run's cache.
+        f'echo {name} > ~/tmpfile',
+        f'echo {name} > ~/tmp-workdir/foo',
         # Launch two clusters concurrently with the same file mounts.
         (f'sky launch -y -c {name}-1 --infra {generic_cloud} '
          f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
@@ -204,6 +208,10 @@ def test_concurrent_file_mounts_jobs_launch(generic_cloud: str):
     job2_name = f'{name}-job2'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Write random content so the blob hash is unique per test run,
+        # avoiding false "already exists" from a previous run's cache.
+        f'echo {name} > ~/tmpfile',
+        f'echo {name} > ~/tmp-workdir/foo',
         # Launch two managed jobs concurrently with the same file mounts.
         (f'sky jobs launch -y -d -n {job1_name} --infra {generic_cloud} '
          f'{smoke_tests_utils.LOW_RESOURCE_ARG} '

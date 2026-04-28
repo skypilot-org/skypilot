@@ -56,6 +56,7 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
+from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -206,6 +207,65 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
+
+# Hints currently only cover Kubernetes failure modes. Scoped to k8s blocks
+# in _format_provision_failure_blocks to avoid false positives on cloud
+# error messages (e.g., AWS "InsufficientInstanceCapacity").
+_KUBERNETES_FAILURE_HINTS = [
+    (['ImagePullBackOff', 'ErrImagePull'],
+     'Verify the image tag exists and registry credentials are configured.'),
+    (['OOMKilled'], 'The container ran out of memory. '
+     'Try requesting more with `memory: <size>` in resources.'),
+    (['Insufficient'],
+     'The cluster does not have enough free resources. View node '
+     'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
+]
+
+
+def _get_kubernetes_hint(reason: str,
+                         context: Optional[str] = None) -> Optional[str]:
+    """Return a hint for the given Kubernetes failure reason, or None.
+
+    Hints may contain a literal `{dashboard_url}` token, which is replaced
+    with the SkyPilot dashboard infra page URL — scoped to the failing
+    context when one is available. If URL resolution fails for any reason,
+    the token is replaced with a generic fallback so we never raise from
+    failure-rendering code (which would mask the original provision error).
+    """
+    for substrings, hint in _KUBERNETES_FAILURE_HINTS:
+        if any(s in reason for s in substrings):
+            if '{dashboard_url}' in hint:
+                try:
+                    starting_page = (f'infra/{context}' if context else 'infra')
+                    dashboard_url = server_common.get_dashboard_url(
+                        server_common.get_server_url(),
+                        starting_page=starting_page)
+                except Exception:  # pylint: disable=broad-except
+                    dashboard_url = 'the SkyPilot dashboard infra page'
+                hint = hint.replace('{dashboard_url}', dashboard_url)
+            return hint
+    return None
+
+
+def _format_provision_failure_blocks(
+    resource_exceptions: Dict['resources_lib.Resources', Exception],) -> str:
+    """Format provision failures as blocks instead of a table."""
+    num_infra = len(resource_exceptions)
+    lines = [f'Provision failures (tried {num_infra} infra):\n']
+    for resource, exception in resource_exceptions.items():
+        infra = resource.infra.formatted_str()
+        resource_str = resources_utils.format_resource(resource,
+                                                       simplified_only=True)[0]
+        reason = str(exception)
+        lines.append(f'\u2717 {infra} \u2014 {resource_str}')
+        lines.append(textwrap.indent(reason, '  '))
+        if isinstance(resource.cloud, clouds.Kubernetes):
+            hint = _get_kubernetes_hint(reason, context=resource.region)
+            if hint:
+                lines.append(f'  Hint: {hint}')
+        lines.append('')
+    return '\n'.join(lines).rstrip() + '\n'
+
 
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
@@ -914,6 +974,7 @@ class RetryingVmProvisioner(object):
         to_provision: resources_lib.Resources,
         requested_resources: Set[resources_lib.Resources],
         insufficient_resources: Optional[List[str]],
+        last_error_reason: Optional[str] = None,
     ) -> str:
         insufficent_resource_msg = ('' if insufficient_resources is None else
                                     f' ({", ".join(insufficient_resources)})')
@@ -937,6 +998,8 @@ class RetryingVmProvisioner(object):
                             f'{requested_resources}. ')
         else:
             message += (f'{to_provision.cloud} for {requested_resources}. ')
+        if last_error_reason:
+            message = message.rstrip() + f'\nReason: {last_error_reason}'
         return message
 
     def _retry_zones(  # pylint: disable=line-too-long
@@ -1018,6 +1081,7 @@ class RetryingVmProvisioner(object):
                 f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.')
 
         insufficient_resources = None
+        last_error_reason: Optional[str] = None
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1245,6 +1309,7 @@ class RetryingVmProvisioner(object):
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
+                        last_error_reason = str(e)
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node.
@@ -1392,9 +1457,11 @@ class RetryingVmProvisioner(object):
                 CloudVmRayBackend().teardown_no_lock(
                     handle, terminate=terminate_or_stop, remove_from_db=False)
 
-        message = self._insufficient_resources_msg(to_provision,
-                                                   requested_resources,
-                                                   insufficient_resources)
+        message = self._insufficient_resources_msg(
+            to_provision,
+            requested_resources,
+            insufficient_resources,
+            last_error_reason=last_error_reason)
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
@@ -1829,19 +1896,9 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
-                for (resource, exception) in resource_exceptions.items():
-                    table.add_row([
-                        resource.infra.formatted_str(),
-                        resources_utils.format_resource(
-                            resource, simplified_only=True)[0], exception
-                    ])
-                # Set the max width of REASON column to 80 to avoid the table
-                # being wrapped in a unreadable way.
-                # pylint: disable=protected-access
-                table._max_width = {'REASON': 80}
+                blocks = _format_provision_failure_blocks(resource_exceptions)
                 raise exceptions.ResourcesUnavailableError(
-                    _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' + blocks,
                     failover_history=failover_history)
             best_resources = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'

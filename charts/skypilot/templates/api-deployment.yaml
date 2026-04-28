@@ -257,6 +257,11 @@ spec:
             path: /api/health
             port: 46580
           periodSeconds: 30
+          {{- with .Values.apiService.probes }}
+          {{- if and .liveness .liveness.timeoutSeconds }}
+          timeoutSeconds: {{ .liveness.timeoutSeconds }}
+          {{- end }}
+          {{- end }}
         readinessProbe:
           httpGet:
             path: /api/health
@@ -275,6 +280,11 @@ spec:
           failureThreshold: 3
           periodSeconds: 5
           initialDelaySeconds: 5
+          {{- with .Values.apiService.probes }}
+          {{- if and .readiness .readiness.timeoutSeconds }}
+          timeoutSeconds: {{ .readiness.timeoutSeconds }}
+          {{- end }}
+          {{- end }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
@@ -295,14 +305,11 @@ spec:
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
-        # Mount only the specific subdirectories needed for managed job logs, not the entire sky_logs folder
-        # This avoids persisting transient cluster logs (sky-*) and api_server logs
+        # Mount the entire sky_logs folder because the request
+        # logs have been moved out of this directory
         - name: state-volume
-          mountPath: /root/sky_logs/jobs_controller # Controller logs for `sky jobs logs --controller`
-          subPath: sky_logs/jobs_controller
-        - name: state-volume
-          mountPath: /root/sky_logs/managed_jobs # Task execution logs for managed jobs
-          subPath: sky_logs/managed_jobs
+          mountPath: /root/sky_logs
+          subPath: sky_logs
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config

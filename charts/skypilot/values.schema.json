@@ -122,6 +122,27 @@
                 "preDeployHook": {
                     "type": "string"
                 },
+                "probes": {
+                    "type": "object",
+                    "properties": {
+                        "liveness": {
+                            "type": "object",
+                            "properties": {
+                                "timeoutSeconds": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "readiness": {
+                            "type": "object",
+                            "properties": {
+                                "timeoutSeconds": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    }
+                },
                 "replicas": {
                     "type": "integer"
                 },

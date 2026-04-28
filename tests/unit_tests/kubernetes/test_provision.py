@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky import exceptions as sky_exceptions
 from sky import resources
 from sky.backends import cloud_vm_ray_backend
 from sky.provision.kubernetes import config as config_lib
@@ -1556,3 +1557,368 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         assert clock.now < instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
             f'No autoscaler configured → short user timeout must not be '
             f'bumped, but loop ran for {clock.now}s.')
+
+
+# ---------------------------------------------------------------------------
+# Helpers and tests for _condensed_pod_reason()
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_pod(phase='Failed',
+                   deletion_timestamp=None,
+                   conditions=None,
+                   container_statuses=None,
+                   init_container_statuses=None):
+    """Helper to build a mock pod with the given status fields."""
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.metadata.deletion_timestamp = deletion_timestamp
+    pod.status.phase = phase
+    pod.status.start_time = None
+    pod.status.conditions = conditions or []
+    pod.status.container_statuses = container_statuses or []
+    pod.status.init_container_statuses = init_container_statuses or []
+    return pod
+
+
+def _make_condition(type_,
+                    reason,
+                    message='',
+                    status='True',
+                    last_transition_time=None):
+    cond = mock.MagicMock()
+    cond.type = type_
+    cond.reason = reason
+    cond.message = message
+    cond.status = status
+    cond.last_transition_time = last_transition_time
+    return cond
+
+
+def _make_container_status(name='main',
+                           terminated_reason=None,
+                           terminated_exit_code=None,
+                           terminated_finished_at=None,
+                           waiting_reason=None,
+                           waiting_message=None):
+    cs = mock.MagicMock()
+    cs.name = name
+    cs.state.terminated = None
+    cs.state.waiting = None
+    if terminated_reason is not None:
+        cs.state.terminated = mock.MagicMock()
+        cs.state.terminated.reason = terminated_reason
+        cs.state.terminated.exit_code = terminated_exit_code or 1
+        cs.state.terminated.finished_at = terminated_finished_at
+        cs.state.terminated.message = None
+    if waiting_reason is not None:
+        cs.state.waiting = mock.MagicMock()
+        cs.state.waiting.reason = waiting_reason
+        cs.state.waiting.message = waiting_message
+    return cs
+
+
+class TestCondensedPodReason:
+    """Tests for _condensed_pod_reason()."""
+
+    def test_oom_killed(self):
+        container = _make_container_status(terminated_reason='OOMKilled',
+                                           terminated_exit_code=137)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'OOMKilled' in result
+        assert '137' in result
+
+    def test_kueue_preemption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('TerminationTarget', 'PreemptedByWorkloadPriority',
+                            'Higher priority workload scheduled'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Preempted by Kueue' in result
+        assert 'PreemptedByWorkloadPriority' in result
+
+    def test_disruption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('DisruptionTarget', 'EvictionByKueue',
+                            'Preempted to accommodate a higher priority'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Disrupted' in result
+
+    def test_image_pull_backoff_from_waiting(self):
+        container = _make_container_status(
+            waiting_reason='ImagePullBackOff',
+            waiting_message='Back-off pulling image "nvcr.io/foo:bad"')
+        pod = _make_mock_pod(phase='Failed',
+                             conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'ImagePullBackOff' in result
+        assert 'nvcr.io/foo:bad' in result
+
+    def test_crash_loop_from_terminated(self):
+        container = _make_container_status(terminated_reason='Error',
+                                           terminated_exit_code=1)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Error' in result
+        assert 'exit code 1' in result
+
+    def test_terminated_no_reason(self):
+        """When terminated.reason is None, should show exit code cleanly."""
+        container = mock.MagicMock()
+        container.state.waiting = None
+        container.state.terminated = mock.MagicMock()
+        container.state.terminated.reason = None
+        container.state.terminated.exit_code = 137
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert result == 'Terminated with exit code 137'
+
+    def test_unknown_fallback(self):
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Terminated unexpectedly' in result
+
+
+class TestInsufficientResourcesMsg:
+    """Tests for _insufficient_resources_msg with last_error_reason."""
+
+    def _make_provisioner(self):
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        return provisioner
+
+    def test_includes_error_reason_for_k8s(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(
+            k8s_resource,
+            requested,
+            None,
+            last_error_reason='OOMKilled (exit code 137)')
+        assert 'OOMKilled (exit code 137)' in msg
+        assert 'my-context' in msg
+
+    def test_no_error_reason_falls_back(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(k8s_resource,
+                                                      requested,
+                                                      None,
+                                                      last_error_reason=None)
+        assert 'Failed to acquire resources' in msg
+        assert 'my-context' in msg
+        assert 'OOMKilled' not in msg
+
+
+@pytest.fixture()
+def mock_format_resource(monkeypatch):
+    """Mock format_resource to avoid needing real Resources objects."""
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.resources_utils.format_resource',
+        lambda resource, simplified_only=False:
+        ('H100:1, cpus=4, mem=16', None))
+
+
+class TestProvisionFailureBlocks:
+    """Tests for _format_provision_failure_blocks."""
+
+    def _make_k8s_resource(self,
+                           infra_str='Kubernetes (in-cluster)',
+                           region='in-cluster'):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.Kubernetes()
+        resource.region = region
+        return resource
+
+    def _make_aws_resource(self, infra_str='AWS (us-east-1)'):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.AWS()
+        return resource
+
+    def test_single_failure_block(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Failed to acquire resources in context in-cluster. '
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert 'OOMKilled' in result
+
+    def test_hint_for_image_pull(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: ImagePullBackOff: nvcr.io/foo:bad - manifest unknown')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'image' in result.lower() or 'registry' in result.lower()
+
+    def test_hint_for_oom(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'memory' in result.lower()
+
+    def test_hint_for_insufficient_includes_url_and_kubectl(
+            self, mock_format_resource, monkeypatch):
+        """Insufficient hint links the dashboard infra page scoped to the
+        failing context and also mentions `kubectl describe nodes`."""
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            lambda: 'http://api.example.com')
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        assert ('http://api.example.com/dashboard/infra/my-cluster-context'
+                in result)
+
+    def test_hint_falls_back_when_url_resolution_fails(self,
+                                                       mock_format_resource,
+                                                       monkeypatch):
+        """If get_server_url raises, the hint should still render (with a
+        generic fallback) rather than crash the failure-rendering path."""
+
+        def _boom():
+            raise RuntimeError('no api server endpoint configured')
+
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            _boom)
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        # Generic fallback text used when URL resolution fails.
+        assert 'SkyPilot dashboard infra page' in result
+        # Placeholder must not leak through.
+        assert '{dashboard_url}' not in result
+
+    def test_no_hint_for_unknown_k8s_failure(self, mock_format_resource):
+        """K8s block with no recognized failure substring gets no hint."""
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Some unrecognized cluster failure.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+
+    def test_no_hint_for_non_k8s_cloud(self, mock_format_resource):
+        """Hints don't fire for non-k8s clouds even if substring matches.
+
+        Prevents AWS messages like 'InsufficientInstanceCapacity' from
+        triggering the k8s insufficient-resources hint.
+        """
+        resource = self._make_aws_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'InsufficientInstanceCapacity: no A100 capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+        assert 'dashboard' not in result
+
+    def test_multiple_failures_mixed_clouds(self, mock_format_resource):
+        r1 = self._make_k8s_resource()
+        r2 = self._make_aws_resource()
+        exc1 = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        exc2 = sky_exceptions.ResourcesUnavailableError(
+            'No capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks({
+            r1: exc1,
+            r2: exc2
+        })
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert '\u2717 AWS (us-east-1)' in result
+        # K8s block has the OOM hint
+        assert 'memory' in result.lower()
+
+
+class TestFullPipeline:
+    """Integration test: KubernetesError message → retry loop → block output."""
+
+    def test_oom_reason_reaches_block_output(self, mock_format_resource):
+        """Verify OOMKilled flows from exception through to block rendering."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: OOMKilled (exit code 137). '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'OOMKilled' in blocks
+        assert 'exit code 137' in blocks
+        assert 'Hint:' in blocks
+        assert 'memory' in blocks.lower()
+
+    def test_image_pull_reason_reaches_block_output(self, mock_format_resource):
+        """Verify ImagePullBackOff flows end-to-end."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: ImagePullBackOff: '
+            'Back-off pulling image "nvcr.io/nvidia/pytorch:bad-tag". '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'ImagePullBackOff' in blocks
+        assert 'nvcr.io/nvidia/pytorch:bad-tag' in blocks
+        assert 'Hint:' in blocks
+        assert 'image' in blocks.lower() or 'registry' in blocks.lower()

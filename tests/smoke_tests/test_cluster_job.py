@@ -1242,7 +1242,8 @@ def test_task_labels_kubernetes():
                     '--selector inlinelabel1=inlinevalue1 '
                     '--selector inlinelabel2=inlinevalue2 '
                     '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                    f'grep \'^{name}\'')
+                    f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
+                )
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
