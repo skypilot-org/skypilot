@@ -612,13 +612,6 @@ def download_logs_streaming(
 
     threading.Thread(target=_drain, daemon=True).start()
 
-    job_label = job_id if job_id is not None else name
-    log_type = 'controller' if controller else 'job'
-    filename = f'managed-{log_type}-{job_label}.log.gz'
-    local_path = pathlib.Path(
-        local_dir).expanduser() / 'managed_jobs' / filename
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-
     stream_url = (f'/api/stream?request_id={request_id}'
                   '&format=plain&compress=gz')
     stream_resp = server_common.make_authenticated_request('GET',
@@ -628,6 +621,20 @@ def download_logs_streaming(
     if not stream_resp.ok:
         raise RuntimeError(
             f'Failed to attach to /api/stream: HTTP {stream_resp.status_code}')
+
+    # Sniff Content-Type — older API servers without compress=gz support
+    # silently ignore the query param and return text/plain. We must NOT
+    # save plain text under a .gz filename or the user's gunzip will
+    # fail. Pick the extension and Content-Type-aware filename here.
+    content_type = (stream_resp.headers.get('Content-Type') or '').lower()
+    is_gzipped = content_type.startswith('application/gzip')
+    job_label = job_id if job_id is not None else name
+    log_type = 'controller' if controller else 'job'
+    ext = '.log.gz' if is_gzipped else '.log'
+    filename = f'managed-{log_type}-{job_label}{ext}'
+    local_path = pathlib.Path(
+        local_dir).expanduser() / 'managed_jobs' / filename
+    local_path.parent.mkdir(parents=True, exist_ok=True)
 
     bytes_written = 0
     with open(local_path, 'wb') as f:
