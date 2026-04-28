@@ -943,15 +943,32 @@ export async function downloadManagedJobLogs({
     if (!requestId) {
       throw new Error('Missing X-Skypilot-Request-ID on /jobs/logs response');
     }
-    // Cancel the dispatched request body — we'll re-attach to it via
-    // /api/stream below. Without this the response body sits open
-    // until the request completes, which on multi-GB logs ties up the
-    // browser's per-host connection pool.
-    try {
-      dispatch.body?.cancel();
-    } catch {
-      /* ignore */
-    }
+    // Drain the dispatch body in the background. We CANNOT cancel it —
+    // the API server interprets connection close as a client
+    // disconnect and cancels the running tail_logs task, leaving
+    // /api/stream with only a partial log. We also can't ignore it —
+    // the response is a chunked stream and unread bytes will back up
+    // the OS socket buffer, eventually blocking server writes.
+    // Reading and discarding keeps the request alive without holding
+    // the bytes in JS memory.
+    (async () => {
+      const reader = dispatch.body?.getReader();
+      if (!reader) return;
+      try {
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
 
     const url =
       `${baseUrl}${ENDPOINT}/api/stream` +
