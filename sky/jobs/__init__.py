@@ -1,9 +1,11 @@
 """Managed jobs."""
 import pathlib
 
+from sky.jobs.client.sdk import _JobLogStreamingEmptyError
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
+from sky.jobs.client.sdk import download_logs_streaming
 from sky.jobs.client.sdk import launch
 from sky.jobs.client.sdk import pool_apply
 from sky.jobs.client.sdk import pool_down
@@ -45,6 +47,7 @@ __all__ = [
     'wait',
     'dashboard',
     'download_logs',
+    'download_logs_streaming',
     # utils
     'ManagedJobCodeGen',
     'format_job_table',
