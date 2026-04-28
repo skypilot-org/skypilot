@@ -708,20 +708,18 @@ def test_kubernetes_ensure_no_fd_leak_fusermount_server():
         # blocking on stuck fds.
         # Look up the workload pod via the skypilot-cluster-name
         # annotation (raw cluster name, no hash suffix).
-        get_node = (
-            'NODE=$(kubectl get pods -o'
-            ' custom-columns=NAME:.metadata.name,'
-            'NODE:.spec.nodeName,'
-            'ANN:.metadata.annotations.skypilot-cluster-name'
-            ' --no-headers |'
-            """ awk -v n="{cluster}" '$NF==n{{print $2}}' |"""
-            ' head -1) && echo "node=$NODE"')
-        get_fuse_pod = (
-            'FUSE_POD=$(kubectl get pods -n skypilot-system'
-            ' -l app=fusermount-server'
-            ' --field-selector spec.nodeName=$NODE'
-            ' -o jsonpath=\'{{.items[0].metadata.name}}\') &&'
-            ' echo "fuse_pod=$FUSE_POD"')
+        get_node = ('NODE=$(kubectl get pods -o'
+                    ' custom-columns=NAME:.metadata.name,'
+                    'NODE:.spec.nodeName,'
+                    'ANN:.metadata.annotations.skypilot-cluster-name'
+                    ' --no-headers |'
+                    """ awk -v n="{cluster}" '$NF==n{{print $2}}' |"""
+                    ' head -1) && echo "node=$NODE"')
+        get_fuse_pod = ('FUSE_POD=$(kubectl get pods -n skypilot-system'
+                        ' -l app=fusermount-server'
+                        ' --field-selector spec.nodeName=$NODE'
+                        ' -o jsonpath=\'{{.items[0].metadata.name}}\') &&'
+                        ' echo "fuse_pod=$FUSE_POD"')
         count_fuse_fds = (
             'COUNT=$(kubectl exec -n skypilot-system $FUSE_POD --'
             ' sh -c \''
