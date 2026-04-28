@@ -824,7 +824,7 @@ function ControllerLogsSection({
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: true,
-        jobStatus: jobData?.status ?? jobData?.jobs?.[0]?.status,
+        jobStatus: detailJobData?.status,
       });
     } finally {
       setDownloading(false);
@@ -879,8 +879,7 @@ function ControllerLogsSection({
                 context={{
                   jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
                   controller: true,
-                  jobStatus:
-                    jobData?.status ?? jobData?.jobs?.[0]?.status,
+                  jobStatus: detailJobData?.status,
                   downloading,
                   onDownloadingChange: setDownloading,
                 }}
