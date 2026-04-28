@@ -2607,7 +2607,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
     # `uv_spawn`, which on Linux always uses fork().
     # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
-    # Python objects; if any sqlite3 connection/cursor is in that set, its
+    # Python objects; if any sqlite3 statement is in that set, its
     # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
     # static allocator mutex. That mutex was held by another parent thread at
     # the fork moment (aiosqlite worker), and the child only has one thread,
