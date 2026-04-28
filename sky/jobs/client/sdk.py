@@ -1,5 +1,7 @@
 """SDK functions for managed jobs."""
 import json
+import pathlib
+import threading
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -32,6 +34,13 @@ if typing.TYPE_CHECKING:
     from sky.serve import serve_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+class _JobLogStreamingEmptyError(RuntimeError):
+    """Raised when the streaming log download returned zero bytes — the
+    caller (typically the CLI) should fall back to the sync-down/rsync
+    path. Common for terminal jobs whose worker cluster is already
+    torn down: the underlying tail_logs has no source to read."""
 
 
 @context.contextual
@@ -537,6 +546,109 @@ def wait(
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def download_logs_streaming(
+        name: Optional[str],
+        job_id: Optional[int],
+        refresh: bool,
+        controller: bool,
+        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    """Download a managed job's log as a gzipped file via streaming.
+
+    This dispatches the same /jobs/logs (tail=None, follow=False) path
+    that the live-tail UI uses, then attaches to /api/stream with
+    compress=gz to receive gzipped bytes as they're produced. For
+    RUNNING jobs this is much faster than ``download_logs`` because
+    no rsync of the full log to the API server's tmp dir is needed
+    before bytes can flow to the client; for terminal jobs whose
+    worker cluster has already been torn down the underlying
+    tail_logs returns nothing — the function detects the empty result
+    and the CLI falls back to ``download_logs``.
+
+    Returns:
+        ``{job_id: local_path}``. ``local_path`` ends in ``.log.gz``;
+        decompress with ``gunzip`` or any standard gzip tool.
+    """
+    if job_id is None and name is None:
+        raise ValueError(
+            'Must specify either job_id or name to stream-download logs.')
+
+    body = payloads.JobsLogsBody(
+        name=name,
+        job_id=job_id,
+        follow=False,
+        controller=controller,
+        refresh=refresh,
+        tail=None,
+    )
+    dispatch = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/logs',
+        json=json.loads(body.model_dump_json()),
+        stream=True,
+        timeout=(5, None))
+    if not dispatch.ok:
+        raise RuntimeError(
+            f'Failed to dispatch /jobs/logs: HTTP {dispatch.status_code}')
+    request_id = dispatch.headers.get(server_constants.STREAM_REQUEST_HEADER) \
+        or dispatch.headers.get('X-SkyPilot-Request-ID')
+    if not request_id:
+        raise RuntimeError(
+            '/jobs/logs response missing X-SkyPilot-Request-ID header')
+
+    # Drain the dispatch body in a background thread. Cancelling/closing
+    # would tell the API server the client disconnected and the running
+    # tail_logs task would be cancelled, leaving /api/stream with only
+    # a partial log. Reading and discarding keeps the request alive.
+    def _drain() -> None:
+        try:
+            for _ in dispatch.iter_content(chunk_size=64 * 1024):
+                pass
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    threading.Thread(target=_drain, daemon=True).start()
+
+    job_label = job_id if job_id is not None else name
+    log_type = 'controller' if controller else 'job'
+    filename = f'managed-{log_type}-{job_label}.log.gz'
+    local_path = pathlib.Path(
+        local_dir).expanduser() / 'managed_jobs' / filename
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+    stream_url = (f'/api/stream?request_id={request_id}'
+                  '&format=plain&compress=gz')
+    stream_resp = server_common.make_authenticated_request('GET',
+                                                           stream_url,
+                                                           stream=True,
+                                                           timeout=(5, None))
+    if not stream_resp.ok:
+        raise RuntimeError(
+            f'Failed to attach to /api/stream: HTTP {stream_resp.status_code}')
+
+    bytes_written = 0
+    with open(local_path, 'wb') as f:
+        for chunk in stream_resp.iter_content(chunk_size=64 * 1024):
+            if chunk:
+                f.write(chunk)
+                bytes_written += len(chunk)
+
+    if bytes_written == 0:
+        # Server sent nothing (e.g., terminal job, worker cluster gone).
+        # Remove the empty file and signal the caller to fall back.
+        try:
+            local_path.unlink()
+        except OSError:
+            pass
+        raise _JobLogStreamingEmptyError(
+            f'No streaming log bytes for job {job_label}; '
+            f'fall back to sync-down path.')
+
+    key = int(job_id) if job_id is not None else 0
+    return {key: str(local_path)}
 
 
 @usage_lib.entrypoint
