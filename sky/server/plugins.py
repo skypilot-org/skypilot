@@ -119,7 +119,7 @@ class ExtensionContext:
     def __init__(
         self,
         # Default exists for backward compatibility.
-        context: PluginContext = PluginContext.MAIN,
+        context: PluginContext = PluginContext.UVICORN,
         app: Optional[FastAPI] = None,
     ):
         self.context = context
