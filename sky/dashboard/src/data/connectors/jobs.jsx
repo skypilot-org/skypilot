@@ -1053,15 +1053,20 @@ export async function downloadManagedJobLogs({
       }
     })();
 
+    // compress=gz: text logs compress 10-30x, so multi-GB downloads
+    // come down dramatically. The server gzips inline; the browser
+    // saves a real .log.gz file (macOS/Linux file managers
+    // auto-extract; gunzip works everywhere).
     const url =
       `${baseUrl}${ENDPOINT}/api/stream` +
       `?request_id=${encodeURIComponent(requestId)}` +
       `&format=plain` +
+      `&compress=gz` +
       `&download=${encodeURIComponent(filename)}`;
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = `${filename}.gz`;
     document.body.appendChild(a);
     a.click();
     a.remove();
