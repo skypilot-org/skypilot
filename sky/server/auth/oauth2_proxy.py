@@ -23,6 +23,17 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+HOP_BY_HOP_HEADERS = {
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+}
+
 
 @middleware_utils.websocket_aware
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -71,10 +82,15 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
+                    response_headers = {
+                        name: value
+                        for name, value in response.headers.items()
+                        if name.lower() not in HOP_BY_HOP_HEADERS
+                    }
                     fastapi_response = fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
-                        headers=dict(response.headers),
+                        headers=response_headers,
                     )
                     # Forward cookies from OAuth2 proxy response to client
                     for cookie_name, cookie in response.cookies.items():
