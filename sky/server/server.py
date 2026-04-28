@@ -2278,6 +2278,14 @@ async def stream(
     # 'console': console for CLI/API clients
     # pylint: disable=redefined-builtin
     format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
+    # When set, return the stream as an attachment (browser download)
+    # with this filename. Forces plain-text formatting so the saved
+    # file is the raw log content. Use this to download large running
+    # job logs via `<a download href=/api/stream?...>`: bytes start
+    # flowing the moment the underlying request emits its first chunk,
+    # so the user sees the OS save dialog immediately instead of
+    # waiting for sync_down to complete.
+    download: Optional[str] = None,
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
 
@@ -2310,8 +2318,13 @@ async def stream(
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
 
-    # Determine if we should use HTML format
-    if format == 'auto':
+    # download mode forces a plain-text streaming response with an
+    # attachment header — the browser saves the bytes to disk as they
+    # arrive instead of rendering them.
+    if download is not None:
+        format = 'plain'
+        use_html = False
+    elif format == 'auto':
         # Check if request is coming from a browser
         user_agent = request.headers.get('user-agent', '').lower()
         use_html = any(browser in user_agent
@@ -2396,6 +2409,14 @@ async def stream(
         headers[server_constants.STREAM_REQUEST_HEADER] = (
             user_supplied_request_id
             if user_supplied_request_id else request_id)
+    if download is not None:
+        # Sanitize the filename (no path separators, no quotes).
+        safe_filename = (download.replace('"',
+                                          '').replace('/',
+                                                      '_').replace('\\',
+                                                                   '_'))[:200]
+        headers['Content-Disposition'] = (
+            f'attachment; filename="{safe_filename}"')
 
     if request_id is not None:
         content = log_provider.get_log_provider().log_stream(
