@@ -1463,17 +1463,10 @@ async def _receive_and_assemble_chunks(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
     logger.info(f'Uploaded chunk: {zip_file_path}')
-    # Assemble + extract are not idempotent across concurrent callers
-    # (they mutate shared paths on disk).  Callers that may have
-    # multiple chunks land "all present" simultaneously must serialize
-    # this step with their own lock — see the upload-lock-protected
-    # section in /upload_v2.  ``/upload`` uses a unique upload_id per
-    # request so no contention exists there.
-    if assemble or extract:
+    if assemble:
         await _finalize_chunked_upload(base_dir=base_dir,
                                        zip_name=zip_name,
                                        total_chunks=total_chunks,
-                                       assemble=assemble,
                                        extract=extract)
     return None
 
@@ -1482,21 +1475,10 @@ async def _finalize_chunked_upload(
     base_dir: pathlib.Path,
     zip_name: str,
     total_chunks: int,
-    assemble: bool,
     extract: bool,
 ) -> None:
-    """Assemble parts into a single zip and/or extract it.
-
-    Mutates shared paths under ``base_dir`` (writes ``{zip_name}.zip``,
-    extracts into ``base_dir``, removes the parts dir).  Two callers
-    racing on the same ``(base_dir, zip_name)`` would corrupt the
-    output and waste work, so the caller MUST serialize this — e.g. by
-    holding ``BlobStorage.acquire_upload_lock`` for the upload — and
-    must guarantee all chunks have been received before calling.
-    """
-    if extract and not assemble:
-        raise ValueError('extract=True requires assemble=True')
-    if total_chunks > 1 and assemble:
+    """Assemble parts into a single zip and optionally extract it."""
+    if total_chunks > 1:
         chunk_dir = base_dir / zip_name
         zip_file_path = base_dir / f'{zip_name}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
@@ -1510,15 +1492,12 @@ async def _finalize_chunked_upload(
                             break
                         await zip_file.write(data)
     else:
-        # total_chunks == 1: the chunk body is already at
-        # ``{base_dir}/{zip_name}.zip`` (renamed by the receive step);
-        # for total_chunks > 1 with assemble=False the parts stay as
-        # individual ``part{N}`` files and there is no zip to extract.
+        # ``{base_dir}/{zip_name}.zip`` (renamed by the receive step).
         zip_file_path = base_dir / f'{zip_name}.zip'
 
     if extract:
         await unzip_file(zip_file_path, base_dir)
-    if total_chunks > 1 and assemble:
+    if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, base_dir / zip_name)
 
 
@@ -1615,9 +1594,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     # writes to a writer-unique tmp file, then atomic-renames to its
     # final ``part{N}`` name, so concurrent chunk POSTs (parallel
     # workers, retries, or two clients racing on the same content-
-    # hashed blob_id) don't need lock coordination here.  The
-    # assemble + extract + store_blob steps are not idempotent under
-    # concurrency and are run below under the lock.
+    # hashed blob_id) don't need lock coordination here.
+    # Note that we skip assemble and extract here since cocurrent chunk
+    # uploads will race, and we do finalize with the upload_lock instead.
     staging_dir = storage.get_staging_dir(user_id, upload_id)
     result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                 zip_name='staging',
@@ -1636,12 +1615,10 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
         if storage.assemble_on_upload() or storage.extract_on_upload():
-            await _finalize_chunked_upload(
-                base_dir=staging_dir,
-                zip_name='staging',
-                total_chunks=total_chunks,
-                assemble=storage.assemble_on_upload(),
-                extract=storage.extract_on_upload())
+            await _finalize_chunked_upload(base_dir=staging_dir,
+                                           zip_name='staging',
+                                           total_chunks=total_chunks,
+                                           extract=storage.extract_on_upload())
         await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
