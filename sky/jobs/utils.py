@@ -1386,29 +1386,35 @@ def stream_logs_by_id(
                     # Show task header when multiple tasks OR when filtering
                     if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
-                    with open(os.path.expanduser(log_file),
-                              'r',
-                              encoding='utf-8') as f:
-                        # Stream the logs to the console without reading the
-                        # whole file into memory.
-                        start_streaming = False
-                        read_from: Union[TextIO, Deque[str]] = f
-                        if tail is not None:
-                            assert tail > 0
-                            # Read only the last 'tail' lines using deque
-                            read_from = collections.deque(f, maxlen=tail)
-                            # We set start_streaming to True here in case
-                            # truncating the log file removes the line that
-                            # contains LOG_FILE_START_STREAMING_AT. This does
-                            # not cause issues for log files shorter than tail
-                            # because tail_logs in sky/skylet/log_lib.py also
-                            # handles LOG_FILE_START_STREAMING_AT.
-                            start_streaming = True
-                        for line in read_from:
+                    log_path = os.path.expanduser(log_file)
+                    if tail is not None:
+                        assert tail > 0
+                        # Backward-seek tail: O(tail × line) instead of
+                        # scanning the whole file. The previous
+                        # `collections.deque(f, maxlen=tail)` scanned every
+                        # byte of the cached log, making dashboard log
+                        # loading 10+ s for multi-GB cancelled jobs.
+                        offset = max(tail_offset or 0, 0)
+                        lines, _ = log_lib.tail_lines_from_end(
+                            log_path, tail, offset)
+                        # start_streaming=True for the truncated case in
+                        # case the LOG_FILE_START_STREAMING_AT marker was
+                        # cut by the tail (mirrors log_lib.tail_logs).
+                        start_streaming = True
+                        for line in lines:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
+                    else:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            start_streaming = False
+                            for line in f:
+                                if (log_lib.LOG_FILE_START_STREAMING_AT
+                                        in line):
+                                    start_streaming = True
+                                if start_streaming:
+                                    print(line, end='', flush=True)
                     # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
