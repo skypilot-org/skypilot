@@ -2494,12 +2494,13 @@ def queue(clusters: List[str],
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
-@click.option(
-    '--tail',
-    default=0,
-    type=int,
-    help=('The number of lines to display from the end of the log file. '
-          'Default is 0, which means print all lines.'))
+@click.option('--tail',
+              default=1000,
+              type=int,
+              help=('Number of lines to display from the end of the log file. '
+                    'Default is 1000 — sensible for multi-GB logs where '
+                    'downloading the full file is slow. Pass --tail 0 (or '
+                    '--tail -1) to print the entire log.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2649,8 +2650,10 @@ def logs(
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
 
-    # Stream logs from the server.
-    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
+    # 0 or any negative value means "all lines"; SDK expects None for
+    # "no limit"; the cluster SDK already uses 0 to mean "unbounded".
+    tail_arg: int = tail if tail > 0 else 0
+    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail_arg))
 
 
 @cli.command()
@@ -5961,13 +5964,13 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@click.option(
-    '--tail',
-    default=0,
-    type=int,
-    help=('The number of lines to display from the end of the log file. '
-          'Default is 0, which means all lines. Useful for large logs '
-          '(e.g. multi-GB) where downloading the full file is slow.'))
+@click.option('--tail',
+              default=1000,
+              type=int,
+              help=('Number of lines to display from the end of the log file. '
+                    'Default is 1000 — sensible for multi-GB logs where '
+                    'downloading the full file is slow. Pass --tail 0 (or '
+                    '--tail -1) to fetch the entire log.'))
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
@@ -5994,15 +5997,13 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
-    if tail < 0:
-        raise click.UsageError('--tail must be a non-negative integer.')
     if sync_down and tail > 0:
         raise click.UsageError(
             '--tail is not supported with --sync-down. Use '
             '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
             'or redirect stdout to save it to a file.')
-    # tail=0 means "all lines" at the CLI layer; the SDK/API represent
-    # "no limit" as None, so normalize here.
+    # 0 or any negative value means "all lines" at the CLI layer; the
+    # SDK/API represent "no limit" as None, so normalize here.
     tail_lines: Optional[int] = tail if tail > 0 else None
     try:
         if sync_down:
