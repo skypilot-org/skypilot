@@ -104,9 +104,13 @@ function JobDetails() {
     if (logsDownloading) return;
     setLogsDownloading(true);
     try {
+      const detail = jobData?.jobs?.find(
+        (j) => String(j.id) === String(jobId)
+      );
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: false,
+        jobStatus: detail?.status,
       });
     } finally {
       setLogsDownloading(false);
@@ -116,9 +120,13 @@ function JobDetails() {
     if (controllerDownloading) return;
     setControllerDownloading(true);
     try {
+      const detail = jobData?.jobs?.find(
+        (j) => String(j.id) === String(jobId)
+      );
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: true,
+        jobStatus: detail?.status,
       });
     } finally {
       setControllerDownloading(false);
@@ -544,6 +552,7 @@ function JobDetails() {
                                       downloadManagedJobLogs({
                                         jobId: parseInt(jobId),
                                         controller: false,
+                                        jobStatus: task?.status,
                                       })
                                     }
                                     className="text-sky-blue hover:text-sky-blue-bright"
@@ -802,6 +811,7 @@ function ControllerLogsSection({
       await downloadManagedJobLogs({
         jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
         controller: true,
+        jobStatus: jobData?.status ?? jobData?.jobs?.[0]?.status,
       });
     } finally {
       setDownloading(false);
