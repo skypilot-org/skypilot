@@ -750,6 +750,11 @@ export function ContextDetails({
   return (
     <div className="mb-4">
       <PluginSlot
+        name="infra.contextDetail.headerActions"
+        context={{ contextName, isSlurm }}
+        wrapperClassName="flex justify-end mb-2"
+      />
+      <PluginSlot
         name="infra.contextDetail.statusPanel"
         context={{ contextName, isSlurm }}
       />
