@@ -287,7 +287,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             # (--tail -1 / 0 / "all" are all valid synonyms for "all
             # lines".)
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "non-negative integer or \\"all\\""',
+            f'grep "integer or \\"all\\""',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

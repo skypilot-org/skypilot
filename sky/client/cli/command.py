@@ -446,8 +446,8 @@ def _parse_tail(ctx: click.Context, param: click.Parameter,
     """Click callback for --tail.
 
     None (flag not given) → caller sees None and applies the implicit
-    default (with a hint to stderr). 'all' (string) and any non-positive
-    int → 0 = "all lines". Positive int → that count.
+    default (with a hint to stderr). 'all' (string) and any int <= 0 →
+    0 = "all lines". Positive int → that count.
     """
     del ctx, param
     if value is None:
@@ -458,8 +458,36 @@ def _parse_tail(ctx: click.Context, param: click.Parameter,
         n = int(value)
     except ValueError as e:
         raise click.BadParameter(
-            f'must be a non-negative integer or "all", got {value!r}') from e
+            f'must be an integer or "all", got {value!r}') from e
     return n if n > 0 else 0
+
+
+def _tail_option(verb: str):
+    """Shared --tail option for `sky logs` and `sky jobs logs`."""
+    return click.option(
+        '--tail',
+        default=None,
+        type=str,
+        callback=_parse_tail,
+        help=(f'Number of lines to display from the end of the log file. '
+              f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible '
+              f'for multi-GB logs where downloading the full file is slow. '
+              f'Pass --tail all (or 0) to {verb} the entire log.'))
+
+
+def _apply_default_tail(tail: Optional[int]) -> int:
+    """Resolve a --tail value coming from `_parse_tail`.
+
+    None → apply the implicit default and print a one-line stderr hint
+    so users know the output was truncated. Otherwise pass through.
+    """
+    if tail is not None:
+        return tail
+    click.echo(
+        f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
+        f'Pass --tail all (or 0) to print the entire log.',
+        err=True)
+    return _DEFAULT_TAIL_LINES
 
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
@@ -2517,15 +2545,7 @@ def queue(clusters: List[str],
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
-@click.option('--tail',
-              default=None,
-              type=str,
-              callback=_parse_tail,
-              help=('Number of lines to display from the end of the log file. '
-                    f'Default is the last {_DEFAULT_TAIL_LINES} lines — '
-                    'sensible for multi-GB logs where downloading the full '
-                    'file is slow. Pass --tail all (or 0) to print the '
-                    'entire log.'))
+@_tail_option('print')
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2676,17 +2696,10 @@ def logs(
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
 
-    # tail=None means user didn't pass --tail; apply the default and
-    # print a one-line hint to stderr so the truncation is visible.
     # tail=0 (from --tail 0 / --tail all) means "no limit"; the cluster
     # SDK already uses 0 to mean unbounded.
-    if tail is None:
-        tail = _DEFAULT_TAIL_LINES
-        click.echo(
-            f'Showing the last {tail} lines (default). '
-            f'Pass --tail all (or 0) to print the entire log.',
-            err=True)
-    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
+    sys.exit(
+        sdk.tail_logs(cluster, job_id, follow, tail=_apply_default_tail(tail)))
 
 
 @cli.command()
@@ -5997,15 +6010,7 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@click.option('--tail',
-              default=None,
-              type=str,
-              callback=_parse_tail,
-              help=('Number of lines to display from the end of the log file. '
-                    f'Default is the last {_DEFAULT_TAIL_LINES} lines — '
-                    'sensible for multi-GB logs where downloading the full '
-                    'file is slow. Pass --tail all (or 0) to fetch the '
-                    'entire log.'))
+@_tail_option('fetch')
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
@@ -6045,13 +6050,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 'or redirect stdout to save it to a file.')
         tail_lines: Optional[int] = None
     else:
-        if tail is None:
-            tail = _DEFAULT_TAIL_LINES
-            click.echo(
-                f'Showing the last {tail} lines (default). '
-                f'Pass --tail all (or 0) to print the entire log.',
-                err=True)
-        tail_lines = tail if tail > 0 else None
+        n = _apply_default_tail(tail)
+        tail_lines = n if n > 0 else None
     try:
         if sync_down:
             # Try streaming + gzip first — for RUNNING jobs this is

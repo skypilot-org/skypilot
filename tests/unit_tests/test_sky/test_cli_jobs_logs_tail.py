@@ -83,7 +83,7 @@ class TestJobsLogsTailCli:
     def test_tail_invalid_value_rejected(self):
         result, _, _ = self._invoke(['--tail', 'wat', '1'])
         assert result.exit_code != 0
-        assert 'must be a non-negative integer or "all"' in result.output
+        assert 'must be an integer or "all"' in result.output
 
     def test_sync_down_without_tail_still_works(self):
         # Default --tail with --sync-down silently means "all" so
