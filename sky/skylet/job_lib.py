@@ -1386,8 +1386,13 @@ class JobLibCodeGen:
             ),
             # Add a newline to leave the if indent block above.
             '\n' + tail_logs_call,
-            # After tailing, check the job status and exit with appropriate code
-            'job_status = job_lib.get_status(job_id)',
+            # After tailing, check the job status and exit with appropriate
+            # code. The leading '\n' resets indentation back to column 0;
+            # without it, ';'.join() in _build below would paste these onto
+            # the last line of the if/else above and the statements would be
+            # absorbed into the `else:` suite (so the if-branch falls through
+            # without sys.exit-ing).
+            '\njob_status = job_lib.get_status(job_id)',
             'exit_code = exceptions.JobExitCode.from_job_status(job_status)',
             # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
             # exit with success (0) since fetching current logs is a successful operation.

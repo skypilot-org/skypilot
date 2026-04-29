@@ -283,11 +283,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a non-numeric value is rejected.
-            # (--tail -1 / 0 / "all" are all valid synonyms for "all
-            # lines".)
+            # --tail with a non-numeric value is rejected by Click's
+            # built-in int parser. Negative ints (and 0) are valid
+            # synonyms for "all lines".
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "integer or \\"all\\""',
+            f'grep "is not a valid integer"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

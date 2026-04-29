@@ -441,53 +441,38 @@ _RELOAD_BASH_CMD = 'source ~/.bashrc'
 _DEFAULT_TAIL_LINES = 1000
 
 
-def _parse_tail(ctx: click.Context, param: click.Parameter,
-                value: Optional[str]) -> Optional[int]:
-    """Click callback for --tail.
-
-    None (flag not given) → caller sees None and applies the implicit
-    default (with a hint to stderr). 'all' (string) and any int <= 0 →
-    0 = "all lines". Positive int → that count.
-    """
-    del ctx, param
-    if value is None:
-        return None
-    if value.strip().lower() == 'all':
-        return 0
-    try:
-        n = int(value)
-    except ValueError as e:
-        raise click.BadParameter(
-            f'must be an integer or "all", got {value!r}') from e
-    return n if n > 0 else 0
-
-
 def _tail_option(verb: str):
-    """Shared --tail option for `sky logs` and `sky jobs logs`."""
+    """Shared --tail option for `sky logs` and `sky jobs logs`.
+
+    Click default is -1 (the sentinel for "user didn't pass --tail";
+    handler resolves it via `_apply_default_tail`). 0 (or any non-
+    positive int) means "all lines"; positive ints are line counts.
+    """
     return click.option(
         '--tail',
-        default=None,
-        type=str,
-        callback=_parse_tail,
+        default=-1,
+        type=int,
         help=(f'Number of lines to display from the end of the log file. '
               f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible '
               f'for multi-GB logs where downloading the full file is slow. '
-              f'Pass --tail all (or 0) to {verb} the entire log.'))
+              f'Pass --tail 0 to {verb} the entire log.'))
 
 
-def _apply_default_tail(tail: Optional[int]) -> int:
-    """Resolve a --tail value coming from `_parse_tail`.
+def _apply_default_tail(tail: int) -> int:
+    """Resolve a raw --tail value from the Click option above.
 
-    None → apply the implicit default and print a one-line stderr hint
-    so users know the output was truncated. Otherwise pass through.
+    -1 sentinel (user didn't pass --tail) → apply the implicit default
+    and print a one-line stderr hint so users know the output was
+    truncated. Otherwise pass through (0 / negatives = "no limit",
+    positive ints = that count).
     """
-    if tail is not None:
-        return tail
-    click.echo(
-        f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
-        f'Pass --tail all (or 0) to print the entire log.',
-        err=True)
-    return _DEFAULT_TAIL_LINES
+    if tail == -1:
+        click.echo(
+            f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
+            f'Pass --tail 0 to print the entire log.',
+            err=True)
+        return _DEFAULT_TAIL_LINES
+    return max(tail, 0)
 
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
@@ -2562,7 +2547,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
-    tail: Optional[int],
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -6015,8 +6000,8 @@ def jobs_cancel(
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool,
-              tail: Optional[int], task: Optional[str]):
+              controller: bool, refresh: bool, sync_down: bool, tail: int,
+              task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
@@ -6037,13 +6022,14 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
-    # tail=None: user didn't pass --tail. With --sync-down that means
-    # "fetch the whole file" (preserves pre-default-flip behavior). For
-    # an interactive tail, apply the implicit default and print a hint.
-    # tail=0: explicit --tail all / --tail 0 → "no limit" at the SDK.
-    # tail>0: user-specified count.
+    # tail == -1: user didn't pass --tail. With --sync-down that
+    # means "fetch the whole file" (preserves pre-default-flip
+    # behavior). Otherwise apply the implicit default and print a
+    # hint.
+    # tail == 0: explicit --tail 0 → "no limit" at the SDK.
+    # tail > 0: user-specified count.
     if sync_down:
-        if tail is not None and tail > 0:
+        if tail > 0:
             raise click.UsageError(
                 '--tail is not supported with --sync-down. Use '
                 '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
