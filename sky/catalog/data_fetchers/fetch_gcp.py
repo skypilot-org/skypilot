@@ -196,6 +196,9 @@ SERIES_TO_DESCRIPTION = {
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
     'g2': 'G2 Instance',
+    'g4': 'G4 Instance',
+    'h4d': 'H4D Instance',
+    'h3': 'H3 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
     'm3': 'M3 Memory-optimized Instance',
@@ -203,8 +206,11 @@ SERIES_TO_DESCRIPTION = {
     'n2': 'N2 Instance',
     'n2d': 'N2D AMD Instance',
     'n4': 'N4 Instance',
+    'n4a': 'N4A Instance',
+    'n4d': 'N4D Instance',
     't2a': 'T2A Arm Instance',
     't2d': 'T2D AMD Instance',
+    'z3': 'Z3 Instance',
 }
 
 creds, project_id = google.auth.default()
