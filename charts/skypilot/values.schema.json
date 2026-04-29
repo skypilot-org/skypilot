@@ -128,19 +128,19 @@
                         "liveness": {
                             "type": "object",
                             "properties": {
-                                "path": {
-                                    "type": "string"
-                                },
-                                "port": {
-                                    "type": "integer"
-                                },
-                                "periodSeconds": {
-                                    "type": "integer"
-                                },
                                 "failureThreshold": {
                                     "type": "integer"
                                 },
                                 "initialDelaySeconds": {
+                                    "type": "integer"
+                                },
+                                "path": {
+                                    "type": "string"
+                                },
+                                "periodSeconds": {
+                                    "type": "integer"
+                                },
+                                "port": {
                                     "type": "integer"
                                 },
                                 "timeoutSeconds": {
@@ -151,19 +151,19 @@
                         "readiness": {
                             "type": "object",
                             "properties": {
-                                "path": {
-                                    "type": "string"
-                                },
-                                "port": {
-                                    "type": "integer"
-                                },
-                                "periodSeconds": {
-                                    "type": "integer"
-                                },
                                 "failureThreshold": {
                                     "type": "integer"
                                 },
                                 "initialDelaySeconds": {
+                                    "type": "integer"
+                                },
+                                "path": {
+                                    "type": "string"
+                                },
+                                "periodSeconds": {
+                                    "type": "integer"
+                                },
+                                "port": {
                                     "type": "integer"
                                 },
                                 "timeoutSeconds": {
