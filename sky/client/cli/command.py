@@ -441,7 +441,8 @@ _RELOAD_BASH_CMD = 'source ~/.bashrc'
 _DEFAULT_TAIL_LINES = 1000
 
 
-def _parse_tail(ctx, param, value):
+def _parse_tail(ctx: click.Context, param: click.Parameter,
+                value: Optional[str]) -> Optional[int]:
     """Click callback for --tail.
 
     None (flag not given) → caller sees None and applies the implicit
@@ -451,11 +452,11 @@ def _parse_tail(ctx, param, value):
     del ctx, param
     if value is None:
         return None
-    if isinstance(value, str) and value.strip().lower() == 'all':
+    if value.strip().lower() == 'all':
         return 0
     try:
         n = int(value)
-    except (TypeError, ValueError) as e:
+    except ValueError as e:
         raise click.BadParameter(
             f'must be a non-negative integer or "all", got {value!r}') from e
     return n if n > 0 else 0
