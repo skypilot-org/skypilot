@@ -66,12 +66,24 @@ class TestJobsLogsTailCli:
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') is None
 
+    def test_tail_all_means_all_at_sdk(self):
+        """--tail all is the user-friendly form of --tail 0."""
+        result, tail_mock, _ = self._invoke(['--tail', 'all', '1'])
+        assert tail_mock.called, result.output
+        _, kwargs = tail_mock.call_args
+        assert kwargs.get('tail') is None
+
     def test_tail_negative_means_all_at_sdk(self):
         """--tail -1 is also a valid way to ask for all lines."""
         result, tail_mock, _ = self._invoke(['--tail', '-1', '1'])
         assert tail_mock.called, result.output
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') is None
+
+    def test_tail_invalid_value_rejected(self):
+        result, _, _ = self._invoke(['--tail', 'wat', '1'])
+        assert result.exit_code != 0
+        assert 'must be a non-negative integer or "all"' in result.output
 
     def test_sync_down_without_tail_still_works(self):
         # Default --tail with --sync-down silently means "all" so
