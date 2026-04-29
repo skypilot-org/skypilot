@@ -426,7 +426,11 @@ export function InfrastructureSection({
                                   )}
                                 </span>
                               </NonCapitalizedTooltip>
-                              {contextErrors[context] && (
+                              {contextErrors[context] && !statusByKey && (
+                                // Hidden when a plugin is contributing status data
+                                // via the infra.row.namePrefix slot — the plugin's
+                                // status dot + per-context detail page cover this
+                                // information already.
                                 <NonCapitalizedTooltip
                                   content={`Context unreachable: ${contextErrors[context]}`}
                                   className="text-sm text-muted-foreground"
@@ -2995,7 +2999,7 @@ export function GPUs() {
 
                     const rowInner = (
                       <>
-                        <td className="p-3 font-medium text-gray-700">
+                        <td className="p-3">
                           <div className="flex items-center gap-1.5">
                             <PluginSlot
                               name="infra.row.namePrefix"
@@ -3007,7 +3011,9 @@ export function GPUs() {
                                 ),
                               }}
                             />
-                            <span>{cloud.name}</span>
+                            <span className="text-blue-600 hover:underline cursor-pointer font-medium">
+                              {cloud.name}
+                            </span>
                           </div>
                         </td>
                         <td className="p-3">
