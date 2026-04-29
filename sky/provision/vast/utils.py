@@ -141,8 +141,14 @@ def launch(name: str,
 
     # Required skypilot parameters
     launch_params['id'] = instance_touse['id']
-    launch_params['direct'] = True
-    launch_params['ssh'] = True
+    
+    # Remove parameters not accepted by Vast SDK
+    launch_params.pop('direct', None)
+    launch_params.pop('ssh', None)
+    
+    # Set runtype to ssh for SSH access (replaces deprecated ssh=True)
+    launch_params['runtype'] = 'ssh'
+    
     # Use user's label if provided, otherwise use skypilot name
     if 'label' not in launch_params:
         launch_params['label'] = name
@@ -197,9 +203,14 @@ def launch(name: str,
     # Build onstart command - always prepend skypilot requirements
     # These commands are critical for SkyPilot operation and must always run,
     # even when using a template
+    # Read API key from config file (vastai SDK doesn't expose api_key_access)
+    import pathlib
+    api_key_path = pathlib.Path.home() / '.config' / 'vastai' / 'vast_api_key'
+    api_key = api_key_path.read_text().strip() if api_key_path.exists() else ''
+    
     skypilot_onstart = [
         'touch ~/.no_auto_tmux',
-        f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
+        f'echo "{api_key}" > ~/.vast_api_key',
     ]
 
     # Inject SSH public key into authorized_keys if provided
@@ -220,16 +231,30 @@ def launch(name: str,
         skypilot_onstart.append(user_onstart_cmd)
     launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
 
-    # Handle env - merge port mappings and user env
+    # Handle env - must be a dict for Vast API
     # Always include __SOURCE=skypilot for instance tracking
+    env_dict = {'__SOURCE': 'skypilot'}
     user_env = launch_params.pop('env', None)
-    port_map = ' '.join([f'-p {p}:{p}' for p in ports]) if ports else ''
-    env_parts = ['-e __SOURCE=skypilot']
-    if port_map:
-        env_parts.append(port_map)
     if user_env:
-        env_parts.append(user_env)
-    launch_params['env'] = ' '.join(env_parts).strip()
+        if isinstance(user_env, str):
+            # Parse env string using shlex for robust handling of spaces
+            tokens = shlex.split(user_env)
+            it = iter(tokens)
+            for token in it:
+                if token == '-e':
+                    token = next(it, '')
+                if '=' in token:
+                    key, value = token.split('=', 1)
+                    env_dict[key] = value
+        elif isinstance(user_env, dict):
+            env_dict.update(user_env)
+    launch_params['env'] = env_dict
+
+    # Handle port mappings - add to extra parameter as Docker run args
+    if ports:
+        port_map = ' '.join([f'-p {p}:{p}' for p in ports])
+        existing_extra = launch_params.get('extra', '')
+        launch_params['extra'] = f'{existing_extra} {port_map}'.strip()
 
     new_instance_contract = vast.vast().create_instance(**launch_params)
 
