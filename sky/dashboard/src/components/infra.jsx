@@ -2992,7 +2992,9 @@ export function GPUs() {
                               context={{
                                 id: cloudId,
                                 kind: 'cloud',
-                                status: statusByKey?.get(`cloud:${cloudId}`),
+                                status: extraStatusByKey?.get(
+                                  `cloud:${cloudId}`,
+                                ),
                               }}
                             />
                             <span>{cloud.name}</span>
