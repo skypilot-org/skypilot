@@ -599,8 +599,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # Strip query/fragment before logging — CF Access embeds JWTs there.
             safe_url = parsed._replace(query='', fragment='').geturl()
             logger.debug(f'Checking URL for auth redirect: {safe_url}')
-            if any(key in parsed.path for key in ['login', 'oauth2']) or \
-                    parsed.netloc.endswith('.cloudflareaccess.com'):
+            if any(key in parsed.path for key in ['login', 'oauth2']):
                 logger.debug(f'URL {safe_url} looks like a login page, '
                              'trying cookie flow.')
                 return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
