@@ -2592,6 +2592,17 @@ export function GPUs() {
     };
   }, []);
 
+  // Listen for plugin-emitted refresh requests, e.g. when a plugin's
+  // "Add infra" / "Remove infra" flow finishes, so the host page picks up
+  // the new state without the user having to click Refresh manually.
+  useEffect(() => {
+    const onRefreshEvent = () => handleRefresh();
+    window.addEventListener('skydashboard:infra:refresh', onRefreshEvent);
+    return () => {
+      window.removeEventListener('skydashboard:infra:refresh', onRefreshEvent);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Calculate summary data
   const totalGpuTypes = (allGPUs || []).length;
   const grandTotalGPUs = (allGPUs || []).reduce(
