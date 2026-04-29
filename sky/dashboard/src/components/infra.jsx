@@ -3455,11 +3455,15 @@ export function GPUs() {
 // number of hooks called per parent render (which would be a Rules-of-
 // Hooks violation). Used by GPUs to enumerate `useExtraInfraRows`
 // hooks contributed by plugin data providers.
+//
+// The effect MUST depend on `result` (not run on every render) — otherwise
+// any plugin hook that returns a fresh object literal each render will
+// re-fire onResult forever, the parent re-renders, and the page stalls.
 function ProviderInfraRowsLoader({ providerId, useHook, onResult }) {
   const result = useHook();
   React.useEffect(() => {
     onResult(providerId, result);
-  });
+  }, [providerId, result, onResult]);
   return null;
 }
 
