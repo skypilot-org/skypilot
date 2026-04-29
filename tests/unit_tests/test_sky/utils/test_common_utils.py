@@ -777,3 +777,28 @@ class TestAtomicWriteText:
 
         assert (tmp_path /
                 'relative-file').read_text(encoding='utf-8') == 'content'
+
+    def test_cleanup_temp_on_keyboard_interrupt(self, tmp_path, monkeypatch):
+        """``KeyboardInterrupt`` (and any ``BaseException``) during the
+        write must still trigger tmp cleanup -- otherwise a Ctrl-C
+        during ``atomic_write_text`` would leak a hidden ``.<rand>.tmp``
+        file into the destination directory, and successive interrupts
+        could pile up dotfiles.
+
+        Implementation note: the function uses ``try/finally`` with a
+        success flag (rather than ``except Exception``) precisely so
+        that ``BaseException`` subclasses do trigger cleanup.
+        """
+
+        def boom(*args, **kwargs):
+            raise KeyboardInterrupt('user pressed Ctrl-C')
+
+        monkeypatch.setattr(common_utils.os, 'chmod', boom)
+
+        target = tmp_path / 'interrupted'
+        with pytest.raises(KeyboardInterrupt):
+            common_utils.atomic_write_text(str(target), 'content')
+
+        assert not target.exists()
+        # Crucially: no hidden .tmp file left behind in the directory.
+        assert list(tmp_path.iterdir()) == []

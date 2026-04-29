@@ -1385,6 +1385,11 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
     like ``Include ~/.sky/generated/ssh/*`` (which by default skip
     dotfiles) do not pick up an in-progress tmp file.
 
+    On any failure -- including SIGINT / SystemExit during the write --
+    the tmp file is removed via ``try/finally`` so we do not leak dotfile
+    fragments into the destination directory.  The original exception is
+    propagated unchanged.
+
     Args:
         path: The destination file path.  The parent directory must
             already exist.
@@ -1394,15 +1399,17 @@ def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
     """
     parent_dir = os.path.dirname(path) or '.'
     fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    success = False
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(content)
         # mkstemp creates with mode 0o600; chmod to the requested mode.
         os.chmod(tmp_path, mode)
         os.rename(tmp_path, path)
-    except BaseException:
-        try:
-            os.remove(tmp_path)
-        except FileNotFoundError:
-            pass
-        raise
+        success = True
+    finally:
+        if not success:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
