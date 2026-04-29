@@ -578,7 +578,15 @@ Step 5: Test access
 
 .. code-block:: console
 
-    $ sky api login -e https://skypilot.skypilot.org
+    # Set your DNS record variables
+    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. skypilot
+    $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
+
+    # Test the API health endpoint (should return a Cloudflare Access redirect)
+    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
+
+    # Test SkyPilot API login (browser will open for the Access challenge)
+    $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
     A web browser has been opened at https://skypilot.skypilot.org/token?local_port=8000.
     Please continue the login in the web browser.
     ...
