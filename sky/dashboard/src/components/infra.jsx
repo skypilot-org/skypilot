@@ -752,11 +752,10 @@ export function ContextDetails({
 
   return (
     <div className="mb-4">
-      <PluginSlot
-        name="infra.contextDetail.headerActions"
-        context={{ contextName, isSlurm }}
-        wrapperClassName="flex justify-end mb-2"
-      />
+      {/* infra.contextDetail.headerActions used to render here, but the
+          actions look right next to the page heading rather than above
+          the panels. The slot is now rendered alongside the h1 in the
+          GPUs component's return. */}
       <PluginSlot
         name="infra.contextDetail.statusPanel"
         context={{ contextName, isSlurm }}
@@ -3417,21 +3416,33 @@ export function GPUs() {
       <PluginSlot name="infra.attentionBanner" />
 
       {selectedContext && (
-        // Large h1 title for the detail view. Use monospace for k8s
-        // contexts (matches the row name styling) and the standard sans
-        // typography otherwise.
-        <h1
-          className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight mb-5 ${
-            selectedContext.startsWith('ssh-') ||
-            slurmClusters.includes(selectedContext)
-              ? ''
-              : 'font-mono'
-          }`}
-        >
-          {selectedContext.startsWith('ssh-')
-            ? selectedContext.replace(/^ssh-/, '')
-            : selectedContext}
-        </h1>
+        // Large h1 title + plugin-injected header actions (e.g. Remove)
+        // on a single row.
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <h1
+            className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${
+              selectedContext.startsWith('ssh-') ||
+              slurmClusters.includes(selectedContext)
+                ? ''
+                : 'font-mono'
+            }`}
+          >
+            {selectedContext.startsWith('ssh-')
+              ? selectedContext.replace(/^ssh-/, '')
+              : selectedContext}
+          </h1>
+          <PluginSlot
+            name="infra.contextDetail.headerActions"
+            context={{
+              contextName: selectedContext.startsWith('ssh-')
+                ? selectedContext.replace(/^ssh-/, '')
+                : selectedContext,
+              isSlurm: slurmClusters.includes(selectedContext),
+              isSsh: selectedContext.startsWith('ssh-'),
+            }}
+            wrapperClassName="flex items-center gap-2"
+          />
+        </div>
       )}
 
       {/* Each section handles its own loading state */}
