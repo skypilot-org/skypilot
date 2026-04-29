@@ -1992,9 +1992,7 @@ export function GPUs() {
       extraInfraResults.some((r) => r?.loading));
   const refreshExtraInfra = React.useCallback(
     () =>
-      Promise.all(
-        extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)
-      ),
+      Promise.all(extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)),
     [extraInfraResults]
   );
 
@@ -2611,6 +2609,7 @@ export function GPUs() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Listen for plugin-emitted refresh requests, e.g. when a plugin's
@@ -2849,8 +2848,11 @@ export function GPUs() {
   // Check URL on component mount to set initial context
   useEffect(() => {
     if (router.isReady && router.query.context) {
+      // The dynamic route is a catch-all (`[...context].js`), so the
+      // segments come back as an array — rejoin them so context names
+      // containing slashes (e.g. EKS ARNs) survive a page refresh.
       const contextParam = Array.isArray(router.query.context)
-        ? router.query.context[0]
+        ? router.query.context.join('/')
         : router.query.context;
       setSelectedContext(decodeURIComponent(contextParam));
     }
@@ -3031,7 +3033,7 @@ export function GPUs() {
                                 id: cloudId,
                                 kind: 'cloud',
                                 status: extraStatusByKey?.get(
-                                  `cloud:${cloudId}`,
+                                  `cloud:${cloudId}`
                                 ),
                               }}
                             />
@@ -3354,64 +3356,61 @@ export function GPUs() {
           when viewing one infra. Hiding the whole row also closes the
           ~36px gap (h-5 + mb-4) between the back link and the h1. */}
       {!selectedContext && (
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
-          <Link
-            href="/infra"
-            className="text-sky-blue cursor-default"
-          >
-            Infrastructure
-          </Link>
-        </div>
-        <div className="flex items-center">
-          {/* Workspace Selector */}
-          {availableWorkspaces.length > 0 && (
-            <div className="flex items-center mr-4">
-              <label className="text-sm font-medium text-gray-700 mr-2">
-                Workspace:
-              </label>
-              <Select
-                value={selectedWorkspace}
-                onValueChange={setSelectedWorkspace}
-              >
-                <SelectTrigger className="w-40 h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Workspaces</SelectItem>
-                  {availableWorkspaces.map((workspace) => (
-                    <SelectItem key={workspace} value={workspace}>
-                      {workspace}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+        <div className="flex items-center justify-between mb-4 h-5">
+          <div className="text-base flex items-center">
+            <Link href="/infra" className="text-sky-blue cursor-default">
+              Infrastructure
+            </Link>
+          </div>
+          <div className="flex items-center">
+            {/* Workspace Selector */}
+            {availableWorkspaces.length > 0 && (
+              <div className="flex items-center mr-4">
+                <label className="text-sm font-medium text-gray-700 mr-2">
+                  Workspace:
+                </label>
+                <Select
+                  value={selectedWorkspace}
+                  onValueChange={setSelectedWorkspace}
+                >
+                  <SelectTrigger className="w-40 h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Workspaces</SelectItem>
+                    {availableWorkspaces.map((workspace) => (
+                      <SelectItem key={workspace} value={workspace}>
+                        {workspace}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-          {isAnyLoading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          {!isAnyLoading && lastFetchedTime && (
-            <LastUpdatedTimestamp
-              timestamp={lastFetchedTime}
-              className="mr-2"
-            />
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={isAnyLoading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && 'Refresh'}
-          </button>
-          <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
+            {isAnyLoading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            {!isAnyLoading && lastFetchedTime && (
+              <LastUpdatedTimestamp
+                timestamp={lastFetchedTime}
+                className="mr-2"
+              />
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={isAnyLoading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && 'Refresh'}
+            </button>
+            <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
+          </div>
         </div>
-      </div>
       )}
 
       <PluginSlot name="infra.attentionBanner" />
