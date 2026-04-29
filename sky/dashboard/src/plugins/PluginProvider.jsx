@@ -1064,6 +1064,20 @@ export function useDataProvider(id) {
 }
 
 /**
+ * Hook to access all registered data providers as an array.
+ *
+ * Used by host pages that want to discover plugins exposing a particular
+ * hook by name (e.g., looking for any provider with a `useExtraInfraRows`
+ * hook) without knowing any specific plugin id.
+ *
+ * @returns {Array} All registered data provider configs
+ */
+export function useAllDataProviders() {
+  const { dataProviders } = usePluginState();
+  return Object.values(dataProviders);
+}
+
+/**
  * Hook to merge base columns with plugin columns, automatically handling replacements.
  * Plugin columns with the same ID as base columns will replace the base columns.
  *
