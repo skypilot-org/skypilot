@@ -1959,7 +1959,11 @@ class Task:
                 if isinstance(existing, dict):
                     # Mixed: inline dict already set. Put refs in
                     # managed_secrets field to keep YAML valid.
-                    managed_secrets_field.extend(ref_list)
+                    # The 'secrets:' prefix is only used by the secrets
+                    # array form; managed_secrets entries are bare names.
+                    managed_secrets_field.extend(
+                        e[len('secrets:'):] if e.startswith('secrets:') else e
+                        for e in ref_list)
                 else:
                     config['secrets'] = ref_list
 

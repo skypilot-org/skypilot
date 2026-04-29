@@ -231,6 +231,30 @@ def test_to_yaml_config_preserves_other_fields():
     assert 'resources' in config_redacted
 
 
+def test_yaml_config_roundtrip_inline_and_managed_secrets():
+    """Mixed inline + managed secret refs must survive to_yaml/from_yaml.
+
+    Reproduces a case where the 'secrets:' prefix used by the array form
+    leaked into the managed_secrets field, and the resulting refs were
+    parsed with 'secrets:' as part of the name.
+    """
+    config = {
+        'run': 'echo hi',
+        'secrets': {
+            'HF_TOKEN': 'hello',
+            'secrets:TEST_TOKEN': None,
+        },
+    }
+    t1 = task.Task.from_yaml_config(config)
+    assert [r.name for r in t1._managed_secret_refs] == ['TEST_TOKEN']
+
+    serialized = t1.to_yaml_config()
+    assert serialized.get('managed_secrets') == ['TEST_TOKEN']
+
+    t2 = task.Task.from_yaml_config(serialized)
+    assert [r.name for r in t2._managed_secret_refs] == ['TEST_TOKEN']
+
+
 def test_update_secrets():
     """Test the update_secrets method."""
     task_obj = task.Task(run='echo hello')
