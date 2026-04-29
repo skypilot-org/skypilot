@@ -70,24 +70,6 @@ apiService:
   terminationGracePeriodSeconds: 60
 
   # Liveness and readiness probe configuration for the API server container.
-  # The full Kubernetes probe spec is rendered as-is into the deployment, so
-  # any field supported by ``v1.Probe`` (httpGet/exec/tcpSocket, periodSeconds,
-  # failureThreshold, initialDelaySeconds, timeoutSeconds, etc.) can be set
-  # here without further chart changes.
-  #
-  # Defaults match the chart's historical rendered output exactly, so an
-  # in-place ``helm upgrade`` against the same values does not trigger a
-  # pod rollout.  HA orchestrators that expose their own /readyz or /livez
-  # endpoints can override ``httpGet.path`` and ``httpGet.port`` to point
-  # the probes at a dedicated health surface.
-  #
-  # Under heavy request load the ``/api/health`` handler can occasionally
-  # exceed the default 1s probe timeout and cause the pod to be restarted;
-  # bump ``timeoutSeconds`` (e.g. to 3-5) if you see the pod flapping.
-  #
-  # ``readinessProbe.successThreshold`` is injected by the deployment
-  # template based on ``apiService.upgradeStrategy`` (RollingUpdate=3,
-  # Recreate=1) when not explicitly set here.
   # @schema type: [object, null]
   livenessProbe:
     httpGet:
