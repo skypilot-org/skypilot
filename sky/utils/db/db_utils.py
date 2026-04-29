@@ -511,8 +511,9 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     passed to ``create_async_engine`` (which is used only for dialect
     selection).
 
-    Refs: https://github.com/sqlalchemy/sqlalchemy/issues/6275#issuecomment-820227148,
-          https://github.com/MagicStack/asyncpg/issues/737
+    Refs:
+      https://github.com/sqlalchemy/sqlalchemy/issues/6275
+      https://github.com/MagicStack/asyncpg/issues/737
     """
     # pylint: disable=import-outside-toplevel
     import asyncpg
