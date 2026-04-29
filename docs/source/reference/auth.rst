@@ -501,52 +501,15 @@ so that subsequent ``sky`` commands authenticate automatically:
     Logged into SkyPilot API server at: https://<CF_ACCESS_PROTECTED_ENDPOINT>
     └── Dashboard: https://<CF_ACCESS_PROTECTED_ENDPOINT>/dashboard
 
-Configure Cloudflare Access as your :ref:`auth proxy <auth-proxy-byo>` (set
-``auth.externalProxy.enabled: true`` and ``auth.externalProxy.headerName`` to
-the header Cloudflare injects, typically ``Cf-Access-Authenticated-User-Email``).
-No other SkyPilot-side changes are needed.
-
-.. _cloudflare-zero-trust-warp:
-
-Optional: seamless login with WARP
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-You can additionally configure Cloudflare Zero Trust with WARP to let
-CLI/API requests bypass the browser challenge entirely when the device is
-enrolled in WARP, while browser users are still challenged with SSO.
-
 Prerequisites
-'''''''''''''
+^^^^^^^^^^^^^
 
 * A domain managed by Cloudflare (e.g. ``skypilot.org``)
 * Cloudflare Zero Trust subscription
-* DNS record pointing your API ingress LoadBalancer IP from the SSO setup in the same Cloudflare account as your Zero Trust setup (this example uses ``zerotrust.skypilot.org``)
-* SkyPilot API server configured with SSO (you will need your client ID and secret)
+* DNS record pointing your API server's ingress IP to your domain (this example uses ``skypilot.skypilot.org``)
 
-
-Step 1: Create policies
-'''''''''''''''''''''''
-
-* Navigate to **Zero Trust → Access → Policies → Add a policy**
-
-  * **Policy 1: allow-<yourorg>**
-
-    * **Action**: ``Allow``
-    * **Include**: 
-       
-      * **Selector**: ``Emails ending in``
-      * **Value**: ``@<yourorg>.com``
-
-  * **Policy 2: bypass-warp**
-
-    * **Action**: ``Bypass``
-    * **Include**: 
-       
-      * **Selector**: ``Warp``
-      * **Value**: ``Warp``
-
-Step 2: Configure your SSO provider as an identity provider
-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Step 1: Configure your SSO provider as an identity provider
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Navigate to **Zero Trust → Settings → Authentication → Login methods → Add new**
 
@@ -561,12 +524,24 @@ Step 2: Configure your SSO provider as an identity provider
    * **Redirect URIs**: ``https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback``
 
 .. note::
-    
+
     You can find your team name under **Zero Trust → Settings → Custom Pages → Team Domain**.
     It will be listed as ``<your-team-name>.cloudflareaccess.com``.
 
-Step 3: Create a Cloudflare access application
-'''''''''''''''''''''''''''''''''''''''''''''''
+Step 2: Create an allow policy
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Navigate to **Zero Trust → Access → Policies → Add a policy** and create:
+
+* **Policy name**: ``allow-<yourorg>``
+* **Action**: ``Allow``
+* **Include**:
+
+  * **Selector**: ``Emails ending in``
+  * **Value**: ``@<yourorg>.com``
+
+Step 3: Create a Cloudflare Access application
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Navigate to **Zero Trust → Access → Applications → Add an application**
 
@@ -576,23 +551,68 @@ Step 3: Create a Cloudflare access application
    * **Application name**: ``SkyPilot API``
    * **Session duration**: ``24 hours``
    * **Public hostname**:
-   
-     * **Subdomain**: ``DNS_RECORD_NAME`` (e.g. ``zerotrust``)
-     * **Domain**: ``DNS_RECORD_DOMAIN`` (e.g. ``skypilot.org``)
+
+     * **Subdomain**: ``skypilot``
+     * **Domain**: ``skypilot.org``
    * **Access policies → Select existing policies**:
 
      * **Allow policy**: ``allow-<yourorg>``
-     * **Bypass policy**: ``bypass-warp``
 
 3. Save the application.
 
-This configuration allows:
+Step 4: Configure SkyPilot
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* CLI/API requests to bypass login if the device is on WARP
-* Browser users to be challenged with SSO
+Configure SkyPilot to trust the ``Cf-Access-Authenticated-User-Email`` header
+that Cloudflare Access injects:
 
+.. code-block:: console
 
-Step 4: Enable device enrollment for WARP
+    $ helm upgrade --install $RELEASE_NAME skypilot/skypilot --namespace $NAMESPACE \
+      --reuse-values \
+      --set auth.externalProxy.enabled=true \
+      --set auth.externalProxy.headerName=Cf-Access-Authenticated-User-Email
+
+Step 5: Test access
+^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: console
+
+    $ sky api login -e https://skypilot.skypilot.org
+    A web browser has been opened at https://skypilot.skypilot.org/token?local_port=8000.
+    Please continue the login in the web browser.
+    ...
+    Logged into SkyPilot API server at: https://skypilot.skypilot.org
+    └── Dashboard: https://skypilot.skypilot.org/dashboard
+
+.. _cloudflare-zero-trust-warp:
+
+Optional: seamless login with WARP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can additionally configure Cloudflare Zero Trust with WARP to let
+CLI/API requests bypass the browser challenge entirely when the device is
+enrolled in WARP.
+
+Step 1: Create a bypass-warp policy
+'''''''''''''''''''''''''''''''''''''
+
+Navigate to **Zero Trust → Access → Policies → Add a policy** and create:
+
+* **Policy name**: ``bypass-warp``
+* **Action**: ``Bypass``
+* **Include**:
+
+  * **Selector**: ``Warp``
+  * **Value**: ``Warp``
+
+Step 2: Add the bypass policy to your Access application
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Edit the application created in Step 3 above and add ``bypass-warp`` to its
+**Access policies**.
+
+Step 3: Enable device enrollment for WARP
 ''''''''''''''''''''''''''''''''''''''''''
 
 1. Navigate to **Zero Trust → Settings → WARP client → Device enrollment permissions → Manage**
@@ -603,37 +623,26 @@ Step 4: Enable device enrollment for WARP
 
 3. Save
 
-This restricts WARP enrollment to only your team members.
+Step 4: Deploy WARP client to your team
+''''''''''''''''''''''''''''''''''''''''
 
-Step 5: Deploy WARP client to your team
-'''''''''''''''''''''''''''''''''''''''
-
-You you deploy the WARP client to your team in one of two ways:
+Deploy the WARP client to your team in one of two ways:
 
 1. Manual deployment (`Cloudflare WARP client manual deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/manual-deployment/>`__)
 2. Automatic deployment (`Cloudflare WARP client MDM deployment <https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/mdm-deployment/>`__)
 
 Each user performs this setup once per device.
 
+Step 5: Test access
+''''''''''''''''''''
 
-Step 6: Test access
-'''''''''''''''''''
-
-Test that the configuration is working:
+With WARP connected, login completes without a browser prompt:
 
 .. code-block:: console
 
-    # Set your DNS record variables
-    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. zerotrust
-    $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
-
-    # Test the API health endpoint
-    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
-    # Should return 200 OK
-
-    # Test SkyPilot API login
-    $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
-    # Should complete login without browser redirect
+    $ sky api login -e https://skypilot.skypilot.org
+    Logged into SkyPilot API server at: https://skypilot.skypilot.org
+    └── Dashboard: https://skypilot.skypilot.org/dashboard
 
 
 SkyPilot RBAC
