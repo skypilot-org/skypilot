@@ -41,7 +41,7 @@ def _storage_cmds(generic_cloud: str, bucket: str):
 def test_batch_simple(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-smpl-{name}'
-    pool_name = 'test-batch-pool'
+    pool_name = f'batch-smpl-pool-{name}'
     url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
         generic_cloud, bucket)
     store = 'gs' if generic_cloud == 'gcp' else 's3'
@@ -121,7 +121,8 @@ def test_batch_simple(generic_cloud: str):
         timeout=30 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
-            'SKY_BATCH_STORE': store
+            'SKY_BATCH_STORE': store,
+            'BATCH_POOL_NAME': pool_name,
         },
     )
     smoke_tests_utils.run_one_test(test)
@@ -295,7 +296,7 @@ def test_batch_custom_formats(generic_cloud: str):
 def test_batch_cancel(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cncl-{name}'
-    pool_name = 'test-batch-pool'
+    pool_name = f'batch-cncl-pool-{name}'
     url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
         generic_cloud, bucket)
     store = 'gs' if generic_cloud == 'gcp' else 's3'
@@ -349,7 +350,8 @@ def test_batch_cancel(generic_cloud: str):
         timeout=30 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
-            'SKY_BATCH_STORE': store
+            'SKY_BATCH_STORE': store,
+            'BATCH_POOL_NAME': pool_name,
         },
     )
     smoke_tests_utils.run_one_test(test)

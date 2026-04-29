@@ -80,7 +80,7 @@ def main():
 
     input_path = f'{store}://{bucket}/test.jsonl'
     output_path = f'{store}://{bucket}/output.jsonl'
-    pool_name = 'test-batch-pool'
+    pool_name = os.environ.get('BATCH_POOL_NAME', 'test-batch-pool')
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     # Create dataset from cloud storage
