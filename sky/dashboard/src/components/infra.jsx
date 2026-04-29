@@ -3347,21 +3347,22 @@ export function GPUs() {
           </Link>
         </div>
       )}
+      {/* List-view top bar: title link + workspace selector + Refresh +
+          plugin header actions. Skipped entirely on a detail page —
+          the back link above already serves as the leaf navigation,
+          and the page-level Refresh / Add Infra controls don't apply
+          when viewing one infra. Hiding the whole row also closes the
+          ~36px gap (h-5 + mb-4) between the back link and the h1. */}
+      {!selectedContext && (
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
-          {!selectedContext && (
-            <Link
-              href="/infra"
-              className="text-sky-blue cursor-default"
-            >
-              Infrastructure
-            </Link>
-          )}
+          <Link
+            href="/infra"
+            className="text-sky-blue cursor-default"
+          >
+            Infrastructure
+          </Link>
         </div>
-        {/* Workspace, Refresh, and plugin header actions only apply to the
-            list view. On a detail page these are hidden — the per-page
-            chrome handles its own back-link + actions. */}
-        {!selectedContext && (
         <div className="flex items-center">
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
@@ -3410,8 +3411,8 @@ export function GPUs() {
           </button>
           <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
         </div>
-        )}
       </div>
+      )}
 
       <PluginSlot name="infra.attentionBanner" />
 
