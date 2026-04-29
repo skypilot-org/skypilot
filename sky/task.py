@@ -240,11 +240,22 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
 
 
 def _parse_secret_name(raw_name: str):
-    """Parse 'scope.NAME' into (name, scope_override).
+    """Parse '[secrets:]scope.NAME' into (name, scope_override).
 
     Supports prefixes: personal., workspace., global.
-    Returns (name, None) if no prefix found.
+    Returns (name, None) if no scope prefix found.
+
+    Strips a leading ``secrets:`` if present so the parse is symmetric with
+    the YAML emission in ``_to_yaml_config``: refs with no inline mount
+    path are written as ``secrets:NAME`` (or ``secrets:scope.NAME``) into
+    either the ``secrets:`` array or the ``managed_secrets:`` field. The
+    ``secrets:`` array form strips the prefix at its call site; the
+    ``managed_secrets:`` form (used when the task also carries inline
+    secrets, e.g. an injected service-account token) routes through this
+    function, so we strip here to avoid the prefix accumulating across
+    YAML round-trips.
     """
+    raw_name = common_utils.removeprefix(raw_name, 'secrets:')
     for prefix in ('personal.', 'workspace.', 'global.'):
         if raw_name.startswith(prefix):
             return raw_name[len(prefix):], prefix[:-1]

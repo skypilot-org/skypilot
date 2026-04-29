@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from sky import exceptions
 from sky import global_user_state
@@ -30,6 +30,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+
+if TYPE_CHECKING:
+    from kubernetes.client import V1Pod
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -711,10 +714,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             termination_reason = _get_pod_termination_reason(pod, cluster_name)
             logger.warning(
                 f'Pod {pod.metadata.name} terminated: {termination_reason}')
+            condensed = _condensed_pod_reason(pod)
             raise config_lib.KubernetesError(
-                f'Pod {pod.metadata.name} has terminated or failed '
-                f'unexpectedly. Run `sky logs --provision {cluster_name}` '
-                'for more details.')
+                f'Pod {pod.metadata.name} failed: {condensed}')
 
         container_statuses = pod.status.container_statuses
         # Continue if pod and all the containers within the
@@ -749,8 +751,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
                             raise config_lib.KubernetesError(
-                                'Failed to create container while launching '
-                                f'the node. Error details: {msg}.')
+                                f'{waiting.reason}: {msg}')
         return False, reason
 
     missing_pods_retry = 0
@@ -2102,6 +2103,53 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
         transitioned_at=int(latest_timestamp.timestamp()),
     )
     return pod_reason
+
+
+def _condensed_pod_reason(pod: 'V1Pod') -> str:
+    """Condense pod failure into a single-line user-facing summary.
+
+    Checks pod conditions and container statuses to produce a concise
+    reason string suitable for display in the provision failure output.
+    """
+    # Check pod conditions for preemption/disruption (highest priority).
+    if pod.status.conditions:
+        for condition in pod.status.conditions:
+            reason = condition.reason or 'Unknown reason'
+            message = condition.message or ''
+            if condition.type == 'TerminationTarget':
+                summary = f'Preempted by Kueue: {reason}'
+                if message:
+                    summary += f' ({message})'
+                return summary
+            if condition.type == 'DisruptionTarget':
+                summary = f'Disrupted: {reason}'
+                if message:
+                    summary += f' ({message})'
+                return summary
+
+    # Check container statuses for waiting states (ImagePullBackOff, etc.).
+    if pod.status.container_statuses:
+        for cs in pod.status.container_statuses:
+            if cs.state.waiting is not None:
+                waiting = cs.state.waiting
+                if waiting.reason and waiting.reason not in (
+                        'ContainerCreating', 'PodInitializing'):
+                    msg = waiting.message or ''
+                    return f'{waiting.reason}: {msg}'.rstrip(': ')
+
+    # Check container statuses for terminated states (OOMKilled, Error, etc.).
+    if pod.status.container_statuses:
+        for cs in pod.status.container_statuses:
+            if cs.state.terminated is not None:
+                terminated = cs.state.terminated
+                if terminated.exit_code != 0:
+                    if terminated.reason:
+                        return (f'{terminated.reason} '
+                                f'(exit code {terminated.exit_code})')
+                    return (f'Terminated with exit code '
+                            f'{terminated.exit_code}')
+
+    return 'Terminated unexpectedly'
 
 
 def _get_pod_events(context: Optional[str], namespace: str,

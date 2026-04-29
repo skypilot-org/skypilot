@@ -571,8 +571,9 @@ function VolumesTable({
   };
 
   const formatSize = (size) => {
-    if (!size) return '-';
-    return size;
+    if (size == null) return '-';
+    if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
+    return `${size}Gi`;
   };
 
   const formatTimestamp = (timestamp) => {

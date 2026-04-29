@@ -581,14 +581,18 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     # within K8s's 42-char limit, so name_on_cloud is no longer a
     # prefix of the actual pod name.
     stable_prefix = name_on_cloud[:15]
+    # Exclude the cloud-cmd helper cluster: its head/worker pods share the
+    # same {stable_prefix} and {user_hash} suffix, so without this filter
+    # `kubectl delete` would also kill the pod running this very command,
+    # producing exit code 137 and a spurious test failure.
     terminate_head_cmd = (
         f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{stable_prefix}" | grep -- "{user_hash}-head" | '
-        f'xargs kubectl delete pod')
+        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
+        f'grep -- "{user_hash}-head" | xargs kubectl delete pod')
     terminate_worker_cmd = (
         f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{stable_prefix}" | grep -- "{user_hash}-worker" | '
-        f'xargs kubectl delete pod')
+        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
+        f'grep -- "{user_hash}-worker" | xargs kubectl delete pod')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [

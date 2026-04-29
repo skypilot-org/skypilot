@@ -2791,11 +2791,18 @@ class ManagedJobCodeGen:
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
 
         # Plugins are only loaded for managed jobs version 13 and above.
-        if managed_job_version >= 13:
+        # Context-aware loading (PluginContext) was introduced in version 20.
+        if managed_job_version >= 20:
             from sky import sky_logging as _sky_logging
             from sky.server import plugins
             # Suppress logging during plugin loading to prevent installation
             # logs from leaking into codegen output.
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext(
+                    context=plugins.PluginContext.CONTROLLER))
+        elif managed_job_version >= 13:
+            from sky import sky_logging as _sky_logging
+            from sky.server import plugins
             with _sky_logging.silent():
                 plugins.load_plugins(plugins.ExtensionContext())
         """)

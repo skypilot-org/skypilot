@@ -1020,3 +1020,156 @@ tests:
           any: true
           content:
             name: logrotate
+
+  # Tests for the apiService.livenessProbe / apiService.readinessProbe values
+  - it: should render the default probe specs that match the historical chart output
+    asserts:
+      # Liveness — historical defaults: httpGet only, periodSeconds 30,
+      # timeoutSeconds 1. failureThreshold and initialDelaySeconds were
+      # not set; k8s defaults apply (3, 0).
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /api/health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: 46580
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 30
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.timeoutSeconds
+          value: 1
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe.initialDelaySeconds
+      # Readiness — historical defaults plus successThreshold injected
+      # based on upgradeStrategy (RollingUpdate=3 by default; Recreate=1).
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /api/health
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: 46580
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.periodSeconds
+          value: 5
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.failureThreshold
+          value: 3
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 5
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.timeoutSeconds
+          value: 1
+
+  - it: should set readiness successThreshold to 1 under Recreate strategy
+    set:
+      apiService.upgradeStrategy: Recreate
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.successThreshold
+          value: 1
+
+  - it: should set readiness successThreshold to 3 under RollingUpdate strategy
+    set:
+      apiService.dbConnectionString: postgres://test
+      apiService.upgradeStrategy: RollingUpdate
+      storage.accessMode: ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.successThreshold
+          value: 3
+
+  - it: should honor explicit successThreshold override on readinessProbe
+    set:
+      apiService.readinessProbe.successThreshold: 7
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.successThreshold
+          value: 7
+
+  - it: should render the entire user-provided probe specs verbatim
+    set:
+      apiService.livenessProbe:
+        httpGet:
+          path: /livez
+          port: 46581
+        periodSeconds: 60
+        failureThreshold: 5
+        initialDelaySeconds: 30
+        timeoutSeconds: 3
+      apiService.readinessProbe:
+        httpGet:
+          path: /readyz
+          port: 46581
+        failureThreshold: 2
+        periodSeconds: 10
+        initialDelaySeconds: 15
+        timeoutSeconds: 2
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /livez
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: 46581
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 60
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 5
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.initialDelaySeconds
+          value: 30
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.timeoutSeconds
+          value: 3
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: 46581
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.failureThreshold
+          value: 2
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.periodSeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 15
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.timeoutSeconds
+          value: 2
+
+  - it: should accept exec / tcpSocket probe types via raw spec passthrough
+    set:
+      apiService.livenessProbe:
+        exec:
+          command: ["/bin/true"]
+        periodSeconds: 30
+      apiService.readinessProbe:
+        tcpSocket:
+          port: 46580
+        periodSeconds: 5
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command[0]
+          value: /bin/true
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: 46580
+
+  - it: should omit the probes entirely when set to null
+    set:
+      apiService.livenessProbe: null
+      apiService.readinessProbe: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe

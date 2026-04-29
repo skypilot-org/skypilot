@@ -43,7 +43,8 @@ def test_load_plugins_registers_and_installs(monkeypatch, tmp_path):
     monkeypatch.setattr(plugins, '_PLUGINS', {})
 
     app = FastAPI()
-    ctx = plugins.ExtensionContext(app=app)
+    ctx = plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                   app=app)
 
     plugins.load_plugins(ctx)
     loaded_plugins = plugins.get_plugins()
@@ -53,6 +54,101 @@ def test_load_plugins_registers_and_installs(monkeypatch, tmp_path):
     assert isinstance(plugin, DummyPlugin)
     assert plugin.value == 42
     assert installed['ctx'] is ctx
+
+
+def test_load_plugins_filters_by_context(monkeypatch, tmp_path):
+    """Plugins are skipped when their load_contexts excludes the current one."""
+    module_name = 'sky_test_context_filtered_plugin'
+    api_calls = {'count': 0}
+    controller_calls = {'count': 0}
+
+    class ApiOnlyPlugin(plugins.BasePlugin):
+        load_contexts = frozenset({plugins.PluginContext.UVICORN})
+
+        def install(self, extension_context):
+            api_calls['count'] += 1
+
+    class ControllerOnlyPlugin(plugins.BasePlugin):
+        load_contexts = frozenset({plugins.PluginContext.CONTROLLER})
+
+        def install(self, extension_context):
+            controller_calls['count'] += 1
+
+    ApiOnlyPlugin.__module__ = module_name
+    ControllerOnlyPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.ApiOnlyPlugin = ApiOnlyPlugin
+    module.ControllerOnlyPlugin = ControllerOnlyPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = {
+        'plugins': [
+            {
+                'class': f'{module_name}.ApiOnlyPlugin'
+            },
+            {
+                'class': f'{module_name}.ControllerOnlyPlugin'
+            },
+        ],
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    # API_SERVER context: only ApiOnlyPlugin runs.
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN))
+    assert api_calls['count'] == 1
+    assert controller_calls['count'] == 0
+    loaded = plugins.get_plugins()
+    assert len(loaded) == 1
+    assert isinstance(loaded[0], ApiOnlyPlugin)
+
+    # CONTROLLER context: only ControllerOnlyPlugin runs.
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.CONTROLLER))
+    assert api_calls['count'] == 1
+    assert controller_calls['count'] == 1
+    loaded = plugins.get_plugins()
+    assert len(loaded) == 1
+    assert isinstance(loaded[0], ControllerOnlyPlugin)
+
+    # EXECUTOR context: neither runs (both opted out).
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
+    assert api_calls['count'] == 1
+    assert controller_calls['count'] == 1
+    assert plugins.get_plugins() == []
+
+
+def test_load_plugins_default_loads_in_all_contexts(monkeypatch, tmp_path):
+    """A plugin without load_contexts overridden loads in every context."""
+    module_name = 'sky_test_default_contexts_plugin'
+    install_count = {'count': 0}
+
+    class DefaultPlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            install_count['count'] += 1
+
+    DefaultPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.DefaultPlugin = DefaultPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = {'plugins': [{'class': f'{module_name}.DefaultPlugin'}]}
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    for context in plugins.PluginContext:
+        monkeypatch.setattr(plugins, '_PLUGINS', {})
+        plugins.load_plugins(plugins.ExtensionContext(context=context))
+
+    assert install_count['count'] == len(plugins.PluginContext)
 
 
 def test_server_import_loads_plugins(monkeypatch):

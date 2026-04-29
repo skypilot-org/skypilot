@@ -1319,6 +1319,65 @@ def test_multinode_rwo_volume_raises():
             t.resolve_and_validate_volumes()
 
 
+def test_managed_secret_refs_round_trip_with_inline_secrets():
+    """managed_secret_refs must keep their bare name across YAML round-trips
+    even when the task also carries inline ``_secrets``.
+
+    Regression test for the ``Secret not found: secrets:secrets:NAME`` bug:
+    when inline secrets are present (e.g. via the
+    ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` injection in
+    ``sky/jobs/server/core.py`` for ``api_server_access`` jobs),
+    ``_to_yaml_config`` routes refs into the ``managed_secrets:`` field
+    with a ``secrets:`` prefix. Path 2 (``managed_secrets:``) parsing must
+    strip that prefix so the round-trip is symmetric — otherwise each
+    serialize/parse cycle (e.g. one for the controller, one for
+    ``recovery_strategy.sdk.launch``) accumulates another ``secrets:``
+    layer and the SecretsManager plugin fails to resolve the ref.
+    """
+    # pylint: disable=protected-access
+    config = {
+        'run': 'echo hello',
+        'secrets': ['secrets:my_secret'],
+    }
+    task_obj = task.Task.from_yaml_config(config)
+    assert len(task_obj._managed_secret_refs) == 1
+    assert task_obj._managed_secret_refs[0].name == 'my_secret'
+
+    # Simulate the inline-secret injection path used by api_server_access:
+    # this forces ``config['secrets']`` to be a dict on serialize, which
+    # routes refs into the ``managed_secrets:`` field.
+    task_obj._secrets['INJECTED_TOKEN'] = SecretStr('token-value')
+
+    # First round-trip.
+    yaml_config = task_obj._to_yaml_config()
+    assert isinstance(yaml_config.get('secrets'), dict)
+    assert yaml_config.get('managed_secrets') == ['secrets:my_secret']
+
+    task_obj2 = task.Task.from_yaml_config(yaml_config)
+    assert len(task_obj2._managed_secret_refs) == 1
+    assert task_obj2._managed_secret_refs[0].name == 'my_secret'
+
+    # Second round-trip — pre-fix this would yield ``secrets:secrets:my_secret``.
+    yaml_config2 = task_obj2._to_yaml_config()
+    assert yaml_config2.get('managed_secrets') == ['secrets:my_secret']
+
+    task_obj3 = task.Task.from_yaml_config(yaml_config2)
+    assert task_obj3._managed_secret_refs[0].name == 'my_secret'
+
+
+def test_managed_secret_name_with_scope_and_secrets_prefix():
+    """``_parse_secret_name`` strips ``secrets:`` and a scope prefix together."""
+    # pylint: disable=protected-access
+    # pylint: disable=import-outside-toplevel
+    from sky.task import _parse_secret_name
+    assert _parse_secret_name('foo') == ('foo', None)
+    assert _parse_secret_name('secrets:foo') == ('foo', None)
+    assert _parse_secret_name('personal.foo') == ('foo', 'personal')
+    assert _parse_secret_name('secrets:personal.foo') == ('foo', 'personal')
+    assert _parse_secret_name('secrets:workspace.foo') == ('foo', 'workspace')
+    assert _parse_secret_name('secrets:global.foo') == ('foo', 'global')
+
+
 def test_multinode_rwx_volume_passes():
     """Multi-node with ReadWriteMany volume should pass."""
     t = task.Task()

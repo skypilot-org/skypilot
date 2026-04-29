@@ -159,7 +159,8 @@ def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
