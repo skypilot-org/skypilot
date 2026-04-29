@@ -260,10 +260,11 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            # Connection string should be modified for asyncpg
-            assert call_args[0][
-                0] == 'postgresql+asyncpg://user:pass@localhost/db'
+            # URL is just the dialect placeholder; all connection params
+            # are supplied via async_creator (see _make_asyncpg_creator).
+            assert call_args[0][0] == 'postgresql+asyncpg://'
             assert call_args[1]['poolclass'] == sqlalchemy.NullPool
+            assert callable(call_args[1].get('async_creator'))
             assert engine == mock_engine
 
     def test_postgres_engine_caching(self, monkeypatch):
