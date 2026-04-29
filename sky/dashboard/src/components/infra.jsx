@@ -3152,9 +3152,10 @@ export function GPUs() {
       });
     };
 
-    // If all infrastructure is disabled, add hint card at the top.
-    // Plugins can replace the default OSS hint via the `infra.emptyState` slot
-    // (e.g. to show a richer "Connect your first infrastructure" CTA).
+    // If all infrastructure is disabled, show ONLY the empty-state hint —
+    // hide the per-type cards (which would all be empty anyway). Plugins can
+    // replace the default OSS hint via the `infra.emptyState` slot (e.g. to
+    // show a richer "Connect your first infrastructure" CTA).
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
@@ -3167,47 +3168,47 @@ export function GPUs() {
         hasActivity: false,
         priority: 0, // Highest priority, always show at the top
       });
+    } else {
+      // Add per-type sections (each handles its own loading/empty states).
+
+      // Add Kubernetes section (always show) - Priority 1 to show at top
+      // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
+      const kubeHasActivity = kubeContexts.length > 0;
+      sections.push({
+        name: 'Kubernetes',
+        render: renderKubernetesInfrastructure,
+        hasActivity: kubeHasActivity,
+        priority: 1, // Kubernetes gets priority 1 within same activity level
+      });
+
+      // Add Slurm section (always show)
+      const slurmHasActivity = slurmClusters.length > 0;
+      sections.push({
+        name: 'Slurm',
+        render: renderSlurmInfrastructure,
+        hasActivity: slurmHasActivity,
+        priority: 2, // Slurm gets priority 2 within same activity level
+      });
+
+      // Add Cloud section (always show)
+      // Cloud section is active if there are any enabled clouds
+      const cloudHasActivity = enabledClouds > 0;
+      sections.push({
+        name: 'Cloud',
+        render: renderCloudInfrastructure,
+        hasActivity: cloudHasActivity,
+        priority: 3, // Cloud gets priority 3 within same activity level
+      });
+
+      // Add SSH section (always show)
+      const sshHasActivity = sshContexts.length > 0;
+      sections.push({
+        name: 'SSH Node Pool',
+        render: renderSSHNodePoolInfrastructure,
+        hasActivity: sshHasActivity,
+        priority: 4, // SSH gets priority 4 within same activity level
+      });
     }
-
-    // Always add all sections (they handle their own loading/empty states)
-
-    // Add Kubernetes section (always show) - Priority 1 to show at top
-    // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
-    const kubeHasActivity = kubeContexts.length > 0;
-    sections.push({
-      name: 'Kubernetes',
-      render: renderKubernetesInfrastructure,
-      hasActivity: kubeHasActivity,
-      priority: 1, // Kubernetes gets priority 1 within same activity level
-    });
-
-    // Add Slurm section (always show)
-    const slurmHasActivity = slurmClusters.length > 0;
-    sections.push({
-      name: 'Slurm',
-      render: renderSlurmInfrastructure,
-      hasActivity: slurmHasActivity,
-      priority: 2, // Slurm gets priority 2 within same activity level
-    });
-
-    // Add Cloud section (always show)
-    // Cloud section is active if there are any enabled clouds
-    const cloudHasActivity = enabledClouds > 0;
-    sections.push({
-      name: 'Cloud',
-      render: renderCloudInfrastructure,
-      hasActivity: cloudHasActivity,
-      priority: 3, // Cloud gets priority 3 within same activity level
-    });
-
-    // Add SSH section (always show)
-    const sshHasActivity = sshContexts.length > 0;
-    sections.push({
-      name: 'SSH Node Pool',
-      render: renderSSHNodePoolInfrastructure,
-      hasActivity: sshHasActivity,
-      priority: 4, // SSH gets priority 4 within same activity level
-    });
 
     // Dynamic sorting: enabled/active sections move to front automatically
     // This re-sorts every render as data becomes available
@@ -3350,7 +3351,7 @@ export function GPUs() {
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && 'Refresh'}
           </button>
-          <PluginSlot name="infra.headerActions" />
+          <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
         </div>
       </div>
 
