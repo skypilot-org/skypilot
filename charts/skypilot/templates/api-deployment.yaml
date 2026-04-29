@@ -254,18 +254,15 @@ spec:
         - containerPort: 46580
         livenessProbe:
           httpGet:
-            path: /api/health
-            port: 46580
-          periodSeconds: 30
-          {{- with .Values.apiService.probes }}
-          {{- if and .liveness .liveness.timeoutSeconds }}
-          timeoutSeconds: {{ .liveness.timeoutSeconds }}
-          {{- end }}
-          {{- end }}
+            path: {{ .Values.apiService.probes.liveness.path | default "/api/health" }}
+            port: {{ .Values.apiService.probes.liveness.port | default 46580 }}
+          periodSeconds: {{ .Values.apiService.probes.liveness.periodSeconds | default 30 }}
+          failureThreshold: {{ .Values.apiService.probes.liveness.failureThreshold | default 3 }}
+          timeoutSeconds: {{ .Values.apiService.probes.liveness.timeoutSeconds | default 1 }}
         readinessProbe:
           httpGet:
-            path: /api/health
-            port: 46580
+            path: {{ .Values.apiService.probes.readiness.path | default "/api/health" }}
+            port: {{ .Values.apiService.probes.readiness.port | default 46580 }}
           {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
           # When using RollingUpdate strategy, be more patient with the new
           # API server to avoid flaky serving where one of the server process
@@ -277,14 +274,10 @@ spec:
           # other replica to serve requests anyway.
           successThreshold: 1
           {{- end }}
-          failureThreshold: 3
-          periodSeconds: 5
-          initialDelaySeconds: 5
-          {{- with .Values.apiService.probes }}
-          {{- if and .readiness .readiness.timeoutSeconds }}
-          timeoutSeconds: {{ .readiness.timeoutSeconds }}
-          {{- end }}
-          {{- end }}
+          failureThreshold: {{ .Values.apiService.probes.readiness.failureThreshold | default 3 }}
+          periodSeconds: {{ .Values.apiService.probes.readiness.periodSeconds | default 5 }}
+          initialDelaySeconds: {{ .Values.apiService.probes.readiness.initialDelaySeconds | default 5 }}
+          timeoutSeconds: {{ .Values.apiService.probes.readiness.timeoutSeconds | default 1 }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
