@@ -367,6 +367,40 @@ tests:
             mountPath: /root/sky_logs
             subPath: sky_logs
 
+  - it: should mount sky generated ssh and debug dumps directories when storage is enabled
+    set:
+      storage.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/generated/ssh
+            subPath: sky_generated_ssh
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/debug_dumps
+            subPath: sky_debug_dumps
+
+  - it: should not mount sky generated ssh and debug dumps directories when storage is disabled
+    set:
+      storage.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/generated/ssh
+            subPath: sky_generated_ssh
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/debug_dumps
+            subPath: sky_debug_dumps
+
   - it: should honor fullnameOverride for deployment names and labels
     set:
       fullnameOverride: custom-fullname

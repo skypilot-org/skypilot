@@ -305,6 +305,12 @@ spec:
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        - mountPath: /root/.sky/generated/ssh
+          name: state-volume
+          subPath: sky_generated_ssh
+        - mountPath: /root/.sky/debug_dumps
+          name: state-volume
+          subPath: sky_debug_dumps
         # Mount the entire sky_logs folder because the request
         # logs have been moved out of this directory
         - name: state-volume
