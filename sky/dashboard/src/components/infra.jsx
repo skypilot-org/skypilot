@@ -3323,46 +3323,29 @@ export function GPUs() {
           onResult={recordExtraInfraResult}
         />
       ))}
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
+      {selectedContext && (
+        // Detail-view header: small back button on its own line, then a
+        // larger h1 row below (rendered further down). This matches the
+        // dashboard's other detail pages and gives the leaf identifier
+        // proper visual weight.
+        <div className="mb-2">
           <Link
             href="/infra"
-            className={`text-sky-blue hover:underline ${selectedContext ? '' : 'cursor-default'}`}
+            className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 cursor-pointer"
           >
-            Infrastructure
+            ← Infrastructure
           </Link>
-          {selectedContext && (
-            <>
-              <span className="mx-2 text-gray-500">›</span>
-              {selectedContext.startsWith('ssh-') ? (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  SSH Node Pool
-                </Link>
-              ) : slurmClusters.includes(selectedContext) ? (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  Slurm
-                </Link>
-              ) : (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  Kubernetes
-                </Link>
-              )}
-              <span className="mx-2 text-gray-500">›</span>
-              <span className="text-sky-blue">
-                {selectedContext.startsWith('ssh-')
-                  ? selectedContext.replace(/^ssh-/, '')
-                  : selectedContext}
-              </span>
-            </>
+        </div>
+      )}
+      <div className="flex items-center justify-between mb-4 h-5">
+        <div className="text-base flex items-center">
+          {!selectedContext && (
+            <Link
+              href="/infra"
+              className="text-sky-blue cursor-default"
+            >
+              Infrastructure
+            </Link>
           )}
         </div>
         <div className="flex items-center">
@@ -3416,6 +3399,24 @@ export function GPUs() {
       </div>
 
       <PluginSlot name="infra.attentionBanner" />
+
+      {selectedContext && (
+        // Large h1 title for the detail view. Use monospace for k8s
+        // contexts (matches the row name styling) and the standard sans
+        // typography otherwise.
+        <h1
+          className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight mb-5 ${
+            selectedContext.startsWith('ssh-') ||
+            slurmClusters.includes(selectedContext)
+              ? ''
+              : 'font-mono'
+          }`}
+        >
+          {selectedContext.startsWith('ssh-')
+            ? selectedContext.replace(/^ssh-/, '')
+            : selectedContext}
+        </h1>
+      )}
 
       {/* Each section handles its own loading state */}
       {renderKubernetesTab()}
