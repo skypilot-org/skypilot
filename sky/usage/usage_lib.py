@@ -306,6 +306,15 @@ class HeartbeatMessageToReport(MessageToReport):
         # This interval_seconds is mainly for recording the heartbeat interval
         # in the heartbeat message, so that the collector can use it.
         self.interval_seconds = interval_seconds
+        # Optional cluster placement and accelerator context. Populated
+        # by ``send_heartbeat`` callers that have this info; left as
+        # ``None`` otherwise.
+        self.cloud: Optional[str] = None
+        self.region: Optional[str] = None
+        self.zone: Optional[str] = None
+        self.gpu_type: Optional[str] = None
+        self.num_nodes: Optional[int] = None
+        self.gpus_per_node: Optional[int] = None
 
     def get_properties(self) -> Dict[str, Any]:
         properties = super().get_properties()
@@ -551,8 +560,43 @@ def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
             common_utils.format_exception(e))
 
 
-def send_heartbeat(interval_seconds: int = 600):
+def send_heartbeat(
+    interval_seconds: int = 600,
+    cloud: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    gpu_type: Optional[str] = None,
+    num_nodes: Optional[int] = None,
+    gpus_per_node: Optional[int] = None,
+):
+    """Send one heartbeat record.
+
+    Args:
+        interval_seconds: cadence at which this caller emits heartbeats.
+        cloud: cloud the cluster is running on.
+        region: cloud region the cluster is running in.
+        zone: cloud zone the cluster is running in (when applicable).
+        gpu_type: accelerator type (e.g. ``H100``).
+        num_nodes: current alive node count for the cluster.
+        gpus_per_node: accelerators allocated per node.
+
+    All cluster/accelerator fields are optional. When set, they are
+    written onto the singleton heartbeat message and reset after each
+    send so values do not leak between calls.
+    """
     messages.heartbeat.interval_seconds = interval_seconds
+    if cloud is not None:
+        messages.heartbeat.cloud = cloud
+    if region is not None:
+        messages.heartbeat.region = region
+    if zone is not None:
+        messages.heartbeat.zone = zone
+    if gpu_type is not None:
+        messages.heartbeat.gpu_type = gpu_type
+    if num_nodes is not None:
+        messages.heartbeat.num_nodes = num_nodes
+    if gpus_per_node is not None:
+        messages.heartbeat.gpus_per_node = gpus_per_node
     _send_to_loki(MessageType.HEARTBEAT)
 
 

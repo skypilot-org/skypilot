@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 import traceback
+from typing import Optional
 
 import psutil
 
@@ -155,7 +156,25 @@ class UsageHeartbeatReportEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 600
 
     def _run(self):
-        usage_lib.send_heartbeat(interval_seconds=self.EVENT_INTERVAL_SECONDS)
+        # Cluster placement and accelerator context are exported into
+        # skylet's environment by start_skylet_on_head_node at
+        # provisioning time. Forward whatever is set.
+        def _int_env(name: str) -> Optional[int]:
+            value = os.environ.get(name)
+            try:
+                return int(value) if value not in (None, '') else None
+            except ValueError:
+                return None
+
+        usage_lib.send_heartbeat(
+            interval_seconds=self.EVENT_INTERVAL_SECONDS,
+            cloud=os.environ.get('SKYPILOT_HEARTBEAT_CLOUD'),
+            region=os.environ.get('SKYPILOT_HEARTBEAT_REGION'),
+            zone=os.environ.get('SKYPILOT_HEARTBEAT_ZONE'),
+            gpu_type=os.environ.get('SKYPILOT_HEARTBEAT_GPU_TYPE'),
+            num_nodes=_int_env('SKYPILOT_HEARTBEAT_NUM_NODES'),
+            gpus_per_node=_int_env('SKYPILOT_HEARTBEAT_GPUS_PER_NODE'),
+        )
 
 
 class AutostopEvent(SkyletEvent):
