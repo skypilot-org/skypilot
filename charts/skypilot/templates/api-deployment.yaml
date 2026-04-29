@@ -252,17 +252,26 @@ spec:
           {{- end }}
         ports:
         - containerPort: 46580
+        {{- /* Resolve probe overrides defensively: a user setting
+                apiService.probes (or .liveness / .readiness) to null must
+                not blow up template rendering. ``default dict`` at each
+                level makes the field accessors null-safe; the per-field
+                ``| default`` then supplies the historical default. */}}
+        {{- $probes := .Values.apiService.probes | default dict }}
+        {{- $liveness := $probes.liveness | default dict }}
+        {{- $readiness := $probes.readiness | default dict }}
         livenessProbe:
           httpGet:
-            path: {{ .Values.apiService.probes.liveness.path | default "/api/health" }}
-            port: {{ .Values.apiService.probes.liveness.port | default 46580 }}
-          periodSeconds: {{ .Values.apiService.probes.liveness.periodSeconds | default 30 }}
-          failureThreshold: {{ .Values.apiService.probes.liveness.failureThreshold | default 3 }}
-          timeoutSeconds: {{ .Values.apiService.probes.liveness.timeoutSeconds | default 1 }}
+            path: {{ $liveness.path | default "/api/health" }}
+            port: {{ $liveness.port | default 46580 }}
+          periodSeconds: {{ $liveness.periodSeconds | default 30 }}
+          failureThreshold: {{ $liveness.failureThreshold | default 3 }}
+          initialDelaySeconds: {{ $liveness.initialDelaySeconds | default 0 }}
+          timeoutSeconds: {{ $liveness.timeoutSeconds | default 1 }}
         readinessProbe:
           httpGet:
-            path: {{ .Values.apiService.probes.readiness.path | default "/api/health" }}
-            port: {{ .Values.apiService.probes.readiness.port | default 46580 }}
+            path: {{ $readiness.path | default "/api/health" }}
+            port: {{ $readiness.port | default 46580 }}
           {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
           # When using RollingUpdate strategy, be more patient with the new
           # API server to avoid flaky serving where one of the server process
@@ -274,10 +283,10 @@ spec:
           # other replica to serve requests anyway.
           successThreshold: 1
           {{- end }}
-          failureThreshold: {{ .Values.apiService.probes.readiness.failureThreshold | default 3 }}
-          periodSeconds: {{ .Values.apiService.probes.readiness.periodSeconds | default 5 }}
-          initialDelaySeconds: {{ .Values.apiService.probes.readiness.initialDelaySeconds | default 5 }}
-          timeoutSeconds: {{ .Values.apiService.probes.readiness.timeoutSeconds | default 1 }}
+          failureThreshold: {{ $readiness.failureThreshold | default 3 }}
+          periodSeconds: {{ $readiness.periodSeconds | default 5 }}
+          initialDelaySeconds: {{ $readiness.initialDelaySeconds | default 5 }}
+          timeoutSeconds: {{ $readiness.timeoutSeconds | default 1 }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid

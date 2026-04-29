@@ -82,6 +82,7 @@ apiService:
       port: 46580
       periodSeconds: 30
       failureThreshold: 3
+      initialDelaySeconds: 0
       timeoutSeconds: 1
     readiness:
       path: /api/health

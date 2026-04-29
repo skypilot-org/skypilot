@@ -140,6 +140,9 @@
                                 "failureThreshold": {
                                     "type": "integer"
                                 },
+                                "initialDelaySeconds": {
+                                    "type": "integer"
+                                },
                                 "timeoutSeconds": {
                                     "type": "integer"
                                 }
