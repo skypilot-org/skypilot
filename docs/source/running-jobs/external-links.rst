@@ -19,7 +19,7 @@ Supported services
 
 SkyPilot automatically detects URLs from the following services in your job logs:
 
-- **Weights & Biases (W&B)**: Run URLs (e.g., ``https://wandb.ai/<entity>/<project>/runs/<run_id>``)
+- **Weights & Biases (W&B)**: Run URLs on W&B SaaS (e.g., ``https://wandb.ai/<entity>/<project>/runs/<run_id>``) and W&B Dedicated Cloud tenants (e.g., ``https://<tenant>.wandb.io/<entity>/<project>/runs/<run_id>``)
 
 When your job prints a URL from a supported service to stdout or stderr, the dashboard will automatically extract it and display it in the "External Links" section.
 

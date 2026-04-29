@@ -39,31 +39,42 @@ if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
     sky gpus list H100:8 > source/compute/show-gpus-h100-8.txt
 fi
 
-rm -rf build docs
-
 # Add command line argument parsing
 AUTO_BUILD=false
+CLEAN=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --watch|-w) AUTO_BUILD=true ;;
         --port|-p) PORT=$2; shift ;;
+        --clean|-c) CLEAN=true ;;
         *) echo "Unknown parameter: $1"; exit 1 ;;
     esac
     shift
 done
+
+# Only clear the build cache on explicit request. Incremental Sphinx builds
+# are much faster and still rebuild pages whose sources changed.
+if [ "$CLEAN" = true ]; then
+    rm -rf build docs
+fi
 
 if [ "$AUTO_BUILD" = true ]; then
     # Use sphinx-autobuild for automatic rebuilding
     # Ignore gallery directory and llms.txt to prevent unnecessary rebuilds
     export SPHINX_BUILD_LOCAL=true
     export SPHINX_PORT=${PORT:-8000}
+    # Share the doctree cache with `make html` (which writes to
+    # build/doctrees) so the initial watch-mode build is incremental.
+    # Without -d, sphinx defaults to build/html/.doctrees and ignores the
+    # existing cache. -j auto enables parallel reads/writes, matching the
+    # Makefile default.
     sphinx-autobuild source build/html \
+        -d build/doctrees \
+        -j auto \
         --ignore "*.md" \
         --ignore "**/llms.txt" \
         --port ${PORT:-8000}
 else
-    rm -rf build docs
-
     # Set build environment (only if not already set by GitHub Actions)
     if [ -z "$SPHINX_BUILD_PRODUCTION" ]; then
         export SPHINX_BUILD_LOCAL=true

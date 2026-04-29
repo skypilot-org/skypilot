@@ -75,6 +75,7 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> None:
         """Initialize the strategy executor.
 
@@ -90,6 +91,11 @@ class StrategyExecutor:
             starting_signal: Condition to signal when a job can start.
             recover_on_exit_codes: List of exit codes that should trigger
                 recovery regardless of max_restarts_on_errors limit.
+            file_mounts_blob_id: If set, the content-addressed blob id
+                associated with this job's uploaded file mounts. It is
+                forwarded to the inner ``sdk.launch`` so that whichever API
+                server replica executes the launch can resolve the blob to
+                its own extraction cache (critical under HA failover).
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -111,6 +117,7 @@ class StrategyExecutor:
         self.starting = starting
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
+        self.file_mounts_blob_id = file_mounts_blob_id
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -139,6 +146,7 @@ class StrategyExecutor:
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
@@ -195,7 +203,8 @@ class StrategyExecutor:
         executor = job_recovery_strategy(cluster_name, backend, task,
                                          max_restarts_on_errors, job_id,
                                          task_id, pool, starting, starting_lock,
-                                         starting_signal, recover_on_exit_codes)
+                                         starting_signal, recover_on_exit_codes,
+                                         file_mounts_blob_id)
         executor.set_strategy_config(strategy_config)
         return executor
 
@@ -453,6 +462,16 @@ class StrategyExecutor:
                                                      f'{env_var}: {value}')
                                         os.environ[env_var] = value
 
+                            # HA failover may land the controller on new hosts,
+                            # ensure blob extraction on the current host
+                            if self.file_mounts_blob_id is not None:
+                                # pylint: disable=import-outside-toplevel
+                                from sky.server import common as server_common
+                                await asyncio.to_thread(
+                                    server_common.resolve_blob_dir,
+                                    self.file_mounts_blob_id,
+                                    common_utils.get_user_hash())
+
                             request_id = None
                             try:
                                 request_id = await asyncio.to_thread(
@@ -472,6 +491,8 @@ class StrategyExecutor:
                                     #     _AUTODOWN_MINUTES),
                                     # down=True,
                                     _is_launched_by_jobs_controller=True,
+                                    _file_mounts_blob_id=(
+                                        self.file_mounts_blob_id),
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')
@@ -744,10 +765,12 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal, recover_on_exit_codes)
+                         starting_signal, recover_on_exit_codes,
+                         file_mounts_blob_id)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

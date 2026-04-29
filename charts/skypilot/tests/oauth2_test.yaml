@@ -488,3 +488,55 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled"
+
+  - it: should inherit apiService nodeSelector tolerations and affinity on oauth2-proxy
+    values:
+      - fixtures/oauth2-scheduling-values.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.pool
+          value: system
+        template: templates/oauth2-proxy-deployment.yaml
+      - equal:
+          path: spec.template.spec.tolerations[0].key
+          value: components.gke.io/gke-managed-components
+        template: templates/oauth2-proxy-deployment.yaml
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey
+          value: kubernetes.io/hostname
+        template: templates/oauth2-proxy-deployment.yaml
+      - equal:
+          path: spec.template.spec.nodeSelector.pool
+          value: system
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.tolerations[0].key
+          value: components.gke.io/gke-managed-components
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey
+          value: kubernetes.io/hostname
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+
+  - it: should inherit apiService scheduling for legacy ingress oauth2-proxy
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      apiService.nodeSelector.role: control-plane
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.role
+          value: control-plane
+        template: templates/oauth2-proxy-deployment.yaml
+      - equal:
+          path: spec.template.spec.nodeSelector.role
+          value: control-plane
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0

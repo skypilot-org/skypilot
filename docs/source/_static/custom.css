@@ -193,14 +193,31 @@ active tab to be moved up. */
   border-bottom: none;
 }
 
+/* Index page hero title — shrunk slightly so the long title fits beside the
+   copy-page button on a full-width laptop viewport. */
+.hero-title h1 {
+  font-size: 2.1rem;
+}
+
 /* Copy page as Markdown — split button next to title */
-.copy-page-wrapper {
-  position: absolute;
-  right: 0;
-  bottom: 0.15em;
-  display: inline-flex;
-  flex-direction: column;
+.bd-title-row {
+  display: flex;
   align-items: flex-end;
+  gap: 0.6rem;
+  /* Absorb the h1's natural margin-bottom onto the row so the button aligns
+     with the title and the gap to the following content is preserved. */
+  margin-bottom: 1.05rem;
+}
+
+.bd-title-row > h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.copy-page-wrapper {
+  position: relative;  /* anchor for the dropdown below */
+  flex-shrink: 0;
   z-index: 10;
 }
 
@@ -217,22 +234,22 @@ active tab to be moved up. */
 .copy-page-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   background: none;
   border: none;
   cursor: pointer;
   color: var(--pst-color-text-muted);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-family: inherit;
   transition: background 0.12s, color 0.12s;
 }
 
 .copy-page-main {
-  padding: 0.35rem 0.6rem;
+  padding: 0.3rem 0.5rem;
 }
 
 .copy-page-toggle {
-  padding: 0.35rem 0.45rem;
+  padding: 0.3rem 0.4rem;
   border-left: 1px solid var(--pst-color-border);
 }
 

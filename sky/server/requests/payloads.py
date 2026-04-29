@@ -573,6 +573,10 @@ class JobsLaunchBody(RequestBody):
             self.env_vars,
             workdir_only=False,
             file_mounts_blob_id=self.file_mounts_blob_id)
+        # Pass the blob id through so that consolidation-mode submissions can
+        # record it on the job and keep the blob alive until the job is
+        # terminal.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 

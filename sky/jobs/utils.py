@@ -198,41 +198,6 @@ def terminate_cluster(
             time.sleep(backoff.current_backoff())
 
 
-def _validate_consolidation_mode_config(
-        current_is_consolidation_mode: bool) -> None:
-    """Validate the consolidation mode config."""
-    # Check whether the consolidation mode config is changed.
-    if current_is_consolidation_mode:
-        controller_cn = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.cluster_with_name_exists(controller_cn):
-            logger.warning(
-                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
-                f'but the controller cluster {controller_cn} is still running. '
-                'Please terminate the controller cluster first.'
-                f'{colorama.Style.RESET_ALL}')
-    else:
-        total_jobs = managed_job_state.get_managed_jobs_total()
-        if total_jobs > 0:
-            nonterminal_jobs = (
-                managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, None, all_users=True))
-            if nonterminal_jobs:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are still {len(nonterminal_jobs)} managed jobs '
-                    'running. Please terminate those jobs first.'
-                    f'{colorama.Style.RESET_ALL}')
-            else:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {total_jobs} jobs from previous '
-                    'consolidation mode. Reset the `jobs.controller.'
-                    'consolidation_mode` to `true` and run `sky jobs queue` '
-                    'to see those jobs. Switching to normal mode will '
-                    f'lose the job history.{colorama.Style.RESET_ALL}')
-
-
 def setup_consolidation_mode_on_startup(deploy: bool) -> None:
     """Set up consolidation mode signal file on API server startup.
 
@@ -274,7 +239,7 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
             # Local API server: don't auto-enable
             enabled = False
 
-    _validate_consolidation_mode_config(enabled)
+    controller_utils.warn_jobs_consolidation_mode_intent(enabled)
 
     if enabled:
         signal_file.touch()
@@ -286,42 +251,14 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# The signal file is the source of truth, managed by
-# setup_consolidation_mode_on_startup() at server start. Config changes
-# (enabling or disabling) require a server restart to take effect.
+# Thin wrapper around controller_utils.is_jobs_consolidation_mode — the helper
+# owns the signal-file read, the config-vs-signal restart warning, and the
+# jobs validator call. See controller_utils for the full contract.
+# INVARIANT: serve_utils.is_consolidation_mode(pool=True) routes through the
+# same helper, so pool and managed-jobs readers cannot diverge.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
-
-    signal_file = pathlib.Path(
-        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-    ).expanduser()
-    effective = signal_file.exists()
-
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        # Warn if explicit config disagrees with actual state — the admin
-        # needs to restart the server for the config change to take effect.
-        config_value = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=None)
-        if config_value is not None and config_value != effective:
-            expected = 'enabled' if config_value else 'disabled'
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
-                f'is {expected} in the server config, but the API server has '
-                'not been restarted yet. Please restart the API server to '
-                f'apply the change.{colorama.Style.RESET_ALL}')
-        # Validation may print a warning. Run validation against the intended
-        # (config) value to print warnings that should be addressed before the
-        # server is restarted.
-        if config_value is not None:
-            assert isinstance(config_value, bool), config_value
-            _validate_consolidation_mode_config(config_value)
-
-    return effective
+    return controller_utils.is_jobs_consolidation_mode()
 
 
 def ha_recovery_for_consolidation_mode() -> None:
@@ -1200,6 +1137,56 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def cancel_managed_jobs(
+    *,
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    pool: Optional[str] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+    current_workspace: Optional[str] = None,
+    user_hash: Optional[str] = None,
+) -> str:
+    """Dispatch to the correct cancel variant based on selector args.
+
+    One of ``job_ids``/``name``/``pool``/``all``/``all_users`` should be set.
+    Precedence:
+
+      - ``all_users`` or ``all`` or ``job_ids`` -> ``cancel_jobs_by_id``
+      - ``name`` -> ``cancel_job_by_name``
+      - ``pool`` -> ``cancel_jobs_by_pool``
+
+    Single source of truth for the dispatch precedence. Direct callers
+    (including plugins registering a custom ``ManagedJobRunner``) invoke
+    this function; the codegen path
+    (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
+    name on controllers running ``MANAGED_JOBS_VERSION >= 19``.
+    """
+    if all_users or all or job_ids:
+        return cancel_jobs_by_id(
+            job_ids,
+            all_users=all_users,
+            current_workspace=current_workspace,
+            user_hash=user_hash,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    if name is not None:
+        return cancel_job_by_name(
+            name,
+            current_workspace=current_workspace,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    assert pool is not None, (job_ids, name, pool, all)
+    return cancel_jobs_by_pool(
+        pool,
+        current_workspace=current_workspace,
+    )
+
+
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -1442,6 +1429,16 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+        # Batch coordinator jobs run inline on the controller — no
+        # separate cluster is provisioned. Stream controller logs instead
+        # of trying to find a worker cluster handle.
+        if managed_job_state.is_batch_job(job_id):
+            return stream_logs(job_id,
+                               job_name=None,
+                               controller=True,
+                               follow=follow,
+                               tail=tail)
+
         backend = backends.CloudVmRayBackend()
         latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -2347,6 +2344,10 @@ def format_job_table(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
+        Jobs that appear on multiple workers (e.g. batch coordinators
+        that orchestrate across the whole pool) are excluded — they
+        should not display a single ``(worker=N)`` annotation.
+
         Args:
             pool_status: List of pool status dictionaries with replica_info.
 
@@ -2354,6 +2355,7 @@ def format_job_table(
             Dictionary mapping job_id to replica_id (worker ID).
         """
         job_to_worker: Dict[int, int] = {}
+        multi_worker_jobs: Set[int] = set()
         if pool_status is None:
             return job_to_worker
         for pool in pool_status:
@@ -2362,7 +2364,11 @@ def format_job_table(
                 used_by = replica.get('used_by')
                 if used_by is not None:
                     for job_id in used_by:
+                        if job_id in job_to_worker:
+                            multi_worker_jobs.add(job_id)
                         job_to_worker[job_id] = replica.get('replica_id')
+        for job_id in multi_worker_jobs:
+            del job_to_worker[job_id]
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
@@ -2386,6 +2392,23 @@ def format_job_table(
         if show_all:
             user_cols.append('USER_ID')
 
+    def _fmt_batch_progress(task_or_tasks) -> str:
+        """Format batch progress as 'completed/total' or '-' if not a batch."""
+        if isinstance(task_or_tasks, list):
+            t = task_or_tasks[0]
+        else:
+            t = task_or_tasks
+        total = t.get('batch_total_batches')
+        if not total:
+            return '-'
+        status = t.get('status')
+        if (isinstance(status, managed_job_state.ManagedJobStatus) and
+                status == managed_job_state.ManagedJobStatus.WINDING_DOWN):
+            return 'Winding down'
+        completed = t.get('batch_completed_batches') or 0
+        pct = int(completed * 100 / total)
+        return f'{pct}% {completed}/{total}'
+
     columns = [
         'ID',
         'TASK',
@@ -2398,6 +2421,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'PROGRESS',
         'POOL',
     ]
     if show_all:
@@ -2529,6 +2553,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                _fmt_batch_progress(job_tasks),
                 pool,
             ]
             if show_all:
@@ -2592,6 +2617,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                _fmt_batch_progress(task),
                 pool,
             ]
             if show_all:
@@ -2765,9 +2791,20 @@ class ManagedJobCodeGen:
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
 
         # Plugins are only loaded for managed jobs version 13 and above.
-        if managed_job_version >= 13:
+        # Context-aware loading (PluginContext) was introduced in version 20.
+        if managed_job_version >= 20:
+            from sky import sky_logging as _sky_logging
             from sky.server import plugins
-            plugins.load_plugins(plugins.ExtensionContext())
+            # Suppress logging during plugin loading to prevent installation
+            # logs from leaking into codegen output.
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext(
+                    context=plugins.PluginContext.CONTROLLER))
+        elif managed_job_version >= 13:
+            from sky import sky_logging as _sky_logging
+            from sky.server import plugins
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod
@@ -2792,6 +2829,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out batch fields for older controllers (< 18)
+        _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
+        if managed_job_version < 18 and _fields is not None:
+            _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -2853,70 +2894,104 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls,
-                          job_ids: Optional[List[int]],
-                          all_users: bool = False,
-                          graceful: bool = False,
-                          graceful_timeout: Optional[int] = None) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
-                            current_workspace={active_workspace!r})
-        else:
-            msg = utils.cancel_jobs_by_id(
-                {job_ids},
-                all_users={all_users},
-                current_workspace={active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
+    def cancel_managed_jobs(
+        cls,
+        *,
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        pool: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+    ) -> str:
+        """Unified cancel codegen.
 
-    @classmethod
-    def cancel_job_by_name(cls,
-                           job_name: str,
-                           graceful: bool = False,
-                           graceful_timeout: Optional[int] = None) -> str:
+        On controllers running ``MANAGED_JOBS_VERSION >= 19``, emits a
+        single call to ``utils.cancel_managed_jobs`` — the one dispatch
+        function that direct callers also use. On older controllers
+        (``< 19``) that don't have the dispatcher, falls back to a
+        targeted call to the underlying ``utils.cancel_jobs_by_id`` /
+        ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
+        client-side based on the selector args.
+        """
         active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
-            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        else:
-            msg = utils.cancel_job_by_name(
-                {job_name!r},
-                {active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
 
-    @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
-        """)
+        # ``user_hash`` is intentionally omitted below — the controller runs
+        # the generated code under ``_build()``, which exports
+        # ``USER_ID_ENV_VAR`` to the caller's hash. The dispatcher defaults
+        # ``user_hash=None``, and ``state.get_nonterminal_job_ids_by_name``
+        # falls back to ``common_utils.get_user_hash()`` (reading the env
+        # var) when ``user_hash`` is None — matching the old per-variant
+        # codegens, which also never passed it.
+
+        # Client-side pick of which legacy variant to emit for controllers
+        # running ``managed_job_version < 19``. Each variant preserves the
+        # per-version gating that its dedicated codegen method used before
+        # we consolidated everything into ``cancel_managed_jobs``: older
+        # controllers predate args like ``current_workspace``/``graceful``
+        # and must not receive them. Lines are at column 0 here; the final
+        # assembly indents them by 4 spaces so they nest under
+        # ``if managed_job_version < 19:`` in the generated code.
+        if all_users or all or job_ids:
+            legacy_call_lines = [
+                'if managed_job_version < 2:',
+                # #4787: all_users not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r})',
+                'elif managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        elif name is not None:
+            legacy_call_lines = [
+                'if managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_job_by_name({name!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            # cancel_jobs_by_pool had no historical version gating.
+            legacy_call_lines = [
+                f'msg = utils.cancel_jobs_by_pool({pool!r}, '
+                f'{active_workspace!r})',
+            ]
+
+        legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        code = (f'if managed_job_version < 19:\n'
+                f'{legacy_block}\n'
+                f'else:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'        name={name!r},\n'
+                f'        job_ids={job_ids!r},\n'
+                f'        pool={pool!r},\n'
+                f'        all={all!r},\n'
+                f'        all_users={all_users!r},\n'
+                f'        graceful={graceful!r},\n'
+                f'        graceful_timeout={graceful_timeout!r},\n'
+                f'        current_workspace={active_workspace!r},\n'
+                f'    )\n'
+                f'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod

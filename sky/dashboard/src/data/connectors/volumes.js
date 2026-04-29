@@ -29,7 +29,7 @@ export async function getVolumes() {
           region: volume.region,
           zone: volume.zone,
           infra: infra,
-          size: volume.size != null ? `${volume.size}Gi` : '-',
+          size: volume.size,
           config: volume.config,
           storage_class: volume.config?.storage_class_name || '-',
           access_mode: volume.config?.access_mode || '-',
@@ -50,11 +50,12 @@ export async function getVolumes() {
   }
 }
 
-export async function deleteVolume(volumeName) {
+export async function deleteVolume(volumeName, { purge = false } = {}) {
   let msg = '';
   try {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
+      purge,
     });
     if (!response.ok) {
       console.error(

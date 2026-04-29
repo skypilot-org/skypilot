@@ -1,4 +1,4 @@
-SkyPilot: Run AI on Any Infrastructure
+SkyPilot: Manage all your AI compute
 ======================================
 
 

@@ -145,6 +145,10 @@ class Slurm(clouds.Cloud):
         return False
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return True
+
+    @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
@@ -312,8 +316,9 @@ class Slurm(clouds.Cloud):
             partitions_to_check = [z.name for z in r.zones] if r.zones else []
             valid_zones = []
 
-            # Check if gpu_partition_map narrows the partition list for
-            # this GPU type.
+            # Narrow partition list based on config:
+            # - gpu_partition_map for GPU tasks
+            # - cpu_partition for CPU-only tasks
             try:
                 sit = slurm_utils.SlurmInstanceType.from_instance_type(
                     instance_type)
@@ -347,6 +352,32 @@ class Slurm(clouds.Cloud):
                                                f'double-check the partition '
                                                f'names in gpu_partition_map.'
                                                f'{colorama.Style.RESET_ALL}')
+                else:
+                    # CPU-only: narrow to cpu_partition if configured.
+                    cpu_part = None
+                    if resources is not None:
+                        cpu_part = (
+                            config_utils.get_cloud_config_value_from_dict(
+                                dict_config=(
+                                    resources.cluster_config_overrides),
+                                cloud='slurm',
+                                region=cluster,
+                                keys=('cpu_partition',)))
+                    if cpu_part is None:
+                        cpu_part = slurm_utils.lookup_cpu_partition(cluster)
+                    if cpu_part is not None:
+                        available = set(partitions_to_check)
+                        if cpu_part in available:
+                            partitions_to_check = [cpu_part]
+                        else:
+                            partitions_to_check = []
+                            logger.warning(
+                                f'{colorama.Fore.YELLOW}'
+                                f'cpu_partition is set to '
+                                f'{cpu_part!r}, but it does not exist '
+                                f'on cluster {cluster!r}. Please '
+                                f'double-check the partition name.'
+                                f'{colorama.Style.RESET_ALL}')
             except ValueError:
                 pass
 
@@ -594,7 +625,8 @@ class Slurm(clouds.Cloud):
                 accelerators=None,
                 use_spot=resources.use_spot,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                resources=resources)
             if not available_regions:
                 return resources_utils.FeasibleResources([], [], None)
 
@@ -665,7 +697,8 @@ class Slurm(clouds.Cloud):
             accelerators=None,
             use_spot=resources.use_spot,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            resources=resources)
         if not available_regions:
             hint = self._get_memory_hint(resources)
             return resources_utils.FeasibleResources([], [], hint)

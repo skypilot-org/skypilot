@@ -142,6 +142,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         V100: 2.50     # $/accelerator/hr
     :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
       H100: h100-partition
+    :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
@@ -150,6 +151,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           cpu: 0.06
         gpu_partition_map:
           H100: h100-custom
+        cpu_partition: cpu-only
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -181,6 +183,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
       my-label: my-value
     :ref:`vpc_name <config-yaml-gcp-vpc-name>`: skypilot-vpc
+    :ref:`subnet_names <config-yaml-gcp-subnet-names>`:
+      - skypilot-subnet
     :ref:`use_internal_ips <config-yaml-gcp-use-internal-ips>`: true
     :ref:`force_enable_external_ips <config-yaml-gcp-force-enable-external-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-gcp-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -377,6 +381,9 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
+.. note::
+  For :ref:`remote API servers <sky-api-server-remote>`, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default, which means the API server manages jobs directly. In this mode, ``controller.resources`` and ``controller.autostop`` settings are ignored.
+
 For more information about managed jobs, see :ref:`managed-jobs`.
 
 
@@ -427,9 +434,9 @@ Example:
 ``jobs.controller.consolidation_mode``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the API server, rather than on a :ref:`remote controller cluster <jobs-controller-remote>`. Don't enable unless you are using a remotely-deployed API server.
 
-Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``). Otherwise disabled. Changes require an API server restart to take effect.
+Default: when unset, automatically enabled for :ref:`remote API servers <sky-api-server-remote>`. Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 
@@ -445,7 +452,7 @@ Example:
 ``jobs.controller.resources``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure resources for the managed jobs controller.
+Configure resources for the remote managed jobs controller. Ignored when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers); in that case, tune the API server's resources instead (see :ref:`sky-api-server-resources-tuning`).
 
 For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
 
@@ -468,7 +475,7 @@ Example:
 ``jobs.controller.autostop``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+Configure :ref:`autostop <auto-stop>` for the remote managed jobs controller. Not applicable when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers), since the controller lifecycle is tied to the API server.
 
 By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
 
@@ -1127,14 +1134,49 @@ By default, only VPCs from the current project are used.
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-vpc
+    vpc_name: my-vpc
 
 To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
 
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-project-123456/default
+    vpc_name: my-project-123456/default
+
+.. _config-yaml-gcp-subnet-names:
+
+``gcp.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use within the selected GCP VPC (optional).
+
+If set, SkyPilot will only consider subnets whose names match the provided
+string or list of strings. This can be used together with ``vpc_name`` to pick
+one specific subnet inside a custom VPC. If ``vpc_name`` is not set, SkyPilot
+will infer the VPC from the matching subnet. The matched subnets must belong to
+the same VPC.
+
+For shared VPCs, ``vpc_name`` must be set to ``<project ID>/<vpc name>`` when
+using ``subnet_names``. The subnet-only inference path only searches the
+current project and will not find subnets in a shared VPC host project.
+
+When ``subnet_names`` is set, SkyPilot uses the selected VPC/subnet as-is.
+Make sure the chosen VPC already has the
+:ref:`necessary firewall rules <gcp-minimum-firewall-rules>`.
+
+Because each GCP VM interface uses a single subnet, SkyPilot uses the first
+matching subnet in the order provided.
+
+Default: ``null`` (automatically select a subnet from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc_name: my-vpc
+    subnet_names:
+      - train-subnet-a
 
 .. _config-yaml-gcp-use-internal-ips:
 
@@ -2133,6 +2175,32 @@ Example:
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Per-cluster
 values override global values for the same GPU type.
 
+.. _config-yaml-slurm-cpu-partition:
+
+``slurm.cpu_partition``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Slurm partition to use for CPU-only tasks (optional).
+
+When ``--gpus`` is not provided (i.e., no accelerators are requested),
+SkyPilot will use this partition instead of the cluster's default partition.
+This is useful when your Slurm cluster has separate partitions for CPU-only
+and GPU workloads.
+
+Default: not set (uses the cluster's default partition).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    cpu_partition: cpu-batch
+
+``cpu_partition`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, or per-task
+using the ``config:`` block in a task YAML. Per-cluster values override
+global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2161,6 +2229,10 @@ Supported fields:
   :ref:`GPU partition map <config-yaml-slurm-gpu-partition-map>` overrides at
   the cluster level. Per-cluster values override global values for the same
   GPU type.
+
+- ``cpu_partition``:
+  :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
+  cluster level. Per-cluster values override the global value.
 
 Example:
 

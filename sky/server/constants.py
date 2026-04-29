@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 48  # mount config read_only support
+API_VERSION = 49  # sky batch column in managed jobs
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -41,6 +41,12 @@ MIN_API_ACCESS_API_VERSION = 42
 
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
+
+# Minimum API version that supports Sky Batch (sky.batch module).
+MIN_BATCH_API_VERSION = 49
+
+# Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
+MIN_BATCH_REPLICA_INFO_VERSION = 3
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

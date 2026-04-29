@@ -28,17 +28,21 @@ Batch processing, development, (pre)training, finetuning, hyperparameter sweeps,
 
 Using SkyPilot to run workloads offers these benefits:
 
-.. dropdown:: Unified execution on any cloud, region, and cluster
+.. dropdown:: Unified execution on any cluster, cloud, or region
 
-    Regardless of how many clouds, regions, and clusters you have, you can use a unified interface
+    Regardless of how many clusters, clouds, or regions you have, you can use a unified interface
     to submit, run, and manage workloads on them.
 
     You focus on the workload, and SkyPilot alleviates the burden of
     dealing with cloud infra details and differences.
 
-.. dropdown:: Cost and capacity optimization
+.. dropdown:: Maximize GPU fleet utilization
 
-    When launching a workload, SkyPilot will automatically choose the cheapest and most available infra choice in your search space.
+    When launching a workload, SkyPilot automatically finds an available
+    cluster in your search space. GPU utilization is further maximized through
+    binpacking and queueing.
+
+    If you are provisioning elastic resources (VMs), SkyPilot additionally optimizes for cost by choosing the cheapest and available zone/region/cloud.
 
 .. dropdown:: Auto-failover across infra choices
 
@@ -122,7 +126,7 @@ A *job* is a program you want to run. Two types of jobs are supported:
    * - Jobs are submitted to an existing cluster and reuse that cluster's setup.
      - Each job runs in its own temporary cluster, with auto-recovery.
    * - Ideal for interactive development and debugging on an existing cluster.
-     - Ideal for jobs requiring recovery (e.g., spot instances) or scaling to many parallel jobs.
+     - Ideal for jobs requiring recovery or scaling to many parallel jobs.
 
 
 
@@ -182,15 +186,13 @@ Managed jobs
 
 
 *Managed jobs* automatically provision a temporary cluster for each job and handle
-auto-recovery. A lightweight jobs controller is used to offer hands-off monitoring and recovery.
-You can use ``sky jobs launch`` to launch managed jobs.
+auto-recovery. You can use ``sky jobs launch`` to launch managed jobs.
 
-Managed jobs are especially ideal for running jobs on preemptible spot instances (e.g.,
-finetuning, batch inference). Spot GPUs can typically save 3--6x costs. They are also
-ideal for scaling to many parallel jobs.
+Managed jobs are especially ideal for running jobs that may require retries (e.g., handling job preemptions; running on hardware that may fail).
+They are also ideal for scaling to many parallel jobs.
 
-Suggested pattern: Use clusters to interactively develop and debug your code first, and then
-use managed jobs to run them at scale.
+Suggested pattern: Use clusters (``sky launch``, ``sky exec``) to interactively develop and debug your code first, and then
+use managed jobs (``sky jobs launch``) to run them at scale.
 
 See :ref:`managed-jobs` and :ref:`many-jobs` to get started.
 

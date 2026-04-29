@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky import exceptions as sky_exceptions
 from sky import resources
 from sky.backends import cloud_vm_ray_backend
 from sky.provision.kubernetes import config as config_lib
@@ -1273,3 +1274,651 @@ class TestRuntimeClassOverride:
                                         nvidia_runtime_exists=True,
                                         needs_gpus_nvidia=False)
         assert 'runtimeClassName' not in pod_spec['spec']
+
+
+class TestWaitForPodsToScheduleAutoscaleTimeout:
+    """Tests for the autoscaler-aware timeout extension in
+    _wait_for_pods_to_schedule.
+
+    The production bug: when an autoscaler is configured, node scale-up can
+    take 10+ minutes, but the default provision_timeout (10s) is tuned for
+    normal scheduling latency. Tests verify that once autoscaling is
+    detected, the deadline is extended from the detection moment.
+    """
+
+    class _FakeClock:
+        """Deterministic clock that advances only when sleep() is called.
+
+        Replaces time.time()/time.sleep() in the instance module so the
+        while loop in _wait_for_pods_to_schedule is driven by simulated
+        time rather than wall-clock time.
+        """
+
+        def __init__(self):
+            self.now = 0.0
+
+        def time(self):
+            return self.now
+
+        def sleep(self, secs):
+            self.now += secs
+
+    @staticmethod
+    def _make_node(name: str, cluster_name_on_cloud: str):
+        """Build a mock new_node (used to derive expected pod names)."""
+        from sky.provision import constants as prov_constants
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        return node
+
+    @staticmethod
+    def _make_pending_pod(name: str, cluster_name_on_cloud: str):
+        """Build a pod that is Pending with no container_statuses.
+
+        This represents a pod that has not yet been scheduled — the loop
+        should keep waiting for it.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        return pod
+
+    def _setup(self, monkeypatch, autoscaler_type, autoscale_detected):
+        """Wire up all mocks. Returns (clock, raise_errors_mock)."""
+
+        # 1. Config lookup — return the autoscaler type when asked.
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            if keys == ('autoscaler',):
+                return autoscaler_type
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        # 2. k8s core API — always return the same pending pod.
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_pending_pod('pod-0', cluster_name_on_cloud)
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        # 3. Autoscale detection — return caller-supplied flag.
+        monkeypatch.setattr(instance, '_cluster_had_autoscale_event',
+                            lambda *a, **kw: autoscale_detected)
+        monkeypatch.setattr(instance, '_cluster_maybe_autoscaling',
+                            lambda *a, **kw: autoscale_detected)
+
+        # 4. Replace the slow error-surfacing path with a simple marker
+        #    so we can cheaply detect that the timeout path fired.
+        raise_errors = mock.MagicMock(
+            side_effect=config_lib.KubernetesError('simulated-timeout'))
+        monkeypatch.setattr(instance, '_raise_pod_scheduling_errors',
+                            raise_errors)
+
+        # 5. Deterministic clock — advances only via sleep().
+        clock = self._FakeClock()
+        monkeypatch.setattr(instance.time, 'time', clock.time)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+
+        # 6. No-op spinner update to avoid rich_utils side effects.
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+
+        return clock, raise_errors, cluster_name_on_cloud
+
+    def test_timeout_fires_without_autoscaler(self, monkeypatch):
+        """Without any autoscaler configured, the original timeout is
+        enforced — the function should exit the loop and raise once the
+        user-specified timeout elapses."""
+        _, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type=None, autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert raise_errors.called, (
+            'Without autoscaler, timeout=5s must trigger the error path.')
+
+    def test_autoscale_detection_extends_deadline(self, monkeypatch):
+        """When autoscaling is detected, the deadline is extended from the
+        detection moment by _AUTOSCALE_DETECTED_TIMEOUT_SECONDS. A short
+        user timeout alone would exit in seconds, but the extension keeps
+        the loop alive for much longer."""
+        clock, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type='gke', autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,  # far shorter than the 900s extension
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # The loop sleeps 1s per iteration via the fake clock. If the
+        # extension did NOT apply we would exit after ~5s of simulated
+        # time. It must run for at least the extension window instead.
+        assert clock.now >= instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'Expected simulated time >= '
+            f'{instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS}s after '
+            f'autoscale detection, but got {clock.now}s — the extension '
+            f'did not take effect.')
+        assert raise_errors.called
+
+    def test_autoscale_extension_does_not_shorten_user_timeout(
+            self, monkeypatch):
+        """If the user set a provision_timeout longer than the extension
+        window, their value must still be honored (max of the two)."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type='gke',
+                                                      autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        long_timeout = instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS + 600
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=long_timeout,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # The function should run at least until the longer user timeout
+        # elapses, even though the extension window expired earlier.
+        assert clock.now >= long_timeout, (
+            f'User-specified timeout of {long_timeout}s must not be '
+            f'shortened by the autoscale extension; loop ran for only '
+            f'{clock.now}s.')
+
+    def test_karpenter_heuristic_does_not_extend_deadline(self, monkeypatch):
+        """Karpenter does not emit TriggeredScaleUp; the code falls back
+        to heuristic FailedScheduling detection. That signal is NOT
+        reliable enough (same event fires for oversized requests,
+        taints, PVC binding errors, etc.) to extend the deadline by
+        15 min, so the heuristic path must only update the spinner
+        message and leave the deadline alone.
+
+        The autoscaler-configured initial minimum timeout still applies,
+        but nothing beyond that.
+        """
+        clock, _, cluster_name_on_cloud = self._setup(
+            monkeypatch, autoscaler_type='karpenter', autoscale_detected=True)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # Initial timeout is bumped to the autoscaler minimum (60s), but
+        # the 15 min extension must NOT apply under the heuristic path.
+        assert clock.now >= instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'Expected at least the autoscaler initial minimum '
+            f'({instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s) of '
+            f'waiting, got {clock.now}s.')
+        assert clock.now < instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'Heuristic FailedScheduling detection must NOT extend the '
+            f'deadline by the full 15 min window, but loop ran for '
+            f'{clock.now}s.')
+
+    def test_autoscaler_configured_bumps_short_timeout_to_minimum(
+            self, monkeypatch):
+        """The default provision_timeout (10s) is shorter than the
+        Cluster Autoscaler scan interval (~10s), so with a vanilla
+        config the loop would exit before any TriggeredScaleUp could
+        be emitted. When an autoscaler is configured, the initial
+        timeout must be bumped to at least
+        _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS so detection has a
+        chance to run."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type='gke',
+                                                      autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=10,  # default; shorter than CA scan interval
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # No detection → no 15 min extension. But the initial timeout
+        # must have been bumped to the autoscaler minimum, so the loop
+        # should run for at least that long.
+        assert clock.now >= instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'Autoscaler-configured timeout should be bumped to >= '
+            f'{instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s, but '
+            f'loop ran only {clock.now}s.')
+        assert clock.now < instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS, (
+            f'No TriggeredScaleUp detected → 15 min extension must not '
+            f'apply, but loop ran for {clock.now}s.')
+
+    def test_no_autoscaler_does_not_bump_timeout(self, monkeypatch):
+        """Without an autoscaler configured, the initial-minimum bump
+        must NOT apply — a user who explicitly sets a short timeout on
+        a non-autoscaling cluster expects it to be honored."""
+        clock, _, cluster_name_on_cloud = self._setup(monkeypatch,
+                                                      autoscaler_type=None,
+                                                      autoscale_detected=False)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # Without autoscaler, the 5s timeout must be honored (not bumped
+        # to the 60s autoscaler minimum). Loop should exit shortly after
+        # 5s — generously below the autoscaler minimum.
+        assert clock.now < instance._AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS, (
+            f'No autoscaler configured → short user timeout must not be '
+            f'bumped, but loop ran for {clock.now}s.')
+
+
+# ---------------------------------------------------------------------------
+# Helpers and tests for _condensed_pod_reason()
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_pod(phase='Failed',
+                   deletion_timestamp=None,
+                   conditions=None,
+                   container_statuses=None,
+                   init_container_statuses=None):
+    """Helper to build a mock pod with the given status fields."""
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.metadata.deletion_timestamp = deletion_timestamp
+    pod.status.phase = phase
+    pod.status.start_time = None
+    pod.status.conditions = conditions or []
+    pod.status.container_statuses = container_statuses or []
+    pod.status.init_container_statuses = init_container_statuses or []
+    return pod
+
+
+def _make_condition(type_,
+                    reason,
+                    message='',
+                    status='True',
+                    last_transition_time=None):
+    cond = mock.MagicMock()
+    cond.type = type_
+    cond.reason = reason
+    cond.message = message
+    cond.status = status
+    cond.last_transition_time = last_transition_time
+    return cond
+
+
+def _make_container_status(name='main',
+                           terminated_reason=None,
+                           terminated_exit_code=None,
+                           terminated_finished_at=None,
+                           waiting_reason=None,
+                           waiting_message=None):
+    cs = mock.MagicMock()
+    cs.name = name
+    cs.state.terminated = None
+    cs.state.waiting = None
+    if terminated_reason is not None:
+        cs.state.terminated = mock.MagicMock()
+        cs.state.terminated.reason = terminated_reason
+        cs.state.terminated.exit_code = terminated_exit_code or 1
+        cs.state.terminated.finished_at = terminated_finished_at
+        cs.state.terminated.message = None
+    if waiting_reason is not None:
+        cs.state.waiting = mock.MagicMock()
+        cs.state.waiting.reason = waiting_reason
+        cs.state.waiting.message = waiting_message
+    return cs
+
+
+class TestCondensedPodReason:
+    """Tests for _condensed_pod_reason()."""
+
+    def test_oom_killed(self):
+        container = _make_container_status(terminated_reason='OOMKilled',
+                                           terminated_exit_code=137)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'OOMKilled' in result
+        assert '137' in result
+
+    def test_kueue_preemption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('TerminationTarget', 'PreemptedByWorkloadPriority',
+                            'Higher priority workload scheduled'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Preempted by Kueue' in result
+        assert 'PreemptedByWorkloadPriority' in result
+
+    def test_disruption(self):
+        conditions = [
+            _make_condition('Ready', 'False'),
+            _make_condition('DisruptionTarget', 'EvictionByKueue',
+                            'Preempted to accommodate a higher priority'),
+        ]
+        pod = _make_mock_pod(conditions=conditions)
+        result = instance._condensed_pod_reason(pod)
+        assert 'Disrupted' in result
+
+    def test_image_pull_backoff_from_waiting(self):
+        container = _make_container_status(
+            waiting_reason='ImagePullBackOff',
+            waiting_message='Back-off pulling image "nvcr.io/foo:bad"')
+        pod = _make_mock_pod(phase='Failed',
+                             conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'ImagePullBackOff' in result
+        assert 'nvcr.io/foo:bad' in result
+
+    def test_crash_loop_from_terminated(self):
+        container = _make_container_status(terminated_reason='Error',
+                                           terminated_exit_code=1)
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Error' in result
+        assert 'exit code 1' in result
+
+    def test_terminated_no_reason(self):
+        """When terminated.reason is None, should show exit code cleanly."""
+        container = mock.MagicMock()
+        container.state.waiting = None
+        container.state.terminated = mock.MagicMock()
+        container.state.terminated.reason = None
+        container.state.terminated.exit_code = 137
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[container])
+        result = instance._condensed_pod_reason(pod)
+        assert result == 'Terminated with exit code 137'
+
+    def test_unknown_fallback(self):
+        pod = _make_mock_pod(conditions=[_make_condition('Ready', 'False')],
+                             container_statuses=[])
+        result = instance._condensed_pod_reason(pod)
+        assert 'Terminated unexpectedly' in result
+
+
+class TestInsufficientResourcesMsg:
+    """Tests for _insufficient_resources_msg with last_error_reason."""
+
+    def _make_provisioner(self):
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        return provisioner
+
+    def test_includes_error_reason_for_k8s(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(
+            k8s_resource,
+            requested,
+            None,
+            last_error_reason='OOMKilled (exit code 137)')
+        assert 'OOMKilled (exit code 137)' in msg
+        assert 'my-context' in msg
+
+    def test_no_error_reason_falls_back(self):
+        provisioner = self._make_provisioner()
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        requested = {k8s_resource}
+
+        msg = provisioner._insufficient_resources_msg(k8s_resource,
+                                                      requested,
+                                                      None,
+                                                      last_error_reason=None)
+        assert 'Failed to acquire resources' in msg
+        assert 'my-context' in msg
+        assert 'OOMKilled' not in msg
+
+
+@pytest.fixture()
+def mock_format_resource(monkeypatch):
+    """Mock format_resource to avoid needing real Resources objects."""
+    monkeypatch.setattr(
+        'sky.backends.cloud_vm_ray_backend.resources_utils.format_resource',
+        lambda resource, simplified_only=False:
+        ('H100:1, cpus=4, mem=16', None))
+
+
+class TestProvisionFailureBlocks:
+    """Tests for _format_provision_failure_blocks."""
+
+    def _make_k8s_resource(self,
+                           infra_str='Kubernetes (in-cluster)',
+                           region='in-cluster'):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.Kubernetes()
+        resource.region = region
+        return resource
+
+    def _make_aws_resource(self, infra_str='AWS (us-east-1)'):
+        resource = mock.MagicMock()
+        resource.infra.formatted_str.return_value = infra_str
+        resource.cloud = clouds.AWS()
+        return resource
+
+    def test_single_failure_block(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Failed to acquire resources in context in-cluster. '
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert 'OOMKilled' in result
+
+    def test_hint_for_image_pull(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: ImagePullBackOff: nvcr.io/foo:bad - manifest unknown')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'image' in result.lower() or 'registry' in result.lower()
+
+    def test_hint_for_oom(self, mock_format_resource):
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'memory' in result.lower()
+
+    def test_hint_for_insufficient_includes_url_and_kubectl(
+            self, mock_format_resource, monkeypatch):
+        """Insufficient hint links the dashboard infra page scoped to the
+        failing context and also mentions `kubectl describe nodes`."""
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            lambda: 'http://api.example.com')
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        assert ('http://api.example.com/dashboard/infra/my-cluster-context'
+                in result)
+
+    def test_hint_falls_back_when_url_resolution_fails(self,
+                                                       mock_format_resource,
+                                                       monkeypatch):
+        """If get_server_url raises, the hint should still render (with a
+        generic fallback) rather than crash the failure-rendering path."""
+
+        def _boom():
+            raise RuntimeError('no api server endpoint configured')
+
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.server_common.get_server_url',
+            _boom)
+        resource = self._make_k8s_resource(region='my-cluster-context')
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Reason: Insufficient nvidia.com/gpu')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' in result
+        assert 'kubectl describe nodes' in result
+        # Generic fallback text used when URL resolution fails.
+        assert 'SkyPilot dashboard infra page' in result
+        # Placeholder must not leak through.
+        assert '{dashboard_url}' not in result
+
+    def test_no_hint_for_unknown_k8s_failure(self, mock_format_resource):
+        """K8s block with no recognized failure substring gets no hint."""
+        resource = self._make_k8s_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'Some unrecognized cluster failure.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+
+    def test_no_hint_for_non_k8s_cloud(self, mock_format_resource):
+        """Hints don't fire for non-k8s clouds even if substring matches.
+
+        Prevents AWS messages like 'InsufficientInstanceCapacity' from
+        triggering the k8s insufficient-resources hint.
+        """
+        resource = self._make_aws_resource()
+        exc = sky_exceptions.ResourcesUnavailableError(
+            'InsufficientInstanceCapacity: no A100 capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {resource: exc})
+        assert 'Hint:' not in result
+        assert 'dashboard' not in result
+
+    def test_multiple_failures_mixed_clouds(self, mock_format_resource):
+        r1 = self._make_k8s_resource()
+        r2 = self._make_aws_resource()
+        exc1 = sky_exceptions.ResourcesUnavailableError(
+            'Reason: OOMKilled (exit code 137)')
+        exc2 = sky_exceptions.ResourcesUnavailableError(
+            'No capacity in us-east-1.')
+        result = cloud_vm_ray_backend._format_provision_failure_blocks({
+            r1: exc1,
+            r2: exc2
+        })
+        assert '\u2717 Kubernetes (in-cluster)' in result
+        assert '\u2717 AWS (us-east-1)' in result
+        # K8s block has the OOM hint
+        assert 'memory' in result.lower()
+
+
+class TestFullPipeline:
+    """Integration test: KubernetesError message → retry loop → block output."""
+
+    def test_oom_reason_reaches_block_output(self, mock_format_resource):
+        """Verify OOMKilled flows from exception through to block rendering."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: OOMKilled (exit code 137). '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'OOMKilled' in blocks
+        assert 'exit code 137' in blocks
+        assert 'Hint:' in blocks
+        assert 'memory' in blocks.lower()
+
+    def test_image_pull_reason_reaches_block_output(self, mock_format_resource):
+        """Verify ImagePullBackOff flows end-to-end."""
+        k8s_error = config_lib.KubernetesError(
+            'Pod test-pod failed: ImagePullBackOff: '
+            'Back-off pulling image "nvcr.io/nvidia/pytorch:bad-tag". '
+            'Run `sky logs --provision test-cluster` for more details.')
+        last_error_reason = str(k8s_error)
+
+        backend = cloud_vm_ray_backend.RetryingVmProvisioner.__new__(
+            cloud_vm_ray_backend.RetryingVmProvisioner)
+        k8s_resource = mock.MagicMock()
+        k8s_resource.zone = None
+        k8s_resource.region = 'my-context'
+        k8s_resource.cloud = clouds.Kubernetes()
+        msg = backend._insufficient_resources_msg(
+            k8s_resource, {k8s_resource},
+            None,
+            last_error_reason=last_error_reason)
+
+        exc = sky_exceptions.ResourcesUnavailableError(msg)
+        blocks = cloud_vm_ray_backend._format_provision_failure_blocks(
+            {k8s_resource: exc})
+        assert 'ImagePullBackOff' in blocks
+        assert 'nvcr.io/nvidia/pytorch:bad-tag' in blocks
+        assert 'Hint:' in blocks
+        assert 'image' in blocks.lower() or 'registry' in blocks.lower()

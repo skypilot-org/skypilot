@@ -13,7 +13,7 @@ import generate_examples
 # -- Project information
 
 project = 'SkyPilot'
-copyright = '2025, SkyPilot Team'
+copyright = '2026, SkyPilot Team'
 author = 'the SkyPilot authors'
 
 # The version info for the project you're documenting, acts as replacement for

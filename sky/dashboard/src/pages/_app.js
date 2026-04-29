@@ -13,6 +13,7 @@ import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
 import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
+import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
 import { getNonce } from '@/utils/csp';
 
 const Layout = dynamic(
@@ -44,13 +45,15 @@ function App({ Component, pageProps }) {
   return (
     <CacheProvider value={emotionCache}>
       <PluginProvider>
-        <VersionProvider>
-          <TourProvider>
-            <Layout highlighted={pageProps.highlighted}>
-              <Component {...pageProps} />
-            </Layout>
-          </TourProvider>
-        </VersionProvider>
+        <PluginWrapperSlot name="app.providers">
+          <VersionProvider>
+            <TourProvider>
+              <Layout highlighted={pageProps.highlighted}>
+                <Component {...pageProps} />
+              </Layout>
+            </TourProvider>
+          </VersionProvider>
+        </PluginWrapperSlot>
       </PluginProvider>
     </CacheProvider>
   );

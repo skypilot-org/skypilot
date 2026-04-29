@@ -66,6 +66,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import dashboardCache from '@/lib/cache';
+import { trackInfraAction } from '@/lib/analytics';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
@@ -693,6 +694,7 @@ export function ContextDetails({
 
   // Handle time range preset change
   const handleTimeRangePreset = (preset) => {
+    trackInfraAction('time_range_change', { range: preset });
     const presets = {
       '15m': { from: 'now-15m', to: 'now' },
       '1h': { from: 'now-1h', to: 'now' },
@@ -2465,6 +2467,7 @@ export function GPUs() {
   }, []);
 
   const handleRefresh = async () => {
+    trackInfraAction('refresh');
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
@@ -2729,6 +2732,7 @@ export function GPUs() {
 
   // Handler for clicking on a context
   const handleContextClick = (context) => {
+    trackInfraAction('view_context');
     setSelectedContext(context);
     // Use push instead of replace for proper browser history
     const targetPath = `/infra/${encodeURIComponent(context)}`;

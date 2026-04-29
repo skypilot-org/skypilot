@@ -110,8 +110,18 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
     return data
 
 
-def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
-    """Deserialize the exception."""
+def deserialize_exception(serialized: Any) -> Exception:
+    """Deserialize the exception.
+
+    Handles non-standard inputs gracefully (None, str, partial dicts) to
+    avoid crashing when the server returns unexpected error responses.
+    """
+    if serialized is None:
+        return RuntimeError('Unknown server error (no detail in response)')
+    if isinstance(serialized, str):
+        return RuntimeError(serialized)
+    if not isinstance(serialized, dict) or 'type' not in serialized:
+        return RuntimeError(f'Server error: {serialized}')
     exception_type = serialized['type']
     if hasattr(builtins, exception_type):
         exception_class = getattr(builtins, exception_type)
@@ -119,10 +129,13 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         exception_class = globals().get(exception_type, None)
     if exception_class is None:
         # Unknown exception type.
-        return Exception(f'{exception_type}: {serialized["message"]}')
-    e = exception_class(*serialized['args'], **serialized['attributes'])
-    if serialized['stacktrace'] is not None:
-        setattr(e, 'stacktrace', serialized['stacktrace'])
+        return Exception(
+            f'{exception_type}: {serialized.get("message", serialized)}')
+    e = exception_class(*serialized.get('args', ()),
+                        **serialized.get('attributes', {}))
+    stacktrace = serialized.get('stacktrace')
+    if stacktrace is not None:
+        setattr(e, 'stacktrace', stacktrace)
     return e
 
 
@@ -704,6 +717,19 @@ class SkyletInternalError(Exception):
 class SkyletMethodNotImplementedError(Exception):
     """Raised when a Skylet gRPC method is not implemented on the server."""
     pass
+
+
+class SkyletUnavailableError(Exception):
+    """Raised when the Skylet gRPC server is unreachable."""
+    pass
+
+
+# Exception types that indicate gRPC failed and the caller should fall
+# back to the legacy SSH code path.
+SKYLET_GRPC_FALLBACK_ERRORS = (
+    SkyletMethodNotImplementedError,
+    SkyletUnavailableError,
+)
 
 
 class ClientError(Exception):

@@ -25,6 +25,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatAutostop,
   LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
@@ -38,7 +39,9 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
+import { TelemetrySection } from '@/components/TelemetrySection';
+import { hasAccelerator } from '@/utils/gpuUtils';
+import { trackClusterAction } from '@/lib/analytics';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import {
   Select,
@@ -47,27 +50,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    autostopStr = autostop + 'm';
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
 
 function ClusterDetails() {
   const router = useRouter();
@@ -80,9 +62,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // Counter incremented on refresh to force telemetry iframes to reload.
   // When this value changes, the iframe key changes, causing React to remount the iframe.
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const {
     clusterData,
@@ -94,7 +76,7 @@ function ClusterDetails() {
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
 
   // Check Grafana availability on mount
@@ -146,16 +128,18 @@ function ClusterDetails() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await refreshData();
-    // Increment GPU metrics refresh trigger to force iframe reload
-    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+    // Increment telemetry refresh trigger to force iframe reload
+    setTelemetryRefreshTrigger((prev) => prev + 1);
     setIsRefreshing(false);
   };
 
   const handleConnectClick = () => {
+    trackClusterAction('connect');
     setIsSSHModalOpen(true);
   };
 
   const handleVSCodeClick = () => {
+    trackClusterAction('vscode');
     setIsVSCodeModalOpen(true);
   };
 
@@ -238,7 +222,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={isVSCodeModalOpen}
             setIsVSCodeModalOpen={setIsVSCodeModalOpen}
             isGrafanaAvailable={isGrafanaAvailable}
-            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+            telemetryRefreshTrigger={telemetryRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -250,7 +234,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
             isGrafanaAvailable={false}
-            gpuMetricsRefreshTrigger={0}
+            telemetryRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -287,7 +271,7 @@ function ActiveTab({
   isVSCodeModalOpen,
   setIsVSCodeModalOpen,
   isGrafanaAvailable,
-  gpuMetricsRefreshTrigger,
+  telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -652,6 +636,23 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Telemetry Section (GPU + CPU/Memory) - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
+      {clusterData &&
+        clusterData.full_infra &&
+        clusterData.full_infra.toLowerCase().includes('kubernetes') &&
+        !clusterData.full_infra.toLowerCase().includes('ssh') &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <TelemetrySection
+              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              displayName={clusterData?.cluster}
+              refreshTrigger={telemetryRefreshTrigger}
+              storageKey="skypilot-clusters-telemetry-expanded"
+              hasGpu={hasAccelerator(clusterData?.gpus)}
+            />
+          </div>
+        )}
+
       {/* Plugin Slot: Cluster Infra Nodes */}
       <PluginSlot
         name="clusters.detail.nodes"
@@ -680,6 +681,15 @@ function ActiveTab({
         </div>
       )}
 
+      {/* Plugin Slot: Cluster Detail Events */}
+      <PluginSlot
+        name="clusters.detail.events"
+        context={{
+          clusterHash: clusterData.cluster_hash,
+        }}
+        wrapperClassName="mb-8"
+      />
+
       {/* Provision Logs - Only show for active clusters */}
       {!isHistoricalCluster && (
         <div className="mb-8">
@@ -689,32 +699,6 @@ function ActiveTab({
           />
         </div>
       )}
-
-      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
-      {clusterData &&
-        clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
-          <div className="mb-6">
-            <GPUMetricsSection
-              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
-              displayName={clusterData?.cluster}
-              refreshTrigger={gpuMetricsRefreshTrigger}
-              storageKey="skypilot-gpu-metrics-expanded"
-            />
-          </div>
-        )}
-
-      {/* Plugin Slot: Cluster Detail Events */}
-      <PluginSlot
-        name="clusters.detail.events"
-        context={{
-          clusterHash: clusterData.cluster_hash,
-        }}
-        wrapperClassName="mb-8"
-      />
     </div>
   );
 }
@@ -771,12 +755,12 @@ function ProvisionLogs({ clusterName, numNodes }) {
         <div className="flex items-center">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
           >
             {isExpanded ? (
-              <ChevronDownIcon className="w-4 h-4 mr-1" />
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
             ) : (
-              <ChevronRightIcon className="w-4 h-4 mr-1" />
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
             )}
             <h2 className="text-lg font-semibold">Provision Logs</h2>
           </button>
@@ -839,7 +823,7 @@ function ProvisionLogs({ clusterName, numNodes }) {
               <span>No provision logs available.</span>
             </div>
           ) : (
-            <div className="max-h-96 overflow-y-auto">
+            <div className="max-h-[50vh] min-h-[200px] overflow-y-auto">
               <LogFilter logs={displayLines} />
             </div>
           )}

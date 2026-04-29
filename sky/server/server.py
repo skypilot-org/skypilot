@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -33,7 +34,6 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
-import filelock
 import jwt as pyjwt
 import starlette.background
 import starlette.middleware.base
@@ -76,7 +76,9 @@ from sky.server import websocket_utils
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
+from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
+from sky.server.requests import log_provider
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
@@ -120,6 +122,11 @@ P = ParamSpec('P')
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
+
+# Resolved once at import so `subprocess.Popen(executable=...)` gets an
+# absolute path — a required precondition for Python subprocess to route
+# through posix_spawn instead of fork_exec.
+_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -573,41 +580,33 @@ async def cleanup_unreferenced_file_mounts():
     # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
     # blocking the event loop.
     def _do_cleanup():
-        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-        # Get all blob_id referenced by active requests.
-        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
-        if not clients_dir.exists():
-            return
-        for user_dir in clients_dir.iterdir():
-            if not user_dir.is_dir():
-                continue
-            try:
-                blobs_dir = user_dir / 'file_mounts' / 'blobs'
-                if not blobs_dir.exists():
-                    continue
-                # Delete unreferenced extraction dirs older than grace period.
-                grace_cutoff = time.time() - 3600  # 1 hour grace
-                for entry in blobs_dir.iterdir():
-                    if not entry.is_dir():
-                        continue
-                    if entry.name in ('.locks', '.staging'):
-                        continue
-                    blob_id = entry.name
-                    if (blob_id not in active_blob_ids and
-                            entry.stat().st_mtime < grace_cutoff):
-                        logger.info(f'GC: removing unreferenced blob '
-                                    f'{blob_id} for user {user_dir.name}')
-                        shutil.rmtree(entry, ignore_errors=True)
-                # Clean up stale staging directories from interrupted uploads.
-                staging_base = blobs_dir / '.staging'
-                if staging_base.exists():
-                    for staging in staging_base.iterdir():
-                        if staging.is_dir():
-                            if staging.stat().st_mtime < grace_cutoff:
-                                shutil.rmtree(staging, ignore_errors=True)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
-                             f'{common_utils.format_exception(e)}')
+        storage = bs.get_blob_storage()
+
+        with storage.gc_lock() as should_run:
+            if not should_run:
+                logger.debug('Another replica is running blob GC, skipping')
+                return
+
+            # A blob is kept alive by either an active API request (e.g. the
+            # submit request that is still running) or a non-terminal managed
+            # job that was started from it.
+            active_blob_ids = (
+                requests_lib.get_active_file_mounts_blob_ids() |
+                managed_job_state.get_active_file_mounts_blob_ids())
+            grace_cutoff = time.time() - bs.GC_GRACE_SECONDS
+
+            for user_id in storage.list_users():
+                try:
+                    for blob_id, mtime in storage.list_blob_ids(user_id):
+                        if (blob_id not in active_blob_ids and
+                                mtime < grace_cutoff):
+                            logger.info(f'GC: removing unreferenced blob '
+                                        f'{blob_id} for user {user_id}')
+                            storage.delete_blob(user_id, blob_id)
+                    storage.release_stale_uploads(user_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error cleaning filemounts dir: {user_id}: '
+                                 f'{common_utils.format_exception(e)}')
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -615,6 +614,39 @@ async def cleanup_unreferenced_file_mounts():
             await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_file_mounts: '
+                         f'{common_utils.format_exception(e)}')
+
+
+async def cleanup_download_tmp():
+    """Delete expired download tmp directories.
+
+    Downloaded logs are transient — synced from the cluster for the client
+    to download, then no longer needed.  Clean up anything older than the
+    blob GC grace period (1 hour by default).
+    """
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+            if tmp_dir is None:
+                # Backend shares the persistent log dir; no separate
+                # cleanup needed.
+                continue
+            if not os.path.exists(tmp_dir):
+                continue
+            cutoff = time.time() - bs.GC_GRACE_SECONDS
+            for user_entry in os.scandir(tmp_dir):
+                if not user_entry.is_dir():
+                    continue
+                for entry in os.scandir(user_entry.path):
+                    if entry.is_dir():
+                        try:
+                            if entry.stat().st_mtime < cutoff:
+                                shutil.rmtree(entry.path, ignore_errors=True)
+                        except OSError:
+                            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_download_tmp: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -661,6 +693,7 @@ async def schedule_on_boot_check_async():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
+
     # Startup: Run background tasks
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
@@ -690,7 +723,6 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         # event loop (process).
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
-    # Shutdown: Add any cleanup code here if needed
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -713,11 +745,15 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     #   elements that cannot easily carry nonces.  CSS cannot execute
     #   scripts, so the risk is negligible.
     # - font-src 'self': Only allow same-origin fonts
-    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
-    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
-    #   needed by the /token page's legacy auth callback flow (the page's
-    #   JavaScript POSTs the auth token to a local HTTP server started by
-    #   the CLI on localhost)
+    # - connect-src 'self' https://usage-v3.skypilot.co
+    #   http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket, analytics traffic via the
+    #   usage-v3 reverse proxy, and localhost connections needed by the
+    #   /token page's legacy auth callback flow (the page's JavaScript
+    #   POSTs the auth token to a local HTTP server started by the CLI
+    #   on localhost)
+    # - worker-src 'self' blob:: Allow same-origin workers and blob
+    #   workers (needed for analytics).
     # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
     # - img-src 'self' data:: Allow same-origin images and data URIs
     # - object-src 'none': Block all plugin content (Flash, Java, etc.)
@@ -725,11 +761,13 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
     _CSP_TEMPLATE = ('default-src \'self\'; '
-                     'script-src {script_src}; '
+                     'script-src {script_src} '
+                     'https://usage-v3.skypilot.co; '
                      'style-src \'self\' \'unsafe-inline\'; '
                      'font-src \'self\'; '
-                     'connect-src \'self\' http://localhost:* '
-                     'http://127.0.0.1:*; '
+                     'connect-src \'self\' https://usage-v3.skypilot.co '
+                     'http://localhost:* http://127.0.0.1:*; '
+                     'worker-src \'self\' blob:; '
                      'frame-src \'self\'; '
                      'img-src \'self\' data:; '
                      'object-src \'none\'; '
@@ -913,7 +951,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 # TODO(aylei): move uvicorn app out of the top-level module to avoid
 # duplicate app initialization.
 if __name__ == 'sky.server.server':
-    plugins.load_plugins(plugins.ExtensionContext(app=app))
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                 app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -1347,13 +1387,17 @@ async def _receive_and_assemble_chunks(
     request: fastapi.Request,
     chunk_index: int,
     total_chunks: int,
+    extract: bool = True,
+    assemble: bool = True,
 ) -> Optional[payloads.UploadZipFileResponse]:
-    """Receive chunks, assemble into a zip file, and extract.
+    """Receive chunks, optionally assemble into a zip file, and extract.
 
     Returns:
         None if the upload is completed,
         A response to tell the client to upload more chunks otherwise.
     """
+    if extract and not assemble:
+        raise ValueError('extract=True requires assemble=True')
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
     # test.
@@ -1373,13 +1417,17 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    # Write chunk to a unique private path first, so concurrent uploads for
+    # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = base_dir / f'{zip_name}.zip'
+        final_path = base_dir / f'{zip_name}.zip'
+        zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
         chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+        final_path = chunk_dir / f'part{chunk_index}'
+        zip_file_path = chunk_dir / f'part{chunk_index}.tmp.{uuid.uuid4().hex}'
 
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
@@ -1401,32 +1449,64 @@ async def _receive_and_assemble_chunks(
                     f'{common_utils.format_exception(e)}'))
 
     def get_missing_chunks(total_chunks: int) -> Set[str]:
-        return set(f'part{i}' for i in range(total_chunks)) - set(
-            p.name for p in chunk_dir.glob('part*'))
+        existing = set()
+        for p in chunk_dir.glob('part*'):
+            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
+            # belong to in-flight concurrent writers.  Only renamed
+            # final names ``part{N}`` count toward completion.
+            name = p.name
+            suffix = name[len('part'):] if name.startswith('part') else ''
+            if suffix.isdigit():
+                existing.add(name)
+        return set(f'part{i}' for i in range(total_chunks)) - existing
+
+    # Rename the writer-unique tmp file to its final name.
+    os.rename(str(zip_file_path), str(final_path))
+    zip_file_path = final_path
 
     if total_chunks > 1:
-        zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
+    logger.info(f'Uploaded chunk: {zip_file_path}')
+    if assemble:
+        await _finalize_chunked_upload(base_dir=base_dir,
+                                       zip_name=zip_name,
+                                       total_chunks=total_chunks,
+                                       extract=extract)
+    return None
+
+
+async def _finalize_chunked_upload(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    total_chunks: int,
+    extract: bool,
+) -> None:
+    """Assemble parts into a single zip and optionally extract it."""
+    if total_chunks > 1:
+        chunk_dir = base_dir / zip_name
         zip_file_path = base_dir / f'{zip_name}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
                 async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
-                        # Use 64KB buffer to avoid memory overflow, same size
-                        # as shutil.copyfileobj.
+                        # Use 64KB buffer to avoid memory overflow, same
+                        # size as shutil.copyfileobj.
                         data = await f.read(64 * 1024)
                         if not data:
                             break
                         await zip_file.write(data)
-    logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, base_dir)
+    else:
+        # ``{base_dir}/{zip_name}.zip`` (renamed by the receive step).
+        zip_file_path = base_dir / f'{zip_name}.zip'
+
+    if extract:
+        await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
-        await asyncio.to_thread(shutil.rmtree, chunk_dir)
-    return None
+        await asyncio.to_thread(shutil.rmtree, base_dir / zip_name)
 
 
 # TODO(aylei): for backward compatibility, remove after v0.14.0
@@ -1485,13 +1565,8 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-                'file_mounts' / 'blobs' / blob_id)
-    if blob_dir.is_dir():
-        # Refresh mtime to claim a longer lifetime of the blob cache
-        os.utime(blob_dir)
-        return {'exists': True}
-    return {'exists': False}
+    exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
+    return {'exists': exists}
 
 
 @app.post('/upload_v2')
@@ -1507,44 +1582,52 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if not re.match(r'^[0-9a-f]{64}$', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
-    # Here we still isolate the blobs between users, as the upload_id is
-    # provided by the client and we want to be careful about cross-user
-    # blob sharing.
-    mount_dir = await _prepare_client_mount_dir(user_hash, request)
-    blobs_dir = mount_dir / 'blobs'
-    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    target_dir = blobs_dir / upload_id
+
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+
+    storage = bs.get_blob_storage()
+
+    # Ensure blobs directory exists.
+    await anyio.Path(storage.blobs_dir(user_id)).mkdir(parents=True,
+                                                       exist_ok=True)
+    target_dir = storage.get_target_dir(user_id, upload_id)
 
     if target_dir.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
-    # Per-blob filelock to prevent concurrent uploads of the same blob.
-    locks_dir = blobs_dir / '.locks'
-    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
-    lock = filelock.AsyncFileLock(
-        lock_file=str(locks_dir / f'{upload_id}.lock'),
-        executor=executor.get_request_thread_executor())
+    # Receive the chunk WITHOUT holding the upload lock.  Each chunk
+    # writes to a writer-unique tmp file, then atomic-renames to its
+    # final ``part{N}`` name, so concurrent chunk POSTs (parallel
+    # workers, retries, or two clients racing on the same content-
+    # hashed blob_id) don't need lock coordination here.
+    # Note that we skip assemble and extract here since cocurrent chunk
+    # uploads will race, and we do finalize with the upload_lock instead.
+    staging_dir = storage.get_staging_dir(user_id, upload_id)
+    result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                zip_name='staging',
+                                                request=request,
+                                                chunk_index=chunk_index,
+                                                total_chunks=total_chunks,
+                                                extract=False,
+                                                assemble=False)
+    if result is not None:
+        return result
 
-    async with lock:
-        # Re-check after acquiring the lock: another upload may have
-        # completed while we were waiting.
+    # All chunks present — finalize and publish under the upload
+    # lock so exactly one caller does the assemble/extract/rename.
+    async with storage.acquire_upload_lock(user_id, upload_id):
         if target_dir.exists():
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
-
-        # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = blobs_dir / '.staging' / upload_id
-        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
-                                                    zip_name='staging',
-                                                    request=request,
-                                                    chunk_index=chunk_index,
-                                                    total_chunks=total_chunks)
-        if result is not None:
-            return result
-        # Atomic rename of the extracted staging dir to the final
-        # directory (same filesystem).
-        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        if storage.assemble_on_upload() or storage.extract_on_upload():
+            await _finalize_chunked_upload(base_dir=staging_dir,
+                                           zip_name='staging',
+                                           total_chunks=total_chunks,
+                                           extract=storage.extract_on_upload())
+        await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
@@ -1852,7 +1935,8 @@ async def download_logs(
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
+    logs_dir_on_api_server = pathlib.Path(
+        bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     # We should reuse the original request body, so that the env vars, such as
     # user hash, are kept the same.
@@ -1877,8 +1961,13 @@ async def download(download_body: payloads.DownloadBody,
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
+    download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
-        if not str(folder_path).startswith(str(logs_dir_on_api_server)):
+        folder_str = str(folder_path)
+        expanded_str = str(folder_path.expanduser())
+        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
+                folder_str.startswith(download_tmp) or
+                expanded_str.startswith(os.path.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
@@ -2136,6 +2225,10 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
     # Validate request_id prefix matches a single request.
     request_id = await get_expanded_request_id(request_id)
 
+    # Exponential backoff: start fast (10ms) for short requests like
+    # status/queue, then back off to 100ms for long requests like
+    # launch/exec.
+    poll_interval = 0.01
     while True:
         req_status = await requests_lib.get_request_status_async(request_id)
         if req_status is None:
@@ -2148,9 +2241,9 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
             break
         if req_status.status > requests_lib.RequestStatus.RUNNING:
             break
-        # yield control to allow other coroutines to run, sleep shortly
-        # to avoid storming the DB and CPU in the meantime
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(poll_interval)
+        # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
+        poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
     # TODO(aylei): refine this, /api/get will not be retried and this is
     # meaningless to retry. It is the original request that should be retried.
@@ -2251,12 +2344,6 @@ async def stream(
         # req.log_path is derived from request_id,
         # so it's ok to just grab the request_id in the above query.
         log_path_to_stream = request_task.log_path
-        if not log_path_to_stream.exists():
-            # The log file might be deleted by the request GC daemon but the
-            # request task is still in the database.
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=f'Log of request {request_id!r} has been deleted')
         if request_task.schedule_type == requests_lib.ScheduleType.LONG:
             polling_interval = stream_utils.LONG_REQUEST_POLL_INTERVAL
         del request_task
@@ -2304,13 +2391,24 @@ async def stream(
             user_supplied_request_id
             if user_supplied_request_id else request_id)
 
+    if request_id is not None:
+        content = log_provider.get_log_provider().log_stream(
+            request_id=request_id,
+            log_path=log_path_to_stream,
+            plain_logs=format == 'plain',
+            tail=tail,
+            follow=follow,
+            polling_interval=polling_interval)
+    else:
+        content = stream_utils.log_streamer(request_id=None,
+                                            log_path=log_path_to_stream,
+                                            plain_logs=format == 'plain',
+                                            tail=tail,
+                                            follow=follow,
+                                            polling_interval=polling_interval)
+
     return fastapi.responses.StreamingResponse(
-        content=stream_utils.log_streamer(request_id,
-                                          log_path_to_stream,
-                                          plain_logs=format == 'plain',
-                                          tail=tail,
-                                          follow=follow,
-                                          polling_interval=polling_interval),
+        content=content,
         media_type='text/plain',
         headers=headers,
     )
@@ -2473,6 +2571,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
+        # Whether telemetry/usage collection is enabled
+        telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
     )
 
 
@@ -2558,17 +2658,52 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
+    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
+    # `uv_spawn`, which on Linux always uses fork().
+    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
+    # Python objects; if any sqlite3 statement is in that set, its
+    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # static allocator mutex. That mutex was held by another parent thread at
+    # the fork moment (aiosqlite worker), and the child only has one thread,
+    # so no one ever releases it. Child deadlocks before execv, leaks the
+    # parent's inherited fds (including every `.<request>.lock` flock), and
+    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
+    # parent SIGKILL.
+    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
+    # entirely.
+    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
+        raise RuntimeError(
+            'kubectl not found on PATH with an absolute path; refusing to '
+            'fall back to fork-based spawn which risks the SQLite-mutex '
+            'ghost-worker deadlock.')
+    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
+
+    def _spawn_sync() -> subprocess.Popen:
+        return subprocess.Popen(
+            argv,
+            executable=_KUBECTL_PATH,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=False,
+        )
+
+    loop = asyncio.get_running_loop()
+    proc = await loop.run_in_executor(None, _spawn_sync)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+    # Wrap the sync Popen's stdout pipe as an asyncio StreamReader so the
+    # rest of this handler can stay async.
+    assert proc.stdout is not None
+    stdout_reader = asyncio.StreamReader(loop=loop)
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(stdout_reader, loop=loop),
+        proc.stdout)
 
     # Wait for port-forward to be ready and get the local port
     local_port = None
-    assert proc.stdout is not None
     while True:
-        stdout_line = await proc.stdout.readline()
+        stdout_line = await stdout_reader.readline()
         if stdout_line:
             decoded_line = stdout_line.decode()
             logger.info(f'kubectl port-forward stdout: {decoded_line}')
@@ -2610,7 +2745,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             logger.info('Terminating kubectl port-forward process')
             proc.terminate()
         except ProcessLookupError:
-            stdout = await proc.stdout.read()
+            stdout = await stdout_reader.read()
             logger.error('kubectl port-forward was terminated before the '
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout)}')
@@ -2624,6 +2759,17 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
+        # Reap the kubectl child. `asyncio.create_subprocess_exec` had this
+        # handled by asyncio's child watcher; `subprocess.Popen` is outside
+        # that watcher so we must wait() ourselves or leave a zombie.
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
+                                   timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning(
+                'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
+            proc.kill()
+            await loop.run_in_executor(None, proc.wait)
 
 
 @app.websocket('/slurm-job-ssh-proxy')
@@ -3153,6 +3299,13 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
+    # Always load plugin in main process, an edge case is that the main process
+    # will also run uvicorn server when num_worker=1 and then the plugins will
+    # be installed twice in main process (second time with the uvicorn app).
+    # This is okay since plugin install is considered idempotent.
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.MAIN))
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -3222,6 +3375,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
+        global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
