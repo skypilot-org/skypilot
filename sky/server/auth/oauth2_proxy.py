@@ -23,7 +23,7 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-HOP_BY_HOP_HEADERS = {
+HOP_BY_HOP_HEADERS = frozenset({
     'connection',
     'keep-alive',
     'proxy-authenticate',
@@ -32,7 +32,7 @@ HOP_BY_HOP_HEADERS = {
     'trailer',
     'transfer-encoding',
     'upgrade',
-}
+})
 
 
 @middleware_utils.websocket_aware
