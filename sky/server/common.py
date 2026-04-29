@@ -590,27 +590,19 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         set_api_cookie_jar(cookies, create_if_not_exists=True)
         return server_info
     except (requests.JSONDecodeError, AttributeError) as e:
-        # Try to check if we got redirected to a login page.
-        # Check all URLs in the redirect chain, including the final
-        # destination (response.url). Auth proxies such as Cloudflare
-        # Access redirect FROM the protected URL TO a login URL, so
-        # 'login' only appears in the final URL, not in history URLs.
+        # Check all URLs in the redirect chain including the final destination.
+        # CF Access redirects FROM the protected URL TO a login URL, so
+        # 'login' only appears in response.url, not in history URLs.
         urls_to_check = [r.url for r in response.history] + [response.url]
         for url in urls_to_check:
             parsed = urlparse.urlparse(url)
-            # Log only scheme+host+path; query strings can carry OAuth
-            # state tokens, CF Access JWTs, and internal tenant names.
+            # Strip query/fragment before logging — CF Access embeds JWTs there.
             safe_url = parsed._replace(query='', fragment='').geturl()
             logger.debug(f'Checking URL for auth redirect: {safe_url}')
-            # Heuristic: check if the url looks like a login page or
-            # oauth flow. For Cloudflare Access, match the hostname
-            # suffix rather than a bare substring to avoid false
-            # positives from unrelated domains.
             if any(key in parsed.path for key in ['login', 'oauth2']) or \
                     parsed.netloc.endswith('.cloudflareaccess.com'):
-                logger.debug(f'URL {safe_url} looks like '
-                             'a login page or oauth flow, so try to '
-                             'get the cookie.')
+                logger.debug(f'URL {safe_url} looks like a login page, '
+                             'trying cookie flow.')
                 return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
         logger.warning('Failed to parse API server response: '
                        f'{str(e)}')
