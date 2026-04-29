@@ -73,7 +73,10 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
-import { useAllDataProviders } from '@/plugins/PluginProvider';
+import {
+  useAllDataProviders,
+  usePluginComponents,
+} from '@/plugins/PluginProvider';
 import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
@@ -2929,6 +2932,12 @@ export function GPUs() {
     );
   };
 
+  // Cloud rows are only styled as clickable links when a plugin is wrapping
+  // them with the infra.cloudRow.link slot — pure OSS has no per-cloud
+  // detail page, so making them look clickable would be misleading.
+  const cloudRowIsClickable =
+    usePluginComponents('infra.cloudRow.link').length > 0;
+
   const renderCloudInfrastructure = () => {
     // Show panel-level loading spinner only during initial load when no cloud data at all
     // On subsequent loads, show the table structure with cell-level spinners instead
@@ -3016,7 +3025,13 @@ export function GPUs() {
                                 ),
                               }}
                             />
-                            <span className="text-blue-600 hover:underline cursor-pointer font-medium">
+                            <span
+                              className={
+                                cloudRowIsClickable
+                                  ? 'text-blue-600 hover:underline cursor-pointer font-medium'
+                                  : 'font-medium text-gray-700'
+                              }
+                            >
                               {cloud.name}
                             </span>
                           </div>
