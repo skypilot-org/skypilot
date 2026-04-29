@@ -252,11 +252,6 @@ spec:
           {{- end }}
         ports:
         - containerPort: 46580
-        {{- /* Resolve probe overrides defensively: a user setting
-                apiService.probes (or .liveness / .readiness) to null must
-                not blow up template rendering. ``default dict`` at each
-                level makes the field accessors null-safe; the per-field
-                ``| default`` then supplies the historical default. */}}
         {{- $probes := .Values.apiService.probes | default dict }}
         {{- $liveness := $probes.liveness | default dict }}
         {{- $readiness := $probes.readiness | default dict }}
