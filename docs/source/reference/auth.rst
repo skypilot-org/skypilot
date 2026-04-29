@@ -540,7 +540,7 @@ Navigate to **Zero Trust → Access → Policies → Add a policy** and create:
   * **Selector**: ``Emails ending in``
   * **Value**: ``@<yourorg>.com``
 
-Step 3: Create a Cloudflare Access application
+Step 3: Create a Cloudflare access application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Navigate to **Zero Trust → Access → Applications → Add an application**
@@ -606,7 +606,7 @@ Navigate to **Zero Trust → Access → Policies → Add a policy** and create:
   * **Selector**: ``Warp``
   * **Value**: ``Warp``
 
-Step 2: Add the bypass policy to your Access application
+Step 2: Add the bypass policy to your access application
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 Edit the application created in Step 3 above and add ``bypass-warp`` to its
