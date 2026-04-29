@@ -696,6 +696,8 @@ prometheus:
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
       honor_labels: true
+      scrape_interval: 30s
+      scrape_timeout: 30s
       kubernetes_sd_configs:
         - role: pod
           namespaces:
