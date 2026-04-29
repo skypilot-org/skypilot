@@ -17,6 +17,7 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
+from urllib import parse as urlparse
 from urllib.request import Request
 import uuid
 
@@ -596,12 +597,18 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         # 'login' only appears in the final URL, not in history URLs.
         urls_to_check = [r.url for r in response.history] + [response.url]
         for url in urls_to_check:
-            logger.debug(f'Checking URL for auth redirect: {url}')
+            parsed = urlparse.urlparse(url)
+            # Log only scheme+host+path; query strings can carry OAuth
+            # state tokens, CF Access JWTs, and internal tenant names.
+            safe_url = parsed._replace(query='', fragment='').geturl()
+            logger.debug(f'Checking URL for auth redirect: {safe_url}')
             # Heuristic: check if the url looks like a login page or
-            # oauth flow.
-            if any(key in url for key in ['login', 'oauth2',
-                                          'cloudflareaccess']):
-                logger.debug(f'URL {url} looks like '
+            # oauth flow. For Cloudflare Access, match the hostname
+            # suffix rather than a bare substring to avoid false
+            # positives from unrelated domains.
+            if any(key in parsed.path for key in ['login', 'oauth2']) or \
+                    parsed.netloc.endswith('.cloudflareaccess.com'):
+                logger.debug(f'URL {safe_url} looks like '
                              'a login page or oauth flow, so try to '
                              'get the cookie.')
                 return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
