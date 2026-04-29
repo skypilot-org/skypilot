@@ -162,14 +162,16 @@ class UsageHeartbeatReportEvent(SkyletEvent):
         # whatever is set.
         def _int_env(name: str) -> Optional[int]:
             value = os.environ.get(name)
+            if value is None or value == '':
+                return None
             try:
-                return int(value) if value not in (None, '') else None
+                return int(value)
             except ValueError:
                 return None
 
         def _bool_env(name: str) -> Optional[bool]:
             value = os.environ.get(name)
-            if value in (None, ''):
+            if value is None or value == '':
                 return None
             return value not in ('0', 'false', 'False', 'FALSE')
 
