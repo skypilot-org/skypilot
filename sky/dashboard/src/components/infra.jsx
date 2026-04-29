@@ -2969,11 +2969,22 @@ export function GPUs() {
             </span>
           </div>
           {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              {selectedWorkspace === 'all'
-                ? 'No enabled clouds available.'
-                : `No enabled clouds for workspace "${selectedWorkspace}".`}
-            </p>
+            (cloudLoading && !cloudDataLoaded) ||
+            (hasInfraExtension && pluginInfraLoading) ? (
+              // Don't show "No enabled clouds" while we're still waiting on
+              // either OSS's cloud fetch or a plugin-contributed data feed —
+              // either could still surface clouds before the table renders.
+              <div className="flex items-center py-2 text-sm text-gray-500">
+                <CircularProgress size={16} className="mr-2" />
+                Loading...
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">
+                {selectedWorkspace === 'all'
+                  ? 'No enabled clouds available.'
+                  : `No enabled clouds for workspace "${selectedWorkspace}".`}
+              </p>
+            )
           ) : (
             <div
               className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
@@ -3348,6 +3359,10 @@ export function GPUs() {
             </Link>
           )}
         </div>
+        {/* Workspace, Refresh, and plugin header actions only apply to the
+            list view. On a detail page these are hidden — the per-page
+            chrome handles its own back-link + actions. */}
+        {!selectedContext && (
         <div className="flex items-center">
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
@@ -3396,6 +3411,7 @@ export function GPUs() {
           </button>
           <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
         </div>
+        )}
       </div>
 
       <PluginSlot name="infra.attentionBanner" />
