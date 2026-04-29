@@ -122,56 +122,17 @@
                 "preDeployHook": {
                     "type": "string"
                 },
-                "probes": {
-                    "type": "object",
-                    "properties": {
-                        "liveness": {
-                            "type": "object",
-                            "properties": {
-                                "failureThreshold": {
-                                    "type": "integer"
-                                },
-                                "initialDelaySeconds": {
-                                    "type": "integer"
-                                },
-                                "path": {
-                                    "type": "string"
-                                },
-                                "periodSeconds": {
-                                    "type": "integer"
-                                },
-                                "port": {
-                                    "type": "integer"
-                                },
-                                "timeoutSeconds": {
-                                    "type": "integer"
-                                }
-                            }
-                        },
-                        "readiness": {
-                            "type": "object",
-                            "properties": {
-                                "failureThreshold": {
-                                    "type": "integer"
-                                },
-                                "initialDelaySeconds": {
-                                    "type": "integer"
-                                },
-                                "path": {
-                                    "type": "string"
-                                },
-                                "periodSeconds": {
-                                    "type": "integer"
-                                },
-                                "port": {
-                                    "type": "integer"
-                                },
-                                "timeoutSeconds": {
-                                    "type": "integer"
-                                }
-                            }
-                        }
-                    }
+                "livenessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                },
+                "readinessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
                 },
                 "replicas": {
                     "type": "integer"

@@ -252,22 +252,14 @@ spec:
           {{- end }}
         ports:
         - containerPort: 46580
-        {{- $probes := .Values.apiService.probes | default dict }}
-        {{- $liveness := $probes.liveness | default dict }}
-        {{- $readiness := $probes.readiness | default dict }}
+        {{- with .Values.apiService.livenessProbe }}
         livenessProbe:
-          httpGet:
-            path: {{ $liveness.path | default "/api/health" }}
-            port: {{ $liveness.port | default 46580 }}
-          periodSeconds: {{ $liveness.periodSeconds | default 30 }}
-          failureThreshold: {{ $liveness.failureThreshold | default 3 }}
-          initialDelaySeconds: {{ $liveness.initialDelaySeconds | default 0 }}
-          timeoutSeconds: {{ $liveness.timeoutSeconds | default 1 }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.apiService.readinessProbe }}
         readinessProbe:
-          httpGet:
-            path: {{ $readiness.path | default "/api/health" }}
-            port: {{ $readiness.port | default 46580 }}
-          {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+          {{- if not (hasKey . "successThreshold") }}
+          {{- if eq $.Values.apiService.upgradeStrategy "RollingUpdate" }}
           # When using RollingUpdate strategy, be more patient with the new
           # API server to avoid flaky serving where one of the server process
           # returns ready of the healthz check endpoint while others may still
@@ -278,10 +270,9 @@ spec:
           # other replica to serve requests anyway.
           successThreshold: 1
           {{- end }}
-          failureThreshold: {{ $readiness.failureThreshold | default 3 }}
-          periodSeconds: {{ $readiness.periodSeconds | default 5 }}
-          initialDelaySeconds: {{ $readiness.initialDelaySeconds | default 5 }}
-          timeoutSeconds: {{ $readiness.timeoutSeconds | default 1 }}
+          {{- end }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
