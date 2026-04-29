@@ -506,7 +506,7 @@ Prerequisites
 
 * A domain managed by Cloudflare (e.g. ``skypilot.org``)
 * Cloudflare Zero Trust subscription
-* DNS record pointing your API server's ingress IP to your domain (this example uses ``skypilot.skypilot.org``)
+* DNS record pointing your API server's ingress IP to your domain (this example uses ``${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}``, e.g. ``zerotrust.skypilot.org``)
 
 Step 1: Configure your SSO provider as an identity provider
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -552,8 +552,8 @@ Step 3: Create a Cloudflare access application
    * **Session duration**: ``24 hours``
    * **Public hostname**:
 
-     * **Subdomain**: ``skypilot``
-     * **Domain**: ``skypilot.org``
+     * **Subdomain**: ``DNS_RECORD_NAME`` (e.g. ``zerotrust``)
+     * **Domain**: ``DNS_RECORD_DOMAIN`` (e.g. ``skypilot.org``)
    * **Access policies → Select existing policies**:
 
      * **Allow policy**: ``allow-<yourorg>``
@@ -579,19 +579,16 @@ Step 5: Test access
 .. code-block:: console
 
     # Set your DNS record variables
-    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. skypilot
+    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. zerotrust
     $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
 
-    # Test the API health endpoint (should return a Cloudflare Access redirect)
-    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
-
-    # Test SkyPilot API login (browser will open for the Access challenge)
+    # Log in (browser will open for the Cloudflare Access challenge)
     $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
-    A web browser has been opened at https://skypilot.skypilot.org/token?local_port=8000.
+    A web browser has been opened at https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/token?local_port=8000.
     Please continue the login in the web browser.
     ...
-    Logged into SkyPilot API server at: https://skypilot.skypilot.org
-    └── Dashboard: https://skypilot.skypilot.org/dashboard
+    Logged into SkyPilot API server at: https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
+    └── Dashboard: https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/dashboard
 
 .. _cloudflare-zero-trust-warp:
 
@@ -648,9 +645,17 @@ With WARP connected, login completes without a browser prompt:
 
 .. code-block:: console
 
-    $ sky api login -e https://skypilot.skypilot.org
-    Logged into SkyPilot API server at: https://skypilot.skypilot.org
-    └── Dashboard: https://skypilot.skypilot.org/dashboard
+    # Set your DNS record variables
+    $ DNS_RECORD_NAME=<your_dns_record_name>  # e.g. zerotrust
+    $ DNS_RECORD_DOMAIN=<your_dns_record_domain>  # e.g. skypilot.org
+
+    # Test the API health endpoint
+    $ curl -i https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}/api/health
+    # Should return 200 OK
+
+    # Test SkyPilot API login
+    $ sky api login -e https://${DNS_RECORD_NAME}.${DNS_RECORD_DOMAIN}
+    # Should complete login without browser redirect
 
 
 SkyPilot RBAC
