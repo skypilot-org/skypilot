@@ -1939,25 +1939,32 @@ function InfrastructureHint() {
 
 export function GPUs() {
   // Plugin-contributed extra rows + status data.
-  // OSS does not know any plugin id; we discover providers by hook name and
-  // call each one's `useExtraInfraRows` hook directly.
   //
-  // Rules-of-hooks note: this enumeration relies on the registered-providers
-  // list being stable across renders. Plugins register once during the
-  // 'skydashboard:plugins-ready' event before any page mounts, so the
-  // returned hook count is effectively constant after the first paint.
-  // Adding or removing plugins at runtime is not supported.
+  // OSS does not know any plugin id; we discover providers by hook name.
+  // Each provider's `useExtraInfraRows` hook is called inside its own
+  // child component (`ProviderInfraRowsLoader`, defined below GPUs)
+  // rather than directly in GPUs, so adding/removing data providers does
+  // NOT change the count of hooks called per GPUs render — that would
+  // be a Rules-of-Hooks violation.
   const allDataProviders = useAllDataProviders();
-  const extraInfraRowHooks = allDataProviders
-    .map((p) => p.hooks?.useExtraInfraRows)
-    .filter(Boolean);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const extraInfraResults = extraInfraRowHooks.map((useHook) => useHook());
-  const hasInfraExtension = extraInfraRowHooks.length > 0;
+  const extraInfraProviders = React.useMemo(
+    () => allDataProviders.filter((p) => p.hooks?.useExtraInfraRows),
+    [allDataProviders]
+  );
+  const [extraInfraResultsById, setExtraInfraResultsById] = useState({});
+  const recordExtraInfraResult = React.useCallback((id, result) => {
+    setExtraInfraResultsById((prev) => {
+      if (prev[id] === result) return prev;
+      return { ...prev, [id]: result };
+    });
+  }, []);
+  const hasInfraExtension = extraInfraProviders.length > 0;
+  const extraInfraResults = React.useMemo(
+    () => Object.values(extraInfraResultsById),
+    [extraInfraResultsById]
+  );
   const extraInfraRows = React.useMemo(
     () => extraInfraResults.flatMap((r) => r?.rows ?? []),
-    // extraInfraResults is a fresh array every render but cheap to scan.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [extraInfraResults]
   );
   const extraStatusByKey = React.useMemo(() => {
@@ -1967,13 +1974,16 @@ export function GPUs() {
       for (const [k, v] of r.statusByKey) m.set(k, v);
     }
     return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extraInfraResults]);
-  const pluginInfraLoading = extraInfraResults.some((r) => r?.loading);
+  const pluginInfraLoading =
+    hasInfraExtension &&
+    (extraInfraResults.length < extraInfraProviders.length ||
+      extraInfraResults.some((r) => r?.loading));
   const refreshExtraInfra = React.useCallback(
     () =>
-      Promise.all(extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      Promise.all(
+        extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)
+      ),
     [extraInfraResults]
   );
 
@@ -3276,6 +3286,17 @@ export function GPUs() {
 
   return (
     <>
+      {/* One loader component per registered data-provider that exposes
+          `useExtraInfraRows`. Each loader owns its own hook calls; the
+          plugin's hook count never affects GPUs's hook count. */}
+      {extraInfraProviders.map((p) => (
+        <ProviderInfraRowsLoader
+          key={p.id}
+          providerId={p.id}
+          useHook={p.hooks.useExtraInfraRows}
+          onResult={recordExtraInfraResult}
+        />
+      ))}
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
@@ -3383,6 +3404,20 @@ export function GPUs() {
       />
     </>
   );
+}
+
+// Renders nothing, but calls a plugin-provided custom hook in its own
+// component scope. This isolates the plugin's hook calls from the parent
+// page's render — so adding/removing data providers doesn't change the
+// number of hooks called per parent render (which would be a Rules-of-
+// Hooks violation). Used by GPUs to enumerate `useExtraInfraRows`
+// hooks contributed by plugin data providers.
+function ProviderInfraRowsLoader({ providerId, useHook, onResult }) {
+  const result = useHook();
+  React.useEffect(() => {
+    onResult(providerId, result);
+  });
+  return null;
 }
 
 // Helper table component for cloud GPUs
