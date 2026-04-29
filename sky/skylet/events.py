@@ -156,15 +156,22 @@ class UsageHeartbeatReportEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 600
 
     def _run(self):
-        # Cluster placement and accelerator context are exported into
-        # skylet's environment by start_skylet_on_head_node at
-        # provisioning time. Forward whatever is set.
+        # Cluster placement, accelerator, and provenance context are
+        # exported into skylet's environment by
+        # start_skylet_on_head_node at provisioning time. Forward
+        # whatever is set.
         def _int_env(name: str) -> Optional[int]:
             value = os.environ.get(name)
             try:
                 return int(value) if value not in (None, '') else None
             except ValueError:
                 return None
+
+        def _bool_env(name: str) -> Optional[bool]:
+            value = os.environ.get(name)
+            if value in (None, ''):
+                return None
+            return value not in ('0', 'false', 'False', 'FALSE')
 
         usage_lib.send_heartbeat(
             interval_seconds=self.EVENT_INTERVAL_SECONDS,
@@ -174,6 +181,9 @@ class UsageHeartbeatReportEvent(SkyletEvent):
             gpu_type=os.environ.get('SKYPILOT_HEARTBEAT_GPU_TYPE'),
             num_nodes=_int_env('SKYPILOT_HEARTBEAT_NUM_NODES'),
             gpus_per_node=_int_env('SKYPILOT_HEARTBEAT_GPUS_PER_NODE'),
+            user=os.environ.get('SKYPILOT_HEARTBEAT_USER'),
+            use_spot=_bool_env('SKYPILOT_HEARTBEAT_USE_SPOT'),
+            instance_type=os.environ.get('SKYPILOT_HEARTBEAT_INSTANCE_TYPE'),
         )
 
 

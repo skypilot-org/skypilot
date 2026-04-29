@@ -520,18 +520,28 @@ def start_skylet_on_head_node(
             if mem is not None:
                 env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = str(mem)
 
-        # Cluster placement and accelerator context for skylet's heartbeat
-        # event (sky/skylet/events.py:UsageHeartbeatReportEvent). cloud /
-        # region / zone come from launched_resources directly — they
-        # reflect the actual placement and aren't on cluster_info.
+        # Cluster placement, accelerator, and provenance context for
+        # skylet's heartbeat event (sky/skylet/events.py:
+        # UsageHeartbeatReportEvent). cloud / region / zone / instance_type
+        # / use_spot come from launched_resources directly — they reflect
+        # the actual placement and aren't on cluster_info. The user hash
+        # comes from the orchestrator process so the heartbeat carries
+        # the launching user, not whatever identity the head node would
+        # generate on its own.
         env_vars['SKYPILOT_HEARTBEAT_NUM_NODES'] = str(
             cluster_info.num_instances)
+        env_vars['SKYPILOT_HEARTBEAT_USER'] = common_utils.get_user_hash()
+        env_vars['SKYPILOT_HEARTBEAT_USE_SPOT'] = (
+            '1' if launched_resources.use_spot else '0')
         if launched_resources.cloud is not None:
             env_vars['SKYPILOT_HEARTBEAT_CLOUD'] = str(launched_resources.cloud)
         if launched_resources.region is not None:
             env_vars['SKYPILOT_HEARTBEAT_REGION'] = launched_resources.region
         if launched_resources.zone is not None:
             env_vars['SKYPILOT_HEARTBEAT_ZONE'] = launched_resources.zone
+        if launched_resources.instance_type is not None:
+            env_vars['SKYPILOT_HEARTBEAT_INSTANCE_TYPE'] = (
+                launched_resources.instance_type)
         accelerators = launched_resources.accelerators or {}
         if accelerators:
             gpu_type, count = next(iter(accelerators.items()))
