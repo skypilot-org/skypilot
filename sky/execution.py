@@ -581,6 +581,16 @@ def _execute_dag(
 
         if Stage.PRE_EXEC in stages and not dryrun:
             task_hooks = resources[0].hooks
+            # Hooks payload sent to skylet:
+            #   None  → "leave stored hooks alone" (first launch w/o hooks)
+            #   []    → "clear stored hooks" (re-launch dropping hooks)
+            #   [...] → "replace stored hooks"
+            if task_hooks is not None:
+                hooks_payload: Optional[List[Dict[str, Any]]] = task_hooks
+            elif cluster_exists:
+                hooks_payload = []
+            else:
+                hooks_payload = None
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -590,17 +600,19 @@ def _execute_dag(
                                      down,
                                      hook=hook,
                                      hook_timeout=hook_timeout,
-                                     hooks=task_hooks)
-            elif task_hooks:
+                                     hooks=hooks_payload)
+            elif hooks_payload is not None:
                 # Hooks can fire on preemption/down independent of
                 # autostop — persist them even when autostop is disabled.
+                # Re-launches with hooks dropped from YAML hit this with
+                # hooks_payload=[] so the skylet clears its stored hooks.
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop=-1,
                                      wait_for=None,
                                      down=False,
-                                     hooks=task_hooks)
+                                     hooks=hooks_payload)
 
         job_id = None
         if Stage.EXEC in stages:
