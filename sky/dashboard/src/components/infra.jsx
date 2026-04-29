@@ -71,6 +71,9 @@ import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import { PluginSlot } from '@/plugins/PluginSlot';
+import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
+import { useAllDataProviders } from '@/plugins/PluginProvider';
 import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
@@ -183,6 +186,7 @@ export function InfrastructureSection({
   gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
+  statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -299,6 +303,7 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         GPUs
                       </th>
+                      <th className="p-3 text-right font-medium text-gray-600 w-12" />
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -381,6 +386,28 @@ export function InfrastructureSection({
                         >
                           <td className="p-3">
                             <div className="flex items-center gap-1.5">
+                              <PluginSlot
+                                name="infra.row.namePrefix"
+                                context={{
+                                  id: isSSH
+                                    ? context.replace(/^ssh-/, '')
+                                    : context,
+                                  kind: isSSH
+                                    ? 'ssh'
+                                    : isSlurm
+                                      ? 'slurm'
+                                      : 'k8s',
+                                  status: statusByKey?.get(
+                                    `${
+                                      isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s'
+                                    }:${
+                                      isSSH
+                                        ? context.replace(/^ssh-/, '')
+                                        : context
+                                    }`
+                                  ),
+                                }}
+                              />
                               <NonCapitalizedTooltip
                                 content={`${displayName}${workspaceDisplay}`}
                                 className="text-sm text-muted-foreground"
@@ -475,6 +502,17 @@ export function InfrastructureSection({
                                 {totalGpus}
                               </span>
                             )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <PluginSlot
+                              name="infra.row.actions"
+                              context={{
+                                id: isSSH
+                                  ? context.replace(/^ssh-/, '')
+                                  : context,
+                                kind: isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s',
+                              }}
+                            />
                           </td>
                         </tr>
                       );
@@ -707,6 +745,10 @@ export function ContextDetails({
 
   return (
     <div className="mb-4">
+      <PluginSlot
+        name="infra.contextDetail.statusPanel"
+        context={{ contextName, isSlurm }}
+      />
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -1468,6 +1510,7 @@ function SSHNodePoolDetails({
 
   return (
     <div>
+      <PluginSlot name="infra.sshDetail.statusPanel" context={{ poolName }} />
       {/* SSH Node Pool Info Card */}
       <div className="mb-6">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -1895,6 +1938,45 @@ function InfrastructureHint() {
 }
 
 export function GPUs() {
+  // Plugin-contributed extra rows + status data.
+  // OSS does not know any plugin id; we discover providers by hook name and
+  // call each one's `useExtraInfraRows` hook directly.
+  //
+  // Rules-of-hooks note: this enumeration relies on the registered-providers
+  // list being stable across renders. Plugins register once during the
+  // 'skydashboard:plugins-ready' event before any page mounts, so the
+  // returned hook count is effectively constant after the first paint.
+  // Adding or removing plugins at runtime is not supported.
+  const allDataProviders = useAllDataProviders();
+  const extraInfraRowHooks = allDataProviders
+    .map((p) => p.hooks?.useExtraInfraRows)
+    .filter(Boolean);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const extraInfraResults = extraInfraRowHooks.map((useHook) => useHook());
+  const hasInfraExtension = extraInfraRowHooks.length > 0;
+  const extraInfraRows = React.useMemo(
+    () => extraInfraResults.flatMap((r) => r?.rows ?? []),
+    // extraInfraResults is a fresh array every render but cheap to scan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extraInfraResults]
+  );
+  const extraStatusByKey = React.useMemo(() => {
+    const m = new Map();
+    for (const r of extraInfraResults) {
+      if (!r?.statusByKey) continue;
+      for (const [k, v] of r.statusByKey) m.set(k, v);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraInfraResults]);
+  const pluginInfraLoading = extraInfraResults.some((r) => r?.loading);
+  const refreshExtraInfra = React.useCallback(
+    () =>
+      Promise.all(extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extraInfraResults]
+  );
+
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
   const [cloudLoading, setCloudLoading] = useState(true);
@@ -2489,6 +2571,8 @@ export function GPUs() {
         forceRefresh: true, // Force refresh to run sky check
       });
     }
+    // Also refresh any plugin-contributed infra rows / status data.
+    await refreshExtraInfra();
   };
 
   // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
@@ -2582,20 +2666,30 @@ export function GPUs() {
     }
   }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
-  // Filter cloud infrastructure data based on selected workspace
+  // Filter cloud infrastructure data based on selected workspace, then merge
+  // in any plugin-contributed cloud rows (e.g. misconfigured clouds that have
+  // credentials registered but didn't show up in workspace-enabled clouds).
   const filteredCloudInfraData = React.useMemo(() => {
-    if (!cloudInfraData || cloudInfraData.length === 0) {
-      return [];
-    }
-    // If workspaceEnabledClouds is null (Kubernetes still loading),
-    // show all enabled clouds without filtering by workspace
-    if (workspaceEnabledClouds === null) {
-      return cloudInfraData;
-    }
-    return cloudInfraData.filter((cloud) => {
-      return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
-    });
-  }, [cloudInfraData, workspaceEnabledClouds]);
+    const base = (() => {
+      if (!cloudInfraData || cloudInfraData.length === 0) return [];
+      if (workspaceEnabledClouds === null) return cloudInfraData;
+      return cloudInfraData.filter((cloud) =>
+        workspaceEnabledClouds.includes(cloud.name.toLowerCase())
+      );
+    })();
+    // Merge plugin-contributed cloud rows by id (case-insensitive).
+    const seen = new Set(base.map((c) => (c.id || c.name || '').toLowerCase()));
+    const extras = extraInfraRows
+      .filter((r) => r.kind === 'cloud')
+      .filter((r) => !seen.has((r.id || '').toLowerCase()))
+      .map((r) => ({
+        id: r.id,
+        name: r.name || r.id,
+        clusters: 0,
+        jobs: 0,
+      }));
+    return [...base, ...extras];
+  }, [cloudInfraData, workspaceEnabledClouds, extraInfraRows]);
 
   // Calculate enabled clouds count for the selected workspace
   const filteredEnabledCloudsCount = React.useMemo(() => {
@@ -2862,6 +2956,7 @@ export function GPUs() {
                     <th className="p-3 text-left font-medium text-gray-600 w-24">
                       Jobs
                     </th>
+                    <th className="p-3 text-right font-medium text-gray-600 w-12" />
                   </tr>
                 </thead>
                 <tbody className="bg-card divide-y divide-gray-200">
@@ -2871,11 +2966,26 @@ export function GPUs() {
                     const clusterCount =
                       cloudClusterCounts[cloud.name] ?? cloud.clusters;
                     const jobCount = cloudJobCounts[cloud.name] ?? cloud.jobs;
+                    const cloudId = (
+                      cloud.id ||
+                      cloud.name ||
+                      ''
+                    ).toLowerCase();
 
-                    return (
-                      <tr key={cloud.name} className="hover:bg-muted/50">
+                    const rowInner = (
+                      <>
                         <td className="p-3 font-medium text-gray-700">
-                          {cloud.name}
+                          <div className="flex items-center gap-1.5">
+                            <PluginSlot
+                              name="infra.row.namePrefix"
+                              context={{
+                                id: cloudId,
+                                kind: 'cloud',
+                                status: statusByKey?.get(`cloud:${cloudId}`),
+                              }}
+                            />
+                            <span>{cloud.name}</span>
+                          </div>
                         </td>
                         <td className="p-3">
                           {clusterDataLoading ? (
@@ -2895,7 +3005,26 @@ export function GPUs() {
                             </span>
                           )}
                         </td>
-                      </tr>
+                        <td className="p-3 text-right">
+                          <PluginSlot
+                            name="infra.row.actions"
+                            context={{ id: cloudId, kind: 'cloud' }}
+                          />
+                        </td>
+                      </>
+                    );
+
+                    return (
+                      <PluginWrapperSlot
+                        key={cloud.name}
+                        name="infra.cloudRow.link"
+                        context={{ id: cloudId }}
+                        fallback={
+                          <tr className="hover:bg-muted/50">{rowInner}</tr>
+                        }
+                      >
+                        <tr className="hover:bg-muted/50">{rowInner}</tr>
+                      </PluginWrapperSlot>
                     );
                   })}
                 </tbody>
@@ -2928,6 +3057,7 @@ export function GPUs() {
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2964,6 +3094,7 @@ export function GPUs() {
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
       />
     );
   };
@@ -2987,6 +3118,7 @@ export function GPUs() {
         isSlurm={true}
         contextWorkspaceMap={{}}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
       />
     );
   };
@@ -3020,11 +3152,18 @@ export function GPUs() {
       });
     };
 
-    // If all infrastructure is disabled, add hint card at the top
+    // If all infrastructure is disabled, add hint card at the top.
+    // Plugins can replace the default OSS hint via the `infra.emptyState` slot
+    // (e.g. to show a richer "Connect your first infrastructure" CTA).
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
-        render: () => <InfrastructureHint />,
+        render: () => (
+          <PluginSlot
+            name="infra.emptyState"
+            fallback={<InfrastructureHint />}
+          />
+        ),
         hasActivity: false,
         priority: 0, // Highest priority, always show at the top
       });
@@ -3095,7 +3234,9 @@ export function GPUs() {
     allKubeContextNames.length > 0 &&
     loadedContexts.size < allKubeContextNames.length;
 
-  // Check if any data is currently loading (all panels and subcomponents)
+  // Check if any data is currently loading (all panels and subcomponents).
+  // Plugin-contributed rows count toward "any loading" so Refresh disables
+  // and the indicator stays visible until plugin data resolves too.
   const isAnyLoading =
     kubeLoading ||
     cloudLoading ||
@@ -3103,7 +3244,8 @@ export function GPUs() {
     sshAndKubeJobsDataLoading ||
     clusterDataLoading ||
     isKubeContextsLoading ||
-    isFetching;
+    isFetching ||
+    (hasInfraExtension && pluginInfraLoading);
 
   // Check if all data has been loaded at least once
   const isAllDataLoaded =
@@ -3208,8 +3350,11 @@ export function GPUs() {
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && 'Refresh'}
           </button>
+          <PluginSlot name="infra.headerActions" />
         </div>
       </div>
+
+      <PluginSlot name="infra.attentionBanner" />
 
       {/* Each section handles its own loading state */}
       {renderKubernetesTab()}
