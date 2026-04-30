@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 const extraContent = (process.env.SKYPILOT_DASHBOARD_TAILWIND_CONTENT || '')
-  .split(',')
+  .split(';')
   .map((s) => s.trim())
   .filter(Boolean);
 
