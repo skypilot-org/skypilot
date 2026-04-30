@@ -1439,12 +1439,13 @@ class Optimizer:
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
+                    requested_resources = next(iter(local_task.resources))
                     launchable_resources_map, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
                             blocked_resources=blocked_resources,
                             quiet=False))
-                    if launchable_resources_map.get(resources, []):
+                    if launchable_resources_map.get(requested_resources, []):
                         break
 
         local_graph = local_dag.get_graph()
