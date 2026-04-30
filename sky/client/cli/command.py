@@ -2345,8 +2345,12 @@ def status_kubernetes(verbose: bool):
               type=int,
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
+def cost_report(
+        all: bool,
+        days: int,  # pylint: disable=redefined-builtin
+        output_format: str):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2390,6 +2394,21 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 controllers[controller_name] = cluster_record
         else:
             normal_cluster_records.append(cluster_record)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        all_records = list(normal_cluster_records)
+        for cluster_record in controllers.values():
+            all_records.append(cluster_record)
+        json_records = []
+        for record in all_records:
+            r = dict(record)
+            if r.get('resources') is not None:
+                r['resources'] = str(r['resources'])
+            if r.get('status') is not None:
+                r['status'] = r['status'].value
+            json_records.append(r)
+        click.echo(json.dumps(json_records, indent=2))
+        return
 
     total_cost = status_utils.get_total_cost_of_displayed_records(
         normal_cluster_records, all)

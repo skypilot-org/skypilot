@@ -1,7 +1,7 @@
 """Tests for CLI -o json output support.
 
 Tests for sky status -o json, sky jobs queue -o json, sky gpus list -o json,
-sky api status -o json, and sky queue -o json.
+sky api status -o json, sky queue -o json, and sky cost-report -o json.
 """
 import json
 from unittest import mock
@@ -402,3 +402,79 @@ class TestQueueJsonOutput:
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
         assert parsed == {}
+
+
+class TestCostReportJsonOutput:
+    """Tests for `sky cost-report -o json` output format."""
+
+    def _make_cost_report_record(self, name='mycluster', **kwargs):
+        mock_resources = mock.Mock()
+        mock_resources.__str__ = lambda self: 'AWS(m5.xlarge)'
+        mock_resources.get_cost = mock.Mock(return_value=0.192)
+        defaults = dict(
+            name=name,
+            launched_at=1700000000,
+            duration=3600,
+            num_nodes=1,
+            resources=mock_resources,
+            cluster_hash='abc123',
+            usage_intervals=[(1700000000, 1700003600)],
+            total_cost=0.192,
+            status=status_lib.ClusterStatus.UP,
+            cloud='AWS',
+            region='us-east-1',
+            resources_str='1xAWS(m5.xlarge)',
+        )
+        defaults.update(kwargs)
+        return defaults
+
+    def test_json_output_valid(self, monkeypatch):
+        """Test that -o json produces valid JSON."""
+        records = [self._make_cost_report_record()]
+
+        monkeypatch.setattr('sky.client.sdk.cost_report',
+                            lambda *a, **kw: 'mock_req')
+        monkeypatch.setattr('sky.client.sdk.get', lambda *a, **kw: records)
+        monkeypatch.setattr('sky.utils.controller_utils.Controllers.from_name',
+                            lambda *a, **kw: None)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.cost_report, ['-o', 'json'])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert len(parsed) == 1
+        assert parsed[0]['name'] == 'mycluster'
+        assert parsed[0]['status'] == 'UP'
+        assert parsed[0]['total_cost'] == 0.192
+        assert parsed[0]['resources'] == 'AWS(m5.xlarge)'
+
+    def test_json_output_no_table_text(self, monkeypatch):
+        """Test that -o json suppresses table output."""
+        monkeypatch.setattr('sky.client.sdk.cost_report',
+                            lambda *a, **kw: 'mock_req')
+        monkeypatch.setattr('sky.client.sdk.get', lambda *a, **kw: [])
+        monkeypatch.setattr('sky.utils.controller_utils.Controllers.from_name',
+                            lambda *a, **kw: None)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.cost_report, ['-o', 'json'])
+
+        assert result.exit_code == 0, result.output
+        assert 'Total Cost' not in result.output
+        assert 'experimental' not in result.output
+
+    def test_json_output_empty(self, monkeypatch):
+        """Test JSON output with no clusters."""
+        monkeypatch.setattr('sky.client.sdk.cost_report',
+                            lambda *a, **kw: 'mock_req')
+        monkeypatch.setattr('sky.client.sdk.get', lambda *a, **kw: [])
+        monkeypatch.setattr('sky.utils.controller_utils.Controllers.from_name',
+                            lambda *a, **kw: None)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.cost_report, ['-o', 'json'])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed == []
