@@ -153,7 +153,9 @@ export function Config() {
     <>
       <div className="flex items-center justify-between mb-4 h-8">
         <div className="text-base flex items-center">
-          <span className="text-sky-blue leading-none">SkyPilot API Server</span>
+          <span className="text-sky-blue leading-none">
+            SkyPilot API Server
+          </span>
         </div>
 
         <div className="flex items-center">
