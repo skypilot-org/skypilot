@@ -2156,7 +2156,12 @@ def _check_owner_identity_with_record(cluster_name: str,
                 _raise_identity_error()
         else:
             identity = user_identities[0]
+            context = None
         global_user_state.set_owner_identity_for_cluster(cluster_name, identity)
+        msg = f'Successfully patched {cluster_name} owner identity to {identity}'
+        if context is not None:
+            msg += f' (launched on context {context})'
+        logger.debug(msg)
         return
 
     assert isinstance(owner_identity, list)
