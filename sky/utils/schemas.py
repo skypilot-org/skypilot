@@ -2510,6 +2510,14 @@ def get_config_schema():
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
+            # Free-form section reserved for plugin-specific configuration.
+            # Each plugin reads its own sub-key (e.g. plugins.<name>.<...>);
+            # the schema accepts any structure so plugins do not need to
+            # land schema changes in core to ship new config knobs.
+            'plugins': {
+                'type': 'object',
+                'additionalProperties': True,
+            },
             **cloud_configs,
         },
     }
