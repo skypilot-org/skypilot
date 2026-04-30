@@ -18,6 +18,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -1367,3 +1368,48 @@ def get_display_node_names(node_names_json: Optional[str]) -> Optional[str]:
     except (json.JSONDecodeError, TypeError):
         # Backward compat: return as-is if not valid JSON
         return node_names_json
+
+
+def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
+    """Write text to ``path`` atomically using tmp + rename.
+
+    On shared filesystems (NFS / EFS / k8s PVC) ``open(path, 'w')`` (which
+    uses ``O_TRUNC``) creates a window where readers on other nodes can
+    observe a zero-byte or partially-written file.  ``rename()`` is atomic
+    across the common shared FS implementations, so writers stage the
+    content to a sibling tmp file under the same directory and then rename
+    it into place; readers always see either the old inode or the new
+    inode, never a torn write.
+
+    The tmp file's basename is prefixed with a dot so that glob patterns
+    like ``Include ~/.sky/generated/ssh/*`` (which by default skip
+    dotfiles) do not pick up an in-progress tmp file.
+
+    On any failure -- including SIGINT / SystemExit during the write --
+    the tmp file is removed via ``try/finally`` so we do not leak dotfile
+    fragments into the destination directory.  The original exception is
+    propagated unchanged.
+
+    Args:
+        path: The destination file path.  The parent directory must
+            already exist.
+        content: The text content to write.  Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file.  Defaults to 0o644.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    success = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        os.rename(tmp_path, path)
+        success = True
+    finally:
+        if not success:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass

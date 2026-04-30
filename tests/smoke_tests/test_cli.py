@@ -158,6 +158,10 @@ def test_cli_auto_retry(generic_cloud: str):
     port = common_utils.find_free_port(23456)
     server_url = smoke_tests_utils.get_api_server_url()
     parsed = parse.urlparse(server_url)
+    if parsed.scheme == 'https':
+        pytest.skip(
+            'chaos_proxy does not support HTTPS upstreams; the test cannot '
+            'exercise CLI auto-retry with a TLS API server endpoint.')
     api_proxy_url = f'http://127.0.0.1:{port}'
     if parsed.username and parsed.password:
         api_proxy_url = f'http://{parsed.username}:{parsed.password}@127.0.0.1:{port}'

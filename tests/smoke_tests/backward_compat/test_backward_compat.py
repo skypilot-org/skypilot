@@ -168,6 +168,18 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && python '
             f'{pathlib.Path(__file__).parent / "hotpatch_me_south_1.py"}')
 
+        # Hot-patch old env with click<8.3.0 pin (PR #9459).
+        # Old SkyPilot versions don't pin click<8.3.0 in RAY_INSTALLATION_COMMANDS
+        # or the cloud-deps install. typer 0.25.x transitively pulls click>=8.2.1
+        # with no upper bound, so uv resolves click to 8.3.x on the controller.
+        # ray 2.9.3 then crashes on import via copy.deepcopy on Click Sentinels,
+        # surfacing as 'Failed to start ray on the head node'.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-28 (which includes commit a1a1f0bef).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
+
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '

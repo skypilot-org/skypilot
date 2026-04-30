@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -122,6 +123,11 @@ P = ParamSpec('P')
 _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
+
+# Resolved once at import so `subprocess.Popen(executable=...)` gets an
+# absolute path — a required precondition for Python subprocess to route
+# through posix_spawn instead of fork_exec.
+_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
@@ -1412,13 +1418,17 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    # Write chunk to a unique private path first, so concurrent uploads for
+    # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = base_dir / f'{zip_name}.zip'
+        final_path = base_dir / f'{zip_name}.zip'
+        zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
         chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+        final_path = chunk_dir / f'part{chunk_index}'
+        zip_file_path = chunk_dir / f'part{chunk_index}.tmp.{uuid.uuid4().hex}'
 
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
@@ -1440,35 +1450,64 @@ async def _receive_and_assemble_chunks(
                     f'{common_utils.format_exception(e)}'))
 
     def get_missing_chunks(total_chunks: int) -> Set[str]:
-        return set(f'part{i}' for i in range(total_chunks)) - set(
-            p.name for p in chunk_dir.glob('part*'))
+        existing = set()
+        for p in chunk_dir.glob('part*'):
+            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
+            # belong to in-flight concurrent writers.  Only renamed
+            # final names ``part{N}`` count toward completion.
+            name = p.name
+            suffix = name[len('part'):] if name.startswith('part') else ''
+            if suffix.isdigit():
+                existing.add(name)
+        return set(f'part{i}' for i in range(total_chunks)) - existing
+
+    # Rename the writer-unique tmp file to its final name.
+    os.rename(str(zip_file_path), str(final_path))
+    zip_file_path = final_path
 
     if total_chunks > 1:
-        zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        if assemble:
-            zip_file_path = base_dir / f'{zip_name}.zip'
-            async with aiofiles.open(zip_file_path, 'wb') as zip_file:
-                for chunk in range(total_chunks):
-                    async with aiofiles.open(chunk_dir / f'part{chunk}',
-                                             'rb') as f:
-                        while True:
-                            # Use 64KB buffer to avoid memory overflow, same
-                            # size as shutil.copyfileobj.
-                            data = await f.read(64 * 1024)
-                            if not data:
-                                break
-                            await zip_file.write(data)
-    logger.info(f'Uploaded zip file: {zip_file_path}')
+    logger.info(f'Uploaded chunk: {zip_file_path}')
+    if assemble:
+        await _finalize_chunked_upload(base_dir=base_dir,
+                                       zip_name=zip_name,
+                                       total_chunks=total_chunks,
+                                       extract=extract)
+    return None
+
+
+async def _finalize_chunked_upload(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    total_chunks: int,
+    extract: bool,
+) -> None:
+    """Assemble parts into a single zip and optionally extract it."""
+    if total_chunks > 1:
+        chunk_dir = base_dir / zip_name
+        zip_file_path = base_dir / f'{zip_name}.zip'
+        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
+            for chunk in range(total_chunks):
+                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
+                    while True:
+                        # Use 64KB buffer to avoid memory overflow, same
+                        # size as shutil.copyfileobj.
+                        data = await f.read(64 * 1024)
+                        if not data:
+                            break
+                        await zip_file.write(data)
+    else:
+        # ``{base_dir}/{zip_name}.zip`` (renamed by the receive step).
+        zip_file_path = base_dir / f'{zip_name}.zip'
+
     if extract:
         await unzip_file(zip_file_path, base_dir)
-    if total_chunks > 1 and assemble:
-        await asyncio.to_thread(shutil.rmtree, chunk_dir)
-    return None
+    if total_chunks > 1:
+        await asyncio.to_thread(shutil.rmtree, base_dir / zip_name)
 
 
 # TODO(aylei): for backward compatibility, remove after v0.14.0
@@ -1560,27 +1599,35 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
+    # Receive the chunk WITHOUT holding the upload lock.  Each chunk
+    # writes to a writer-unique tmp file, then atomic-renames to its
+    # final ``part{N}`` name, so concurrent chunk POSTs (parallel
+    # workers, retries, or two clients racing on the same content-
+    # hashed blob_id) don't need lock coordination here.
+    # Note that we skip assemble and extract here since cocurrent chunk
+    # uploads will race, and we do finalize with the upload_lock instead.
+    staging_dir = storage.get_staging_dir(user_id, upload_id)
+    result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                zip_name='staging',
+                                                request=request,
+                                                chunk_index=chunk_index,
+                                                total_chunks=total_chunks,
+                                                extract=False,
+                                                assemble=False)
+    if result is not None:
+        return result
+
+    # All chunks present — finalize and publish under the upload
+    # lock so exactly one caller does the assemble/extract/rename.
     async with storage.acquire_upload_lock(user_id, upload_id):
-        # Re-check after acquiring the lock: another upload may have
-        # completed while we were waiting.
         if target_dir.exists():
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
-
-        # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = storage.get_staging_dir(user_id, upload_id)
-        result = await _receive_and_assemble_chunks(
-            base_dir=staging_dir,
-            zip_name='staging',
-            request=request,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            extract=storage.extract_on_upload(),
-            assemble=storage.assemble_on_upload())
-        if result is not None:
-            return result
-        # Atomic rename of the extracted staging dir to the final
-        # directory (same filesystem).
+        if storage.assemble_on_upload() or storage.extract_on_upload():
+            await _finalize_chunked_upload(base_dir=staging_dir,
+                                           zip_name='staging',
+                                           total_chunks=total_chunks,
+                                           extract=storage.extract_on_upload())
         await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
@@ -2693,17 +2740,52 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
+    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
+    # `uv_spawn`, which on Linux always uses fork().
+    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
+    # Python objects; if any sqlite3 statement is in that set, its
+    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # static allocator mutex. That mutex was held by another parent thread at
+    # the fork moment (aiosqlite worker), and the child only has one thread,
+    # so no one ever releases it. Child deadlocks before execv, leaks the
+    # parent's inherited fds (including every `.<request>.lock` flock), and
+    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
+    # parent SIGKILL.
+    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
+    # entirely.
+    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
+        raise RuntimeError(
+            'kubectl not found on PATH with an absolute path; refusing to '
+            'fall back to fork-based spawn which risks the SQLite-mutex '
+            'ghost-worker deadlock.')
+    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
+
+    def _spawn_sync() -> subprocess.Popen:
+        return subprocess.Popen(
+            argv,
+            executable=_KUBECTL_PATH,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=False,
+        )
+
+    loop = asyncio.get_running_loop()
+    proc = await loop.run_in_executor(None, _spawn_sync)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+    # Wrap the sync Popen's stdout pipe as an asyncio StreamReader so the
+    # rest of this handler can stay async.
+    assert proc.stdout is not None
+    stdout_reader = asyncio.StreamReader(loop=loop)
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(stdout_reader, loop=loop),
+        proc.stdout)
 
     # Wait for port-forward to be ready and get the local port
     local_port = None
-    assert proc.stdout is not None
     while True:
-        stdout_line = await proc.stdout.readline()
+        stdout_line = await stdout_reader.readline()
         if stdout_line:
             decoded_line = stdout_line.decode()
             logger.info(f'kubectl port-forward stdout: {decoded_line}')
@@ -2745,7 +2827,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             logger.info('Terminating kubectl port-forward process')
             proc.terminate()
         except ProcessLookupError:
-            stdout = await proc.stdout.read()
+            stdout = await stdout_reader.read()
             logger.error('kubectl port-forward was terminated before the '
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout)}')
@@ -2759,6 +2841,17 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
+        # Reap the kubectl child. `asyncio.create_subprocess_exec` had this
+        # handled by asyncio's child watcher; `subprocess.Popen` is outside
+        # that watcher so we must wait() ourselves or leave a zombie.
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
+                                   timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning(
+                'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
+            proc.kill()
+            await loop.run_in_executor(None, proc.wait)
 
 
 @app.websocket('/slurm-job-ssh-proxy')

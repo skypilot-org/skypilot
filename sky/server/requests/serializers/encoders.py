@@ -154,7 +154,7 @@ def encode_status_kubernetes(
 @register_encoder('jobs.queue')
 def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
-        job['status'] = job['status'].value
+        job['status'] = getattr(job['status'], 'value', job['status'])
     return jobs
 
 

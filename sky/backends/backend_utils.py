@@ -240,6 +240,29 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     ('provider', 'security_group'),
 ]
 
+# Filenames in `file_mounts` whose content sha256 should NOT participate in the
+# cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
+# transient on-disk caches whose bytes drift across replicas / time without any
+# user-meaningful semantic change (e.g., gcloud token refreshes), and including
+# them in the hash makes `sky launch --fast` re-provision unexpectedly.
+#
+# These files are still uploaded to the cluster as part of file_mounts -- we
+# only skip them from the deterministic hash used for the --fast cache key.
+# The cluster's gcloud will tolerate a slightly-stale cache (refresh tokens
+# are long-lived; access tokens auto-refresh on use).
+_FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
+    # gcloud OAuth credentials cache (refresh tokens + token metadata).
+    'credentials.db',
+    'credentials.db-journal',
+    'credentials.db-wal',
+    'credentials.db-shm',
+    # gcloud short-lived access token cache (1 hour TTL, auto-refreshed).
+    'access_tokens.db',
+    'access_tokens.db-journal',
+    'access_tokens.db-wal',
+    'access_tokens.db-shm',
+})
+
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
@@ -1483,7 +1506,9 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
         # case we hash the contents of the symlink destination.
         if os.path.isfile(expanded_src):
             config_hash.update('file'.encode('utf-8'))
-            config_hash.update(_hash_file(expanded_src))
+            if os.path.basename(expanded_src) not in (
+                    _FILE_MOUNT_BASENAMES_SKIP_HASH):
+                config_hash.update(_hash_file(expanded_src))
 
         # This can also be a symlink to a directory. os.walk will treat it as a
         # normal directory and list the contents of the symlink destination.
@@ -1513,8 +1538,14 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
                 # contents.
                 for filename in filenames:
                     config_hash.update(filename.encode('utf-8') + b'\0')
-                    config_hash.update(
-                        _hash_file(os.path.join(dirpath, filename)))
+                    # Filename is recorded above (so an add/remove of a
+                    # transient cache file is still detected); we just don't
+                    # hash the file content for the skip-list, because that
+                    # content drifts independently of any user-meaningful
+                    # change (see _FILE_MOUNT_BASENAMES_SKIP_HASH).
+                    if filename not in _FILE_MOUNT_BASENAMES_SKIP_HASH:
+                        config_hash.update(
+                            _hash_file(os.path.join(dirpath, filename)))
                 config_hash.update(b'\0')
 
         else:

@@ -4,6 +4,7 @@ import functools
 import hashlib
 import json
 import os
+import shlex
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -518,7 +519,41 @@ def start_skylet_on_head_node(
                 env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = str(vcpus)
             if mem is not None:
                 env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = str(mem)
-        return '; '.join([f'export {k}={v}' for k, v in env_vars.items()])
+
+        # Cluster placement, accelerator, and provenance context for
+        # skylet's heartbeat event (sky/skylet/events.py:
+        # UsageHeartbeatReportEvent). cloud / region / zone / instance_type
+        # / use_spot come from launched_resources directly — they reflect
+        # the actual placement and aren't on cluster_info. The user hash
+        # comes from the orchestrator process so the heartbeat carries
+        # the launching user, not whatever identity the head node would
+        # generate on its own.
+        env_vars['SKYPILOT_HEARTBEAT_NUM_NODES'] = str(
+            cluster_info.num_instances)
+        env_vars['SKYPILOT_HEARTBEAT_USER'] = common_utils.get_user_hash()
+        env_vars['SKYPILOT_HEARTBEAT_USE_SPOT'] = (
+            '1' if launched_resources.use_spot else '0')
+        if launched_resources.cloud is not None:
+            env_vars['SKYPILOT_HEARTBEAT_CLOUD'] = str(launched_resources.cloud)
+        if launched_resources.region is not None:
+            env_vars['SKYPILOT_HEARTBEAT_REGION'] = launched_resources.region
+        if launched_resources.zone is not None:
+            env_vars['SKYPILOT_HEARTBEAT_ZONE'] = launched_resources.zone
+        if launched_resources.instance_type is not None:
+            env_vars['SKYPILOT_HEARTBEAT_INSTANCE_TYPE'] = (
+                launched_resources.instance_type)
+        accelerators = launched_resources.accelerators or {}
+        if accelerators:
+            gpu_type, count = next(iter(accelerators.items()))
+            env_vars['SKYPILOT_HEARTBEAT_GPU_TYPE'] = str(gpu_type)
+            env_vars['SKYPILOT_HEARTBEAT_GPUS_PER_NODE'] = str(int(count))
+
+        # Quote values so shell metacharacters in any field (e.g. an
+        # exotic K8s context derived region/zone, a hyphenated GPU type,
+        # or a future env var that carries a path or sentence) cannot
+        # break the export. shlex.quote is a no-op on plain alphanumerics.
+        return '; '.join(
+            f'export {k}={shlex.quote(v)}' for k, v in env_vars.items())
 
     runners = provision.get_command_runners(cluster_info.provider_name,
                                             cluster_info, **ssh_credentials)
@@ -530,7 +565,8 @@ def start_skylet_on_head_node(
     # access the path to the cloud CLIs.
     set_usage_run_id_cmd = _set_usage_run_id_cmd()
     # Set the skypilot environment variables, including the usage type, debug
-    # info, and other options.
+    # info, other options, and cluster identity / accelerator context for
+    # skylet's heartbeat event.
     set_skypilot_env_var_cmd = _set_skypilot_env_var_cmd()
     returncode, stdout, stderr = head_runner.run(
         f'{set_usage_run_id_cmd}; {set_skypilot_env_var_cmd}; '

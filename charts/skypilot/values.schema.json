@@ -89,6 +89,31 @@
                         "null"
                     ]
                 },
+                "livenessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "httpGet": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "periodSeconds": {
+                            "type": "integer"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer"
+                        }
+                    }
+                },
                 "logs": {
                     "type": "object",
                     "properties": {
@@ -122,24 +147,34 @@
                 "preDeployHook": {
                     "type": "string"
                 },
-                "probes": {
-                    "type": "object",
+                "readinessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
                     "properties": {
-                        "liveness": {
+                        "failureThreshold": {
+                            "type": "integer"
+                        },
+                        "httpGet": {
                             "type": "object",
                             "properties": {
-                                "timeoutSeconds": {
+                                "path": {
+                                    "type": "string"
+                                },
+                                "port": {
                                     "type": "integer"
                                 }
                             }
                         },
-                        "readiness": {
-                            "type": "object",
-                            "properties": {
-                                "timeoutSeconds": {
-                                    "type": "integer"
-                                }
-                            }
+                        "initialDelaySeconds": {
+                            "type": "integer"
+                        },
+                        "periodSeconds": {
+                            "type": "integer"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer"
                         }
                     }
                 },
