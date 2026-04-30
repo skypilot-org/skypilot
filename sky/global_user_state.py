@@ -2179,6 +2179,90 @@ def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
     return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
 
 
+_CHECK_RESULTS_KEY_PREFIX = 'check_results_'
+
+
+def _get_check_results_key(workspace: str) -> str:
+    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
+
+
+@metrics_lib.time_me
+def get_cached_check_results(
+        workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Return the persisted check_results dict for a workspace, or {}.
+
+    Shape:
+        {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(config_table).filter_by(
+            key=_get_check_results_key(workspace)).first()
+    if row is None or row.value is None:
+        return {}
+    try:
+        return json.loads(row.value)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning(
+            f'Corrupt check_results row for workspace {workspace!r}; '
+            f'returning empty dict.')
+        return {}
+
+
+@metrics_lib.time_me
+def set_check_results(
+    results: Dict[str, Dict[str, Dict[str, Any]]],
+    workspace: str,
+    *,
+    is_full_workspace_run: bool,
+) -> None:
+    """Persist `results` for `workspace`.
+
+    `is_full_workspace_run=True` replaces the entire row (drops clouds /
+    contexts not present in `results`).  `False` merges at cloud
+    granularity: read the existing row, replace only the cloud entries
+    in `results`, write back.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+
+    key = _get_check_results_key(workspace)
+    with orm.Session(engine) as session:
+        if is_full_workspace_run:
+            new_value = results
+        else:
+            # Read-modify-write inside a single session/transaction so that
+            # concurrent scoped writes for different clouds in the same
+            # workspace get last-writer-wins at the row level rather than
+            # partial-merge corruption.
+            row = session.query(config_table).filter_by(key=key).first()
+            existing: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            if row is not None and row.value is not None:
+                try:
+                    existing = json.loads(row.value)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f'Corrupt check_results row for workspace '
+                                   f'{workspace!r}; replacing.')
+                    existing = {}
+            new_value = dict(existing)
+            for cloud_repr, ctx_dict in results.items():
+                new_value[cloud_repr] = ctx_dict
+
+        serialized = json.dumps(new_value)
+        insert_stmnt = insert_func(config_table).values(key=key,
+                                                        value=serialized)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_table.c.key],
+            set_={config_table.c.value: serialized})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
 @metrics_lib.time_me
 def get_allowed_clouds(workspace: str) -> List[str]:
     engine = _db_manager.get_engine()
