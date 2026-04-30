@@ -69,7 +69,15 @@ apiService:
   # The default value is 60 seconds.
   terminationGracePeriodSeconds: 60
 
-  # Liveness and readiness probe configuration for the API server container.
+  # Probe configuration for the API server container.
+  #
+  # If a startupProbe is set, the kubelet runs only that probe until it
+  # succeeds; only then do liveness/readiness probes start. This is the
+  # right place to absorb cold-start latency (Python imports, plugin
+  # loading, first PG round-trip) without weakening the steady-state
+  # liveness threshold.
+  # @schema type: [object, null]
+  startupProbe: null
   # @schema type: [object, null]
   livenessProbe:
     httpGet:
