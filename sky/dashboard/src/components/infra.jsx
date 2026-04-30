@@ -2584,14 +2584,19 @@ export function GPUs() {
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
 
-    if (refreshDataRef.current) {
-      await refreshDataRef.current({
-        showLoadingIndicators: true,
-        forceRefresh: true, // Force refresh to run sky check
-      });
-    }
-    // Also refresh any plugin-contributed infra rows / status data.
-    await refreshExtraInfra();
+    // Run OSS data refresh and plugin extras refresh in parallel so the
+    // status dots update as soon as the (much faster) plugin call returns
+    // — without this, dots stay frozen on stale data until the slower
+    // sky-check pass finishes.
+    await Promise.all([
+      refreshDataRef.current
+        ? refreshDataRef.current({
+            showLoadingIndicators: true,
+            forceRefresh: true, // Force refresh to run sky check
+          })
+        : Promise.resolve(),
+      refreshExtraInfra(),
+    ]);
   };
 
   // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
