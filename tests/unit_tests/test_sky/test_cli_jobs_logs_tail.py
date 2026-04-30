@@ -18,11 +18,18 @@ class TestJobsLogsTailCli:
         # Patch the module-level `managed_jobs` alias (= sky.jobs) in
         # command.py. Don't mock sys.exit — click's UsageError handler
         # raises SystemExit, and CliRunner captures it into exit_code.
+        # Mock download_logs_streaming to return None so the CLI's
+        # streaming-first sync-down branch falls through to the legacy
+        # download_logs (which we also mock).
         with mock.patch.object(command.managed_jobs, 'tail_logs') as tail_mock, \
              mock.patch.object(command.managed_jobs,
-                               'download_logs') as download_mock:
+                               'download_logs') as download_mock, \
+             mock.patch.object(
+                 command.managed_jobs,
+                 'download_logs_streaming') as stream_mock:
             tail_mock.return_value = 0
             download_mock.return_value = {}
+            stream_mock.return_value = None
             result = self.runner.invoke(command.jobs_logs, args)
             return result, tail_mock, download_mock
 
