@@ -656,16 +656,28 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 
     pid = str(os.getpid())
     lag_threshold = perf_utils.get_loop_lag_threshold()
+    # Tumbling 30s window peak per process — paired with the pid-less lag
+    # histogram so we keep per-worker visibility without histogram cardinality.
+    lag_max_window_seconds = 30.0
+    lag_max_window_end = time.time() + lag_max_window_seconds
+    lag_max_in_window = 0.0
 
     def tick():
-        nonlocal target
+        nonlocal target, lag_max_window_end, lag_max_in_window
         now = loop.time()
         lag = max(0.0, now - target)
         if lag_threshold is not None and lag > lag_threshold:
             logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
                            f'{lag_threshold} seconds.')
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
-            pid=pid).observe(lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
+        wall = time.time()
+        if wall >= lag_max_window_end:
+            lag_max_window_end = wall + lag_max_window_seconds
+            lag_max_in_window = lag
+        else:
+            lag_max_in_window = max(lag_max_in_window, lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+            pid=pid).set(lag_max_in_window)
         target = now + interval
         loop.call_at(target, tick)
 
