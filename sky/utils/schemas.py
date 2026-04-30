@@ -44,16 +44,7 @@ _extra_plugin_properties: Dict[str, Any] = {}
 
 
 def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
-    """Register a sub-property of the top-level `plugins:` config section.
-
-    Each plugin owns one key under `plugins:`. e.g. the HA plugin
-    registers ``'ha'`` and reads its config from ``plugins.ha.<...>``.
-
-    Args:
-        name: The plugin's key under `plugins:`.
-        schema: The JSON Schema for the property
-            (e.g., {'type': 'object', 'properties': {...}}).
-    """
+    """Register a sub-property of the top-level `plugins:` config section."""
     if name in _extra_plugin_properties:
         raise ValueError(f'Plugin property {name!r} is already registered.')
     _extra_plugin_properties[name] = schema
@@ -2531,16 +2522,13 @@ def get_config_schema():
             'daemons': daemon_schema,
             'data': data_schema,
             **cloud_configs,
-            # Reserved namespace for plugin-specific config. Each plugin
-            # owns one key under `plugins:` and registers its sub-schema
-            # via register_plugin_property(). additionalProperties=True
-            # so that disabling a plugin (its register call no longer
-            # runs) does not invalidate an existing config block — the
-            # server should not refuse to start just because some
-            # `plugins.<retired>:` entry is sitting in the user's config.
+            # For plugin-specific config.
             'plugins': {
                 'type': 'object',
                 'required': [],
+                # Allow unknown properties since a plugin can be turned off
+                # and the previously valid config should not block server
+                # from reading the config file.
                 'additionalProperties': True,
                 'properties': _extra_plugin_properties,
             },
