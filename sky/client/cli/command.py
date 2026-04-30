@@ -450,15 +450,24 @@ _TAIL_OPTION = click.option(
           f'--tail 0 to print the entire log.'))
 
 
-def _apply_default_tail(tail: int) -> int:
+def _apply_default_tail(tail: int, follow: bool = True) -> int:
     """Resolve a raw --tail value from the Click option above.
 
     -1 sentinel (user didn't pass --tail) → apply the implicit default
     and print a one-line stderr hint so users know the output was
     truncated. Otherwise pass through (0 / negatives = "no limit",
     positive ints = that count).
+
+    The implicit default differs by mode: live-tail (``--follow``,
+    default) uses ``_DEFAULT_TAIL_LINES`` so opening a multi-GB log
+    doesn't dump the whole thing upfront; snapshot mode
+    (``--no-follow``) returns 0 so scripts that grep
+    ``sky jobs logs --no-follow | grep <marker>`` for markers near the
+    start of the log keep working.
     """
     if tail == -1:
+        if not follow:
+            return 0
         click.echo(
             f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
             f'Pass --tail 0 to print the entire log.',
@@ -2676,7 +2685,10 @@ def logs(
     # tail=0 (from --tail 0 / --tail all) means "no limit"; the cluster
     # SDK already uses 0 to mean unbounded.
     sys.exit(
-        sdk.tail_logs(cluster, job_id, follow, tail=_apply_default_tail(tail)))
+        sdk.tail_logs(cluster,
+                      job_id,
+                      follow,
+                      tail=_apply_default_tail(tail, follow=follow)))
 
 
 @cli.command()
@@ -6028,7 +6040,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 'or redirect stdout to save it to a file.')
         tail_lines: Optional[int] = None
     else:
-        n = _apply_default_tail(tail)
+        n = _apply_default_tail(tail, follow=follow)
         tail_lines = n if n > 0 else None
     try:
         if sync_down:

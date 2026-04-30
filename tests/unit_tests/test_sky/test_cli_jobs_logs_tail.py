@@ -40,14 +40,26 @@ class TestJobsLogsTailCli:
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') == 100
 
-    def test_tail_default_truncates_at_1000(self):
-        """Default --tail (no explicit flag) is 1000 lines — speed-up
-        for multi-GB logs. Users opt back into 'all' via --tail 0/-1.
+    def test_tail_default_follow_truncates_at_1000(self):
+        """Default --tail (no explicit flag) in follow mode is 1000
+        lines — speed-up for multi-GB logs. Users opt back into 'all'
+        via --tail 0.
         """
+        # follow=True is the default; pass no --no-follow.
         result, tail_mock, _ = self._invoke(['1'])
         assert tail_mock.called, result.output
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') == 1000
+
+    def test_tail_default_no_follow_means_all(self):
+        """Default --tail with --no-follow is 'all lines' — preserves
+        pre-PR behavior so scripts that grep for early markers (e.g.
+        'sky jobs logs --no-follow | grep <marker>') keep working.
+        """
+        result, tail_mock, _ = self._invoke(['--no-follow', '1'])
+        assert tail_mock.called, result.output
+        _, kwargs = tail_mock.call_args
+        assert kwargs.get('tail') is None
 
     def test_tail_zero_means_all_at_sdk(self):
         """--tail 0 explicitly opts into 'all lines' (None at the SDK)."""
