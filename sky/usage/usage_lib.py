@@ -1,6 +1,7 @@
 """Logging events to Grafana Loki."""
 
 import contextlib
+import contextvars
 import datetime
 import enum
 import json
@@ -9,6 +10,7 @@ import time
 import traceback
 import typing
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+import uuid
 
 from typing_extensions import ParamSpec
 
@@ -88,7 +90,15 @@ class UsageMessageToReport(MessageToReport):
         # auth is enabled at the API server level.
         self.client_user_hash: Optional[str] = os.environ.get(
             skylet_constants.CLIENT_USER_HASH_ENV_VAR)
-        self.run_id: str = common_utils.get_usage_run_id()
+        # Read SKYPILOT_USAGE_RUN_ID directly. ``os.environ`` is hijacked
+        # to be SkyPilotContext aware, so this read picks up per-context
+        # overrides (e.g. those installed by ``ctx.override_envs`` in
+        # ``sky.jobs.controller.run_job_loop``) and is re-evaluated on
+        # every fresh construction — including when
+        # ``messages.reset(USAGE)`` rebuilds the message after a
+        # decorated entrypoint exits.
+        self.run_id: str = (os.environ.get(constants.USAGE_RUN_ID_ENV_VAR) or
+                            str(uuid.uuid4()))
         self.sky_version: str = sky.__version__
         self.sky_commit: str = sky.__commit__
 
@@ -433,7 +443,97 @@ class MessageCollection:
         return self._messages.values()
 
 
-messages = MessageCollection()
+# Per-context MessageCollection. Reads/writes to ``messages`` go through
+# this ContextVar so that asynchronous tasks (e.g. concurrent JobController
+# coroutines in the consolidated managed jobs controller process) each get
+# their own message state instead of stomping on a process-wide singleton.
+#
+# Lazy creation: the first access in any contextvars Context creates a
+# MessageCollection and installs it via ``ContextVar.set`` — that set is
+# scoped to the current Context, so siblings (e.g. distinct
+# @contextual_async coroutines, each running inside its own copied
+# Context) get independent instances. Synchronous callers in the same
+# Context (e.g. plain CLI use) continue to share one collection.
+_messages_var: contextvars.ContextVar[Optional[MessageCollection]] = (
+    contextvars.ContextVar('usage_messages', default=None))
+
+
+def _get_messages() -> MessageCollection:
+    """Return the MessageCollection for the current context.
+
+    Lazily creates a fresh MessageCollection the first time it is
+    accessed in a given contextvars Context, so different async tasks
+    (whose Contexts are independent copies) see independent collections.
+    """
+    ctx_messages = _messages_var.get()
+    if ctx_messages is None:
+        ctx_messages = MessageCollection()
+        _messages_var.set(ctx_messages)
+    return ctx_messages
+
+
+def install_fresh_messages_for_current_context() -> None:
+    """Install a freshly-initialized MessageCollection in this Context.
+
+    Use this at boundaries where the caller has just established a new
+    per-task identity (e.g. a managed job's controller coroutine after
+    loading the per-job env file). It overrides any MessageCollection
+    inherited from a parent Context — for example, one created at
+    module import time, when class-body decorators like
+    ``@usage_lib.messages.usage.update_runtime('provision')`` first
+    accessed the proxy and triggered lazy creation against the process
+    env (which carries the run id of whoever first spawned this
+    process, not of the per-task caller).
+
+    The override is scoped to the current contextvars Context, so
+    sibling tasks (each with their own Context via
+    ``@context.contextual_async``) keep their own collections. The new
+    collection's ``UsageMessageToReport.__init__`` reads
+    ``SKYPILOT_USAGE_RUN_ID`` directly from ``os.environ`` (which is
+    SkyPilotContext aware), so the new run id reflects the per-task
+    env that was just installed via ``ctx.override_envs``. Subsequent
+    ``messages.reset(USAGE)`` calls inside this Context (e.g. from
+    ``_send_to_loki`` after ``sdk.api_start``'s entrypoint context
+    manager exits) will likewise re-read env via the same path and
+    keep the per-task run id stable across resets.
+    """
+    _messages_var.set(MessageCollection())
+
+
+class _MessagesProxy:
+    """Module-level facade that delegates to the per-context collection.
+
+    Existing call sites read/write ``messages.usage.foo`` etc.; this proxy
+    forwards each access to the MessageCollection associated with the
+    current context, so callers do not need to change.
+    """
+
+    @property
+    def usage(self) -> UsageMessageToReport:
+        return _get_messages().usage
+
+    @property
+    def heartbeat(self) -> HeartbeatMessageToReport:
+        return _get_messages().heartbeat
+
+    @property
+    def server_heartbeat(self) -> ServerHeartbeatMessage:
+        return _get_messages().server_heartbeat
+
+    def reset(self, message_type: MessageType) -> None:
+        _get_messages().reset(message_type)
+
+    def __getitem__(self, key: MessageType) -> MessageToReport:
+        return _get_messages()[key]
+
+    def items(self):
+        return _get_messages().items()
+
+    def values(self):
+        return _get_messages().values()
+
+
+messages = _MessagesProxy()
 
 
 def _send_to_loki(message_type: MessageType):
@@ -460,8 +560,16 @@ def _send_to_loki(message_type: MessageType):
         'schema_version': message.schema_version,
     }
     if message_type == MessageType.USAGE:
-        prom_labels['new_cluster'] = (message.original_cluster_status != 'UP'
-                                      and message.final_cluster_status == 'UP')
+        # Narrow ``message`` to UsageMessageToReport for the type checker;
+        # ``messages[message_type]`` returns the abstract MessageToReport
+        # base type. ``messages.usage`` is annotated as
+        # UsageMessageToReport, and refers to the same per-context
+        # instance that ``messages[message_type]`` returned for
+        # ``MessageType.USAGE``.
+        usage_message = messages.usage
+        prom_labels['new_cluster'] = (
+            usage_message.original_cluster_status != 'UP' and
+            usage_message.final_cluster_status == 'UP')
 
     headers = {'Content-type': 'application/json'}
     payload = {
