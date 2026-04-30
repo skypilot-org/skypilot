@@ -2425,11 +2425,11 @@ async def stream(
                         compressed = compressor.compress(chunk_bytes)
                         if compressed:
                             yield compressed
-            except (asyncio.CancelledError, GeneratorExit):
+            except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
                 # Client disconnect: PEP 525 forbids yielding while a
                 # GeneratorExit is propagating, so we explicitly do
                 # not run the flush() yield below.
-                raise  # pylint: disable=try-except-raise
+                raise
             # Natural EOF only — emit the gzip trailer if we actually
             # produced anything; otherwise the response stays empty so
             # the SDK's bytes_written==0 fallback fires.
