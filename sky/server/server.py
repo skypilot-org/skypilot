@@ -832,7 +832,14 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/dashboard/_next'):
             response = await call_next(request)
-            response.headers['Cache-Control'] = 'max-age=3600'
+            if 200 <= response.status_code < 300:
+                response.headers['Cache-Control'] = 'max-age=3600'
+            else:
+                # Error responses (e.g. 401 from an auth middleware) must not
+                # be cached: a CDN that caches them for the same path will
+                # serve the error to all subsequent users until the cache
+                # entry expires, breaking the dashboard for everyone.
+                response.headers['Cache-Control'] = 'no-store'
             return response
         return await call_next(request)
 
