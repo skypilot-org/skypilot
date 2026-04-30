@@ -138,7 +138,26 @@ def _basic_auth_401_response(content: str):
     """Return a 401 response with basic auth realm."""
     return fastapi.responses.JSONResponse(
         status_code=401,
-        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        headers={
+            'WWW-Authenticate': 'Basic realm=\"SkyPilot\"',
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
+        content=content)
+
+
+def _bearer_auth_401_response(content):
+    """Return a 401 response for bearer token authentication failures."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
         content=content)
 
 
@@ -406,15 +425,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # After this point, all requests must be validated.
 
         if auth_header is None:
-            return fastapi.responses.JSONResponse(
-                status_code=401, content={'detail': 'Authentication required'})
+            return _bearer_auth_401_response(
+                {'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
         if split_header[0].lower() != 'bearer':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Invalid authentication method'})
+            return _bearer_auth_401_response(
+                {'detail': 'Invalid authentication method'})
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
@@ -428,9 +446,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
                                     'false').lower()
         if sa_enabled != 'true':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Service account authentication disabled'})
+            return _bearer_auth_401_response(
+                {'detail': 'Service account authentication disabled'})
 
         try:
             # Import here to avoid circular imports
@@ -442,11 +459,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             if payload is None:
                 logger.warning('Service account token verification failed')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={
-                        'detail': 'Invalid or expired service account token'
-                    })
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid or expired service account token'})
 
             # Extract user information from JWT payload
             user_id = payload.get('sub')
@@ -456,18 +470,16 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if not user_id or not token_id:
                 logger.warning(
                     'Invalid token payload: missing user_id or token_id')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Invalid token payload'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid token payload'})
 
             # Verify user still exists in database
             user_info = global_user_state.get_user(user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Service account user no longer exists'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account user no longer exists'})
 
             # Update last used timestamp for token tracking
             try:
@@ -486,11 +498,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={
-                    'detail': f'Service account authentication failed: {str(e)}'
-                })
+            return _bearer_auth_401_response(
+                {'detail': f'Service account authentication failed: {str(e)}'})
 
         return await call_next(request)
 
@@ -832,14 +841,19 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/dashboard/_next'):
             response = await call_next(request)
-            if response.status_code >= 400:
-                # Error responses (e.g. 401 from an auth middleware) must not
-                # be cached: a CDN that caches them for the same path will
-                # serve the error to all subsequent users until the cache
-                # entry expires, breaking the dashboard for everyone.
-                response.headers['Cache-Control'] = 'no-store'
-            else:
-                response.headers['Cache-Control'] = 'max-age=3600'
+            # Respect an explicit Cache-Control set by downstream middleware
+            # or handlers (e.g. an auth middleware that set 'no-store' on a
+            # 401). Otherwise, fall back to the static-asset defaults.
+            if 'Cache-Control' not in response.headers:
+                if response.status_code >= 400:
+                    # Error responses (e.g. 401 from an auth middleware) must
+                    # not be cached: a CDN that caches them for the same path
+                    # will serve the error to all subsequent users until the
+                    # cache entry expires, breaking the dashboard for
+                    # everyone.
+                    response.headers['Cache-Control'] = 'no-store'
+                else:
+                    response.headers['Cache-Control'] = 'max-age=3600'
             return response
         return await call_next(request)
 
