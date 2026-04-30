@@ -87,12 +87,23 @@ def _set_usage_run_id_cmd() -> str:
     We use a function instead of a constant so that the usage run id is the
     latest one when the function is called.
     """
+    # Prefer the contextual env var over the process-wide singleton. When
+    # multiple operations share a single process (e.g. the consolidated
+    # managed jobs controller serving many jobs concurrently), each can
+    # override USAGE_RUN_ID_ENV_VAR in its own context to make the launched
+    # cluster's heartbeat report a unique run id. os.environ is hijacked to
+    # be context aware via sky.utils.context.ContextualEnviron, so this read
+    # picks up the per-context override when one is set, and falls back to
+    # the process singleton otherwise.
+    run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+    if run_id is None:
+        run_id = usage_lib.messages.usage.run_id
     return (
         f'cat {usage_constants.USAGE_RUN_ID_FILE} 2> /dev/null || '
         # The run id is retrieved locally for the current run, so that the
         # remote cluster will be set with the same run id as the initial
         # launch operation.
-        f'echo "{usage_lib.messages.usage.run_id}" > '
+        f'echo "{run_id}" > '
         f'{usage_constants.USAGE_RUN_ID_FILE}')
 
 

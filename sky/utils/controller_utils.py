@@ -35,6 +35,7 @@ from sky.server.blob import blob_storage as bs
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common
@@ -625,6 +626,15 @@ def controller_only_vars_to_fill(controller: Controllers) -> Dict[str, str]:
     if override_concurrent_launches is not None:
         env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
             int(override_concurrent_launches))
+    # Forward the client's usage run id so the controller (and the worker
+    # clusters it provisions) report heartbeats under the same run id as
+    # the originating launch operation. Without this, in consolidation mode
+    # the controller process would fall back to its own
+    # usage_lib.messages.usage singleton, which is shared across all jobs
+    # served by that process and so cannot distinguish between them.
+    client_usage_run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+    if client_usage_run_id is not None:
+        env_vars[usage_constants.USAGE_RUN_ID_ENV_VAR] = client_usage_run_id
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

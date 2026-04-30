@@ -84,8 +84,19 @@ def request_body_env_vars() -> dict:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
-    env_vars[
-        usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
+    # Prefer the contextual env var so internal API calls (e.g. sky.launch
+    # invoked by a managed jobs JobController coroutine) carry the per-job
+    # client run id rather than the caller process's usage_lib.messages.usage
+    # singleton. In consolidation mode the controller process serves many
+    # jobs, so the singleton is fixed and would otherwise cause every
+    # internal launch to share the same run id, breaking the join from
+    # worker-cluster heartbeats back to the originating launch command.
+    contextual_run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+    if contextual_run_id is not None:
+        env_vars[usage_constants.USAGE_RUN_ID_ENV_VAR] = contextual_run_id
+    else:
+        env_vars[usage_constants.USAGE_RUN_ID_ENV_VAR] = (
+            usage_lib.messages.usage.run_id)
     # Send client user hash for basic auth at API server case, so the server
     # can include it in its own usage report.
     if common.basic_auth_enabled and common.client_user_hash is not None:
