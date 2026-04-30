@@ -6040,40 +6040,19 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         tail_lines = n if n > 0 else None
     try:
         if sync_down:
-            # Try streaming + gzip first — for RUNNING jobs this is
-            # typically minutes faster than the rsync path because
-            # bytes start flowing as the underlying tail_logs reads
-            # them, and gzip cuts a multi-GB log to a few hundred MB.
-            # Falls back to the existing sync-down path when the
-            # streaming download returns zero bytes (terminal job
-            # whose worker cluster is already torn down — tail_logs
-            # has no source).
-            log_local_path_dict: Optional[Dict[int, str]] = None
-            try:
-                with rich_utils.client_status(
-                        ux_utils.spinner_message(
-                            'Downloading jobs logs (streaming)')):
-                    log_local_path_dict = managed_jobs.download_logs_streaming(
-                        name=name,
-                        job_id=job_id,
-                        controller=controller,
-                        refresh=refresh)
-                if log_local_path_dict is None:
-                    logger.info('Streaming returned empty (likely a terminal '
-                                'job with worker torn down); falling back to '
-                                'sync-down.')
-            except Exception as e:  # pylint: disable=broad-except
-                logger.info(
-                    f'Streaming download failed ({type(e).__name__}: {e}); '
-                    f'falling back to sync-down.')
-            if log_local_path_dict is None:
-                with rich_utils.client_status(
-                        ux_utils.spinner_message('Downloading jobs logs')):
-                    log_local_path_dict = managed_jobs.download_logs(
-                        name=name,
-                        job_id=job_id,
-                        controller=controller,
-                        refresh=refresh)
+            # `download_logs_streaming` produces a single .log.gz file
+            # whereas the legacy `download_logs` returns a directory of
+            # per-task log files; existing scripts and our smoke tests
+            # depend on the directory shape. Keep --sync-down on the
+            # legacy path; users wanting the streaming variant can call
+            # `sky.jobs.download_logs_streaming` directly.
+            with rich_utils.client_status(
+                    ux_utils.spinner_message('Downloading jobs logs')):
+                log_local_path_dict = managed_jobs.download_logs(
+                    name=name,
+                    job_id=job_id,
+                    controller=controller,
+                    refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
