@@ -38,6 +38,24 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
 
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
+# Registry for plugin-provided properties under the top-level
+# `plugins:` config section. Keyed by plugin name.
+_extra_plugin_properties: Dict[str, Any] = {}
+
+
+def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register a sub-property of the top-level `plugins:` config section.
+
+    Each plugin owns one key under `plugins:`. e.g. the HA plugin
+    registers ``'ha'`` and reads its config from ``plugins.ha.<...>``.
+
+    Args:
+        name: The plugin's key under `plugins:`.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'object', 'properties': {...}}).
+    """
+    _extra_plugin_properties[name] = schema
+
 
 def _allow_additional_properties() -> bool:
     """Return True if schemas should allow additional properties.
@@ -2511,5 +2529,18 @@ def get_config_schema():
             'daemons': daemon_schema,
             'data': data_schema,
             **cloud_configs,
+            # Reserved namespace for plugin-specific config. Each plugin
+            # owns one key under `plugins:` and registers its sub-schema
+            # via register_plugin_property(). additionalProperties=True
+            # so that disabling a plugin (its register call no longer
+            # runs) does not invalidate an existing config block — the
+            # server should not refuse to start just because some
+            # `plugins.<retired>:` entry is sitting in the user's config.
+            'plugins': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+                'properties': _extra_plugin_properties,
+            },
         },
     }
