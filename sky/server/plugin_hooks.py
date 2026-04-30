@@ -34,7 +34,7 @@ def fire_volume_deleted(name: str, config: 'models.VolumeConfig') -> None:
     Each callback runs in isolation; an exception in one does not affect
     other callbacks or the caller.
     """
-    for fn in _VOLUME_DELETED_HOOKS:
+    for fn in _VOLUME_DELETED_HOOKS[:]:
         try:
             fn(name, config)
         except Exception as e:  # pylint: disable=broad-except
