@@ -364,7 +364,7 @@ Tail or sync down the log of a managed job.
 - `--controller` — Show the controller logs of this job; useful for debugging launching/recoveries, etc.
 - `--refresh`, `-r` — Query the latest job logs, restarting the jobs controller if stopped.
 - `--sync-down`, `-s` — Download logs for all jobs shown in the queue.
-- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to fetch the entire log.
+- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
 - `JOB_ID` — integer
 - `TASK` — text
 

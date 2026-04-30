@@ -2427,8 +2427,9 @@ async def stream(
                             yield compressed
             except (asyncio.CancelledError, GeneratorExit):
                 # Client disconnect: PEP 525 forbids yielding while a
-                # GeneratorExit is propagating, so do not flush here.
-                raise
+                # GeneratorExit is propagating, so we explicitly do
+                # not run the flush() yield below.
+                raise  # pylint: disable=try-except-raise
             # Natural EOF only — emit the gzip trailer if we actually
             # produced anything; otherwise the response stays empty so
             # the SDK's bytes_written==0 fallback fires.
