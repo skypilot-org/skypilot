@@ -54,6 +54,8 @@ def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
         schema: The JSON Schema for the property
             (e.g., {'type': 'object', 'properties': {...}}).
     """
+    if name in _extra_plugin_properties:
+        raise ValueError(f'Plugin property {name!r} is already registered.')
     _extra_plugin_properties[name] = schema
 
 
