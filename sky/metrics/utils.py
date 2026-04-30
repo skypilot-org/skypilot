@@ -154,7 +154,6 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
      'to the client. This does not include: latency to reach the pod, '
      'overhead from sending through the k8s port-forward tunnel, or '
      'ssh server lag on the destination pod.'),
-    ['pid'],
     buckets=_LATENCY_BUCKETS,
 )
 
