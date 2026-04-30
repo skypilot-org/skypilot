@@ -1992,7 +1992,9 @@ export function GPUs() {
       extraInfraResults.some((r) => r?.loading));
   const refreshExtraInfra = React.useCallback(
     () =>
-      Promise.all(extraInfraResults.map((r) => r?.refresh?.()).filter(Boolean)),
+      Promise.all(
+        extraInfraResults.map((r) => r?.refresh?.(true)).filter(Boolean)
+      ),
     [extraInfraResults]
   );
 
