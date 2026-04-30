@@ -440,22 +440,14 @@ _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 _DEFAULT_TAIL_LINES = 1000
 
-
-def _tail_option(verb: str):
-    """Shared --tail option for `sky logs` and `sky jobs logs`.
-
-    Click default is -1 (the sentinel for "user didn't pass --tail";
-    handler resolves it via `_apply_default_tail`). 0 (or any non-
-    positive int) means "all lines"; positive ints are line counts.
-    """
-    return click.option(
-        '--tail',
-        default=-1,
-        type=int,
-        help=(f'Number of lines to display from the end of the log file. '
-              f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible '
-              f'for multi-GB logs where downloading the full file is slow. '
-              f'Pass --tail 0 to {verb} the entire log.'))
+_TAIL_OPTION = click.option(
+    '--tail',
+    default=-1,
+    type=int,
+    help=(f'Number of lines to display from the end of the log file. '
+          f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible for '
+          f'multi-GB logs where downloading the full file is slow. Pass '
+          f'--tail 0 to print the entire log.'))
 
 
 def _apply_default_tail(tail: int) -> int:
@@ -2530,7 +2522,7 @@ def queue(clusters: List[str],
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
-@_tail_option('print')
+@_TAIL_OPTION
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -5995,7 +5987,7 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@_tail_option('fetch')
+@_TAIL_OPTION
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint

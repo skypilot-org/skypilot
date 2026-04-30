@@ -1397,10 +1397,18 @@ def stream_logs_by_id(
                         offset = max(tail_offset or 0, 0)
                         lines, _ = log_lib.tail_lines_from_end(
                             log_path, tail, offset)
-                        # start_streaming=True for the truncated case in
-                        # case the LOG_FILE_START_STREAMING_AT marker was
-                        # cut by the tail (mirrors log_lib.tail_logs).
-                        start_streaming = True
+                        # Apply the same start-stream-marker filter that
+                        # log_lib.tail_logs_iter uses: when the marker
+                        # appears in both the head of the file and the
+                        # tail window (small log fully covered), filter
+                        # so pre-marker boilerplate (Ray INFO lines etc.)
+                        # is hidden.
+                        with open(log_path, 'r', encoding='utf-8') as peek_f:
+                            head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
+                        start_streaming = (
+                            log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
+                                head_lines, lines,
+                                log_lib.LOG_FILE_START_STREAMING_AT))
                         for line in lines:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
