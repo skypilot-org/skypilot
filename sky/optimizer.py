@@ -1439,7 +1439,7 @@ class Optimizer:
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
-                    requested_resources = next(iter(local_task.resources))
+                    requested_resources = list(local_task.resources)[0]
                     launchable_resources_map, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
