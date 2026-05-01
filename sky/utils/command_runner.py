@@ -1674,13 +1674,12 @@ class KubernetesCommandRunner(CommandRunner):
             target,
             node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
-            rsh_option=helper_path,
+            rsh_option=f'bash {helper_path}',
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=(f'chmod +x {helper_path} && ' + (
-                '' if self.container is None else
-                f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} ')),
+            prefix_command=('' if self.container is None else
+                            f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} '),
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
