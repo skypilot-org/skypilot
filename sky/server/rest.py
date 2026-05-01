@@ -37,7 +37,14 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 class RetryContext:
-    """Per-retry-attempt streaming state shared with stream_response()."""
+    """State shared across retry attempts for a single decorated call.
+
+    A single ``RetryContext`` is created in ``retry_transient_errors`` at
+    the start of a decorated function call and persists across all retry
+    attempts within that call. ``stream_response`` reads/writes it to
+    coordinate skip-ahead (``line_processed``) and to report forward
+    progress to the decorator (``progress_count``).
+    """
 
     def __init__(self):
         # `line_processed` tracks the high-water mark of line numbers that

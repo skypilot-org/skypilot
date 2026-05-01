@@ -185,6 +185,16 @@ def test_cli_auto_retry(generic_cloud: str):
             # least one connection drop (30s interval), then verify
             # sky jobs logs --controller in follow mode completes successfully.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'{job_run_command}\'',
+            # Exercise the *resumable* log streaming path. `sky jobs logs
+            # --tail 0` (without --controller) tails job output with
+            # `tail=0`, which the SDK maps to `resumable=True` (see
+            # sky/jobs/client/sdk.py::tail_logs). After a chaos-proxy
+            # disconnect the server replays from line 1; the client must
+            # skip already-printed lines via RetryContext.line_processed
+            # rather than double-printing them. Default `--controller`
+            # paths use `--tail 1000` (`resumable=False`) and don't cover
+            # this branch.
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --tail 0 -n {name}',
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --controller -n {name}',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],

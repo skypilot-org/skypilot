@@ -188,7 +188,10 @@ async def stream_response_async(request_id: Optional[str],
                 print(line, flush=True, end='', file=output_stream)
 
                 if retry_context is not None:
-                    if resumable and line_count > retry_context.line_processed:
+                    if resumable:
+                        # Reaching here implies line_count > line_processed
+                        # (otherwise the resumable skip above would have
+                        # `continue`'d). Advance the high-water mark.
                         retry_context.line_processed = line_count
                     # Report forward progress to the retry decorator so it
                     # can reset the consecutive-failure counter even for
