@@ -911,11 +911,31 @@ def write_cluster_config(
                 f'--region {region_name} --filters {ip_address_filter} ' + \
                 '--query \"Reservations[].Instances[].InstanceId\" ' + \
                 f'{profile_str} --output text'
-            ssm_proxy_command = 'aws ssm start-session --target ' + \
+            ssm_start_session = 'aws ssm start-session --target ' + \
                 f'\"$({get_instance_id_command})\" ' + \
                 f'--region {region_name} {profile_str} ' + \
                 '--document-name AWS-StartSSHSession ' + \
                 '--parameters portNumber=%p'
+            # The SSM agent flaps during cold-start and intermittently
+            # afterwards: even after the agent reports `PingStatus=Online`
+            # and a successful session, a follow-up `start-session` can
+            # return `TargetNotConnected` for tens of seconds. AWS's own
+            # tooling guidance is to retry — see
+            # https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-troubleshooting.html
+            # We wrap the proxy command in a tight shell retry loop on
+            # `TargetNotConnected` only, so a transient blip during cluster
+            # bring-up, file mounts, or `sky exec` rides through silently
+            # while real errors (auth, network, IAM) still fail fast.
+            ssm_proxy_command = (
+                'exec 3>&1; i=0; '
+                'while [ $i -lt 18 ]; do i=$((i+1)); '
+                f'err=$({ssm_start_session} 2>&1 1>&3); rc=$?; '
+                '[ $rc -eq 0 ] && exit 0; '
+                'case "$err" in '
+                '*TargetNotConnected*) sleep 5; continue;; '
+                'esac; '
+                'printf "%%s\\n" "$err" >&2; exit $rc; done; '
+                'printf "%%s\\n" "$err" >&2; exit $rc')
             ssh_proxy_command = ssm_proxy_command
             region_name = 'ssm-session'
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
