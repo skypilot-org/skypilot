@@ -183,6 +183,7 @@ Show estimated costs for launched clusters.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--all`, `-a` — Show all cluster information.
 - `--days` (default: `30`) — Show clusters from the last N days. Default is 30 days. If set to 0, show all clusters.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## Job Queue Commands
 
