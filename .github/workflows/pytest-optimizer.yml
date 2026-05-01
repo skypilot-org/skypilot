@@ -21,7 +21,14 @@ jobs:
           - "tests/test_optimizer_dryruns.py -k \"partial\""
           - "tests/test_optimizer_dryruns.py -k \"not partial and not accelerator_memory and not accelerator_manufacturer\""
           - "tests/test_optimizer_dryruns.py -k \"accelerator_memory or accelerator_manufacturer\""
-          - tests/test_optimizer_random_dag.py
+          # TODO(lloyd): Re-enable once test_optimizer_random_dag is stable.
+          # The test is currently flaky on master with assertion failures
+          # like `assert abs(objective - min_objective) < 2` — the
+          # numerical tolerance is too tight for the randomized DAG it
+          # generates. Because matrix `fail-fast` defaults to true, this
+          # broken job cancels the Optimizer Dryruns Parts 1-3 jobs on
+          # every PR, blocking unrelated changes from merging.
+          # - tests/test_optimizer_random_dag.py
         include:
           - test-path: "tests/test_optimizer_dryruns.py -k \"partial\""
             test-name: "Optimizer Dryruns Part 1"
@@ -29,8 +36,8 @@ jobs:
             test-name: "Optimizer Dryruns Part 2"
           - test-path: "tests/test_optimizer_dryruns.py -k \"accelerator_memory or accelerator_manufacturer\""
             test-name: "Optimizer Dryruns Part 3"
-          - test-path: tests/test_optimizer_random_dag.py
-            test-name: "Optimizer Random DAG Tests"
+          # - test-path: tests/test_optimizer_random_dag.py
+          #   test-name: "Optimizer Random DAG Tests"
     runs-on: ubuntu-latest
     name: "Python Tests - ${{ matrix.test-name }}"
     steps:
