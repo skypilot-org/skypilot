@@ -2671,6 +2671,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # For backwards compatibility. Refer to
         # https://github.com/skypilot-org/skypilot/pull/7133
         state.setdefault('skylet_ssh_tunnel', None)
+        # Serialize provision_manifest as a plain dict so older code
+        # (which doesn't have the ProvisionManifest class on
+        # sky.provision.common) can still load this handle from the DB
+        # or from an API response.
+        manifest = state.get('provision_manifest')
+        if isinstance(manifest, provision_common.ProvisionManifest):
+            state['provision_manifest'] = dataclasses.asdict(manifest)
         return state
 
     def __setstate__(self, state):
@@ -2734,7 +2741,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
 
-        if version < 13:
+        # provision_manifest is serialized as a plain dict (see
+        # __getstate__) for cross-version compatibility. Reconstruct
+        # the dataclass here, defaulting if absent.
+        manifest = state.get('provision_manifest')
+        if isinstance(manifest, dict):
+            state['provision_manifest'] = provision_common.ProvisionManifest(
+                **manifest)
+        elif manifest is None:
             state['provision_manifest'] = provision_common.ProvisionManifest()
 
         self.__dict__.update(state)
