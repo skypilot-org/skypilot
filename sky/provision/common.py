@@ -39,11 +39,16 @@ class StopFailoverError(Exception):
 
 # These fields are sensitive and should be redacted from the config for logging
 # purposes.
-SENSITIVE_FIELDS = [
+SENSITIVE_FIELDS: List[Tuple[str, ...]] = [
     ('docker_config', 'docker_login_config', 'password'),
     ('provider_config', 'create_instance_kwargs', 'login'),
     ('provider_config', 'create_instance_kwargs', 'api_key'),
 ]
+
+
+def register_sensitive_fields(fields: List[Tuple[str, ...]]) -> None:
+    """Register additional sensitive fields for redaction."""
+    SENSITIVE_FIELDS.extend(fields)
 
 
 @dataclasses.dataclass
@@ -82,6 +87,20 @@ class ProvisionConfig:
 # -------------------- output data model -------------------- #
 
 
+@dataclasses.dataclass(frozen=True)
+class ProvisionManifest:
+    """Record of what the provisioner set up and which runtime
+    phases it handled. Set once at provision time.
+    """
+
+    has_ray: bool = True
+    runtime_setup_done: bool = False
+    workdir_synced: bool = False
+    file_mounts_synced: bool = False
+    setup_done: bool = False
+    run_started: bool = False
+
+
 @dataclasses.dataclass
 class ProvisionRecord:
     """Record for a provisioning process."""
@@ -101,6 +120,9 @@ class ProvisionRecord:
     resumed_instance_ids: List[InstanceId]
     # The IDs of all just created instances.
     created_instance_ids: List[InstanceId]
+    # Describes what the provisioner has set up.
+    manifest: ProvisionManifest = dataclasses.field(
+        default_factory=ProvisionManifest)
 
     def is_instance_just_booted(self, instance_id: InstanceId) -> bool:
         """Whether or not the instance is just booted.

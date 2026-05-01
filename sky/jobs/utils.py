@@ -40,6 +40,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
@@ -352,6 +353,13 @@ async def get_job_status(
     # TODO(luca) make this async
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
+
+    if managed_job_runtime.is_registered():
+        result = await asyncio.to_thread(managed_job_runtime.get_job_status,
+                                         handle, cluster_name)
+        if result is not None:
+            return result
+
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
@@ -1472,10 +1480,11 @@ def stream_logs_by_id(
                     handle = global_user_state.get_handle_from_cluster_name(
                         cluster_name)
 
-            # Check the handle: The cluster can be preempted and removed from
-            # the table before the managed job state is updated by the
-            # controller. In this case, we should skip the logging, and wait for
-            # the next round of status check.
+            # Wait if the handle isn't registered yet (transient launch-
+            # in-progress) or if the job isn't running. The cluster can
+            # also be preempted and removed from the table before the
+            # managed job state is updated by the controller; in that
+            # case we wait for the next round of status check.
             if (handle is None or managed_job_status !=
                     managed_job_state.ManagedJobStatus.RUNNING):
                 status_str = ''
@@ -1505,12 +1514,25 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-            tail_param = tail if tail is not None else 0
-            returncode = backend.tail_logs(handle,
-                                           job_id=job_id_to_tail,
-                                           managed_job_id=job_id,
-                                           follow=follow,
-                                           tail=tail_param)
+
+            returncode = None
+            if managed_job_runtime.is_registered():
+                returncode = managed_job_runtime.tail_logs(
+                    handle,
+                    backend=backend,
+                    job_id=job_id,
+                    task_id=task_id,
+                    job_id_on_cluster=job_id_to_tail,
+                    follow=follow,
+                    tail=tail)
+            if returncode is None:
+                # OSS default: stream via backend.tail_logs (skylet/SSH/gRPC).
+                tail_param = tail if tail is not None else 0
+                returncode = backend.tail_logs(handle,
+                                               job_id=job_id_to_tail,
+                                               managed_job_id=job_id,
+                                               follow=follow,
+                                               tail=tail_param)
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process

@@ -32,6 +32,7 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
 from sky.jobs import log_gc
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -267,12 +268,18 @@ class JobController:
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
-        log_file = controller_utils.download_and_stream_job_log(
-            self._backend,
-            handle,
-            managed_job_logs_dir,
-            job_ids=[str(job_id_on_pool_cluster)]
-            if job_id_on_pool_cluster is not None else None)
+
+        log_file = None
+        if managed_job_runtime.is_registered():
+            log_file = managed_job_runtime.download_logs(handle, self._job_id,
+                                                         task_id)
+        if log_file is None:
+            log_file = controller_utils.download_and_stream_job_log(
+                self._backend,
+                handle,
+                managed_job_logs_dir,
+                job_ids=[str(job_id_on_pool_cluster)]
+                if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
@@ -289,6 +296,10 @@ class JobController:
         if cluster_name is None:
             return
         if self._pool is None:
+            tmp_handle = await asyncio.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            if tmp_handle is not None and managed_job_runtime.is_registered():
+                await asyncio.to_thread(managed_job_runtime.cleanup, tmp_handle)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 
@@ -305,6 +316,10 @@ class JobController:
         Returns:
             List of exit codes, or None if not available.
         """
+        if managed_job_runtime.is_registered():
+            exit_codes = managed_job_runtime.get_exit_codes(handle)
+            if exit_codes is not None:
+                return exit_codes
         try:
             # Try gRPC first if enabled
             if handle.is_grpc_enabled_with_flag:

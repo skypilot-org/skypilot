@@ -136,26 +136,33 @@ def _generate_k8s_dns_mappings(
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
     """
-    mappings = []
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
+
+    mappings: List[Tuple[str, str]] = []
     for task, handle in tasks_handles:
         if handle is None or not _is_kubernetes(handle):
             continue
-
+        addresses = None
+        if managed_job_runtime.is_registered():
+            addresses = managed_job_runtime.get_node_addresses(handle)
+        if addresses is None:
+            # OSS default: K8s service-name convention.
+            cluster_name_on_cloud = handle.cluster_name_on_cloud
+            namespace = _get_k8s_namespace_from_handle(handle)
+            num_nodes = (len(handle.stable_internal_external_ips)
+                         if handle.stable_internal_external_ips else 1)
+            addresses = [
+                _construct_k8s_internal_svc(cluster_name_on_cloud, namespace,
+                                            node_idx)
+                for node_idx in range(num_nodes)
+            ]
         job_name = task.name
-        cluster_name_on_cloud = handle.cluster_name_on_cloud
-        namespace = _get_k8s_namespace_from_handle(handle)
-        num_nodes = (len(handle.stable_internal_external_ips)
-                     if handle.stable_internal_external_ips else 1)
-
-        for node_idx in range(num_nodes):
+        for node_idx, dns_name in enumerate(addresses):
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
-            internal_svc = _construct_k8s_internal_svc(cluster_name_on_cloud,
-                                                       namespace, node_idx)
-            mappings.append((internal_svc, hostname))
-            node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
-            logger.debug(f'K8s DNS mapping ({node_type}): '
-                         f'{internal_svc} -> {hostname}')
-
+            mappings.append((dns_name, hostname))
+            logger.debug(f'K8s DNS mapping (node {node_idx}): '
+                         f'{dns_name} -> {hostname}')
     return mappings
 
 
