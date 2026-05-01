@@ -2348,9 +2348,9 @@ def status_kubernetes(verbose: bool):
 @flags.output_format_option()
 @usage_lib.entrypoint
 def cost_report(
-        all: bool,
-        days: int,  # pylint: disable=redefined-builtin
-        output_format: str):
+        all: bool,  # pylint: disable=redefined-builtin
+        days: int,
+        output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
