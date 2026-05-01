@@ -626,6 +626,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
@@ -820,6 +821,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
         job_logger=job_logger)
 
