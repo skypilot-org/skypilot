@@ -252,7 +252,7 @@ class TestRetryTransientErrorsDecorator:
             retry_context = rest.get_retry_context()
             call_count += 1
             if call_count < 10:
-                retry_context.line_processed += 1
+                retry_context.progress_count += 1
                 raise request_err
             return "success"
 
@@ -277,7 +277,7 @@ class TestRetryTransientErrorsDecorator:
             retry_context = rest.get_retry_context()
             call_count += 1
             if call_count < 10:
-                retry_context.line_processed += 1
+                retry_context.progress_count += 1
                 raise request_err
 
             raise request_err
@@ -293,6 +293,40 @@ class TestRetryTransientErrorsDecorator:
         for call in debug_calls:
             assert 'Retry function_failing_after_making_progress due to' in call[
                 0][0]
+
+    @mock.patch('sky.server.rest.logger')
+    def test_progress_via_line_processed_alone_does_not_reset(
+            self, mock_logger):
+        """Test that updating line_processed alone (without progress_count)
+        does not reset the consecutive-failure counter.
+
+        Previously, the decorator used `line_processed` for progress
+        detection, which only worked for resumable streams. Non-resumable
+        streams that emit content but never advance line_processed (e.g.,
+        `sky jobs logs --controller --tail 1000`) should now signal
+        progress via `progress_count` instead. This test guards against
+        regressing back to the old behavior.
+        """
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3, initial_backoff=0.1)
+        def function_advancing_only_line_processed():
+            nonlocal call_count
+            retry_context = rest.get_retry_context()
+            call_count += 1
+            # Simulate a non-resumable stream that "would have" advanced
+            # line_processed in the old code path. The decorator must not
+            # treat this as progress on its own.
+            retry_context.line_processed += 1
+            raise request_err
+
+        with mock.patch('time.sleep'):
+            with pytest.raises(request_err.__class__):
+                function_advancing_only_line_processed()
+
+        # Without progress_count being incremented, retries should exhaust
+        # at max_retries (3 attempts total).
+        assert call_count == 3
 
     def test_different_http_error_status_codes(self):
         """Test behavior with different HTTP error status codes."""

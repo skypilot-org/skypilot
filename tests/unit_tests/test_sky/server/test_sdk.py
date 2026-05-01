@@ -610,8 +610,9 @@ def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
 
-    def __init__(self, line_processed: int = 0):
+    def __init__(self, line_processed: int = 0, progress_count: int = 0):
         self.line_processed = line_processed
+        self.progress_count = progress_count
 
 
 def test_stream_response_non_resumable():
@@ -786,6 +787,43 @@ def test_stream_response_resumable_with_none_lines():
                 mock_get.assert_called_once_with("test_request_id")
                 # Verify the result from get is returned
                 assert result == "test_result"
+
+
+def test_stream_response_non_resumable_reports_progress():
+    """Non-resumable streams should still bump retry_context.progress_count
+    so retry_transient_errors can detect forward progress and reset its
+    consecutive-failure counter. Regression test for the
+    test_cli_auto_retry failure on `sky jobs logs --controller --tail 1000`,
+    where retries exhausted because the decorator was inspecting
+    line_processed (only updated by resumable streams) instead of
+    progress_count.
+    """
+    test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+    mock_response = mock.MagicMock()
+    output_stream = io.StringIO()
+    retry_context = MockRetryContext(line_processed=0, progress_count=0)
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
+        mock_decode.return_value = test_lines
+        with mock.patch('sky.server.rest.get_retry_context') as mock_get_ctx:
+            mock_get_ctx.return_value = retry_context
+            with mock.patch('sky.client.sdk.get') as mock_get:
+                mock_get.return_value = "test_result"
+
+                client_sdk.stream_response(request_id="test_request_id",
+                                           response=mock_response,
+                                           output_stream=output_stream,
+                                           resumable=False)
+
+                # All lines should have been printed, since this is a
+                # non-resumable stream (no skipping based on line_processed).
+                assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
+                # progress_count should have been incremented per line so
+                # the retry decorator sees forward progress.
+                assert retry_context.progress_count == 3
+                # line_processed must remain 0 for non-resumable streams;
+                # it is reserved for resume bookkeeping.
+                assert retry_context.line_processed == 0
 
 
 def test_stream_response_no_request_id():

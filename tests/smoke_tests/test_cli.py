@@ -172,6 +172,12 @@ def test_cli_auto_retry(generic_cloud: str):
         [
             # Chaos proxy will kill TCP connections every 30 seconds.
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Wait until the proxy is actually listening on the port. The
+            # background `&` returns control immediately and on slower CI
+            # workers the first sky-launch would otherwise race the proxy
+            # startup and fail with ApiServerConnectionError before any
+            # connection is ever established.
+            f'for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/{port}) >/dev/null 2>&1 && break; sleep 0.5; done',
             # Both launch streaming and logs streaming should survive the chaos.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} \'{run_command}\'',
             # Test managed job controller logs streaming through the chaos
