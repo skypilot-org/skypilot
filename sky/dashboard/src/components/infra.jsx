@@ -371,6 +371,10 @@ export function InfrastructureSection({
                         ? context.replace(/^ssh-/, '')
                         : context;
 
+                      // Stable id/kind for both row PluginSlots below.
+                      const rowId = displayName;
+                      const rowKind = isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s';
+
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
@@ -392,22 +396,10 @@ export function InfrastructureSection({
                               <PluginSlot
                                 name="infra.row.namePrefix"
                                 context={{
-                                  id: isSSH
-                                    ? context.replace(/^ssh-/, '')
-                                    : context,
-                                  kind: isSSH
-                                    ? 'ssh'
-                                    : isSlurm
-                                      ? 'slurm'
-                                      : 'k8s',
+                                  id: rowId,
+                                  kind: rowKind,
                                   status: statusByKey?.get(
-                                    `${
-                                      isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s'
-                                    }:${
-                                      isSSH
-                                        ? context.replace(/^ssh-/, '')
-                                        : context
-                                    }`
+                                    `${rowKind}:${rowId}`
                                   ),
                                 }}
                               />
@@ -513,12 +505,7 @@ export function InfrastructureSection({
                           <td className="p-3 text-right">
                             <PluginSlot
                               name="infra.row.actions"
-                              context={{
-                                id: isSSH
-                                  ? context.replace(/^ssh-/, '')
-                                  : context,
-                                kind: isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s',
-                              }}
+                              context={{ id: rowId, kind: rowKind }}
                             />
                           </td>
                         </tr>
