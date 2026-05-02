@@ -381,13 +381,22 @@ def check_capabilities(
         # (dashboard endpoints, plugins, etc.) can read it without
         # re-running cloud probes. Full-workspace runs replace the row;
         # scoped runs (clouds is not None) merge at cloud granularity.
-        results_to_persist = _build_check_results(cloud2ctx2text,
-                                                  check_results_dict)
-        global_user_state.set_check_results(
-            results_to_persist,
-            current_workspace_name,
-            is_full_workspace_run=(clouds is None),
-        )
+        # Wrapped in try/except: this row is a cache, and the
+        # source-of-truth enabled_clouds_<workspace>_<cap> rows have
+        # already been written above. A transient DB failure or
+        # unsupported dialect must not fail the user-visible
+        # `sky check` command.
+        try:
+            results_to_persist = _build_check_results(cloud2ctx2text,
+                                                      check_results_dict)
+            global_user_state.set_check_results(
+                results_to_persist,
+                current_workspace_name,
+                is_full_workspace_run=(clouds is None),
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to persist check_results for workspace '
+                           f'{current_workspace_name!r}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,

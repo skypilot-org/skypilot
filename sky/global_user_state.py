@@ -2236,10 +2236,20 @@ def set_check_results(
         if is_full_workspace_run:
             new_value = results
         else:
-            # Read-modify-write inside a single session/transaction so that
-            # concurrent scoped writes for different clouds in the same
-            # workspace get last-writer-wins at the row level rather than
-            # partial-merge corruption.
+            # Read-modify-write under the default session isolation. This
+            # is NOT race-safe against concurrent scoped writes for
+            # different clouds in the same workspace: SQLAlchemy
+            # `orm.Session` does not acquire row locks, and under the
+            # default isolation (READ COMMITTED on Postgres, deferred on
+            # SQLite) two interleaved RMW cycles can clobber each
+            # other's per-cloud updates. The blast radius is limited
+            # (one scoped run's leaves get overwritten until the next
+            # write rewrites the row) and the source-of-truth
+            # enabled_clouds_* rows are unaffected, so we accept the
+            # race here rather than serialize through a per-workspace
+            # advisory lock. If this row ever becomes load-bearing for
+            # correctness, switch to `with_for_update()` (postgres) and
+            # an explicit BEGIN IMMEDIATE (sqlite).
             row = session.query(config_table).filter_by(key=key).first()
             existing: Dict[str, Dict[str, Dict[str, Any]]] = {}
             if row is not None and row.value is not None:
