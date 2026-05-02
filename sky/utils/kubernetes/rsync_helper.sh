@@ -56,6 +56,11 @@ else
     kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" -c \"$container\" --context=\"$context\" --"
 fi
 
+# Optional: ensure a remote directory exists before invoking rsync, so that
+# `mkdir -p` and `rsync` happen in the same kubectl exec round-trip. Set by
+# the caller (e.g. internal_file_mounts) to avoid an extra exec per mount.
+mkdir_target="${SKYPILOT_K8S_RSYNC_MKDIR:-}"
+
 # Execute command on remote pod, waiting for rsync to be available first.
 # The waiting happens on the remote pod, not locally, which is more efficient
 # and reliable than polling from the local machine.
@@ -66,4 +71,8 @@ MAX_WAIT_COUNT=$((MAX_WAIT_TIME_SECONDS * 2))
 # Use --norc --noprofile to prevent bash from sourcing startup files that might
 # output to stdout and corrupt the rsync protocol. All debug output must go to
 # stderr (>&2) to keep stdout clean for rsync communication.
-eval "${kubectl_cmd_base% --} -i -- bash --norc --noprofile -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
+#
+# We pass `mkdir_target` (which may be empty) as $1 to the inner bash -c, then
+# the rsync server args as $2..$N. The inner script creates the directory if
+# requested, then execs the rsync command.
+eval "${kubectl_cmd_base% --} -i -- bash --norc --noprofile -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; mkdir_target=\"\$1\"; shift; if [ -n \"\$mkdir_target\" ]; then mkdir -p \"\$mkdir_target\" || exit 1; fi; exec \"\$@\"' bash \"\$mkdir_target\" \"\$@\""

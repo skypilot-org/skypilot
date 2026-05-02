@@ -116,6 +116,7 @@ class CommandRunner:
         log_path: str = ...,
         stream_logs: bool = ...,
         max_retry: int = ...,
+        target_mkdir: Optional[str] = ...,
     ) -> None:
         ...
 
@@ -170,7 +171,8 @@ class CommandRunner:
                      up: bool,
                      log_path: str = ...,
                      stream_logs: bool = ...,
-                     max_retry: int = ...) -> None:
+                     max_retry: int = ...,
+                     target_mkdir: Optional[str] = ...) -> None:
         ...
 
     def rsync_setup(self,
@@ -180,7 +182,8 @@ class CommandRunner:
                     up: bool,
                     log_path: str = ...,
                     stream_logs: bool = ...,
-                    max_retry: int = ...) -> None:
+                    max_retry: int = ...,
+                    target_mkdir: Optional[str] = ...) -> None:
         ...
 
     def port_forward_command(
@@ -304,6 +307,7 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = ...,
         max_retry: int = ...,
         get_remote_home_dir: Callable[[], str] = ...,
+        target_mkdir: Optional[str] = ...,
     ) -> None:
         ...
 
@@ -389,6 +393,7 @@ class KubernetesCommandRunner(CommandRunner):
         log_path: str = ...,
         stream_logs: bool = ...,
         max_retry: int = ...,
+        target_mkdir: Optional[str] = ...,
     ) -> None:
         ...
 

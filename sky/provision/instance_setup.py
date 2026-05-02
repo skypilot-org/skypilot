@@ -590,30 +590,18 @@ def _internal_file_mounts(file_mounts: Dict,
         return
 
     for dst, src in file_mounts.items():
-        # TODO: We should use this trick to speed up file mounting:
-        # https://stackoverflow.com/questions/1636889/how-can-i-configure-rsync-to-create-target-directory-on-remote-server
         full_src = os.path.abspath(os.path.expanduser(src))
-
-        if os.path.isfile(full_src):
-            mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
-        else:
-            mkdir_command = f'mkdir -p {dst}'
-        rc, stdout, stderr = runner.run_setup(mkdir_command,
-                                              log_path=log_path,
-                                              stream_logs=False,
-                                              require_outputs=True)
-        subprocess_utils.handle_returncode(
-            rc,
-            mkdir_command, ('Failed to run command before rsync '
-                            f'{src} -> {dst}.'),
-            stderr=stdout + stderr)
-
+        # Fold `mkdir -p` into the rsync invocation via `--rsync-path` so the
+        # destination directory is created in the same round-trip as rsync,
+        # avoiding an extra ssh / kubectl exec per file mount.
+        target_mkdir = os.path.dirname(dst) if os.path.isfile(full_src) else dst
         runner.rsync_setup(
             source=src,
             target=dst,
             up=True,
             log_path=log_path,
             stream_logs=False,
+            target_mkdir=target_mkdir,
         )
 
 

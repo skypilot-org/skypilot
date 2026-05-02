@@ -455,7 +455,8 @@ class CommandRunner:
             stream_logs: bool = True,
             max_retry: int = 1,
             prefix_command: Optional[str] = None,
-            get_remote_home_dir: Callable[[], str] = lambda: '~') -> None:
+            get_remote_home_dir: Callable[[], str] = lambda: '~',
+            target_mkdir: Optional[str] = None) -> None:
         """Builds the rsync command."""
         # Build command.
         rsync_command = []
@@ -487,6 +488,26 @@ class CommandRunner:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
         maybe_dest_prefix = ('' if node_destination is None else
                              f'{node_destination}:')
+
+        # Fold the remote `mkdir -p` into the rsync invocation via
+        # `--rsync-path`, so the destination directory is created in the same
+        # round-trip as the rsync itself. Saves one ssh / kubectl exec per
+        # file mount.
+        target_is_remote = up and node_destination is not None
+        if target_mkdir is not None and target_is_remote:
+            resolved_target_mkdir = target_mkdir
+            if target_mkdir.startswith('~'):
+                remote_home_dir = self.get_remote_home_dir_with_retry(
+                    max_retry=max_retry,
+                    get_remote_home_dir=get_remote_home_dir)
+                resolved_target_mkdir = target_mkdir.replace(
+                    '~', remote_home_dir)
+            rsync_path_cmd = (
+                f'mkdir -p {shlex.quote(resolved_target_mkdir)} && rsync')
+            rsync_command.append(f'--rsync-path={shlex.quote(rsync_path_cmd)}')
+        elif target_mkdir is not None:
+            # Local target: just create the directory locally before rsync.
+            os.makedirs(os.path.expanduser(target_mkdir), exist_ok=True)
 
         if up:
             resolved_target = target
@@ -652,6 +673,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -664,6 +686,10 @@ class CommandRunner:
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            target_mkdir: If set, ensure this directory exists on the target
+              side before rsync runs. For remote uploads this is folded into
+              the rsync invocation via `--rsync-path` to avoid an extra
+              round-trip; for local targets it is created with `os.makedirs`.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -679,6 +705,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Rsync files related to the job driver execution.
 
@@ -694,6 +721,7 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: Maximum retry attempts.
+            target_mkdir: See `rsync`.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -703,7 +731,8 @@ class CommandRunner:
                           up=up,
                           log_path=log_path,
                           stream_logs=stream_logs,
-                          max_retry=max_retry)
+                          max_retry=max_retry,
+                          target_mkdir=target_mkdir)
 
     def rsync_setup(
         self,
@@ -714,6 +743,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Rsync files for setting up the SkyPilot runtime on the cluster.
 
@@ -728,6 +758,7 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: Maximum retry attempts.
+            target_mkdir: See `rsync`.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -737,7 +768,8 @@ class CommandRunner:
                           up=up,
                           log_path=log_path,
                           stream_logs=stream_logs,
-                          max_retry=max_retry)
+                          max_retry=max_retry,
+                          target_mkdir=target_mkdir)
 
     @classmethod
     def make_runner_list(
@@ -1363,6 +1395,7 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
         get_remote_home_dir: Callable[[], str] = lambda: '~',
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1377,6 +1410,7 @@ class SSHCommandRunner(CommandRunner):
               This value should be non-negative.
             get_remote_home_dir: A callable that returns the remote home
               directory. Defaults to '~'.
+            target_mkdir: See `CommandRunner.rsync`.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1404,7 +1438,8 @@ class SSHCommandRunner(CommandRunner):
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry,
-                    get_remote_home_dir=get_remote_home_dir)
+                    get_remote_home_dir=get_remote_home_dir,
+                    target_mkdir=target_mkdir)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -1441,6 +1476,16 @@ class KubernetesCommandRunner(CommandRunner):
         (self.namespace, self.context), self.pod_name = node
         self.deployment = deployment
         self.container = container
+        # Cache the remote home dir lookup so concurrent rsync calls (e.g.
+        # parallel internal_file_mounts) only pay one kubectl exec for it.
+        self._remote_home_dir_cache: Optional[str] = None
+        self._remote_home_dir_lock = threading.Lock()
+
+    def _get_remote_home_dir_cached(self) -> str:
+        with self._remote_home_dir_lock:
+            if self._remote_home_dir_cache is None:
+                self._remote_home_dir_cache = self.get_remote_home_dir()
+            return self._remote_home_dir_cache
 
     @property
     def node_id(self) -> str:
@@ -1640,6 +1685,7 @@ class KubernetesCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1652,6 +1698,9 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            target_mkdir: See `CommandRunner.rsync`. For Kubernetes the mkdir
+              is folded into the same `kubectl exec` as rsync via
+              `SKYPILOT_K8S_RSYNC_MKDIR`, which `rsync_helper.sh` reads.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1669,6 +1718,25 @@ class KubernetesCommandRunner(CommandRunner):
         encoded_namespace_context = (namespace_context.replace(
             '@', '%40').replace(':', '%3A').replace('/',
                                                     '%2F').replace('+', '%2B'))
+
+        # Resolve `~` in target_mkdir locally and pass the result through an
+        # env var consumed by rsync_helper.sh. We avoid `--rsync-path` here
+        # because rsync_helper.sh's `exec "$@"` does not shell-interpret `&&`,
+        # so a `--rsync-path="mkdir -p X && rsync"` value would be treated as
+        # a single command name.
+        mkdir_env = ''
+        if target_mkdir is not None:
+            resolved_mkdir = target_mkdir
+            if target_mkdir.startswith('~'):
+                resolved_mkdir = target_mkdir.replace(
+                    '~', self._get_remote_home_dir_cached())
+            mkdir_env = (
+                f'SKYPILOT_K8S_RSYNC_MKDIR={shlex.quote(resolved_mkdir)} ')
+
+        container_env = ('' if self.container is None else
+                         f'SKYPILOT_K8S_EXEC_CONTAINER='
+                         f'{shlex.quote(self.container)} ')
+
         self._rsync(
             source,
             target,
@@ -1678,13 +1746,17 @@ class KubernetesCommandRunner(CommandRunner):
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=(f'chmod +x {helper_path} && ' + (
-                '' if self.container is None else
-                f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} ')),
+            prefix_command=(
+                f'chmod +x {helper_path} && {container_env}{mkdir_env}'),
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=self.get_remote_home_dir)
+            # Route through the cached lookup so parallel rsyncs to the same
+            # pod share one kubectl exec for the home dir.
+            get_remote_home_dir=self._get_remote_home_dir_cached,
+            # mkdir is handled via env var above; do not let _rsync emit a
+            # `--rsync-path` value, which rsync_helper.sh cannot parse.
+            target_mkdir=None)
 
 
 class LocalProcessCommandRunner(CommandRunner):
@@ -1769,6 +1841,7 @@ class LocalProcessCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Use rsync to sync the source to the target."""
         self._rsync(source,
@@ -1778,7 +1851,8 @@ class LocalProcessCommandRunner(CommandRunner):
                     rsh_option=None,
                     log_path=log_path,
                     stream_logs=stream_logs,
-                    max_retry=max_retry)
+                    max_retry=max_retry,
+                    target_mkdir=target_mkdir)
 
 
 class SlurmCommandRunner(SSHCommandRunner):
@@ -1853,6 +1927,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         """Rsyncs files via srun, either to host or into container.
 
@@ -1865,6 +1940,7 @@ class SlurmCommandRunner(SSHCommandRunner):
             log_path: Path for rsync logs.
             stream_logs: Whether to stream logs.
             max_retry: Maximum retry attempts.
+            target_mkdir: See `CommandRunner.rsync`.
         """
         ssh_command = ' '.join(
             self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
@@ -1902,7 +1978,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                         log_path=log_path,
                         stream_logs=stream_logs,
                         max_retry=max_retry,
-                        get_remote_home_dir=lambda: remote_home_dir)
+                        get_remote_home_dir=lambda: remote_home_dir,
+                        target_mkdir=target_mkdir)
         finally:
             try:
                 os.unlink(rsh_script_path)
@@ -1960,6 +2037,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         # Default: run in container if container_args set, otherwise on host
         in_container = self.container_args is not None
@@ -1969,7 +2047,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=in_container,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             target_mkdir=target_mkdir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -2012,6 +2091,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         # Host only: driver runs on host and uses srun internally.
         self._rsync_via_srun(source=source,
@@ -2020,7 +2100,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=False,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             target_mkdir=target_mkdir)
 
     def rsync_setup(
         self,
@@ -2031,6 +2112,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        target_mkdir: Optional[str] = None,
     ) -> None:
         # Both host and container: ensure environment is consistent.
         self._rsync_via_srun(source=source,
@@ -2039,7 +2121,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=False,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             target_mkdir=target_mkdir)
         if self.container_args is not None:
             self._rsync_via_srun(source=source,
                                  target=target,
@@ -2047,4 +2130,5 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                  in_container=True,
                                  log_path=log_path,
                                  stream_logs=stream_logs,
-                                 max_retry=max_retry)
+                                 max_retry=max_retry,
+                                 target_mkdir=target_mkdir)
