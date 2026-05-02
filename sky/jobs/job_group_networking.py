@@ -19,6 +19,7 @@ Design Goals:
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
+import base64
 import os
 import tempfile
 import textwrap
@@ -29,6 +30,7 @@ from typing import List, Tuple
 from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.utils import command_runner
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
@@ -164,6 +166,83 @@ def _generate_k8s_dns_mappings(
             logger.debug(f'K8s DNS mapping (node {node_idx}): '
                          f'{dns_name} -> {hostname}')
     return mappings
+
+
+def _cluster_name_on_cloud_for_task(task: 'task_lib.Task',
+                                    cluster_name: str) -> str:
+    resources = list(task.resources)
+    if not resources or resources[0].cloud is None:
+        return cluster_name
+    return common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=resources[0].cloud.max_cluster_name_length())
+
+
+def _generate_pre_provision_k8s_dns_mappings(
+    job_group_name: str,
+    tasks: List['task_lib.Task'],
+    job_id: int,
+) -> List[Tuple[str, str]]:
+    """Generate K8s DNS mappings before handles exist.
+
+    Runtime plugins may predict addresses for runtimes that have stable DNS
+    before provisioning completes. Returning an empty list preserves the OSS
+    post-provision networking behavior.
+    """
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    if not managed_job_runtime.is_registered():
+        return []
+
+    mappings: List[Tuple[str, str]] = []
+    for task in tasks:
+        if task.name is None:
+            continue
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, job_id)
+        cluster_name_on_cloud = _cluster_name_on_cloud_for_task(
+            task, cluster_name)
+        addresses = managed_job_runtime.get_node_addresses_for_task(
+            task,
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud)
+        if addresses is None:
+            continue
+        for node_idx, dns_name in enumerate(addresses):
+            hostname = f'{task.name}-{node_idx}.{job_group_name}'
+            mappings.append((dns_name, hostname))
+            logger.debug(f'Pre-provision K8s DNS mapping (node {node_idx}): '
+                         f'{dns_name} -> {hostname}')
+    return mappings
+
+
+def generate_pre_provision_networking_script(
+    job_group_name: str,
+    tasks: List['task_lib.Task'],
+    job_id: int,
+) -> str:
+    """Generate an in-pod DNS updater script for pre-provision runtimes."""
+    dns_mappings = _generate_pre_provision_k8s_dns_mappings(
+        job_group_name, tasks, job_id)
+    if not dns_mappings:
+        return ''
+
+    updater_script = generate_k8s_dns_updater_script(dns_mappings,
+                                                     job_group_name)
+    encoded_script = base64.b64encode(updater_script.encode()).decode()
+    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    script_path = f'/tmp/{process_id}.sh'
+    log_path = f'/tmp/{process_id}.log'
+    marker_file = get_network_ready_marker_path(job_group_name)
+    return textwrap.dedent(f"""\
+        # Start JobGroup DNS updater inside the task runtime.
+        echo '{encoded_script}' | base64 -d > {script_path}
+        chmod +x {script_path}
+        (nohup {script_path} < /dev/null > {log_path} 2>&1 &) || true
+        touch {marker_file}
+        """).strip()
 
 
 def _generate_hosts_entries(

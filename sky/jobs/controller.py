@@ -1145,10 +1145,16 @@ class JobController:
         # - If we block in setup, it times out before Phase 3 can run
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
-        if wait_script:
-            # Prepend wait script to task run
+        pre_provision_networking_script = (
+            job_group_networking.generate_pre_provision_networking_script(
+                job_group_name, self._dag.tasks, self._job_id))
+        run_prefixes = [
+            script for script in (pre_provision_networking_script, wait_script)
+            if script
+        ]
+        if run_prefixes:
             current_run = task.run or ''
-            task.run = wait_script + '\n\n' + current_run
+            task.run = '\n\n'.join(run_prefixes + [current_run])
 
         # JobGroups don't support pools, so cluster name is always deterministic
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(

@@ -17,6 +17,7 @@ from sky import sky_logging
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.skylet import job_lib
 
@@ -89,6 +90,16 @@ class ManagedJobRuntime(Protocol):
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[List[str]]:
         """Return internal DNS names for all nodes on this cluster."""
+        ...
+
+    def get_node_addresses_for_task(
+        self,
+        task: 'task_lib.Task',
+        *,
+        cluster_name: str,
+        cluster_name_on_cloud: str,
+    ) -> Optional[List[str]]:
+        """Return predicted internal DNS names before provisioning."""
         ...
 
 
@@ -190,3 +201,18 @@ def get_node_addresses(
     if _current is None:
         return None
     return _current.get_node_addresses(handle)
+
+
+def get_node_addresses_for_task(
+    task: 'task_lib.Task',
+    *,
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+) -> Optional[List[str]]:
+    if _current is None:
+        return None
+    return _current.get_node_addresses_for_task(
+        task,
+        cluster_name=cluster_name,
+        cluster_name_on_cloud=cluster_name_on_cloud,
+    )
