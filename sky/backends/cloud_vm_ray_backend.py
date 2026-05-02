@@ -4364,9 +4364,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
-        # TODO(kevin): Handle this better, or just assert.
         if handle.provision_manifest.run_started:
-            raise RuntimeError('Provisioner reported user commands already started.')
+            logger.info('Skipping run: provisioner reported run already '
+                        'started.')
+            return None
 
         if task.run is None and self._setup_cmd is None:
             # This message is fine without mentioning setup, as there are two
