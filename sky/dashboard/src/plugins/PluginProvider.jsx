@@ -907,6 +907,12 @@ export function PluginProvider({ children }) {
         // Signal that all plugin scripts have finished loading.
         // layout.jsx listens for this to avoid showing the fallback top bar
         // before the sidebar plugin has had a chance to register.
+        // Also set a synchronously-readable global flag so pages that
+        // mount AFTER this event has fired can detect that state without
+        // waiting on a 2-second safety-net timeout. Without this, every
+        // navigation to a plugin-aware page paid an unconditional 2s
+        // gate before rendering anything.
+        window.__skyDashboardPluginsLoaded = true;
         window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
       }
     };

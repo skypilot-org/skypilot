@@ -2859,10 +2859,15 @@ export function GPUs() {
   // Handler for clicking on a context
   const handleContextClick = (context) => {
     trackInfraAction('view_context');
-    setSelectedContext(context);
-    // Use push instead of replace for proper browser history
+    // Don't setSelectedContext here — let the URL effect on the
+    // destination page set it. Setting it locally causes the source
+    // /infra page to render the context-detail view briefly (firing
+    // its data fetches and mounting any plugin slots) right before
+    // router.push unmounts it, which doubles every fetch on
+    // navigation and delays the user-visible status by the time the
+    // destination's mount fights for connection slots against OSS's
+    // own enabled_clouds calls.
     const targetPath = `/infra/${encodeURIComponent(context)}`;
-    // Only navigate if we're not already on the target path
     if (router.asPath !== targetPath) {
       router.push(targetPath);
     }
@@ -2890,15 +2895,6 @@ export function GPUs() {
     const nodesInContext = isSlurmCluster
       ? groupedPerNodeSlurmGPUs[contextName] || []
       : groupedPerNodeGPUs[contextName] || [];
-
-    if (kubeLoading && !kubeDataLoaded) {
-      return (
-        <div className="flex flex-col items-center justify-center h-64">
-          <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">Loading Context...</span>
-        </div>
-      );
-    }
 
     // Check if this is an SSH context
     const isSSHContext = contextName.startsWith('ssh-');
@@ -3182,16 +3178,14 @@ export function GPUs() {
   };
 
   const renderKubernetesTab = () => {
-    // If a context is selected, show its details instead of the summary
+    // If a context is selected, show its details immediately. Don't gate
+    // on kubeLoading — the page-level fetch can take 5-10s on tenants
+    // with many contexts (some failing K8s API calls), and gating the
+    // entire detail view behind it makes plugin-contributed content
+    // (status panels, etc.) wait for OSS data they don't depend on.
+    // ContextDetails handles empty gpus/nodes arrays gracefully; OSS
+    // sub-sections render their own skeletons while data loads.
     if (selectedContext) {
-      if (kubeLoading && !kubeDataLoaded) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64">
-            <CircularProgress size={32} className="mb-4" />
-            <span className="text-gray-500 text-lg">Loading Context...</span>
-          </div>
-        );
-      }
       return renderContextDetails(selectedContext);
     }
 

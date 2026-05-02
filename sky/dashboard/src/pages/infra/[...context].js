@@ -37,15 +37,24 @@ export default function InfraContextPage() {
   // Don't fall through to <GPUs /> until plugin scripts have finished
   // loading — otherwise a refresh on `/infra/cloud/<id>` or `/infra/ssh/<id>`
   // briefly mounts the wrong page while the plugin's `registerRoute` call is
-  // still in flight.
-  const [pluginsLoaded, setPluginsLoaded] = useState(false);
+  // still in flight. Initialize from the global flag set by PluginProvider
+  // when bootstrap finishes; on most navigations the bootstrap already
+  // happened during the initial app load, so we render synchronously.
+  const [pluginsLoaded, setPluginsLoaded] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.__skyDashboardPluginsLoaded === true
+  );
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
+    if (window.__skyDashboardPluginsLoaded === true) {
+      setPluginsLoaded(true);
+      return undefined;
+    }
     const handler = () => setPluginsLoaded(true);
     window.addEventListener('skydashboard:plugins-loaded', handler);
-    // Safety net: if the event already fired before this mount, the
-    // PluginProvider keeps no flag we can read, so fall through after a
-    // short timeout.
+    // Safety net for the rare case where this page mounts during bootstrap
+    // and the event somehow doesn't reach the listener.
     const timer = window.setTimeout(handler, 2000);
     return () => {
       window.removeEventListener('skydashboard:plugins-loaded', handler);
