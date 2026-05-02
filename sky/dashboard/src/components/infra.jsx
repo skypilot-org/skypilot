@@ -2556,7 +2556,12 @@ export function GPUs() {
     };
   }, []);
 
-  const handleRefresh = async () => {
+  // Memoized so the keyboard-shortcut and `skydashboard:infra:refresh`
+  // listeners below close over a fresh refreshExtraInfra each render.
+  // Without this, the listeners capture the first-render handleRefresh
+  // (which closes over an empty extraInfraResults) and never see the
+  // plugin-contributed results that resolve after first paint.
+  const handleRefresh = React.useCallback(async () => {
     trackInfraAction('refresh');
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
@@ -2586,7 +2591,7 @@ export function GPUs() {
         : Promise.resolve(),
       refreshExtraInfra(),
     ]);
-  };
+  }, [refreshExtraInfra]);
 
   // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
   useEffect(() => {
@@ -2603,8 +2608,7 @@ export function GPUs() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleRefresh]);
 
   // Listen for plugin-emitted refresh requests, e.g. when a plugin's
   // "Add infra" / "Remove infra" flow finishes, so the host page picks up
@@ -2615,7 +2619,7 @@ export function GPUs() {
     return () => {
       window.removeEventListener('skydashboard:infra:refresh', onRefreshEvent);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [handleRefresh]);
 
   // Calculate summary data
   const totalGpuTypes = (allGPUs || []).length;
@@ -3069,14 +3073,13 @@ export function GPUs() {
                       </>
                     );
 
+                    // PluginWrapperSlot renders `children` when no plugin is
+                    // registered, so we don't need an explicit fallback.
                     return (
                       <PluginWrapperSlot
                         key={cloud.name}
                         name="infra.cloudRow.link"
                         context={{ id: cloudId }}
-                        fallback={
-                          <tr className="hover:bg-muted/50">{rowInner}</tr>
-                        }
                       >
                         <tr className="hover:bg-muted/50">{rowInner}</tr>
                       </PluginWrapperSlot>
