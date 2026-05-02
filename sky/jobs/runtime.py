@@ -43,6 +43,26 @@ class ManagedJobRuntime(Protocol):
         """Query job status from the underlying runtime."""
         ...
 
+    def get_job_submitted_at(
+        self,
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        cluster_name: str,
+    ) -> Optional[float]:
+        """Return the job's submitted-at timestamp, or None to defer to
+        the call site's default (``managed_job_utils.get_job_timestamp``
+        over skylet)."""
+        ...
+
+    def get_job_ended_at(
+        self,
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        cluster_name: str,
+    ) -> Optional[float]:
+        """Return the job's ended-at timestamp, or None to defer to the
+        call site's default (``managed_job_utils.get_job_timestamp``
+        over skylet)."""
+        ...
+
     def get_exit_codes(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
@@ -137,6 +157,24 @@ def get_job_status(
     if _current is None:
         return None
     return _current.get_job_status(handle, cluster_name)
+
+
+def get_job_submitted_at(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    cluster_name: str,
+) -> Optional[float]:
+    if _current is None:
+        return None
+    return _current.get_job_submitted_at(handle, cluster_name)
+
+
+def get_job_ended_at(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    cluster_name: str,
+) -> Optional[float]:
+    if _current is None:
+        return None
+    return _current.get_job_ended_at(handle, cluster_name)
 
 
 def get_exit_codes(

@@ -726,6 +726,11 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    runtime_ended_at = managed_job_runtime.get_job_ended_at(
+        handle, cluster_name)
+    if runtime_ended_at is not None:
+        return runtime_ended_at
     try:
         return get_job_timestamp(backend,
                                  cluster_name,
@@ -1203,6 +1208,46 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
+def build_managed_job_streaming_header(
+    num_nodes: int,
+    min_nodes: Optional[int] = None,
+) -> str:
+    """Build the multi-line streaming-start header for a managed job.
+
+    The first line contains ``log_lib.LOG_FILE_START_STREAMING_AT``,
+    which is the marker ``stream_logs_by_id``'s terminal-state branch
+    waits for when reading saved log files. Plugin runtimes that write
+    their own saved-log files use this helper so the header is byte-
+    identical to the legacy skylet header — no v1-vs-legacy detection
+    needed at read time.
+
+    Args:
+        num_nodes: Number of pods/nodes the task is running on.
+        min_nodes: If set, render a gang-scheduling info line.
+
+    Returns:
+        Multi-line string ending with a trailing newline. Includes
+        ANSI dim/reset escapes (matches the legacy skylet header).
+    """
+    dim = colorama.Style.DIM
+    reset = colorama.Style.RESET_ALL
+    plural = 's' if num_nodes > 1 else ''
+    lines = [
+        f'{dim}├── {log_lib.LOG_FILE_START_STREAMING_AT}{num_nodes} '
+        f'node{plural}.{reset}\n'
+    ]
+    if min_nodes is not None:
+        lines.append(f'{dim}├── Gang scheduling: waiting for '
+                     f'{min_nodes} nodes before starting setup/run.'
+                     f'{reset}\n')
+    lines.append(f'{dim}└── {reset}'
+                 f'Job started. Streaming logs... '
+                 f'{dim}'
+                 f'(Ctrl-C to exit log streaming; job will not be killed)'
+                 f'{reset}\n')
+    return ''.join(lines)
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1539,8 +1584,16 @@ def stream_logs_by_id(
                 # succeeded (even though the real job can be SUCCEEDED or
                 # FAILED). We use the status in job queue to show the
                 # information, as the ManagedJobStatus is not updated yet.
-                job_statuses = backend.get_job_status(handle, stream_logs=False)
-                job_status = list(job_statuses.values())[0]
+                job_status: Optional[job_lib.JobStatus] = None
+                runtime_result = managed_job_runtime.get_job_status(
+                    handle, cluster_name)
+                if runtime_result is not None:
+                    job_status, _ = runtime_result
+                if job_status is None:
+                    # OSS default: query skylet via backend.
+                    job_statuses = backend.get_job_status(handle,
+                                                          stream_logs=False)
+                    job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 
