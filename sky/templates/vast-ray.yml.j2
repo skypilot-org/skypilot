@@ -11,6 +11,8 @@ provider:
   region: "{{region}}"
   disable_launch_config_check: true
   secure_only: {{secure_only}}
+  launch_timeout: {{launch_timeout}}
+  post_launch_delay: {{post_launch_delay}}
   {%- if create_instance_kwargs %}
   create_instance_kwargs: {{create_instance_kwargs | tojson}}
   {%- endif %}
