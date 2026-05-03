@@ -155,7 +155,11 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null, days = 30) {
+export async function getClusterHistory(
+  clusterHash = null,
+  days = 30,
+  clusterName = null
+) {
   try {
     const requestBody = {
       days: days,
@@ -165,6 +169,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
+    }
+    // The server filters on hash OR name when both are set, which lets the
+    // dashboard look up a cluster by either identifier in a single call.
+    // This avoids fetching the entire history (potentially tens of
+    // thousands of rows) just to resolve a name-keyed URL.
+    if (clusterName) {
+      requestBody.cluster_names = [clusterName];
     }
 
     const history = await apiClient.fetch('/cost_report', requestBody);

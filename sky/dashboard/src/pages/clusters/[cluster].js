@@ -105,29 +105,21 @@ function ClusterDetails() {
         // The URL parameter may be either a cluster hash (when navigated
         // from the historical clusters list) or a cluster name (when the
         // user opened the active cluster page and the cluster was later
-        // torn down via `sky down`). Try the hash lookup first since it
-        // returns the full record; if that misses, fall back to scanning
-        // recent history by name.
-        const byHash = await dashboardCache.get(getClusterHistory, [cluster]);
-        let foundHistoryCluster = byHash.find(
-          (c) => c.cluster_hash === cluster
-        );
-        if (!foundHistoryCluster) {
-          const allHistory = await dashboardCache.get(getClusterHistory, []);
-          const matchByName = allHistory.find((c) => c.cluster === cluster);
-          if (matchByName) {
-            // Re-fetch the full record by hash so fields omitted from the
-            // abbreviated response (e.g. last_creation_yaml,
-            // last_creation_command) are populated.
-            const fullData = await dashboardCache.get(getClusterHistory, [
-              matchByName.cluster_hash,
-            ]);
-            foundHistoryCluster =
-              fullData.find(
-                (c) => c.cluster_hash === matchByName.cluster_hash
-              ) || matchByName;
-          }
-        }
+        // torn down via `sky down`). Send both filters; the server returns
+        // rows matching either, which resolves the cluster in a single
+        // round trip without fetching the entire history (which can
+        // contain tens of thousands of rows).
+        const historyData = await dashboardCache.get(getClusterHistory, [
+          cluster,
+          30,
+          cluster,
+        ]);
+        // Prefer an exact hash match; otherwise fall back to a name match.
+        // A reused cluster name can produce multiple history rows, in which
+        // case the most recent (server-ordered by launched_at desc) wins.
+        const foundHistoryCluster =
+          historyData.find((c) => c.cluster_hash === cluster) ||
+          historyData.find((c) => c.cluster === cluster);
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);

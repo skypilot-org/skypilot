@@ -1966,7 +1966,8 @@ def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
 def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
-        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1974,6 +1975,13 @@ def get_clusters_from_history(
               currently active) that were last used within the past 'days'
               days. Active clusters are always included regardless of this
               parameter.
+        cluster_hashes: If specified, only include clusters whose hash is in
+              this list.
+        cluster_names: If specified, only include clusters whose name is in
+              this list. When both cluster_hashes and cluster_names are
+              specified, rows matching either are returned (logical OR).
+              Note that a single cluster name can map to multiple history
+              records when a name is reused across launches.
 
     Returns:
         List of cluster records with history information.
@@ -2034,9 +2042,15 @@ def get_clusters_from_history(
         query = query.order_by(
             sqlalchemy.desc(cluster_history_table.c.launched_at))
 
+        identifier_filters = []
         if cluster_hashes is not None:
-            query = query.filter(
+            identifier_filters.append(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
+        if cluster_names is not None:
+            identifier_filters.append(
+                cluster_history_table.c.name.in_(cluster_names))
+        if identifier_filters:
+            query = query.filter(sqlalchemy.or_(*identifier_filters))
         rows = query.all()
 
     usage_intervals_dict = {}
