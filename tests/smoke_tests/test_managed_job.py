@@ -246,7 +246,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
       * ``--tail 5`` returns exactly 5 matching lines.
       * the last-N-lines requested are the *trailing* lines (line 20).
       * ``--tail`` + ``-s`` is rejected at the CLI layer.
-      * ``--tail 0`` (default) returns all 20 lines.
+      * No ``--tail`` flag with a small log returns all 20 lines.
     """
     name = smoke_tests_utils.get_cluster_name()
     get_job_id_cmd = (f'sky jobs queue | grep tail-{name} | head -n1 '
@@ -274,7 +274,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'test "$count" = "5" && '
             f'echo "$out" | grep -q "SKYLOGTAIL 20" && '
             f'! (echo "$out" | grep -q "SKYLOGTAIL 1$")',
-            # --tail 0 (default) should return all 20 lines.
+            # No --tail (default 1000) on a 20-line log returns all 20.
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'out=$(sky jobs logs $JOB_ID --no-follow) && '
             f'count=$(echo "$out" | grep -c "SKYLOGTAIL ") && '
@@ -283,9 +283,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a negative value is rejected.
-            f'(sky jobs logs --tail -1 1 2>&1 || true) | '
-            f'grep "non-negative integer"',
+            # --tail with a non-numeric value is rejected by Click's
+            # built-in int parser. Negative ints (and 0) are valid
+            # synonyms for "all lines".
+            f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
+            f'grep "is not a valid integer"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

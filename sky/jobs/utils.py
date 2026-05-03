@@ -23,8 +23,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (Any, Dict, Iterable, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import filelock
@@ -1252,6 +1252,7 @@ def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
         tail: Optional[int] = None,
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
@@ -1259,6 +1260,9 @@ def stream_logs_by_id(
         job_id: The job ID to stream logs for.
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
+        tail_offset: Skip the last ``tail_offset`` lines before applying
+            ``tail``. Used by the dashboard live-tail UI to fetch a window
+            of older history without re-reading the whole file.
         task: Task identifier to view logs for a specific task in a JobGroup.
             If an int, it is treated as a task ID. If a str, it is treated as
             a task name. If None, logs for all tasks are shown.
@@ -1435,29 +1439,43 @@ def stream_logs_by_id(
                     # Show task header when multiple tasks OR when filtering
                     if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
-                    with open(os.path.expanduser(log_file),
-                              'r',
-                              encoding='utf-8') as f:
-                        # Stream the logs to the console without reading the
-                        # whole file into memory.
-                        start_streaming = False
-                        read_from: Union[TextIO, Deque[str]] = f
-                        if tail is not None:
-                            assert tail > 0
-                            # Read only the last 'tail' lines using deque
-                            read_from = collections.deque(f, maxlen=tail)
-                            # We set start_streaming to True here in case
-                            # truncating the log file removes the line that
-                            # contains LOG_FILE_START_STREAMING_AT. This does
-                            # not cause issues for log files shorter than tail
-                            # because tail_logs in sky/skylet/log_lib.py also
-                            # handles LOG_FILE_START_STREAMING_AT.
-                            start_streaming = True
-                        for line in read_from:
+                    log_path = os.path.expanduser(log_file)
+                    if tail is not None:
+                        assert tail > 0
+                        # Backward-seek tail: O(tail × line) instead of
+                        # scanning the whole file. The previous
+                        # `collections.deque(f, maxlen=tail)` scanned every
+                        # byte of the cached log, making dashboard log
+                        # loading 10+ s for multi-GB cancelled jobs.
+                        offset = max(tail_offset or 0, 0)
+                        lines, _ = log_lib.tail_lines_from_end(
+                            log_path, tail, offset)
+                        # Apply the same start-stream-marker filter that
+                        # log_lib.tail_logs_iter uses: when the marker
+                        # appears in both the head of the file and the
+                        # tail window (small log fully covered), filter
+                        # so pre-marker boilerplate (Ray INFO lines etc.)
+                        # is hidden.
+                        with open(log_path, 'r', encoding='utf-8') as peek_f:
+                            head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
+                        start_streaming = (
+                            log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
+                                head_lines, lines,
+                                log_lib.LOG_FILE_START_STREAMING_AT))
+                        for line in lines:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
+                    else:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            start_streaming = False
+                            for line in f:
+                                if (log_lib.LOG_FILE_START_STREAMING_AT
+                                        in line):
+                                    start_streaming = True
+                                if start_streaming:
+                                    print(line, end='', flush=True)
                     # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
@@ -1490,7 +1508,8 @@ def stream_logs_by_id(
                                job_name=None,
                                controller=True,
                                follow=follow,
-                               tail=tail)
+                               tail=tail,
+                               tail_offset=tail_offset)
 
         backend = backends.CloudVmRayBackend()
         latest_task_id, managed_job_status = (
@@ -1559,7 +1578,6 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-
             returncode = None
             if managed_job_runtime.is_registered():
                 returncode = managed_job_runtime.tail_logs(
@@ -1569,15 +1587,21 @@ def stream_logs_by_id(
                     task_id=task_id,
                     job_id_on_cluster=job_id_to_tail,
                     follow=follow,
-                    tail=tail)
+                    tail=tail,
+                    tail_offset=tail_offset)
             if returncode is None:
                 # OSS default: stream via backend.tail_logs (skylet/SSH/gRPC).
+                # require_outputs defaults to False, so the return is int
+                # (not Tuple[int, str, str]).
                 tail_param = tail if tail is not None else 0
-                returncode = backend.tail_logs(handle,
-                                               job_id=job_id_to_tail,
-                                               managed_job_id=job_id,
-                                               follow=follow,
-                                               tail=tail_param)
+                returncode = typing.cast(
+                    int,
+                    backend.tail_logs(handle,
+                                      job_id=job_id_to_tail,
+                                      managed_job_id=job_id,
+                                      follow=follow,
+                                      tail=tail_param,
+                                      tail_offset=tail_offset))
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -1585,6 +1609,8 @@ def stream_logs_by_id(
                 # FAILED). We use the status in job queue to show the
                 # information, as the ManagedJobStatus is not updated yet.
                 job_status: Optional[job_lib.JobStatus] = None
+                # handle being non-None implies cluster_name was set.
+                assert cluster_name is not None, (job_id, task_id)
                 runtime_result = managed_job_runtime.get_job_status(
                     handle, cluster_name)
                 if runtime_result is not None:
@@ -1732,6 +1758,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None,
+                tail_offset: Optional[int] = None,
                 task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
@@ -1809,20 +1836,35 @@ def stream_logs(job_id: Optional[int],
         # This code is based on log_lib.tail_logs. We can't use that code
         # exactly because state works differently between managed jobs and
         # normal jobs.
-        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
-            # Note: we do not need to care about start_stream_at here, since
-            # that should be in the job log printed above.
-            read_from: Union[TextIO, Deque[str]] = f
-            if tail is not None:
-                assert tail > 0
-                # Read only the last 'tail' lines efficiently using deque
-                read_from = collections.deque(f, maxlen=tail)
-            for line in read_from:
+        offset_arg = (tail_offset
+                      if tail_offset is not None and tail_offset > 0 else 0)
+        # Phase 1: emit the historical window. For tail!=None we use a
+        # backward-seek read so cost is O(tail) instead of O(file_size);
+        # otherwise stream the whole file (this is the legacy `tail=None`
+        # behavior used by `sky jobs logs --controller`).
+        end_pos = 0
+        if tail is not None:
+            assert tail > 0
+            tail_lines, end_pos = log_lib.tail_lines_from_end(
+                controller_log_path, tail, offset_arg)
+            for line in tail_lines:
                 print(line, end='')
-            # Flush.
             print(end='', flush=True)
+        else:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                for line in f:
+                    print(line, end='')
+                end_pos = f.tell()
+                print(end='', flush=True)
 
-            if follow:
+        # Phase 2: optionally follow new bytes from where the tail read
+        # stopped. Reopen so the prior file handle (which may have been
+        # binary in the seek branch) doesn't leak.
+        if follow:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                f.seek(end_pos)
                 while True:
                     # Print all new lines, if there are any.
                     line = f.readline()
@@ -1848,8 +1890,8 @@ def stream_logs(job_id: Optional[int],
                 # Wait for final logs to be written.
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
-            # Print any remaining logs including incomplete line.
-            print(f.read(), end='', flush=True)
+                # Print any remaining logs including incomplete line.
+                print(f.read(), end='', flush=True)
 
         if follow:
             return ux_utils.finishing_message(
@@ -1869,7 +1911,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow, tail, task)
+    return stream_logs_by_id(job_id, follow, tail, tail_offset, task)
 
 
 def dump_managed_job_queue(
@@ -3129,6 +3171,7 @@ class ManagedJobCodeGen:
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None,
+                    tail_offset: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
@@ -3139,10 +3182,15 @@ class ManagedJobCodeGen:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
-        else:
+        elif managed_job_version < 21:
+            # Versions before 21 did not support tail_offset parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r},
+                                    tail_offset={tail_offset!r}, task={task!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

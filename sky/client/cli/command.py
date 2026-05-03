@@ -438,6 +438,43 @@ def _get_shell_complete_args(complete_fn):
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
+_DEFAULT_TAIL_LINES = 1000
+
+_TAIL_OPTION = click.option(
+    '--tail',
+    default=-1,
+    type=int,
+    help=(f'Number of lines to display from the end of the log file. '
+          f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible for '
+          f'multi-GB logs where downloading the full file is slow. Pass '
+          f'--tail 0 to print the entire log.'))
+
+
+def _apply_default_tail(tail: int, follow: bool = True) -> int:
+    """Resolve a raw --tail value from the Click option above.
+
+    -1 sentinel (user didn't pass --tail) → apply the implicit default
+    and print a one-line stderr hint so users know the output was
+    truncated. Otherwise pass through (0 / negatives = "no limit",
+    positive ints = that count).
+
+    The implicit default differs by mode: live-tail (``--follow``,
+    default) uses ``_DEFAULT_TAIL_LINES`` so opening a multi-GB log
+    doesn't dump the whole thing upfront; snapshot mode
+    (``--no-follow``) returns 0 so scripts that grep
+    ``sky jobs logs --no-follow | grep <marker>`` for markers near the
+    start of the log keep working.
+    """
+    if tail == -1:
+        if not follow:
+            return 0
+        click.echo(
+            f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
+            f'Pass --tail 0 to print the entire log.',
+            err=True)
+        return _DEFAULT_TAIL_LINES
+    return max(tail, 0)
+
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                               value: str):
@@ -2494,12 +2531,7 @@ def queue(clusters: List[str],
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
-@click.option(
-    '--tail',
-    default=0,
-    type=int,
-    help=('The number of lines to display from the end of the log file. '
-          'Default is 0, which means print all lines.'))
+@_TAIL_OPTION
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2579,19 +2611,20 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if provision:
-        # Stream provision logs
+        # provision.log is a small fixed file; the 1000-line default
+        # for job logs doesn't apply, so an unset --tail means "all".
         sys.exit(
             sdk.tail_provision_logs(cluster_name=cluster,
                                     worker=worker,
                                     follow=follow,
-                                    tail=tail))
+                                    tail=tail or 0))
 
     if autostop:
-        # Stream autostop hook logs
+        # Same as provision — autostop hook output is small.
         sys.exit(
             sdk.tail_autostop_logs(cluster_name=cluster,
                                    follow=follow,
-                                   tail=tail))
+                                   tail=tail or 0))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2649,8 +2682,13 @@ def logs(
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
 
-    # Stream logs from the server.
-    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
+    # tail=0 (from --tail 0 / --tail all) means "no limit"; the cluster
+    # SDK already uses 0 to mean unbounded.
+    sys.exit(
+        sdk.tail_logs(cluster,
+                      job_id,
+                      follow,
+                      tail=_apply_default_tail(tail, follow=follow)))
 
 
 @cli.command()
@@ -5961,13 +5999,7 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@click.option(
-    '--tail',
-    default=0,
-    type=int,
-    help=('The number of lines to display from the end of the log file. '
-          'Default is 0, which means all lines. Useful for large logs '
-          '(e.g. multi-GB) where downloading the full file is slow.'))
+@_TAIL_OPTION
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
@@ -5994,25 +6026,62 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
-    if tail < 0:
-        raise click.UsageError('--tail must be a non-negative integer.')
-    if sync_down and tail > 0:
-        raise click.UsageError(
-            '--tail is not supported with --sync-down. Use '
-            '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
-            'or redirect stdout to save it to a file.')
-    # tail=0 means "all lines" at the CLI layer; the SDK/API represent
-    # "no limit" as None, so normalize here.
-    tail_lines: Optional[int] = tail if tail > 0 else None
+    # tail == -1: user didn't pass --tail. With --sync-down that
+    # means "fetch the whole file" (preserves pre-default-flip
+    # behavior). Otherwise apply the implicit default and print a
+    # hint.
+    # tail == 0: explicit --tail 0 → "no limit" at the SDK.
+    # tail > 0: user-specified count.
+    if sync_down:
+        if tail > 0:
+            raise click.UsageError(
+                '--tail is not supported with --sync-down. Use '
+                '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
+                'or redirect stdout to save it to a file.')
+        tail_lines: Optional[int] = None
+    else:
+        n = _apply_default_tail(tail, follow=follow)
+        tail_lines = n if n > 0 else None
     try:
         if sync_down:
-            with rich_utils.client_status(
-                    ux_utils.spinner_message('Downloading jobs logs')):
-                log_local_path_dict = managed_jobs.download_logs(
-                    name=name,
-                    job_id=job_id,
-                    controller=controller,
-                    refresh=refresh)
+            # Try streaming + gzip first — for RUNNING jobs this is
+            # typically minutes faster than the rsync path because
+            # bytes start flowing as the underlying tail_logs reads
+            # them and gzip cuts a multi-GB log to a few hundred MB
+            # on the wire (decompressed on the client). The streaming
+            # path saves a directory shape matching legacy
+            # download_logs (<dir>/controller.log or <dir>/run.log) so
+            # callers that walk the path with [ -d ] keep working.
+            # Falls back to legacy download_logs when the streaming
+            # download returns zero bytes (terminal job whose worker
+            # cluster is already torn down — tail_logs has no source).
+            log_local_path_dict: Optional[Dict[int, str]] = None
+            try:
+                with rich_utils.client_status(
+                        ux_utils.spinner_message(
+                            'Downloading jobs logs (streaming)')):
+                    log_local_path_dict = managed_jobs.download_logs_streaming(
+                        name=name,
+                        job_id=job_id,
+                        controller=controller,
+                        refresh=refresh)
+                if log_local_path_dict is None:
+                    logger.info('Streaming returned empty (likely a terminal '
+                                'job with worker torn down); falling back to '
+                                'sync-down.')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.info(
+                    f'Streaming download failed '
+                    f'({common_utils.format_exception(e)}); falling back to '
+                    f'sync-down.')
+            if log_local_path_dict is None:
+                with rich_utils.client_status(
+                        ux_utils.spinner_message('Downloading jobs logs')):
+                    log_local_path_dict = managed_jobs.download_logs(
+                        name=name,
+                        job_id=job_id,
+                        controller=controller,
+                        refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''

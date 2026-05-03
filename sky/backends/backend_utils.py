@@ -2146,20 +2146,27 @@ def _check_owner_identity_with_record(cluster_name: str,
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
 
-    if owner_identity is None and is_k8s_cloud:
-        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
-        provider_config = config['provider']
-        context = provider_config.get('context')
-        assert isinstance(context, str)
-        try:
-            identity = clouds.Kubernetes.get_identity_from_context_name(context)
-            global_user_state.set_owner_identity_for_cluster(
-                cluster_name, identity)
-            logger.debug(f'Successfully patched {cluster_name} owner identity '
-                         f'to {identity} (launched on {context}).')
-            return
-        except exceptions.CloudUserIdentityError:
-            _raise_identity_error()
+    if owner_identity is None:
+        if is_k8s_cloud:
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = config['provider']
+            context = provider_config.get('context')
+            assert isinstance(context, str)
+            try:
+                identity = clouds.Kubernetes.get_identity_from_context_name(
+                    context)
+            except exceptions.CloudUserIdentityError:
+                _raise_identity_error()
+        else:
+            identity = user_identities[0]
+            context = None
+        global_user_state.set_owner_identity_for_cluster(cluster_name, identity)
+        msg = f'Successfully patched {cluster_name} owner identity to {identity}'
+        if context is not None:
+            msg += f' (launched on context {context})'
+        logger.debug(msg)
+        return
 
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when

@@ -28,6 +28,7 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
+import zlib
 
 import aiofiles
 import anyio
@@ -137,7 +138,26 @@ def _basic_auth_401_response(content: str):
     """Return a 401 response with basic auth realm."""
     return fastapi.responses.JSONResponse(
         status_code=401,
-        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        headers={
+            'WWW-Authenticate': 'Basic realm=\"SkyPilot\"',
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
+        content=content)
+
+
+def _bearer_auth_401_response(content):
+    """Return a 401 response for bearer token authentication failures."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
         content=content)
 
 
@@ -405,15 +425,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # After this point, all requests must be validated.
 
         if auth_header is None:
-            return fastapi.responses.JSONResponse(
-                status_code=401, content={'detail': 'Authentication required'})
+            return _bearer_auth_401_response(
+                {'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
         if split_header[0].lower() != 'bearer':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Invalid authentication method'})
+            return _bearer_auth_401_response(
+                {'detail': 'Invalid authentication method'})
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
@@ -427,9 +446,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
                                     'false').lower()
         if sa_enabled != 'true':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Service account authentication disabled'})
+            return _bearer_auth_401_response(
+                {'detail': 'Service account authentication disabled'})
 
         try:
             # Import here to avoid circular imports
@@ -441,11 +459,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             if payload is None:
                 logger.warning('Service account token verification failed')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={
-                        'detail': 'Invalid or expired service account token'
-                    })
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid or expired service account token'})
 
             # Extract user information from JWT payload
             user_id = payload.get('sub')
@@ -455,18 +470,16 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if not user_id or not token_id:
                 logger.warning(
                     'Invalid token payload: missing user_id or token_id')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Invalid token payload'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid token payload'})
 
             # Verify user still exists in database
             user_info = global_user_state.get_user(user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Service account user no longer exists'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account user no longer exists'})
 
             # Update last used timestamp for token tracking
             try:
@@ -485,11 +498,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={
-                    'detail': f'Service account authentication failed: {str(e)}'
-                })
+            return _bearer_auth_401_response(
+                {'detail': f'Service account authentication failed: {str(e)}'})
 
         return await call_next(request)
 
@@ -656,16 +666,28 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 
     pid = str(os.getpid())
     lag_threshold = perf_utils.get_loop_lag_threshold()
+    # Tumbling 30s window peak per process — paired with the pid-less lag
+    # histogram so we keep per-worker visibility without histogram cardinality.
+    # Uses loop.time() (monotonic) so NTP adjustments cannot warp the window.
+    lag_max_window_seconds = 30.0
+    lag_max_window_end = loop.time() + lag_max_window_seconds
+    lag_max_in_window = 0.0
 
     def tick():
-        nonlocal target
+        nonlocal target, lag_max_window_end, lag_max_in_window
         now = loop.time()
         lag = max(0.0, now - target)
         if lag_threshold is not None and lag > lag_threshold:
             logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
                            f'{lag_threshold} seconds.')
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
-            pid=pid).observe(lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
+        if now >= lag_max_window_end:
+            lag_max_window_end = now + lag_max_window_seconds
+            lag_max_in_window = lag
+        else:
+            lag_max_in_window = max(lag_max_in_window, lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+            pid=pid).set(lag_max_in_window)
         target = now + interval
         loop.call_at(target, tick)
 
@@ -819,7 +841,19 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/dashboard/_next'):
             response = await call_next(request)
-            response.headers['Cache-Control'] = 'max-age=3600'
+            # Respect an explicit Cache-Control set by downstream middleware
+            # or handlers (e.g. an auth middleware that set 'no-store' on a
+            # 401). Otherwise, fall back to the static-asset defaults.
+            if 'Cache-Control' not in response.headers:
+                if response.status_code >= 400:
+                    # Error responses (e.g. 401 from an auth middleware) must
+                    # not be cached: a CDN that caches them for the same path
+                    # will serve the error to all subsequent users until the
+                    # cache entry expires, breaking the dashboard for
+                    # everyone.
+                    response.headers['Cache-Control'] = 'no-store'
+                else:
+                    response.headers['Cache-Control'] = 'max-age=3600'
             return response
         return await call_next(request)
 
@@ -2010,14 +2044,18 @@ async def download(download_body: payloads.DownloadBody,
             'X-Home-Path': str(pathlib.Path.home())
         }
 
-        # Return the zip file as a download
+        # Return the zip file as a download. starlette.background.BackgroundTask
+        # (singular) runs after the response body is sent. The earlier
+        # `BackgroundTasks().add_task(...)` form was a bug — `.add_task`
+        # returns None, so the unlink never ran and prepared zips
+        # accumulated on disk per download.
         return fastapi.responses.FileResponse(
             path=zip_path,
             filename=zip_filename,
             media_type='application/zip',
             headers=headers,
-            background=fastapi.BackgroundTasks().add_task(
-                lambda: zip_path.unlink(missing_ok=True)))
+            background=starlette.background.BackgroundTask(zip_path.unlink,
+                                                           missing_ok=True))
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
@@ -2272,6 +2310,19 @@ async def stream(
     # 'console': console for CLI/API clients
     # pylint: disable=redefined-builtin
     format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
+    # When set, return the stream as an attachment (browser download)
+    # with this filename. Forces plain-text formatting so the saved
+    # file is the raw log content. Use this to download large running
+    # job logs via `<a download href=/api/stream?...>`: bytes start
+    # flowing the moment the underlying request emits its first chunk,
+    # so the user sees the OS save dialog immediately instead of
+    # waiting for sync_down to complete.
+    download: Optional[str] = None,  # pylint: disable=redefined-outer-name
+    # When 'gz', gzip-stream the bytes inline and adjust the saved
+    # filename to end in .gz. Text logs compress ~10-30x, which makes
+    # multi-GB downloads dramatically faster and smaller; macOS Finder
+    # and most Linux file managers auto-extract on open.
+    compress: Optional[Literal['gz']] = None,
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
 
@@ -2304,8 +2355,13 @@ async def stream(
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
 
-    # Determine if we should use HTML format
-    if format == 'auto':
+    # download mode forces a plain-text streaming response with an
+    # attachment header — the browser saves the bytes to disk as they
+    # arrive instead of rendering them.
+    if download is not None:
+        format = 'plain'
+        use_html = False
+    elif format == 'auto':
         # Check if request is coming from a browser
         user_agent = request.headers.get('user-agent', '').lower()
         use_html = any(browser in user_agent
@@ -2390,6 +2446,18 @@ async def stream(
         headers[server_constants.STREAM_REQUEST_HEADER] = (
             user_supplied_request_id
             if user_supplied_request_id else request_id)
+    if download is not None:
+        # Sanitize the filename to prevent header injection (CR/LF) and
+        # path traversal (slashes, ..). Restrict to a conservative
+        # ASCII set so we don't have to worry about UTF-8 truncation
+        # landing mid-codepoint.
+        safe_filename = re.sub(r'[^A-Za-z0-9._-]+', '_', download)[:200]
+        if not safe_filename:
+            safe_filename = 'download'
+        if compress == 'gz' and not safe_filename.endswith('.gz'):
+            safe_filename = f'{safe_filename}.gz'
+        headers['Content-Disposition'] = (
+            f'attachment; filename="{safe_filename}"')
 
     if request_id is not None:
         content = log_provider.get_log_provider().log_stream(
@@ -2407,9 +2475,56 @@ async def stream(
                                             follow=follow,
                                             polling_interval=polling_interval)
 
+    media_type = 'text/plain'
+    if compress == 'gz':
+        # Gzip-stream the chunks. We do this as PAYLOAD (not transport)
+        # encoding because the browser would decompress the latter
+        # before saving — defeating the bandwidth/disk savings. The
+        # downloaded file is a real .log.gz that double-clicks open
+        # on macOS / extracts trivially with `gunzip` on Linux.
+        media_type = 'application/gzip'
+        # zlib.MAX_WBITS | 16 = gzip wrapper.
+        compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+
+        async def gzipped():
+            # Track whether we ever observed a non-empty source chunk so
+            # the empty-stream signal (used by the SDK to fall back to
+            # the rsync path for terminal jobs) survives gzip framing.
+            # The gzip header alone is ~10 bytes; we suppress it
+            # entirely for an empty source by skipping the trailing
+            # flush() in that case.
+            saw_payload = False
+            try:
+                async for chunk in content:
+                    if isinstance(chunk, str):
+                        chunk_bytes = chunk.encode('utf-8')
+                    else:
+                        chunk_bytes = chunk
+                    if chunk_bytes:
+                        saw_payload = True
+                        compressed = compressor.compress(chunk_bytes)
+                        if compressed:
+                            yield compressed
+            except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
+                # Client disconnect: PEP 525 forbids yielding while a
+                # GeneratorExit is propagating, so we explicitly do
+                # not run the flush() yield below.
+                raise
+            # Natural EOF only — emit the gzip trailer if we actually
+            # produced anything; otherwise the response stays empty so
+            # the SDK's bytes_written==0 fallback fires.
+            if saw_payload:
+                tail_bytes = compressor.flush()
+                if tail_bytes:
+                    yield tail_bytes
+
+        out_content: Any = gzipped()
+    else:
+        out_content = content
+
     return fastapi.responses.StreamingResponse(
-        content=content,
-        media_type='text/plain',
+        content=out_content,
+        media_type=media_type,
         headers=headers,
     )
 

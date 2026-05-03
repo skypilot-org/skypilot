@@ -211,7 +211,7 @@ Tail the log of a job.
 - `--sync-down`, `-s` — Sync down the logs of a job to the local machine. For a distributed job, a separate log file from each worker will be downloaded.
 - `--status` — If specified, do not show logs but exit with a status code for the job's status: 0 for succeeded, or 1 for all other statuses.
 - `--follow`, `--no-follow` — Follow the logs of a job. If --no-follow is specified, print the log so far and exit. [default: --follow]
-- `--tail` (default: `0`) — The number of lines to display from the end of the log file. Default is 0, which means print all lines.
+- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
 - `CLUSTER` — text
 - `JOB_IDS` — text
 
@@ -364,7 +364,7 @@ Tail or sync down the log of a managed job.
 - `--controller` — Show the controller logs of this job; useful for debugging launching/recoveries, etc.
 - `--refresh`, `-r` — Query the latest job logs, restarting the jobs controller if stopped.
 - `--sync-down`, `-s` — Download logs for all jobs shown in the queue.
-- `--tail` (default: `0`) — The number of lines to display from the end of the log file. Default is 0, which means all lines. Useful for large logs (e.g. multi-GB) where downloading the full file is slow.
+- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
 - `JOB_ID` — integer
 - `TASK` — text
 

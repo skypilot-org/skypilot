@@ -31,8 +31,6 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
-from sky.utils import annotations
 from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -79,20 +77,6 @@ class ProcessStatus(enum.Enum):
 
     # The process failed
     FAILED = 'FAILED'
-
-
-@annotations.lru_cache(scope='request')
-def get_usage_run_id() -> str:
-    """Returns a unique run id for each 'run'.
-
-    A run is defined as the lifetime of a process that has imported `sky`
-    and has called its CLI or programmatic APIs. For example, two successive
-    `sky launch` are two runs.
-    """
-    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
-    if usage_run_id is not None:
-        return usage_run_id
-    return str(uuid.uuid4())
 
 
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:

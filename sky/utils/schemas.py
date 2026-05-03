@@ -38,6 +38,17 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
 
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
+# Registry for plugin-provided properties under the top-level
+# `plugins:` config section. Keyed by plugin name.
+_extra_plugin_properties: Dict[str, Any] = {}
+
+
+def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register a sub-property of the top-level `plugins:` config section."""
+    if name in _extra_plugin_properties:
+        raise ValueError(f'Plugin property {name!r} is already registered.')
+    _extra_plugin_properties[name] = schema
+
 
 def _allow_additional_properties() -> bool:
     """Return True if schemas should allow additional properties.
@@ -2511,5 +2522,15 @@ def get_config_schema():
             'daemons': daemon_schema,
             'data': data_schema,
             **cloud_configs,
+            # For plugin-specific config.
+            'plugins': {
+                'type': 'object',
+                'required': [],
+                # Allow unknown properties since a plugin can be turned off
+                # and the previously valid config should not block server
+                # from reading the config file.
+                'additionalProperties': True,
+                'properties': _extra_plugin_properties,
+            },
         },
     }

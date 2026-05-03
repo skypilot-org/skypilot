@@ -122,10 +122,10 @@ def register_provisioner(
     """
     _registered_provisioners[cloud_name.lower()] = Provisioner(
         module=module, template_override=template_override)
-    logger.debug('Registered Provisioner for %r: module=%s, '
-                 'template_override=%s', cloud_name.lower(),
-                 type(module).__name__,
-                 template_override is not None)
+    logger.debug(
+        'Registered Provisioner for %r: module=%s, '
+        'template_override=%s', cloud_name.lower(),
+        type(module).__name__, template_override is not None)
 
 
 def get_registered_provisioner(cloud_name: str) -> Optional[Provisioner]:
@@ -155,8 +155,8 @@ def _route_to_cloud_impl(func):
         plugin = _registered_provisioners.get(module_name)
         plugin_module = plugin.module if plugin is not None else None
         existing_module = globals().get(module_name)
-        assert (plugin_module is not None or
-                existing_module is not None), (f'Unknown provider: {module_name}')
+        assert (plugin_module is not None or existing_module
+                is not None), (f'Unknown provider: {module_name}')
 
         impl = None
         if plugin_module is not None:

@@ -271,8 +271,8 @@ class JobController:
 
         log_file = None
         if managed_job_runtime.is_registered():
-            log_file = managed_job_runtime.download_logs(handle, self._job_id,
-                                                         task_id)
+            log_file = managed_job_runtime.download_logs(
+                handle, self._job_id, task_id)
         if log_file is None:
             log_file = controller_utils.download_and_stream_job_log(
                 self._backend,
@@ -2107,6 +2107,19 @@ class ControllerManager:
                 logger.error(
                     'Failed to load environment variables for job %s: '
                     '%s', job_id, e)
+
+        # Install a fresh per-job usage MessageCollection so the run id and
+        # other identity fields reflect the per-job env we just loaded into
+        # ``ctx``. Without this, in consolidation mode the controller
+        # subprocess inherits a MessageCollection that was created at
+        # module import time (when class-body decorators like
+        # ``@usage_lib.messages.usage.update_runtime('provision')`` in
+        # ``sky/backends/backend.py`` first accessed the proxy) and bound
+        # the run id to whoever first spawned the controller; subsequent
+        # JobController coroutines would all share that one MC instead of
+        # their own per-job state. The override is scoped to this
+        # coroutine's contextvars Context.
+        usage_lib.install_fresh_messages_for_current_context()
 
         cancelling = False
         graceful, graceful_timeout = False, None

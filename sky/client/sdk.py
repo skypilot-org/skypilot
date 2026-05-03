@@ -156,9 +156,10 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             continue to run for long periods of time without further streaming.
     """
 
-    retry_context: Optional[rest.RetryContext] = None
-    if resumable:
-        retry_context = rest.get_retry_context()
+    # Always fetch the retry context (if any) so we can report progress to
+    # the retry decorator across all stream types. `resumable` only controls
+    # whether already-printed lines are skipped on retry.
+    retry_context = rest.get_retry_context()
     try:
         line_count = 0
 
@@ -171,11 +172,23 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     # Line was consumed by interactive auth handler
                     continue
 
-                if retry_context is None:
-                    print(line, flush=True, end='', file=output_stream)
-                elif line_count > retry_context.line_processed:
-                    print(line, flush=True, end='', file=output_stream)
-                    retry_context.line_processed = line_count
+                if (resumable and retry_context is not None and
+                        line_count <= retry_context.line_processed):
+                    # Already printed on a previous attempt; skip.
+                    continue
+
+                print(line, flush=True, end='', file=output_stream)
+
+                if retry_context is not None:
+                    if resumable:
+                        # Reaching here implies line_count > line_processed
+                        # (otherwise the resumable skip above would have
+                        # `continue`'d). Advance the high-water mark.
+                        retry_context.line_processed = line_count
+                    # Report forward progress to the retry decorator so it
+                    # can reset the consecutive-failure counter even for
+                    # non-resumable streams.
+                    retry_context.progress_count += 1
         if request_id is not None and get_result:
             return get(request_id)
         else:

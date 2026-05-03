@@ -15,6 +15,14 @@ from smoke_tests import smoke_tests_utils
 
 from sky import skypilot_config
 
+# 1. TODO(lloyd): Marking the batch tests below as no_remote_server because
+# they all run `sky jobs pool apply`, and on shared API server environments
+# (e.g. the shared GKE pipeline) the controller has limited memory which
+# caps concurrent services at 1. Multiple Buildkite jobs in parallel race
+# for that single slot and fail with "Max number of services reached: 1/1".
+# Remove this when consolidation mode is enabled by default or we have an
+# option to not allow shared env tests.
+
 
 def _storage_cmds(generic_cloud: str, bucket: str):
     """Return cloud-specific storage command fragments for batch tests.
@@ -38,6 +46,7 @@ def _storage_cmds(generic_cloud: str, bucket: str):
 
 # ---------- Test simple batch (text doubling) ----------
 @pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
 def test_batch_simple(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-smpl-{name}'
@@ -132,6 +141,7 @@ def test_batch_simple(generic_cloud: str):
 @pytest.mark.batch
 @pytest.mark.resource_heavy
 @pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
+@pytest.mark.no_remote_server  # see note 1 above
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
@@ -215,6 +225,7 @@ def test_batch_diffusion(generic_cloud: str):
 
 # ---------- Test custom formats (range input, text + JSON file output) --------
 @pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
 def test_batch_custom_formats(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cfmt-{name}'
@@ -293,6 +304,7 @@ def test_batch_custom_formats(generic_cloud: str):
 
 # ---------- Test batch cancel ----------
 @pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
 def test_batch_cancel(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-cncl-{name}'

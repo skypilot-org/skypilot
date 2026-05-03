@@ -60,6 +60,7 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
@@ -84,7 +85,32 @@ function JobDetails() {
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
+  // If a plugin owns the logs slot, the OSS "(Logs are not streaming;
+  // click refresh ...)" hint is misleading — the plugin's component
+  // streams live. Hide it. (ControllerLogsSection makes the same check
+  // independently for the controller-logs heading.)
+  const logsSlotHasPlugin = usePluginComponents('jobs.detail.logs').length > 0;
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
+  // Track download-in-flight per kind ('logs' / 'controller' / per-task)
+  // so we can disable the button + spin the icon while the zip is being
+  // assembled on the server. Without feedback, users click and assume
+  // nothing is happening because the browser only shows the file in the
+  // download bar a second or two later.
+  const [logsDownloading, setLogsDownloading] = useState(false);
+  const downloadLogsZip = async () => {
+    if (logsDownloading) return;
+    setLogsDownloading(true);
+    try {
+      const detail = jobData?.jobs?.find((j) => String(j.id) === String(jobId));
+      await downloadManagedJobLogs({
+        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+        controller: false,
+        jobStatus: detail?.status,
+      });
+    } finally {
+      setLogsDownloading(false);
+    }
+  };
   const isMobile = useMobile();
 
   // Telemetry state
@@ -505,6 +531,7 @@ function JobDetails() {
                                       downloadManagedJobLogs({
                                         jobId: parseInt(jobId),
                                         controller: false,
+                                        jobStatus: task?.status,
                                       })
                                     }
                                     className="text-sky-blue hover:text-sky-blue-bright"
@@ -522,6 +549,139 @@ function JobDetails() {
                 </Card>
               </div>
             )}
+
+            {/* Logs Section — moved up so the live tail is visible
+                 right under the job summary instead of below
+                 Telemetry / Infra Nodes panels. */}
+            <div id="logs-section" className="mt-6">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div className="flex items-center gap-4">
+                    <h3 className="text-lg font-semibold">Logs</h3>
+                    {isMultiTask && (
+                      <Select
+                        onValueChange={(value) =>
+                          setSelectedTaskIndex(parseInt(value, 10))
+                        }
+                        value={String(selectedTaskIndex)}
+                      >
+                        <SelectTrigger
+                          aria-label="Task"
+                          className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm"
+                        >
+                          <SelectValue placeholder="Select Task" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allTasks.map((task, index) => (
+                            <SelectItem
+                              key={task.task_job_id || index}
+                              value={String(index)}
+                            >
+                              Task {index}
+                              {task.task ? `: ${task.task}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Select
+                      onValueChange={(value) => setSelectedNode(value)}
+                      value={selectedNode}
+                    >
+                      <SelectTrigger
+                        aria-label="Node"
+                        className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[120px] text-sm"
+                      >
+                        <SelectValue placeholder="All Nodes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Nodes</SelectItem>
+                        {logNodes.map((node) => (
+                          <SelectItem key={node} value={node}>
+                            {node.charAt(0).toUpperCase() + node.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!logsSlotHasPlugin && (
+                      <span className="text-xs text-gray-500">
+                        (Logs are not streaming; click refresh to fetch the
+                        latest logs.)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <PluginSlot
+                      name="jobs.detail.downloadbutton"
+                      context={{
+                        jobId: parseInt(
+                          Array.isArray(jobId) ? jobId[0] : jobId
+                        ),
+                        controller: false,
+                        jobStatus: detailJobData?.status,
+                        downloading: logsDownloading,
+                        onDownloadingChange: setLogsDownloading,
+                      }}
+                      fallback={
+                        <Tooltip
+                          content={
+                            logsDownloading
+                              ? 'Preparing zip… download will start shortly'
+                              : 'Download all job logs (zip)'
+                          }
+                          className="text-muted-foreground"
+                        >
+                          <button
+                            onClick={downloadLogsZip}
+                            disabled={logsDownloading}
+                            className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                          >
+                            {logsDownloading ? (
+                              <CircularProgress size={16} />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
+                        </Tooltip>
+                      }
+                    />
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleLogsRefresh}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <JobDetailsContent
+                    jobData={
+                      isMultiTask ? allTasks[selectedTaskIndex] : detailJobData
+                    }
+                    allTasks={allTasks}
+                    activeTab="logs"
+                    setIsLoadingLogs={setIsLoadingLogs}
+                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                    isLoadingLogs={isLoadingLogs}
+                    isLoadingControllerLogs={isLoadingControllerLogs}
+                    refreshFlag={refreshLogsFlag}
+                    poolsData={poolsData}
+                    selectedTaskIndex={isMultiTask ? selectedTaskIndex : null}
+                    selectedNode={selectedNode}
+                    onNodesExtracted={setLogNodes}
+                    onLinksExtracted={setLogExtractedLinks}
+                  />
+                </div>
+              </Card>
+            </div>
 
             {/* Telemetry Section (GPU + CPU/Memory) - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
             {isGrafanaAvailable && hasAnyTaskWithTelemetry && (
@@ -592,119 +752,6 @@ function JobDetails() {
               wrapperClassName="mt-6"
             />
 
-            {/* Logs Section */}
-            <div id="logs-section" className="mt-6">
-              <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center gap-4">
-                    <h3 className="text-lg font-semibold">Logs</h3>
-                    {isMultiTask && (
-                      <Select
-                        onValueChange={(value) =>
-                          setSelectedTaskIndex(parseInt(value, 10))
-                        }
-                        value={String(selectedTaskIndex)}
-                      >
-                        <SelectTrigger
-                          aria-label="Task"
-                          className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm"
-                        >
-                          <SelectValue placeholder="Select Task" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {allTasks.map((task, index) => (
-                            <SelectItem
-                              key={task.task_job_id || index}
-                              value={String(index)}
-                            >
-                              Task {index}
-                              {task.task ? `: ${task.task}` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    <Select
-                      onValueChange={(value) => setSelectedNode(value)}
-                      value={selectedNode}
-                    >
-                      <SelectTrigger
-                        aria-label="Node"
-                        className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[120px] text-sm"
-                      >
-                        <SelectValue placeholder="All Nodes" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Nodes</SelectItem>
-                        {logNodes.map((node) => (
-                          <SelectItem key={node} value={node}>
-                            {node.charAt(0).toUpperCase() + node.slice(1)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <span className="text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content="Download all job logs (zip)"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={() =>
-                          downloadManagedJobLogs({
-                            jobId: parseInt(
-                              Array.isArray(jobId) ? jobId[0] : jobId
-                            ),
-                            controller: false,
-                          })
-                        }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      content="Refresh logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={handleLogsRefresh}
-                        disabled={isLoadingLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <RotateCwIcon
-                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                        />
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="p-4">
-                  <JobDetailsContent
-                    jobData={
-                      isMultiTask ? allTasks[selectedTaskIndex] : detailJobData
-                    }
-                    allTasks={allTasks}
-                    activeTab="logs"
-                    setIsLoadingLogs={setIsLoadingLogs}
-                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                    isLoadingLogs={isLoadingLogs}
-                    isLoadingControllerLogs={isLoadingControllerLogs}
-                    refreshFlag={refreshLogsFlag}
-                    poolsData={poolsData}
-                    selectedTaskIndex={isMultiTask ? selectedTaskIndex : null}
-                    selectedNode={selectedNode}
-                    onNodesExtracted={setLogNodes}
-                    onLinksExtracted={setLogExtractedLinks}
-                  />
-                </div>
-              </Card>
-            </div>
-
             {/* Plugin Slot: Job Detail Events */}
             <PluginSlot
               name="jobs.detail.events"
@@ -747,6 +794,22 @@ function ControllerLogsSection({
   poolsData,
 }) {
   const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
+  const controllerLogsSlotHasPlugin =
+    usePluginComponents('jobs.detail.controllerlogs').length > 0;
+  const [downloading, setDownloading] = useState(false);
+  const downloadControllerZip = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadManagedJobLogs({
+        jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+        controller: true,
+        jobStatus: detailJobData?.status,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // Initialize state from localStorage
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -782,28 +845,47 @@ function ControllerLogsSection({
               <ChevronRightIcon className="w-5 h-5 mr-2" />
             )}
             <h3 className="text-lg font-semibold">Controller Logs</h3>
-            <span className="ml-2 text-xs text-gray-500">
-              (Logs are not streaming; click refresh to fetch the latest logs.)
-            </span>
+            {!controllerLogsSlotHasPlugin && (
+              <span className="ml-2 text-xs text-gray-500">
+                (Logs are not streaming; click refresh to fetch the latest
+                logs.)
+              </span>
+            )}
           </button>
           {isExpanded && (
             <div className="flex items-center space-x-3">
-              <Tooltip
-                content="Download full controller logs"
-                className="text-muted-foreground"
-              >
-                <button
-                  onClick={() =>
-                    downloadManagedJobLogs({
-                      jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
-                      controller: true,
-                    })
-                  }
-                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                >
-                  <Download className="w-4 h-4" />
-                </button>
-              </Tooltip>
+              <PluginSlot
+                name="jobs.detail.downloadbutton"
+                context={{
+                  jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+                  controller: true,
+                  jobStatus: detailJobData?.status,
+                  downloading,
+                  onDownloadingChange: setDownloading,
+                }}
+                fallback={
+                  <Tooltip
+                    content={
+                      downloading
+                        ? 'Preparing zip… download will start shortly'
+                        : 'Download full controller logs'
+                    }
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={downloadControllerZip}
+                      disabled={downloading}
+                      className="text-sky-blue hover:text-sky-blue-bright disabled:opacity-50 disabled:cursor-wait flex items-center"
+                    >
+                      {downloading ? (
+                        <CircularProgress size={16} />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                }
+              />
               <Tooltip
                 content="Refresh controller logs"
                 className="text-muted-foreground"
@@ -1010,6 +1092,17 @@ function JobDetailsContent({
     console.error('Error streaming controller logs:', error);
   }, []);
 
+  // If a plugin registers a component for the logs slot, it owns the
+  // entire log panel (its own streamer, its own rendering). Skip the
+  // OSS streamer to avoid double-fetching.
+  const logsSlotPluginComponents = usePluginComponents('jobs.detail.logs');
+  const controllerLogsSlotPluginComponents = usePluginComponents(
+    'jobs.detail.controllerlogs'
+  );
+  const logsSlotOverridden = logsSlotPluginComponents.length > 0;
+  const controllerLogsSlotOverridden =
+    controllerLogsSlotPluginComponents.length > 0;
+
   const {
     lines: logs,
     isLoading: streamingLogsLoading,
@@ -1017,7 +1110,11 @@ function JobDetailsContent({
   } = useLogStreamer({
     streamFn: streamManagedJobLogs,
     streamArgs: logStreamArgs,
-    enabled: activeTab === 'logs' && !isPending && !isRecovering,
+    enabled:
+      activeTab === 'logs' &&
+      !isPending &&
+      !isRecovering &&
+      !logsSlotOverridden,
     refreshTrigger: activeTab === 'logs' ? refreshFlag : 0,
     onError: handleLogsError,
   });
@@ -1029,7 +1126,10 @@ function JobDetailsContent({
   } = useLogStreamer({
     streamFn: streamManagedJobLogs,
     streamArgs: controllerStreamArgs,
-    enabled: activeTab === 'controllerlogs' && !isPreStart,
+    enabled:
+      activeTab === 'controllerlogs' &&
+      !isPreStart &&
+      !controllerLogsSlotOverridden,
     refreshTrigger: activeTab === 'controllerlogs' ? refreshFlag : 0,
     onError: handleControllerLogsError,
   });
@@ -1137,7 +1237,7 @@ function JobDetailsContent({
   }, [activeTab, logs, controllerLogs, scrollToBottom]);
 
   if (activeTab === 'logs') {
-    return (
+    const defaultLogsContent = (
       <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
@@ -1158,10 +1258,32 @@ function JobDetailsContent({
         )}
       </div>
     );
+    // Plugin override: a registered plugin component owns the entire log
+    // panel (its own streamer, its own rendering). We pass enough context
+    // (jobId, taskId, status) for the plugin to drive `/jobs/logs` itself.
+    // Pass `onNodesExtracted` too so the plugin can populate the
+    // node-filter dropdown (the OSS `useLogStreamer` no longer runs to
+    // discover node names when the plugin is in charge).
+    return (
+      <PluginSlot
+        name="jobs.detail.logs"
+        context={{
+          jobId: jobData.id,
+          taskId: selectedTaskIndex,
+          status: jobData.status,
+          isPending,
+          isRecovering,
+          selectedNode,
+          isController: false,
+          onNodesExtracted,
+        }}
+        fallback={defaultLogsContent}
+      />
+    );
   }
 
   if (activeTab === 'controllerlogs') {
-    return (
+    const defaultControllerLogsContent = (
       <div
         className="max-h-96 overflow-y-auto"
         ref={controllerLogsContainerRef}
@@ -1184,6 +1306,18 @@ function JobDetailsContent({
           <LogFilter logs={controllerLogs} controller={true} />
         )}
       </div>
+    );
+    return (
+      <PluginSlot
+        name="jobs.detail.controllerlogs"
+        context={{
+          jobId: jobData.id,
+          status: jobData.status,
+          isPreStart,
+          isController: true,
+        }}
+        fallback={defaultControllerLogsContent}
+      />
     );
   }
 

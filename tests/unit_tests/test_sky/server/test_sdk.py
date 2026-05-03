@@ -16,6 +16,7 @@ import requests
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
+from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
 from sky.utils import common as common_utils
 
@@ -610,8 +611,9 @@ def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
 
-    def __init__(self, line_processed: int = 0):
+    def __init__(self, line_processed: int = 0, progress_count: int = 0):
         self.line_processed = line_processed
+        self.progress_count = progress_count
 
 
 def test_stream_response_non_resumable():
@@ -786,6 +788,110 @@ def test_stream_response_resumable_with_none_lines():
                 mock_get.assert_called_once_with("test_request_id")
                 # Verify the result from get is returned
                 assert result == "test_result"
+
+
+def test_stream_response_non_resumable_reports_progress():
+    """Non-resumable streams should still bump retry_context.progress_count
+    so retry_transient_errors can detect forward progress and reset its
+    consecutive-failure counter. Regression test for the
+    test_cli_auto_retry failure on `sky jobs logs --controller --tail 1000`,
+    where retries exhausted because the decorator was inspecting
+    line_processed (only updated by resumable streams) instead of
+    progress_count.
+    """
+    test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+    mock_response = mock.MagicMock()
+    output_stream = io.StringIO()
+    retry_context = MockRetryContext(line_processed=0, progress_count=0)
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
+        mock_decode.return_value = test_lines
+        with mock.patch('sky.server.rest.get_retry_context') as mock_get_ctx:
+            mock_get_ctx.return_value = retry_context
+            with mock.patch('sky.client.sdk.get') as mock_get:
+                mock_get.return_value = "test_result"
+
+                client_sdk.stream_response(request_id="test_request_id",
+                                           response=mock_response,
+                                           output_stream=output_stream,
+                                           resumable=False)
+
+                # All lines should have been printed, since this is a
+                # non-resumable stream (no skipping based on line_processed).
+                assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
+                # progress_count should have been incremented per line so
+                # the retry decorator sees forward progress.
+                assert retry_context.progress_count == 3
+                # line_processed must remain 0 for non-resumable streams;
+                # it is reserved for resume bookkeeping.
+                assert retry_context.line_processed == 0
+
+
+def test_stream_response_resumable_retry_skips_replayed_lines():
+    """Integration test: ``retry_transient_errors`` + resumable
+    ``stream_response`` together must (1) not double-print lines that the
+    server replays after a mid-stream disconnect, and (2) advance both
+    ``progress_count`` and ``line_processed`` correctly across attempts.
+
+    Scenario: first attempt prints lines 1-2 then the connection breaks
+    with ``ChunkedEncodingError``. The decorator retries; on the second
+    attempt the server replays lines 1-5 from the start. Lines 1-2 must be
+    skipped via ``line_processed``, lines 3-5 must be printed exactly once.
+    """
+    output_stream = io.StringIO()
+    decode_call_count = 0
+
+    def decode_side_effect(_response):
+        nonlocal decode_call_count
+        decode_call_count += 1
+        if decode_call_count == 1:
+            # First attempt: emit 2 lines, then disconnect.
+            yield 'Line 1\n'
+            yield 'Line 2\n'
+            raise requests.exceptions.ChunkedEncodingError('disconnected')
+        # Retry attempt: server replays from line 1, emits all 5 lines.
+        yield 'Line 1\n'
+        yield 'Line 2\n'
+        yield 'Line 3\n'
+        yield 'Line 4\n'
+        yield 'Line 5\n'
+
+    @server_rest.retry_transient_errors(max_retries=3, initial_backoff=0.01)
+    def streaming_call():
+        mock_response = mock.MagicMock()
+        return client_sdk.stream_response(request_id='test_request_id',
+                                          response=mock_response,
+                                          output_stream=output_stream,
+                                          resumable=True)
+
+    captured_context = {}
+
+    def get_ctx_passthrough():
+        ctx = server_rest._RETRY_CONTEXT.get()
+        if ctx is not None:
+            captured_context['ctx'] = ctx
+        return ctx
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status',
+                    side_effect=decode_side_effect):
+        with mock.patch('sky.client.sdk.get') as mock_get:
+            mock_get.return_value = 'final_result'
+            with mock.patch('sky.client.sdk.rest.get_retry_context',
+                            side_effect=get_ctx_passthrough):
+                with mock.patch('time.sleep'):
+                    result = streaming_call()
+
+    # Each line printed exactly once despite the replay.
+    assert output_stream.getvalue() == (
+        'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n')
+    # Two attempts total: one failure + one success.
+    assert decode_call_count == 2
+    # Final result is forwarded from get(request_id).
+    assert result == 'final_result'
+    # Both progress fields advanced exactly to the number of distinct lines.
+    ctx = captured_context['ctx']
+    assert ctx.line_processed == 5
+    assert ctx.progress_count == 5
 
 
 def test_stream_response_no_request_id():

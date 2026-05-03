@@ -172,6 +172,12 @@ def test_cli_auto_retry(generic_cloud: str):
         [
             # Chaos proxy will kill TCP connections every 30 seconds.
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Wait until the proxy is actually listening on the port. The
+            # background `&` returns control immediately and on slower CI
+            # workers the first sky-launch would otherwise race the proxy
+            # startup and fail with ApiServerConnectionError before any
+            # connection is ever established.
+            f'for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/{port}) >/dev/null 2>&1 && break; sleep 0.5; done',
             # Both launch streaming and logs streaming should survive the chaos.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} \'{run_command}\'',
             # Test managed job controller logs streaming through the chaos
@@ -179,6 +185,16 @@ def test_cli_auto_retry(generic_cloud: str):
             # least one connection drop (30s interval), then verify
             # sky jobs logs --controller in follow mode completes successfully.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'{job_run_command}\'',
+            # Exercise the *resumable* log streaming path. `sky jobs logs
+            # --tail 0` (without --controller) tails job output with
+            # `tail=0`, which the SDK maps to `resumable=True` (see
+            # sky/jobs/client/sdk.py::tail_logs). After a chaos-proxy
+            # disconnect the server replays from line 1; the client must
+            # skip already-printed lines via RetryContext.line_processed
+            # rather than double-printing them. Default `--controller`
+            # paths use `--tail 1000` (`resumable=False`) and don't cover
+            # this branch.
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --tail 0 -n {name}',
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --controller -n {name}',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],

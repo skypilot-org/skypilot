@@ -822,6 +822,63 @@ def test_controller_cluster_name_client_side(controller_type: str):
     assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
 
 
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_forward_usage_run_id(controller_type: str,
+                                              monkeypatch):
+    """The client's usage run id is forwarded into controller_envs.
+
+    Regression test for the consolidation-mode bug where a single
+    controller process serves many jobs and so cannot rely on its own
+    usage_lib.messages.usage singleton to identify which client run a
+    worker cluster's heartbeat belongs to.
+    """
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, 'client-run-xyz')
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert envs.get(usage_constants.USAGE_RUN_ID_ENV_VAR) == 'client-run-xyz'
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_skip_unset_usage_run_id(controller_type: str,
+                                                 monkeypatch):
+    """When the client did not supply a run id, controller_envs omits it
+    rather than forwarding an empty string."""
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.delenv(usage_constants.USAGE_RUN_ID_ENV_VAR, raising=False)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert usage_constants.USAGE_RUN_ID_ENV_VAR not in envs
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
+
+
 _JOBS_SIGNAL_CONST = (
     'sky.jobs.constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE')
 

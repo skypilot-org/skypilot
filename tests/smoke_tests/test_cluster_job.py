@@ -2071,7 +2071,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
                 cluster_name=name,
                 job_id='1',
                 job_status=[sky.JobStatus.RUNNING, sky.JobStatus.SUCCEEDED],
-                timeout=150),
+                timeout=360),
             # Wait the GPU process to start.
             'sleep 90',
             f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '

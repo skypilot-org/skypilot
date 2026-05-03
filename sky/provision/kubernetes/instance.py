@@ -2429,9 +2429,8 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
     retry_if_missing: bool = False,
-    status_map_overrides: Optional[Mapping[str,
-                                           Optional['status_lib.ClusterStatus']]
-                                  ] = None,
+    status_map_overrides: Optional[Mapping[
+        str, Optional['status_lib.ClusterStatus']]] = None,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     # Mapping from pod phase to skypilot status. These are the only valid pod
     # phases.
