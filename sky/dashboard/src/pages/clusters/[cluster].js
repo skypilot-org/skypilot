@@ -102,12 +102,32 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
-        const historyData = await dashboardCache.get(getClusterHistory, [
-          cluster,
-        ]);
-        const foundHistoryCluster = historyData.find(
-          (c) => c.cluster_hash === cluster || c.cluster === cluster
+        // The URL parameter may be either a cluster hash (when navigated
+        // from the historical clusters list) or a cluster name (when the
+        // user opened the active cluster page and the cluster was later
+        // torn down via `sky down`). Try the hash lookup first since it
+        // returns the full record; if that misses, fall back to scanning
+        // recent history by name.
+        const byHash = await dashboardCache.get(getClusterHistory, [cluster]);
+        let foundHistoryCluster = byHash.find(
+          (c) => c.cluster_hash === cluster
         );
+        if (!foundHistoryCluster) {
+          const allHistory = await dashboardCache.get(getClusterHistory, []);
+          const matchByName = allHistory.find((c) => c.cluster === cluster);
+          if (matchByName) {
+            // Re-fetch the full record by hash so fields omitted from the
+            // abbreviated response (e.g. last_creation_yaml,
+            // last_creation_command) are populated.
+            const fullData = await dashboardCache.get(getClusterHistory, [
+              matchByName.cluster_hash,
+            ]);
+            foundHistoryCluster =
+              fullData.find(
+                (c) => c.cluster_hash === matchByName.cluster_hash
+              ) || matchByName;
+          }
+        }
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);
