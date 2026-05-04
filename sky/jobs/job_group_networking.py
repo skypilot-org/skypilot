@@ -30,7 +30,6 @@ from typing import List, Optional, Tuple
 from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.utils import command_runner
-from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
@@ -52,7 +51,6 @@ def _is_kubernetes(
         return handle.launched_resources.cloud.is_same_cloud(
             sky_clouds.Kubernetes())
     return False
-
 
 
 def _get_k8s_namespace_from_handle(
@@ -148,8 +146,7 @@ def _generate_k8s_dns_mappings(
             continue
         addresses = None
         if managed_job_runtime.is_registered():
-            addresses = managed_job_runtime.k8s_dns_addresses_for_handle(
-                handle)
+            addresses = managed_job_runtime.k8s_dns_addresses_for_handle(handle)
         if addresses is None:
             cluster_name_on_cloud = handle.cluster_name_on_cloud
             namespace = _get_k8s_namespace_from_handle(handle)
@@ -167,7 +164,6 @@ def _generate_k8s_dns_mappings(
             logger.debug(f'K8s DNS mapping (node {node_idx}): '
                          f'{dns_name} -> {hostname}')
     return mappings
-
 
 
 def dns_addresses_for_task(
