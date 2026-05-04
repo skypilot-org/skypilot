@@ -332,10 +332,21 @@ class CommandRunner:
     def __init__(self, node: Tuple[Any, Any], **kwargs):
         del kwargs  # Unused.
         self.node = node
+        # Cache the remote home dir lookup so concurrent operations on the
+        # same runner (e.g. parallel internal_file_mounts) only pay one
+        # round-trip for it.
+        self._remote_home_dir_cache: Optional[str] = None
+        self._remote_home_dir_lock = threading.Lock()
 
     @property
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
+
+    def _get_remote_home_dir_cached(self) -> str:
+        with self._remote_home_dir_lock:
+            if self._remote_home_dir_cache is None:
+                self._remote_home_dir_cache = self.get_remote_home_dir()
+            return self._remote_home_dir_cache
 
     def get_remote_home_dir(self) -> str:
         # Use pattern matching to extract home directory.
@@ -494,7 +505,7 @@ class CommandRunner:
         # round-trip as the rsync itself. Saves one ssh / kubectl exec per
         # file mount.
         target_is_remote = up and node_destination is not None
-        if target_mkdir is not None and target_is_remote:
+        if target_mkdir and target_is_remote:
             resolved_target_mkdir = target_mkdir
             if target_mkdir.startswith('~'):
                 remote_home_dir = self.get_remote_home_dir_with_retry(
@@ -502,10 +513,20 @@ class CommandRunner:
                     get_remote_home_dir=get_remote_home_dir)
                 resolved_target_mkdir = target_mkdir.replace(
                     '~', remote_home_dir)
-            rsync_path_cmd = (
-                f'mkdir -p {shlex.quote(resolved_target_mkdir)} && rsync')
+            # If the resolved path still starts with `~` (the SSH default
+            # `get_remote_home_dir` returns `~` and defers expansion to the
+            # remote shell), shlex.quote would single-quote the leading
+            # tilde and prevent expansion. Quote only the suffix in that
+            # case.
+            if resolved_target_mkdir == '~':
+                quoted_mkdir = '~'
+            elif resolved_target_mkdir.startswith('~/'):
+                quoted_mkdir = '~/' + shlex.quote(resolved_target_mkdir[2:])
+            else:
+                quoted_mkdir = shlex.quote(resolved_target_mkdir)
+            rsync_path_cmd = f'mkdir -p {quoted_mkdir} && rsync'
             rsync_command.append(f'--rsync-path={shlex.quote(rsync_path_cmd)}')
-        elif target_mkdir is not None:
+        elif target_mkdir:
             # Local target: just create the directory locally before rsync.
             os.makedirs(os.path.expanduser(target_mkdir), exist_ok=True)
 
@@ -1476,16 +1497,6 @@ class KubernetesCommandRunner(CommandRunner):
         (self.namespace, self.context), self.pod_name = node
         self.deployment = deployment
         self.container = container
-        # Cache the remote home dir lookup so concurrent rsync calls (e.g.
-        # parallel internal_file_mounts) only pay one kubectl exec for it.
-        self._remote_home_dir_cache: Optional[str] = None
-        self._remote_home_dir_lock = threading.Lock()
-
-    def _get_remote_home_dir_cached(self) -> str:
-        with self._remote_home_dir_lock:
-            if self._remote_home_dir_cache is None:
-                self._remote_home_dir_cache = self.get_remote_home_dir()
-            return self._remote_home_dir_cache
 
     @property
     def node_id(self) -> str:
@@ -1725,7 +1736,7 @@ class KubernetesCommandRunner(CommandRunner):
         # so a `--rsync-path="mkdir -p X && rsync"` value would be treated as
         # a single command name.
         mkdir_env = ''
-        if target_mkdir is not None:
+        if target_mkdir:
             resolved_mkdir = target_mkdir
             if target_mkdir.startswith('~'):
                 resolved_mkdir = target_mkdir.replace(
