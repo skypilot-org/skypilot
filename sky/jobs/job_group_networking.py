@@ -228,12 +228,13 @@ def _generate_pre_provision_k8s_dns_mappings(
     return mappings
 
 
-def generate_pre_provision_networking_script(
+def generate_inline_networking_setup_script(
     job_group_name: str,
     tasks: List['task_lib.Task'],
     job_id: int,
 ) -> str:
-    """Generate an in-pod DNS updater script for pre-provision runtimes."""
+    """Bash to prepend to task.run that starts the JobGroup DNS updater
+    from there, or empty if the task does not inline the DNS mapping."""
     dns_mappings = _generate_pre_provision_k8s_dns_mappings(
         job_group_name, tasks, job_id)
     if not dns_mappings:

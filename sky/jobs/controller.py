@@ -1145,11 +1145,14 @@ class JobController:
         # - If we block in setup, it times out before Phase 3 can run
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
-        pre_provision_networking_script = (
-            job_group_networking.generate_pre_provision_networking_script(
+        # When non-empty, this prelude is prepended to the task's run
+        # section to start the JobGroup DNS updater from there. Phase 3
+        # below does the same delivery via SSH for tasks not covered here.
+        inline_networking_setup_script = (
+            job_group_networking.generate_inline_networking_setup_script(
                 job_group_name, self._dag.tasks, self._job_id))
         run_prefixes = [
-            script for script in (pre_provision_networking_script, wait_script)
+            script for script in (inline_networking_setup_script, wait_script)
             if script
         ]
         if run_prefixes:
