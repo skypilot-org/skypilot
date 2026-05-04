@@ -1505,11 +1505,10 @@ def stream_logs_by_id(
                     handle = global_user_state.get_handle_from_cluster_name(
                         cluster_name)
 
-            # Wait if the handle isn't registered yet (transient launch-
-            # in-progress) or if the job isn't running. The cluster can
-            # also be preempted and removed from the table before the
-            # managed job state is updated by the controller; in that
-            # case we wait for the next round of status check.
+            # Check the handle: The cluster can be preempted and removed from
+            # the table before the managed job state is updated by the
+            # controller. In this case, we should skip the logging, and wait for
+            # the next round of status check.
             if (handle is None or managed_job_status !=
                     managed_job_state.ManagedJobStatus.RUNNING):
                 status_str = ''
