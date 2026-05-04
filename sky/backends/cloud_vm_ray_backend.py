@@ -3464,22 +3464,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         provision_record=provision_record,
                         custom_resource=resources_vars.get('custom_resources'),
                         log_dir=self.log_dir)
-                # If the provisioner already materialized the runtime, there
-                # may be no SSH/Ray runtime to query.
-                if not manifest.runtime_setup_done:
-                    # We use the IPs from the cluster_info to
-                    # update_cluster_ips, when the provisioning is done, to
-                    # make sure the cluster IPs are up-to-date.
-                    # The staled IPs may be caused by the node being restarted
-                    # manually or by the cloud provider.
-                    # Optimize the case where the cluster's IPs can be
-                    # retrieved from cluster_info.
-                    handle.cached_cluster_info = cluster_info
-                    handle.docker_user = cluster_info.docker_user
-                    handle.update_cluster_ips(
-                        max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                        cluster_info=cluster_info)
-                    handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+                # We use the IPs from the cluster_info to update_cluster_ips,
+                # when the provisioning is done, to make sure the cluster IPs
+                # are up-to-date.
+                # The staled IPs may be caused by the node being restarted
+                # manually or by the cloud provider.
+                # Optimize the case where the cluster's IPs can be retrieved
+                # from cluster_info.
+                handle.cached_cluster_info = cluster_info
+                handle.docker_user = cluster_info.docker_user
+                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          cluster_info=cluster_info)
+                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
