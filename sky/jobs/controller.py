@@ -1224,7 +1224,12 @@ class JobController:
         """
 
         async def on_recovery() -> None:
-            """Re-setup networking after recovery (new node may have new IP)."""
+            """Re-setup networking after recovery (new node may have new IP).
+
+            Unlike Phase 3, we do NOT skip tasks that inline the DNS
+            mapping — a recovered peer may have a new IP, so every
+            task's /etc/hosts needs refreshing.
+            """
             updated_handles = []
             for t, _ in all_tasks_handles:
                 t_name = t.name
