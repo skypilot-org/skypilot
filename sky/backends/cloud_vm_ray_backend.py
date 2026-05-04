@@ -1122,8 +1122,9 @@ class RetryingVmProvisioner(object):
                 zone_str = ','.join(z.name for z in zones)
                 zone_str = f' ({zone_str})'
 
-            # Ask the registered Provisioner (if any) whether to claim
-            # the launch by returning a ``TemplateSpec``.
+            # Let the registered Provisioner (if any) override the cluster
+            # config template by returning a ``TemplateSpec``; otherwise
+            # fall back to the default template for the cloud.
             plugin = provision_lib.get_registered_provisioner(
                 to_provision.cloud.canonical_name())
             template_spec = (plugin.template_override(
@@ -3589,7 +3590,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if (prev_cluster_status == status_lib.ClusterStatus.INIT and
-                not manifest.runtime_setup_done):
+                manifest.has_job_queue):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
@@ -3615,7 +3616,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     subprocess_utils.handle_returncode(
                         returncode, cmd, 'Failed to update job status.', stderr)
         if (prev_cluster_status == status_lib.ClusterStatus.STOPPED and
-                not manifest.runtime_setup_done):
+                manifest.has_job_queue):
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
             # An edge case here due to racing:
@@ -3686,9 +3687,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 status_lib.ClusterStatus.UP)
             # We still add the cluster to ssh config file on API server, this
             # is helpful for people trying to use `sky launch`'ed cluster for
-            # ssh proxy jump. Skip if provisioning already materialized the
-            # runtime without SSH.
-            if not manifest.runtime_setup_done:
+            # ssh proxy jump. Skip if the cluster is not SSH-reachable in the
+            # way the SSH config entry would assume.
+            if manifest.ssh_available:
                 auth_config = backend_utils.ssh_credential_from_yaml(
                     handle.cluster_yaml,
                     ssh_user=handle.ssh_user,

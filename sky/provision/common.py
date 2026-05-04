@@ -93,11 +93,30 @@ class ProvisionManifest:
     phases it handled. Set once at provision time.
     """
 
+    # Whether ray is running on the cluster.
     has_ray: bool = True
+    # Whether the cluster runs a job queue (ray + skylet bookkeeping) that
+    # can accept multiple ``sky exec`` submissions over its lifetime. False
+    # for single-use clusters where the job is baked into the provisioning
+    # manifest itself.
+    has_job_queue: bool = True
+    # Whether the cluster is reachable via SSH using the credentials and
+    # endpoint recorded in its cluster YAML.
+    ssh_available: bool = True
+    # Whether the SkyPilot runtime (cloud credentials, wheel, ray, skylet)
+    # has already been materialized on the cluster by the provisioner.
     runtime_setup_done: bool = False
+    # Whether the user's workdir has already been synced to the cluster by
+    # the provisioner.
     workdir_synced: bool = False
+    # Whether the task's file_mounts have already been synced to the
+    # cluster by the provisioner.
     file_mounts_synced: bool = False
+    # Whether the user's ``setup`` commands have already been run on the
+    # cluster by the provisioner.
     setup_done: bool = False
+    # Whether the user's ``run`` command has already been started on the
+    # cluster by the provisioner.
     run_started: bool = False
 
 
