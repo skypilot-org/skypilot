@@ -3442,6 +3442,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         ux_utils.finishing_message(
                             f'Cluster launched: {handle.cluster_name}.',
                             cluster_name=str(handle.cluster_name)))
+                    config_from_yaml = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
+                    cluster_info = provision_lib.get_cluster_info(
+                        repr(handle.launched_resources.cloud),
+                        provision_record.region,
+                        handle.cluster_name_on_cloud,
+                        provider_config=config_from_yaml.get('provider'))
                 else:
                     # Setup SkyPilot runtime after the cluster is provisioned
                     # 1. Wait for SSH to be ready.
