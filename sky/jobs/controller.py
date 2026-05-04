@@ -1449,8 +1449,8 @@ class JobController:
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
         # Build list of (task, handle) for non-terminal tasks with valid
-        # handles. Skip tasks already covered by pre-provision
-        # networking — they self-configure at task start.
+        # handles. Skip tasks that inline the DNS mapping — they already
+        # start the DNS updater from task.run.
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
