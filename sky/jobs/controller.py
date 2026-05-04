@@ -1241,9 +1241,8 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
 
-            if updated_handles:
-                await job_group_networking.setup_job_group_networking(
-                    job_group_name, updated_handles)
+            await job_group_networking.setup_job_group_networking(
+                job_group_name, updated_handles)
 
         return await self._monitor_one_task(
             task_id=task_id,
