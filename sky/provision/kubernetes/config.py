@@ -1,20 +1,66 @@
 """Kubernetes-specific configuration for the provisioner."""
 from concurrent import futures
 import copy
+import hashlib
+import json
 import logging
 import math
 import os
-from typing import Any, Callable, Dict, List, Optional, Union
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import yaml_utils
+from sky.utils.db import kv_cache
 
 logger = logging.getLogger(__name__)
 
 # Timeout for deleting a Kubernetes resource (in seconds).
 DELETION_TIMEOUT = 90
+
+# How long an RBAC verification stays cached. Bounds staleness if an admin
+# deletes a SkyPilot-managed role/binding outside of SkyPilot. Short enough
+# that the next launch will re-verify, long enough to cover bursts of
+# back-to-back launches.
+_RBAC_CACHE_TTL_SECONDS = 5 * 60
+
+# Fields in provider_config that influence the RBAC + system-namespace setup.
+# A change in any of these invalidates the cache via the content hash.
+# Cluster-specific fields (e.g. 'services') are deliberately excluded so
+# launching a new cluster name doesn't force a cache miss.
+_RBAC_FINGERPRINT_FIELDS: Tuple[str, ...] = (
+    'autoscaler_service_account',
+    'autoscaler_role',
+    'autoscaler_role_binding',
+    'autoscaler_cluster_role',
+    'autoscaler_cluster_role_binding',
+    'autoscaler_skypilot_system_role',
+    'autoscaler_skypilot_system_role_binding',
+    'autoscaler_ingress_role',
+    'autoscaler_ingress_role_binding',
+    'skypilot_system_namespace',
+    'port_mode',
+)
+
+
+def _rbac_cache_key(context: Optional[str], namespace: str,
+                    provider_config: Dict[str, Any]) -> str:
+    """Builds the kv_cache key for the RBAC + system-namespace setup.
+
+    The key fingerprints (context, user namespace, all RBAC inputs). Any
+    change to a cached resource definition or to which namespace the SA
+    lives in causes the next launch to miss and re-verify.
+    """
+    payload: Dict[str, Any] = {
+        f: provider_config.get(f) for f in _RBAC_FINGERPRINT_FIELDS
+    }
+    payload['namespace'] = namespace
+    fingerprint = hashlib.sha256(
+        json.dumps(payload, sort_keys=True,
+                   default=str).encode('utf-8')).hexdigest()
+    return f'k8s_provision_rbac:{context or ""}:{fingerprint}'
 
 
 def bootstrap_instances(
@@ -38,7 +84,19 @@ def bootstrap_instances(
     setup_rbac = (requested_service_account ==
                   kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
 
+    rbac_cache_key: Optional[str] = None
+    rbac_cache_hit = False
     if setup_rbac:
+        rbac_cache_key = _rbac_cache_key(context, namespace,
+                                         config.provider_config)
+        rbac_cache_hit = kv_cache.get_cache_entry(rbac_cache_key) is not None
+        if rbac_cache_hit:
+            logger.debug(
+                f'bootstrap_instances: RBAC setup recently verified for '
+                f'context={context!r} namespace={namespace!r}, skipping '
+                f'{len(_RBAC_FINGERPRINT_FIELDS)} K8s reads.')
+
+    if setup_rbac and not rbac_cache_hit:
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
@@ -104,7 +162,7 @@ def bootstrap_instances(
 
             tasks.append(_configure_ingress)
 
-    elif requested_service_account != 'default':
+    elif not setup_rbac and requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
 
@@ -120,6 +178,13 @@ def bootstrap_instances(
             for future in futures.as_completed(
                 [executor.submit(task) for task in tasks]):
                 future.result()
+
+    # Only mark verified after the RBAC fanout completes without raising —
+    # if any task fails the executor re-raises and we never reach this line.
+    if setup_rbac and not rbac_cache_hit and rbac_cache_key is not None:
+        kv_cache.add_or_update_cache_entry(
+            rbac_cache_key, '1',
+            time.time() + _RBAC_CACHE_TTL_SECONDS)
 
     return config
 

@@ -1218,6 +1218,189 @@ class TestRbac409ConflictHandling:
         auth_api_mock.patch_cluster_role_binding.assert_called_once()
 
 
+class TestRbacKvCache:
+    """Tests that bootstrap_instances skips RBAC reads when kv_cache hits.
+
+    The composite kv_cache entry fingerprints all RBAC + system-namespace
+    inputs (but not cluster-specific resources like services). On a hit,
+    none of the _configure_autoscaler_* helpers should be called.
+    """
+
+    @staticmethod
+    def _make_provision_config(provider_config):
+        from sky.provision import common as provision_common
+        return provision_common.ProvisionConfig(
+            provider_config=provider_config,
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'spec': {
+                    'serviceAccountName': 'skypilot-service-account',
+                },
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+    @staticmethod
+    def _patch_helpers(monkeypatch):
+        """Replace each _configure_* helper with a tracking MagicMock."""
+        helpers = {}
+        for name in [
+                '_configure_services',
+                '_configure_autoscaler_service_account',
+                '_configure_autoscaler_role',
+                '_configure_autoscaler_role_binding',
+                '_configure_autoscaler_cluster_role',
+                '_configure_autoscaler_cluster_role_binding',
+                '_configure_skypilot_system_namespace',
+                '_configure_fuse_mounting',
+        ]:
+            stub = mock.MagicMock()
+            monkeypatch.setattr(config_lib, name, stub)
+            helpers[name] = stub
+        return helpers
+
+    def test_cache_miss_runs_rbac_and_writes_entry(self, monkeypatch):
+        """On cache miss, RBAC helpers run and a cache entry is written."""
+        provider_config = _make_provider_config_for_rbac()
+        provider_config['namespace'] = 'default'
+        helpers = self._patch_helpers(monkeypatch)
+
+        get_calls = []
+        write_calls = []
+        monkeypatch.setattr(
+            'sky.utils.db.kv_cache.get_cache_entry',
+            lambda key: get_calls.append(key) or None)  # always miss
+        monkeypatch.setattr(
+            'sky.utils.db.kv_cache.add_or_update_cache_entry',
+            lambda key, value, expires_at: write_calls.append(
+                (key, value, expires_at)))
+
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_namespace_from_config',
+            lambda _: 'default')
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda _: 'ctx')
+
+        config_lib.bootstrap_instances(
+            'region', 'cluster', self._make_provision_config(provider_config))
+
+        assert len(get_calls) == 1
+        helpers['_configure_services'].assert_called_once()
+        helpers['_configure_autoscaler_service_account'].assert_called_once()
+        helpers['_configure_autoscaler_cluster_role'].assert_called_once()
+        helpers['_configure_skypilot_system_namespace'].assert_called_once()
+        # Single cache write with the same key that was looked up.
+        assert len(write_calls) == 1
+        assert write_calls[0][0] == get_calls[0]
+        assert write_calls[0][1] == '1'
+
+    def test_cache_hit_skips_rbac_no_write(self, monkeypatch):
+        """On cache hit, only services run; RBAC helpers and write are skipped.
+        """
+        provider_config = _make_provider_config_for_rbac()
+        provider_config['namespace'] = 'default'
+        helpers = self._patch_helpers(monkeypatch)
+
+        write_calls = []
+        monkeypatch.setattr('sky.utils.db.kv_cache.get_cache_entry',
+                            lambda key: '1')
+        monkeypatch.setattr(
+            'sky.utils.db.kv_cache.add_or_update_cache_entry',
+            lambda key, value, expires_at: write_calls.append(key))
+
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_namespace_from_config',
+            lambda _: 'default')
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda _: 'ctx')
+
+        config_lib.bootstrap_instances(
+            'region', 'cluster', self._make_provision_config(provider_config))
+
+        helpers['_configure_services'].assert_called_once()
+        helpers['_configure_autoscaler_service_account'].assert_not_called()
+        helpers['_configure_autoscaler_role'].assert_not_called()
+        helpers['_configure_autoscaler_role_binding'].assert_not_called()
+        helpers['_configure_autoscaler_cluster_role'].assert_not_called()
+        helpers['_configure_autoscaler_cluster_role_binding'].assert_not_called(
+        )
+        helpers['_configure_skypilot_system_namespace'].assert_not_called()
+        assert not write_calls
+
+    def test_failed_rbac_does_not_write_cache(self, monkeypatch):
+        """If any RBAC helper raises, the cache must not be written."""
+        provider_config = _make_provider_config_for_rbac()
+        provider_config['namespace'] = 'default'
+        helpers = self._patch_helpers(monkeypatch)
+        helpers['_configure_autoscaler_role'].side_effect = RuntimeError('boom')
+
+        write_calls = []
+        monkeypatch.setattr('sky.utils.db.kv_cache.get_cache_entry',
+                            lambda key: None)
+        monkeypatch.setattr(
+            'sky.utils.db.kv_cache.add_or_update_cache_entry',
+            lambda key, value, expires_at: write_calls.append(key))
+
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_namespace_from_config',
+            lambda _: 'default')
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda _: 'ctx')
+
+        with pytest.raises(RuntimeError, match='boom'):
+            config_lib.bootstrap_instances(
+                'region', 'cluster',
+                self._make_provision_config(provider_config))
+        assert not write_calls
+
+    def test_cache_key_changes_with_definition(self):
+        """Changing a role rule changes the cache key (so a SkyPilot upgrade
+        that ships new RBAC rules naturally invalidates old cache entries)."""
+        provider_config_1 = _make_provider_config_for_rbac()
+        key_1 = config_lib._rbac_cache_key('ctx', 'default', provider_config_1)
+
+        provider_config_2 = _make_provider_config_for_rbac()
+        provider_config_2['autoscaler_role']['rules'][0]['verbs'].append(
+            'watch')
+        key_2 = config_lib._rbac_cache_key('ctx', 'default', provider_config_2)
+
+        assert key_1 != key_2
+
+    def test_cache_key_stable_for_unrelated_changes(self):
+        """Changing services (cluster-specific) must NOT change the cache key,
+        otherwise every new cluster name would force a cache miss."""
+        provider_config_1 = _make_provider_config_for_rbac()
+        provider_config_1['services'] = [{
+            'metadata': {
+                'name': 'sky-aaaa-head'
+            },
+            'spec': {
+                'ports': []
+            }
+        }]
+        key_1 = config_lib._rbac_cache_key('ctx', 'default', provider_config_1)
+
+        provider_config_2 = _make_provider_config_for_rbac()
+        provider_config_2['services'] = [{
+            'metadata': {
+                'name': 'sky-bbbb-head'
+            },
+            'spec': {
+                'ports': []
+            }
+        }]
+        key_2 = config_lib._rbac_cache_key('ctx', 'default', provider_config_2)
+
+        assert key_1 == key_2
+
+
 class TestRuntimeClassOverride:
     """Tests for runtimeClassName override behavior in GPU pod specs.
 
