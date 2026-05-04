@@ -726,11 +726,12 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    runtime_ended_at = managed_job_runtime.get_job_ended_at(
-        handle, cluster_name)
-    if runtime_ended_at is not None:
-        return runtime_ended_at
+    if managed_job_runtime.is_registered():
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        runtime_ended_at = managed_job_runtime.get_job_ended_at(
+            handle, cluster_name)
+        if runtime_ended_at is not None:
+            return runtime_ended_at
     try:
         return get_job_timestamp(backend,
                                  cluster_name,
@@ -1571,10 +1572,11 @@ def stream_logs_by_id(
                 job_status: Optional[job_lib.JobStatus] = None
                 # handle being non-None implies cluster_name was set.
                 assert cluster_name is not None, (job_id, task_id)
-                runtime_result = managed_job_runtime.get_job_status(
-                    handle, cluster_name)
-                if runtime_result is not None:
-                    job_status, _ = runtime_result
+                if managed_job_runtime.is_registered():
+                    runtime_result = managed_job_runtime.get_job_status(
+                        handle, cluster_name)
+                    if runtime_result is not None:
+                        job_status, _ = runtime_result
                 if job_status is None:
                     # OSS default: query skylet via backend.
                     job_statuses = backend.get_job_status(handle,
