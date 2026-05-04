@@ -146,25 +146,26 @@ def _generate_k8s_dns_mappings(
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
     """
-    mappings: List[Tuple[str, str]] = []
+    mappings = []
     for task, handle in tasks_handles:
         if handle is None or not _is_kubernetes(handle):
             continue
+
+        job_name = task.name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         namespace = _get_k8s_namespace_from_handle(handle)
         num_nodes = (len(handle.stable_internal_external_ips)
                      if handle.stable_internal_external_ips else 1)
-        addresses = [
-            _construct_k8s_internal_svc(cluster_name_on_cloud, namespace,
-                                        node_idx) for node_idx in range(
-                                            num_nodes)
-        ]
-        job_name = task.name
-        for node_idx, dns_name in enumerate(addresses):
+
+        for node_idx in range(num_nodes):
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
-            mappings.append((dns_name, hostname))
-            logger.debug(f'K8s DNS mapping (node {node_idx}): '
-                         f'{dns_name} -> {hostname}')
+            internal_svc = _construct_k8s_internal_svc(cluster_name_on_cloud,
+                                                       namespace, node_idx)
+            mappings.append((internal_svc, hostname))
+            node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
+            logger.debug(f'K8s DNS mapping ({node_type}): '
+                         f'{internal_svc} -> {hostname}')
+
     return mappings
 
 
