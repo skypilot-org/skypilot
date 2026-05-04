@@ -189,8 +189,8 @@ def _generate_pre_provision_k8s_dns_mappings(
     post-provision networking behavior.
     """
     # pylint: disable-next=import-outside-toplevel
-    from sky.jobs import runtime as managed_job_runtime
     # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
     from sky.jobs import utils as managed_job_utils
 
     if not managed_job_runtime.is_registered():

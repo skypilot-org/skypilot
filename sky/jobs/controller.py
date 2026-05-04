@@ -32,8 +32,8 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
 from sky.jobs import log_gc
-from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import recovery_strategy
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
