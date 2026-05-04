@@ -81,10 +81,10 @@ def _bulk_provision(
                                                cluster_name.name_on_cloud,
                                                config=config)
 
-    # Kubernetes's run_instances already synchronously waits for all pods to be
-    # scheduled and running, and its wait_instances is a no-op, so skip the
-    # post-run wait/retry loop entirely.
-    if provider_name.lower() != 'kubernetes':
+    # Kubernetes-based clouds' run_instances already synchronously wait for all
+    # pods to be scheduled and running, and their wait_instances is a no-op,
+    # so skip the post-run wait/retry loop entirely.
+    if provider_name.lower() not in provision_constants.K8S_BASED_CLOUDS:
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
