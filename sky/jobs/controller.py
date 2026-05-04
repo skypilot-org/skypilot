@@ -1233,8 +1233,9 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
 
-            await job_group_networking.setup_job_group_networking(
-                job_group_name, updated_handles)
+            if updated_handles:
+                await job_group_networking.setup_job_group_networking(
+                    job_group_name, updated_handles)
 
         return await self._monitor_one_task(
             task_id=task_id,
@@ -1444,13 +1445,19 @@ class JobController:
 
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
-        # Build list of (task, handle) for non-terminal tasks with valid handles
+        # Build list of (task, handle) for non-terminal tasks with valid
+        # handles. Skip tasks already covered by pre-provision
+        # networking — they self-configure at task start.
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
             task_handle = handles[tid]
-            if task_handle is not None:
-                tasks_handles.append((task, task_handle))
+            if task_handle is None:
+                continue
+            if (job_group_networking.pre_provision_addresses_for_task(
+                    task, self._job_id) is not None):
+                continue
+            tasks_handles.append((task, task_handle))
 
         if tasks_handles:
             networking_success = await (

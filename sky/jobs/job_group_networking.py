@@ -25,7 +25,7 @@ import tempfile
 import textwrap
 import traceback
 import typing
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -52,6 +52,14 @@ def _is_kubernetes(
         return handle.launched_resources.cloud.is_same_cloud(
             sky_clouds.Kubernetes())
     return False
+
+
+def _task_targets_kubernetes(task: 'task_lib.Task') -> bool:
+    """Check if a task's resources target Kubernetes (pre-provision)."""
+    resources = list(task.resources)
+    if not resources or resources[0].cloud is None:
+        return False
+    return resources[0].cloud.is_same_cloud(sky_clouds.Kubernetes())
 
 
 def _get_k8s_namespace_from_handle(
@@ -138,27 +146,19 @@ def _generate_k8s_dns_mappings(
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
     """
-    # pylint: disable-next=import-outside-toplevel
-    from sky.jobs import runtime as managed_job_runtime
-
     mappings: List[Tuple[str, str]] = []
     for task, handle in tasks_handles:
         if handle is None or not _is_kubernetes(handle):
             continue
-        addresses = None
-        if managed_job_runtime.is_registered():
-            addresses = managed_job_runtime.get_node_addresses(handle)
-        if addresses is None:
-            # OSS default: K8s service-name convention.
-            cluster_name_on_cloud = handle.cluster_name_on_cloud
-            namespace = _get_k8s_namespace_from_handle(handle)
-            num_nodes = (len(handle.stable_internal_external_ips)
-                         if handle.stable_internal_external_ips else 1)
-            addresses = [
-                _construct_k8s_internal_svc(cluster_name_on_cloud, namespace,
-                                            node_idx)
-                for node_idx in range(num_nodes)
-            ]
+        cluster_name_on_cloud = handle.cluster_name_on_cloud
+        namespace = _get_k8s_namespace_from_handle(handle)
+        num_nodes = (len(handle.stable_internal_external_ips)
+                     if handle.stable_internal_external_ips else 1)
+        addresses = [
+            _construct_k8s_internal_svc(cluster_name_on_cloud, namespace,
+                                        node_idx) for node_idx in range(
+                                            num_nodes)
+        ]
         job_name = task.name
         for node_idx, dns_name in enumerate(addresses):
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
@@ -177,6 +177,33 @@ def _cluster_name_on_cloud_for_task(task: 'task_lib.Task',
         cluster_name, max_length=resources[0].cloud.max_cluster_name_length())
 
 
+def pre_provision_addresses_for_task(
+    task: 'task_lib.Task',
+    job_id: int,
+) -> Optional[List[str]]:
+    """Pre-provision addresses for this task, or ``None``.
+
+    Today this is a no-op and only optionally implemented by
+    plugins; may change in the future.
+    """
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    if not managed_job_runtime.is_registered():
+        return None
+    if task.name is None:
+        return None
+    if not _task_targets_kubernetes(task):
+        return None
+    cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+        task.name, job_id)
+    cluster_name_on_cloud = _cluster_name_on_cloud_for_task(task, cluster_name)
+    return managed_job_runtime.pre_provision_k8s_dns_addresses(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+
+
 def _generate_pre_provision_k8s_dns_mappings(
     job_group_name: str,
     tasks: List['task_lib.Task'],
@@ -188,26 +215,9 @@ def _generate_pre_provision_k8s_dns_mappings(
     before provisioning completes. Returning an empty list preserves the OSS
     post-provision networking behavior.
     """
-    # pylint: disable-next=import-outside-toplevel
-    # pylint: disable-next=import-outside-toplevel
-    from sky.jobs import runtime as managed_job_runtime
-    from sky.jobs import utils as managed_job_utils
-
-    if not managed_job_runtime.is_registered():
-        return []
-
     mappings: List[Tuple[str, str]] = []
     for task in tasks:
-        if task.name is None:
-            continue
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, job_id)
-        cluster_name_on_cloud = _cluster_name_on_cloud_for_task(
-            task, cluster_name)
-        addresses = managed_job_runtime.get_node_addresses_for_task(
-            task,
-            cluster_name=cluster_name,
-            cluster_name_on_cloud=cluster_name_on_cloud)
+        addresses = pre_provision_addresses_for_task(task, job_id)
         if addresses is None:
             continue
         for node_idx, dns_name in enumerate(addresses):
