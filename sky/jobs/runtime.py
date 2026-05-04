@@ -17,6 +17,7 @@ from sky import sky_logging
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.skylet import job_lib
 
@@ -104,27 +105,19 @@ class ManagedJobRuntime(Protocol):
         to the call site's default (``backend.tail_logs``)."""
         ...
 
-    def pre_provision_k8s_dns_addresses(
+    def k8s_dns_addresses_for_task(
         self,
-        *,
-        cluster_name_on_cloud: str,
+        task: 'task_lib.Task',
+        job_id: int,
     ) -> Optional[List[str]]:
-        """Return internal K8s DNS names representing this task's
-        contribution to JobGroup peer discovery, predicted before
-        provisioning.
+        """Return K8s DNS names for this task's nodes, or ``None``."""
+        ...
 
-        Returning a non-None list means the runtime claims the task
-        for the pre-provision path: addresses are injected into the
-        in-pod DNS updater script that runs at task start, and the
-        OSS post-provision SSH-based DNS updater is skipped for this
-        task (the two ends key off the same call to keep them
-        symmetric).
-
-        For runtimes that target Kubernetes, addresses may use the
-        literal ``$POD_NAMESPACE`` placeholder, which is expanded by
-        the in-pod shell from the Kubernetes Downward API rather
-        than resolved on the controller's kubeconfig.
-        """
+    def k8s_dns_addresses_for_handle(
+        self,
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    ) -> Optional[List[str]]:
+        """Return K8s DNS names for this handle's nodes, or ``None``."""
         ...
 
 
@@ -238,11 +231,18 @@ def tail_logs(
     )
 
 
-def pre_provision_k8s_dns_addresses(
-    *,
-    cluster_name_on_cloud: str,
+def k8s_dns_addresses_for_task(
+    task: 'task_lib.Task',
+    job_id: int,
 ) -> Optional[List[str]]:
     if _current is None:
         return None
-    return _current.pre_provision_k8s_dns_addresses(
-        cluster_name_on_cloud=cluster_name_on_cloud)
+    return _current.k8s_dns_addresses_for_task(task, job_id)
+
+
+def k8s_dns_addresses_for_handle(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+) -> Optional[List[str]]:
+    if _current is None:
+        return None
+    return _current.k8s_dns_addresses_for_handle(handle)

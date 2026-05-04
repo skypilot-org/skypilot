@@ -1457,7 +1457,7 @@ class JobController:
             task_handle = handles[tid]
             if task_handle is None:
                 continue
-            if (job_group_networking.pre_provision_addresses_for_task(
+            if (job_group_networking.dns_addresses_for_task(
                     task, self._job_id) is not None):
                 continue
             tasks_handles.append((task, task_handle))
