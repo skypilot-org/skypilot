@@ -1210,20 +1210,23 @@ def _get_pool_health_summary(pool_name: str) -> Optional[str]:
         if not replica_infos:
             return f'Pool {pool_name!r}: 0 workers'
         total = len(replica_infos)
-        ready = sum(1 for r in replica_infos
-                    if r.status == serve_state.ReplicaStatus.READY)
+        ready = 0
+        other_counts: 'collections.Counter[str]' = collections.Counter()
         failed_set = set(serve_state.ReplicaStatus.failed_statuses())
-        other: 'collections.OrderedDict[str, int]' = collections.OrderedDict()
         for r in replica_infos:
             if r.status == serve_state.ReplicaStatus.READY:
-                continue
-            if r.status in failed_set:
-                label = 'failed'
+                ready += 1
+            elif r.status in failed_set:
+                other_counts['failed'] += 1
             else:
-                label = r.status.value.lower()
-            other[label] = other.get(label, 0) + 1
-        if other:
-            other_str = ', '.join(f'{c} {label}' for label, c in other.items())
+                other_counts[r.status.value.lower()] += 1
+        if other_counts:
+            # Sort by count descending (alphabetical tiebreaker) so output is
+            # deterministic and the dominant state appears first — what the
+            # user most needs to see when assessing pool health.
+            ordered = sorted(other_counts.items(),
+                             key=lambda kv: (-kv[1], kv[0]))
+            other_str = ', '.join(f'{c} {label}' for label, c in ordered)
             return (f'Pool {pool_name!r}: {ready}/{total} ready '
                     f'({other_str})')
         return f'Pool {pool_name!r}: {ready}/{total} ready'
