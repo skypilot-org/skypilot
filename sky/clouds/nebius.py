@@ -53,7 +53,9 @@ def nebius_profile_in_aws_cred_and_config() -> bool:
 
 def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
     """Materialize effective Nebius config into a temporary uploadable file."""
-    with tempfile.NamedTemporaryFile(prefix=prefix, mode='w',
+    with tempfile.NamedTemporaryFile(prefix=prefix,
+                                     mode='w',
+                                     delete=False,
                                      encoding='utf-8') as temp_file:
         temp_file.write(value)
         temp_file.write('\n')
