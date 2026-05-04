@@ -854,9 +854,11 @@ available_node_types:
                 # so we only add mirror candidates for ubuntu here.
                 # Selected from https://launchpad.net/ubuntu/+archivemirrors
                 # and results from apt-select
-                MIRROR_CANDIDATES=""
-                if [ "$APT_OS" = "ubuntu" ]; then
-                  MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
+                if [ -z "$MIRROR_CANDIDATES" ]; then
+                  MIRROR_CANDIDATES=""
+                  if [ "$APT_OS" = "ubuntu" ]; then
+                    MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
+                  fi
                 fi
 
                 INSTALL_SUCCESS=false
