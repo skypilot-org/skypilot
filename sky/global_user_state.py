@@ -2026,15 +2026,9 @@ def get_clusters_from_history(
         # or are within the cutoff time (cutoff_time <= last_activity_time).
         # If days is not specified, we include all clusters by setting
         # cutoff_time to 0.
-        # Use COALESCE to handle NULL last_activity_time by falling back to
-        # launched_at. This ensures older clusters without last_activity_time
-        # are still included in results.
-        effective_activity_time = sqlalchemy.func.coalesce(
-            cluster_history_table.c.last_activity_time,
-            cluster_history_table.c.launched_at)
         query = query.filter(
             (cluster_table.c.status.isnot(None) |
-             (effective_activity_time >= cutoff_time)))
+             (cluster_history_table.c.last_activity_time >= cutoff_time)))
 
         # Order by launched_at descending (most recent first)
         query = query.order_by(
