@@ -268,12 +268,22 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
         return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
+def _read_or_none(read_fn: Callable[[], Any]) -> Optional[Any]:
+    """Calls a K8s read_* method, returning None on 404."""
+    try:
+        return read_fn()
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            return None
+        raise
+
+
 def _create_or_patch_resource(
     log_prefix: str,
     resource_field: str,
     name: str,
     create_fn: Callable[[], Any],
-    list_fn: Callable[[], Any],
+    read_fn: Callable[[], Any],
     patch_fn: Optional[Callable[[], None]],
     needs_update_fn: Optional[Callable[[Any], bool]],
 ) -> None:
@@ -282,9 +292,12 @@ def _create_or_patch_resource(
     If the resource doesn't exist, tries to create it. On 409 (concurrent
     creation), re-reads and falls through to compare/patch. If the resource
     exists (found initially or after 409), compares and patches if needed.
+
+    `read_fn` should call a K8s `read_*` method (a single-object GET that
+    raises 404 if missing); it's faster than `list_*` with a field_selector,
+    which forces a LIST scan on the apiserver.
     """
-    items = list_fn().items
-    existing = items[0] if items else None
+    existing = _read_or_none(read_fn)
 
     if existing is None:
         logger.info(f'{log_prefix}: '
@@ -296,7 +309,7 @@ def _create_or_patch_resource(
                 raise
             # Concurrently created by another process; re-read
             # and fall through to compare/patch below.
-            existing = list_fn().items[0]
+            existing = read_fn()
         else:
             logger.info(f'{log_prefix}: '
                         f'{created_msg(resource_field, name)}')
@@ -332,7 +345,6 @@ def _configure_autoscaler_service_account(
         raise InvalidNamespaceError(resource_field, namespace)
 
     name = account['metadata']['name']
-    field_selector = f'metadata.name={name}'
 
     _create_or_patch_resource(
         log_prefix=log_prefix,
@@ -340,9 +352,8 @@ def _configure_autoscaler_service_account(
         name=name,
         create_fn=lambda: kubernetes.core_api(
             context).create_namespaced_service_account(namespace, account),
-        list_fn=lambda: kubernetes.core_api(context).
-        list_namespaced_service_account(namespace,
-                                        field_selector=field_selector),
+        read_fn=lambda: kubernetes.core_api(context).
+        read_namespaced_service_account(name, namespace),
         # Nothing to compare/patch for service accounts.
         patch_fn=None,
         needs_update_fn=None,
@@ -372,7 +383,6 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         namespace = resource['metadata']['namespace']
 
     name = resource['metadata']['name']
-    field_selector = f'metadata.name={name}'
     new_role = kubernetes_utils.dict_to_k8s_object(resource, 'V1Role')
 
     _create_or_patch_resource(
@@ -381,8 +391,8 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         name=name,
         create_fn=lambda: kubernetes.auth_api(context).create_namespaced_role(
             namespace, resource),
-        list_fn=lambda: kubernetes.auth_api(context).list_namespaced_role(
-            namespace, field_selector=field_selector),
+        read_fn=lambda: kubernetes.auth_api(context).read_namespaced_role(
+            name, namespace),
         patch_fn=lambda: kubernetes.auth_api(context).patch_namespaced_role(
             name, namespace, resource),
         needs_update_fn=lambda existing: new_role.rules != existing.rules,
@@ -430,7 +440,6 @@ def _configure_autoscaler_role_binding(
     # Override name if provided
     resource['metadata']['name'] = override_name or resource['metadata']['name']
     name = resource['metadata']['name']
-    field_selector = f'metadata.name={name}'
     new_rb = kubernetes_utils.dict_to_k8s_object(resource, 'V1RoleBinding')
 
     _create_or_patch_resource(
@@ -439,9 +448,8 @@ def _configure_autoscaler_role_binding(
         name=name,
         create_fn=lambda: kubernetes.auth_api(
             context).create_namespaced_role_binding(rb_namespace, resource),
-        list_fn=lambda: kubernetes.auth_api(
-            context).list_namespaced_role_binding(
-                rb_namespace, field_selector=field_selector),
+        read_fn=lambda: kubernetes.auth_api(
+            context).read_namespaced_role_binding(name, rb_namespace),
         patch_fn=lambda: kubernetes.auth_api(context).
         patch_namespaced_role_binding(name, rb_namespace, resource),
         needs_update_fn=lambda existing:
@@ -466,7 +474,6 @@ def _configure_autoscaler_cluster_role(namespace, context,
         raise InvalidNamespaceError(resource_field, namespace)
 
     name = resource['metadata']['name']
-    field_selector = f'metadata.name={name}'
     new_cr = kubernetes_utils.dict_to_k8s_object(resource, 'V1ClusterRole')
 
     _create_or_patch_resource(
@@ -475,8 +482,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
         name=name,
         create_fn=lambda: kubernetes.auth_api(context).create_cluster_role(
             resource),
-        list_fn=lambda: kubernetes.auth_api(context).list_cluster_role(
-            field_selector=field_selector),
+        read_fn=lambda: kubernetes.auth_api(context).read_cluster_role(name),
         patch_fn=lambda: kubernetes.auth_api(context).patch_cluster_role(
             name, resource),
         needs_update_fn=lambda existing: new_cr.rules != existing.rules,
@@ -506,7 +512,6 @@ def _configure_autoscaler_cluster_role_binding(
                 resource_field + f' subject {subject_name}', namespace)
 
     name = resource['metadata']['name']
-    field_selector = f'metadata.name={name}'
     new_binding = kubernetes_utils.dict_to_k8s_object(resource,
                                                       'V1ClusterRoleBinding')
 
@@ -516,8 +521,8 @@ def _configure_autoscaler_cluster_role_binding(
         name=name,
         create_fn=lambda: kubernetes.auth_api(
             context).create_cluster_role_binding(resource),
-        list_fn=lambda: kubernetes.auth_api(context).list_cluster_role_binding(
-            field_selector=field_selector),
+        read_fn=lambda: kubernetes.auth_api(context).read_cluster_role_binding(
+            name),
         patch_fn=lambda: kubernetes.auth_api(
             context).patch_cluster_role_binding(name, resource),
         needs_update_fn=lambda existing:
@@ -660,12 +665,9 @@ def _configure_services(namespace: str, context: Optional[str],
 
     def _reconcile(service: Dict[str, Any]) -> None:
         name = service['metadata']['name']
-        field_selector = f'metadata.name={name}'
-        existing = (kubernetes.core_api(context).list_namespaced_service(
-            namespace, field_selector=field_selector).items)
-        if existing:
-            assert len(existing) == 1
-            existing_service = existing[0]
+        existing_service = _read_or_none(lambda: kubernetes.core_api(
+            context).read_namespaced_service(name, namespace))
+        if existing_service is not None:
             new_svc = kubernetes_utils.dict_to_k8s_object(service, 'V1Service')
             if new_svc.spec.ports == existing_service.spec.ports:
                 logger.info('_configure_services: '
