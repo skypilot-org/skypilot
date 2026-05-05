@@ -1616,6 +1616,82 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             rendered)
 
 
+class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
+    """Verify error-handling invariants of the apt setup in
+    sky/templates/kubernetes-ray.yml.j2 (sed tolerance, log dumping).
+
+    These are template-source invariants (independent of Jinja vars), so we
+    inspect the raw template text rather than rendering it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as f:
+            cls.template = f.read()
+
+    def _slice_between(self, begin_marker, end_marker):
+        begin = self.template.index(begin_marker)
+        end = self.template.index(end_marker, begin)
+        return self.template[begin:end]
+
+    def test_update_apt_sources_tolerates_sed_failure(self):
+        """sed in update_apt_sources must not abort the step on failure.
+
+        A sed error on one sources file (read-only fs, immutable bit, full
+        tmpfs) shouldn't kill the whole apt setup — restore_source undoes
+        partial edits on the next iteration of the candidate-mirror loop.
+        Also verifies $apt_file is quoted to tolerate unusual paths.
+        """
+        snippet = self._slice_between('update_apt_sources()', '}')
+        # The sed line must be quoted and tolerant of failure.
+        self.assertIn('"$apt_file"', snippet)
+        sed_line = next(
+            (line for line in snippet.splitlines() if 'sed -i -E' in line),
+            None)
+        self.assertIsNotNone(sed_line,
+                             'expected a sed -i -E line in update_apt_sources')
+        self.assertTrue(sed_line.rstrip().endswith('|| true'),
+                        f'sed line must end with `|| true`; got: {sed_line!r}')
+
+    def test_dump_apt_log_helper_defined(self):
+        """A dump_apt_log helper must be defined and tail the log to stderr.
+
+        Without surfacing /tmp/apt-update.log to the pod's stderr, users
+        only see the terse summary line and the real apt error is lost
+        when the pod is torn down.
+        """
+        self.assertIn('dump_apt_log()', self.template)
+        helper = self._slice_between('dump_apt_log()', '}')
+        self.assertIn('/tmp/apt-update.log', helper)
+        self.assertIn('tail', helper)
+        # Output must go to stderr (>&2) so it appears in pod logs.
+        self.assertIn('>&2', helper)
+
+    def test_dump_apt_log_called_on_no_sources_found(self):
+        """No-sources-found branch must dump the log before breaking."""
+        snippet = self._slice_between('no apt sources file found', 'break')
+        self.assertIn('dump_apt_log', snippet)
+
+    def test_dump_apt_log_called_on_all_mirrors_failed(self):
+        """Final 'all sources failed' branch must dump the log before exit."""
+        snippet = self._slice_between(
+            'core package installation failed across all sources', 'fi;')
+        self.assertIn('dump_apt_log', snippet)
+        # exit 1 must come after the dump.
+        self.assertLess(snippet.index('dump_apt_log'), snippet.index('exit 1'))
+
+    def test_dump_apt_log_called_on_docker_repo_install_failure(self):
+        """Docker CLI / buildx install path must also surface the log."""
+        snippet = self._slice_between('docker-ce-cli docker-buildx-plugin',
+                                      '{% endif %}')
+        self.assertIn('dump_apt_log', snippet)
+        self.assertIn('exit 1', snippet)
+        self.assertLess(snippet.index('dump_apt_log'), snippet.index('exit 1'))
+
+
 class TestEphemeralStorageValidation(unittest.TestCase):
     """Test that ephemeral_storage is rejected on non-Kubernetes clouds."""
 

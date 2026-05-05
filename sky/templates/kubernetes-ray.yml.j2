@@ -803,7 +803,24 @@ available_node_types:
                 update_apt_sources() {
                   local host=$1
                   local apt_file=$2
-                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                  # || true: a sed failure on one sources file (read-only fs,
+                  # immutable bit, full tmpfs) shouldn't kill the whole step;
+                  # restore_source will undo any partial edits on the next
+                  # iteration of the candidate-mirror loop.
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$apt_file" || true
+                }
+                # Surface /tmp/apt-update.log to the pod's stderr on failure.
+                # Without this, users only see the terse summary line — the
+                # actual apt error stays inside the (often torn-down) pod.
+                dump_apt_log() {
+                  local log=/tmp/apt-update.log
+                  if [ -f "$log" ]; then
+                    echo "=== /tmp/apt-update.log (last 200 lines) ===" >&2
+                    tail -n 200 "$log" >&2 || true
+                    echo "=== end /tmp/apt-update.log ===" >&2
+                  else
+                    echo "/tmp/apt-update.log not found" >&2
+                  fi
                 }
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
@@ -880,6 +897,7 @@ available_node_types:
                     fi
                     if [ "$found_sources" = "false" ]; then
                       echo "Error: no apt sources file found" >> /tmp/apt-update.log
+                      dump_apt_log
                       break
                     fi
                   fi
@@ -917,6 +935,7 @@ available_node_types:
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  dump_apt_log
                   exit 1
                 fi;
 
@@ -934,7 +953,11 @@ available_node_types:
                   https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
                   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
                   | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
-                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1 || {
+                  echo "Error: failed to install Docker CLI / buildx plugin." >> /tmp/apt-update.log
+                  dump_apt_log
+                  exit 1
+                }
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}
