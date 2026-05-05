@@ -390,3 +390,38 @@ Working with clusters
 ---------------------
 
 To see a typical workflow of working with clusters, you can refer to :ref:`quickstart`.
+
+
+.. _dev-resize:
+
+Advanced: Resize a cluster
+--------------------------
+
+Existing clusters can be scaled up or down to a different number of
+nodes without tearing them down. Pass ``--resize`` along with the YAML
+that defines the cluster so ``setup`` runs on the new workers:
+
+.. code-block:: bash
+
+  # Scale up: add more workers and run setup on them.
+  sky launch -c dev --resize --num-nodes 8 dev.yaml
+
+  # Scale down: re-provision workers at the new count.
+  sky launch -c dev --resize --num-nodes 2 dev.yaml
+
+The job queue and logs are preserved across a resize.
+
+.. note::
+
+  New workers start with a clean image. Pass the same YAML you
+  launched with so ``setup`` reruns on them; otherwise the new
+  workers have no setup applied.
+
+Restrictions:
+
+- The cluster must be in the ``UP`` state (run :code:`sky start <cluster>`
+  first if it is stopped).
+- Scale-down is rejected if any job is ``RUNNING``, ``SETTING_UP``, or
+  ``PENDING``. Cancel them first with :code:`sky cancel <cluster> -a`.
+- Only ``--num-nodes`` may change. Other hardware (instance type,
+  accelerators, region, zone, etc.) must match the existing cluster.

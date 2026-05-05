@@ -570,6 +570,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -641,6 +642,11 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster. If True, requires ``cluster_name``
+          to be set.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -678,6 +684,11 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if resize and cluster_name is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'resize=True requires cluster_name to be set to an existing '
+                'cluster.')
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -692,6 +703,12 @@ def launch(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
+    if resize and (remote_api_version is None or remote_api_version < 50):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Cluster resize (--resize / resize=True) is not supported by '
+                'your API server. Please upgrade the API server to a version '
+                'that supports API_VERSION >= 50.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
@@ -737,6 +754,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -758,6 +776,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -802,13 +821,16 @@ def _launch(
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'
 
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
+        # it exists but is STOPPED, or (4) resize is requested and would
+        # change the node count.
         prompt = None
         if cluster_status is None:
-            prompt = (
-                f'Launching a new cluster {cluster_name!r}. '
-                # '{clone_source_str}. '
-                'Proceed?')
+            suffix = ''
+            if resize:
+                suffix = (f' (--resize will be ignored since {cluster_name!r} '
+                          f'does not exist)')
+            prompt = (f'Launching a new cluster {cluster_name!r}.{suffix} '
+                      'Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
@@ -817,6 +839,36 @@ def _launch(
                                  f'{cluster_user_hash_str}')
             prompt = (f'Restarting the stopped cluster {cluster_name!r}'
                       f'{user_name_str}. Proceed?')
+        elif resize:
+            current_nodes = cluster_record.get('nodes')
+            target_nodes = dag.tasks[0].num_nodes
+            user_name_str = ''
+            if cluster_user_hash != common_utils.get_user_hash():
+                user_name_str = (f' (created by another user '
+                                 f'{cluster_user_name!r}'
+                                 f'{cluster_user_hash_str})')
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s). Proceed?')
+            elif current_nodes == target_nodes:
+                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
+                          f'has {current_nodes} node(s); --resize is a '
+                          f'no-op. Proceed?')
+            elif target_nodes > current_nodes:
+                delta = target_nodes - current_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(+{delta} worker(s), scale up). Proceed?')
+            else:
+                delta = current_nodes - target_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(-{delta} worker(s), scale down). Excess '
+                          f'workers will be terminated. Proceed?')
         elif cluster_user_hash != common_utils.get_user_hash():
             # Prompt if the cluster was created by a different user.
             prompt = (f'Cluster {cluster_name!r} was created by another user '
@@ -858,6 +910,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)

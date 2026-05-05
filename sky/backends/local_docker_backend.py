@@ -139,6 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        resize: bool = False,
     ) -> Tuple[Optional[LocalDockerResourceHandle], bool]:
         """Builds docker image for the task and returns cluster name as handle.
 
