@@ -761,6 +761,63 @@ def test_ordered_resources(enable_all_clouds):
         sys.stdout = original_stdout  # Restore original stdout
 
 
+def test_ordered_resources_with_docker_image(enable_all_clouds):
+    """Tests that ordered resources with docker images respect user order.
+
+    Regression test: when set_resources() transforms Resources objects through
+    _with_docker_login_config (which calls .copy()), the resulting objects have
+    different identity than the originals. Since Resources has no __eq__ or
+    __hash__, the old code's `launchable_resources_map.get(resources, [])`
+    lookup would always miss, causing the loop to fall through to the last
+    accelerator instead of selecting the first launchable one.
+    """
+    import copy
+    from unittest.mock import patch
+
+    original_fill = optimizer._fill_in_launchable_resources
+
+    def _fill_with_copied_keys(task, blocked_resources, quiet=False):
+        """Wraps _fill_in_launchable_resources to replace map keys with
+        copies, simulating what happens when set_resources() transforms
+        Resources through _with_docker_login_config's .copy() call."""
+        launchable, cloud_candidates, fuzzy, hints = original_fill(
+            task, blocked_resources, quiet)
+        # Replace each key with a deep copy to break object identity,
+        # simulating the .copy() path in _with_docker_login_config.
+        new_launchable = {}
+        for k, v in launchable.items():
+            new_launchable[copy.deepcopy(k)] = v
+        return new_launchable, cloud_candidates, fuzzy, hints
+
+    captured_output = io.StringIO()
+    captured_output.fileno = lambda: 1
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = captured_output
+
+        with sky.Dag() as dag:
+            task = sky.Task('test_task')
+            task.set_resources([
+                sky.Resources(accelerators={'V100': 1}),
+                sky.Resources(accelerators={'T4': 1}),
+                sky.Resources(accelerators={'K80': 1}),
+            ])
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=_fill_with_copied_keys):
+            dag = sky.optimize(dag)
+
+        output = captured_output.getvalue()
+        assert any(
+            'V100' in line and '\u2714' in line for line in output.splitlines()
+        ), ('Expected V100 (first in ordered list) to be chosen, but it was '
+            'not. This indicates the optimizer is not respecting user-specified '
+            'accelerator ordering when Resources objects lose identity '
+            '(e.g. due to docker image config transforms).\n'
+            f'Output:\n{output}')
+    finally:
+        sys.stdout = original_stdout
+
+
 def test_disk_tier_mismatch(enable_all_clouds):
     for cloud in registry.CLOUD_REGISTRY.values():
         for tier in cloud._SUPPORTED_DISK_TIERS:
