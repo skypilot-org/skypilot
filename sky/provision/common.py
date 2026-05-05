@@ -88,7 +88,7 @@ class ProvisionConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class ProvisionManifest:
+class ProvisionRuntimeMetadata:
     """Record of what the provisioner set up and which runtime
     phases it handled. Set once at provision time.
     """
@@ -97,8 +97,8 @@ class ProvisionManifest:
     has_ray: bool = True
     # Whether the cluster runs a job queue (ray + skylet bookkeeping) that
     # can accept multiple ``sky exec`` submissions over its lifetime. False
-    # for single-use clusters where the job is baked into the provisioning
-    # manifest itself.
+    # for single-use clusters where the job is baked into the provisioned
+    # runtime itself.
     has_job_queue: bool = True
     # Whether the cluster is reachable via SSH using the credentials and
     # endpoint recorded in its cluster YAML.
@@ -139,9 +139,9 @@ class ProvisionRecord:
     resumed_instance_ids: List[InstanceId]
     # The IDs of all just created instances.
     created_instance_ids: List[InstanceId]
-    # Describes what the provisioner has set up.
-    manifest: ProvisionManifest = dataclasses.field(
-        default_factory=ProvisionManifest)
+    # Metadata about the runtime materialized by provisioning.
+    runtime_metadata: ProvisionRuntimeMetadata = dataclasses.field(
+        default_factory=ProvisionRuntimeMetadata)
 
     def is_instance_just_booted(self, instance_id: InstanceId) -> bool:
         """Whether or not the instance is just booted.

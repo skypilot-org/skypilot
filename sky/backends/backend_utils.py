@@ -2670,10 +2670,10 @@ def _update_cluster_status(
 
     # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
     # or when the provisioner reports no Ray runtime.
-    # TODO(kevin): migrate cloud.uses_ray() -> ProvisionManifest, i.e.
+    # TODO(kevin): migrate cloud.uses_ray() -> ProvisionRuntimeMetadata, i.e.
     # from cloud -> provision layer.
     should_check_ray = (cloud is not None and cloud.uses_ray() and
-                        handle.provision_manifest.has_ray)
+                        handle.provision_runtime_metadata.has_ray)
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
             not external_cluster_failures):

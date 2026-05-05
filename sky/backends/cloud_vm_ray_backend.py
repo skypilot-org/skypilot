@@ -2013,7 +2013,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
-        self.provision_manifest = provision_common.ProvisionManifest()
+        self.provision_runtime_metadata = (
+            provision_common.ProvisionRuntimeMetadata())
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2630,7 +2631,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             'docker_user': self.docker_user,
             'is_grpc_enabled': self.is_grpc_enabled,
             'ssh_user': self.ssh_user,
-            'provision_manifest': dataclasses.asdict(self.provision_manifest),
+            'provision_runtime_metadata': dataclasses.asdict(
+                self.provision_runtime_metadata),
         }
 
     @classmethod
@@ -2659,12 +2661,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
         handle.cached_cluster_info = None
         handle._ssh_user = d.get('ssh_user')
-        manifest = d.get('provision_manifest')
-        if manifest is not None:
-            handle.provision_manifest = provision_common.ProvisionManifest(
-                **manifest)
+        runtime_metadata = d.get('provision_runtime_metadata')
+        if runtime_metadata is not None:
+            handle.provision_runtime_metadata = (
+                provision_common.ProvisionRuntimeMetadata(**runtime_metadata))
         else:
-            handle.provision_manifest = provision_common.ProvisionManifest()
+            handle.provision_runtime_metadata = (
+                provision_common.ProvisionRuntimeMetadata())
         return handle
 
     def __getstate__(self):
@@ -2672,13 +2675,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # For backwards compatibility. Refer to
         # https://github.com/skypilot-org/skypilot/pull/7133
         state.setdefault('skylet_ssh_tunnel', None)
-        # Serialize provision_manifest as a plain dict so older code
-        # (which doesn't have the ProvisionManifest class on
-        # sky.provision.common) can still load this handle from the DB
-        # or from an API response.
-        manifest = state.get('provision_manifest')
-        if isinstance(manifest, provision_common.ProvisionManifest):
-            state['provision_manifest'] = dataclasses.asdict(manifest)
+        # Serialize provision_runtime_metadata as a plain dict.
+        runtime_metadata = state.get('provision_runtime_metadata')
+        if isinstance(runtime_metadata,
+                      provision_common.ProvisionRuntimeMetadata):
+            state['provision_runtime_metadata'] = dataclasses.asdict(
+                runtime_metadata)
         return state
 
     def __setstate__(self, state):
@@ -2742,15 +2744,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
 
-        # provision_manifest is serialized as a plain dict (see
-        # __getstate__) for cross-version compatibility. Reconstruct
-        # the dataclass here, defaulting if absent.
-        manifest = state.get('provision_manifest')
-        if isinstance(manifest, dict):
-            state['provision_manifest'] = provision_common.ProvisionManifest(
-                **manifest)
-        elif manifest is None:
-            state['provision_manifest'] = provision_common.ProvisionManifest()
+        # provision_runtime_metadata is serialized as a plain dict (see
+        # __getstate__). Reconstruct the dataclass here, defaulting if absent.
+        runtime_metadata = state.get('provision_runtime_metadata')
+        if isinstance(runtime_metadata, dict):
+            state['provision_runtime_metadata'] = (
+                provision_common.ProvisionRuntimeMetadata(**runtime_metadata))
+        elif runtime_metadata is None:
+            state['provision_runtime_metadata'] = (
+                provision_common.ProvisionRuntimeMetadata())
 
         self.__dict__.update(state)
 
@@ -3431,12 +3433,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # New provisioner is used here.
                 handle = config_dict['handle']
                 provision_record = config_dict['provision_record']
-                manifest = provision_record.manifest
-                handle.provision_manifest = manifest
+                runtime_metadata = provision_record.runtime_metadata
+                handle.provision_runtime_metadata = runtime_metadata
                 resources_vars = config_dict['resources_vars']
                 config_hash = config_dict.get('config_hash', None)
 
-                if manifest.runtime_setup_done:
+                if runtime_metadata.runtime_setup_done:
                     logger.info('Skipping runtime setup: provisioner reported '
                                 'SkyPilot runtime is ready.')
                     logger.info(
@@ -3585,12 +3587,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        manifest = handle.provision_manifest
+        runtime_metadata = handle.provision_runtime_metadata
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if (prev_cluster_status == status_lib.ClusterStatus.INIT and
-                manifest.has_job_queue):
+                runtime_metadata.has_job_queue):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
@@ -3616,7 +3618,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     subprocess_utils.handle_returncode(
                         returncode, cmd, 'Failed to update job status.', stderr)
         if (prev_cluster_status == status_lib.ClusterStatus.STOPPED and
-                manifest.has_job_queue):
+                runtime_metadata.has_job_queue):
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
             # An edge case here due to racing:
@@ -3689,7 +3691,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # is helpful for people trying to use `sky launch`'ed cluster for
             # ssh proxy jump. Skip if the cluster is not SSH-reachable in the
             # way the SSH config entry would assume.
-            if manifest.ssh_available:
+            if runtime_metadata.ssh_available:
                 auth_config = backend_utils.ssh_credential_from_yaml(
                     handle.cluster_yaml,
                     ssh_user=handle.ssh_user,
@@ -3703,7 +3705,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
-        if handle.provision_manifest.workdir_synced:
+        if handle.provision_runtime_metadata.workdir_synced:
             logger.info('Skipping workdir sync: provisioner reported ready.')
             return
 
@@ -3826,7 +3828,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
-        if handle.provision_manifest.file_mounts_synced:
+        if handle.provision_runtime_metadata.file_mounts_synced:
             logger.info('Skipping file mounts sync: provisioner reported '
                         'ready.')
             return
@@ -3855,7 +3857,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         start = time.time()
 
-        if handle.provision_manifest.setup_done:
+        if handle.provision_runtime_metadata.setup_done:
             logger.info('Skipping setup: provisioner reported done.')
             return
 
@@ -4368,7 +4370,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
-        if handle.provision_manifest.run_started:
+        if handle.provision_runtime_metadata.run_started:
             logger.info('Skipping run: provisioner reported run already '
                         'started.')
             return None
@@ -5208,7 +5210,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
-            if handle.provision_manifest.has_ray:
+            if handle.provision_runtime_metadata.has_ray:
                 try:
                     # We do not check the return code, since Ray returns
                     # non-zero return code when calling Ray stop,
