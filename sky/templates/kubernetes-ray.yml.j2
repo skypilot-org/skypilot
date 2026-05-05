@@ -965,8 +965,12 @@ available_node_types:
                   fi
                 fi
 
-                # Install MISSING_PACKAGES individually (optional, some may
-                # not exist on certain distros).
+                # Install MISSING_PACKAGES one at a time, not as a single
+                # `apt-get install` batch: a batch fails entirely if any
+                # one package is unresolvable on the target distro, and
+                # fuse3 in particular is unavailable on some Debian/Ubuntu
+                # variants (see PR #7036). Per-package install lets the
+                # rest succeed and we just log the misses.
                 set +e
                 if [ "$INSTALL_SUCCESS" = "true" ] && [ ! -z "$MISSING_PACKAGES" ]; then
                   echo "Installing missing packages individually: $MISSING_PACKAGES" >> /tmp/apt-update.log;
