@@ -822,13 +822,16 @@ available_node_types:
                   local path_seg=$2
                   shift 2
                   local uris="$*"
-                  $(prefix_cmd) tee "$skypilot_deb822" > /dev/null <<DEB822
-Types: deb
-URIs: $uris
-Suites: $codename $codename-updates $codename-security $codename-backports
-Components: main restricted universe multiverse
-Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-DEB822
+                  # Use echo block (not a heredoc) so we don't have to
+                  # un-indent body lines to column 0 — that would terminate
+                  # the surrounding YAML block scalar early.
+                  {
+                    echo "Types: deb"
+                    echo "URIs: $uris"
+                    echo "Suites: $codename $codename-updates $codename-security $codename-backports"
+                    echo "Components: main restricted universe multiverse"
+                    echo "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg"
+                  } | $(prefix_cmd) tee "$skypilot_deb822" > /dev/null
                 }
                 # Surface /tmp/apt-update.log to the pod's stderr on failure.
                 # Without this, users only see the terse summary line — the
