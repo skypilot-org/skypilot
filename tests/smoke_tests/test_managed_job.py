@@ -608,7 +608,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
                 # check, but should be significantly shorter than the timeout of
                 # a transient error retries, as the controller should discover
                 # the cluster termination immediately.
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -621,7 +622,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.RECOVERING],
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
