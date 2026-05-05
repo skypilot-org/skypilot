@@ -2219,9 +2219,16 @@ def set_check_results(
     """Persist `results` for `workspace`.
 
     `is_full_workspace_run=True` replaces the entire row (drops clouds /
-    contexts not present in `results`).  `False` merges at cloud
-    granularity: read the existing row, replace only the cloud entries
-    in `results`, write back.
+    contexts not present in `results`).  `False` merges at *context*
+    granularity within a cloud: read the existing row, update only the
+    individual leaves under each `cloud_repr` in `results`, and preserve
+    sibling contexts that the scoped run didn't probe.  Per-context
+    merge (rather than replacing the whole cloud entry) is required so a
+    single-context recheck — e.g. a per-context lookup on a multi-
+    context Kubernetes cloud — does not clobber prior results for
+    sibling contexts that the current run didn't iterate.  Stale leaves
+    for contexts that have since been removed from a cloud will linger
+    until the next full-workspace run rewrites the row.
     """
     engine = _db_manager.get_engine()
     if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -2261,7 +2268,10 @@ def set_check_results(
                     existing = {}
             new_value = dict(existing)
             for cloud_repr, ctx_dict in results.items():
-                new_value[cloud_repr] = ctx_dict
+                existing_for_cloud = new_value.get(cloud_repr)
+                if not isinstance(existing_for_cloud, dict):
+                    existing_for_cloud = {}
+                new_value[cloud_repr] = {**existing_for_cloud, **ctx_dict}
 
         serialized = json.dumps(new_value)
         insert_stmnt = insert_func(config_table).values(key=key,

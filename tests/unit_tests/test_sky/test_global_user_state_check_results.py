@@ -98,7 +98,7 @@ def test_full_run_replaces_entire_row(tmp_path, monkeypatch):
     }
 
 
-def test_scoped_run_merges_at_cloud_granularity(tmp_path, monkeypatch):
+def test_scoped_run_merges_other_clouds(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     global_user_state.set_check_results(
         {
@@ -139,6 +139,66 @@ def test_scoped_run_merges_at_cloud_granularity(tmp_path, monkeypatch):
                 'enabled': True,
                 'reason': 'enabled.'
             }
+        },
+    }
+
+
+def test_scoped_run_preserves_sibling_contexts_within_cloud(
+        tmp_path, monkeypatch):
+    """A scoped run that touches a subset of contexts within a cloud
+    must not drop the leaves for sibling contexts that weren't
+    re-probed.  This is the case for per-context lookups on
+    multi-context Kubernetes clouds — a single-context recheck would
+    otherwise clobber every other context's status under the cloud
+    key, making them appear "not enabled" until the next full run.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    global_user_state.set_check_results(
+        {
+            'Kubernetes': {
+                'ctx-a': {
+                    'enabled': True,
+                    'reason': 'enabled.'
+                },
+                'ctx-b': {
+                    'enabled': True,
+                    'reason': 'enabled.'
+                },
+                'ctx-c': {
+                    'enabled': True,
+                    'reason': 'enabled.'
+                },
+            }
+        },
+        workspace='default',
+        is_full_workspace_run=True)
+    # Scoped run that only re-probes ctx-b — ctx-a and ctx-c must
+    # survive intact, and ctx-b's leaf must update.
+    global_user_state.set_check_results(
+        {
+            'Kubernetes': {
+                'ctx-b': {
+                    'enabled': False,
+                    'reason': 'Forbidden'
+                }
+            }
+        },
+        workspace='default',
+        is_full_workspace_run=False)
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': {
+            'ctx-a': {
+                'enabled': True,
+                'reason': 'enabled.'
+            },
+            'ctx-b': {
+                'enabled': False,
+                'reason': 'Forbidden'
+            },
+            'ctx-c': {
+                'enabled': True,
+                'reason': 'enabled.'
+            },
         },
     }
 
