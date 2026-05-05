@@ -194,9 +194,9 @@ active tab to be moved up. */
 }
 
 /* Avoid layout shifts in the right-hand navbar block during the first
-   ~150ms of page load. Four post-paint events would otherwise reflow the
-   search button + icons + kbd shortcut and visibly jiggle Slack/Twitter/
-   GitHub:
+   ~150ms of page load. Four post-paint events would otherwise reflow
+   the search button + icons + kbd shortcut and visibly jiggle
+   Slack/Twitter/GitHub:
 
    (a) The pydata theme's inline <head> script sets html[data-mode] to ""
        when localStorage has no "mode" entry. The theme CSS only shows a
@@ -227,10 +227,27 @@ html[data-mode=""] .theme-switch-button span[data-mode=auto] {
   display: flex;
 }
 
-/* (b) */
-.search-button__kbd-shortcut kbd:first-child {
-  min-width: 2.75rem;
-  text-align: center;
+/* (b) Strip the kbd shortcut from the navbar search button — pydata's
+   post-DCL "Ctrl"→"⌘" swap on Mac would otherwise shrink the search
+   button by ~22px. Pin the button to its original width with the icon
+   and "Search" label centered together. The keyboard binding still
+   works; pydata's Cmd+K / Ctrl+K listener doesn't depend on the
+   indicator. Scoped to the navbar so the hidden search modal in
+   .bd-search is left alone. */
+.navbar-header-items__end .search-button__kbd-shortcut,
+.navbar-persistent--mobile .search-button__kbd-shortcut {
+  display: none;
+}
+.navbar-header-items__end .search-button-field,
+.navbar-persistent--mobile .search-button-field {
+  min-width: 183px;
+  justify-content: center;
+}
+/* Match the visual weight of the navbar nav-links — the pill background
+   makes the default 16px feel heavier than its peers. */
+.navbar-header-items__end .search-button-field .search-button__default-text,
+.navbar-persistent--mobile .search-button-field .search-button__default-text {
+  font-size: 0.875rem;
 }
 
 /* (c) Lock every FontAwesome icon to a fixed-width box regardless of
