@@ -204,22 +204,15 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
 def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
-    workspace: Optional[str] = None,
-    kubernetes_contexts: Optional[Tuple[str, ...]] = None,
+    workspace: Optional[str] = None
 ) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]:
     """Checks the credentials to enable clouds.
 
     Args:
-        infra: The infra to check. Strings of the form
-            `kubernetes/<context>` (or the alias `k8s/<context>`) are
-            parsed as a per-context scope, populating
-            `kubernetes_contexts` so the check only iterates the named
-            context(s).
+        infra: The infra to check.
         verbose: Whether to show verbose output.
         workspace: The workspace to check. If None, all workspaces will be
         checked.
-        kubernetes_contexts: Optional whitelist of Kubernetes contexts.
-            Merged with anything parsed from `infra_list`.
 
     Returns:
         The request ID of the check request.
@@ -228,7 +221,6 @@ def check(
         Dict mapping workspace name to a dict of cloud name to list of
         enabled capability strings (e.g. 'compute', 'storage').
     """
-    contexts_from_infra: List[str] = []
     if infra_list is None:
         clouds = None
     else:
@@ -238,47 +230,16 @@ def check(
             if infra.cloud is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Invalid infra to check: {infra_str}')
-            if infra.cloud == 'kubernetes':
-                # `k8s/<context>` and `kubernetes/<context>` parse with
-                # the context name in `infra.region`. Promote it to the
-                # explicit per-context scope instead of warning and
-                # ignoring it.
-                if infra.region is not None:
-                    contexts_from_infra.append(infra.region)
-            elif infra.region is not None or infra.zone is not None:
+            if infra.region is not None or infra.zone is not None:
                 region_zone = infra_str.partition('/')[-1]
                 logger.warning(f'Infra {infra_str} is specified, but `check` '
                                f'only supports checking {infra.cloud}, '
                                f'ignoring {region_zone}')
             specified_clouds.append(infra.cloud)
         clouds = tuple(specified_clouds)
-    merged_contexts: Optional[Tuple[str, ...]] = None
-    if kubernetes_contexts or contexts_from_infra:
-        # Preserve order, dedupe.
-        seen: Dict[str, None] = {}
-        for ctx in list(kubernetes_contexts or ()) + contexts_from_infra:
-            seen.setdefault(ctx, None)
-        merged_contexts = tuple(seen.keys())
-        # Older servers ignore CheckBody.kubernetes_contexts
-        # (BasePayload uses extra='ignore'), so the per-context scope
-        # would be silently dropped and the user would see every
-        # allowed context iterated. Warn at request time so the
-        # behavior isn't a mystery.
-        remote_api_version = versions.get_remote_api_version()
-        if (remote_api_version is not None and remote_api_version <
-                server_constants.MIN_KUBERNETES_CONTEXTS_API_VERSION):
-            logger.warning(
-                f'`sky check` per-context scope requires API server '
-                f'version {server_constants.MIN_KUBERNETES_CONTEXTS_API_VERSION}'
-                f' or higher; the server is running version '
-                f'{remote_api_version}. The --context / '
-                f'kubernetes/<ctx> argument will be ignored and every '
-                f'allowed context will be checked. Please upgrade the '
-                f'API server to enable per-context scoping.')
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
-                              workspace=workspace,
-                              kubernetes_contexts=merged_contexts)
+                              workspace=workspace)
     response = server_common.make_authenticated_request(
         'POST', '/check', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
