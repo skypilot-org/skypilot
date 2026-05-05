@@ -732,14 +732,20 @@ available_node_types:
                   local i
                   for i in $(seq 1 $tries); do
                     # apt-get update returns 0 even when sources fail to fetch,
-                    # so we also check output for failure indicators.
+                    # so we also check output for apt's own post-acquisition
+                    # summary line, which only appears when at least one
+                    # resource ended up with no fresh data from any URI. A
+                    # per-URI "Failed to fetch" line is normal and expected
+                    # when one mirror in a multi-URI source is degraded but
+                    # apt successfully fell over to a sibling — that case
+                    # must still count as success.
                     local output
                     output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
                     if [ $rc -eq 124 ]; then
                       echo "apt-get update timed out after ${APT_CMD_TIMEOUT}s (attempt $i/$tries)" >> "$log"
-                    elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
+                    elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Some index files failed to download"; then
                       set -e; return 0
                     else
                       echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
