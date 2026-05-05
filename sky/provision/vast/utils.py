@@ -113,8 +113,6 @@ def launch(name: str,
 
     query = [
         'chunked=true',
-        'georegion=true',
-        f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
