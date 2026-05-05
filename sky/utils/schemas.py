@@ -1539,6 +1539,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'type': 'array',
         'items': {
             'type': 'string',
+            'pattern': '^[a-zA-Z0-9.-]+$',
         },
     },
     'set_pod_resource_limits': {
