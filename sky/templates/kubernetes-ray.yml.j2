@@ -789,31 +789,46 @@ available_node_types:
                   apt_install_with_retries "$@"
                 }
                 backup_dir=/etc/apt/sources.list.backup_skypilot
+                skypilot_deb822=/etc/apt/sources.list.d/skypilot-mirrors.sources
+                # Move existing ubuntu sources aside so our deb822 file is the
+                # sole archive source during install. Using mv (not cp) means
+                # apt won't see both sets and double-fetch / pin against
+                # mismatched checksums.
                 backup_source() {
                   $(prefix_cmd) mkdir -p "$backup_dir"
                   if [ -f /etc/apt/sources.list ] && [ ! -f "$backup_dir/sources.list" ]; then
-                    $(prefix_cmd) cp -a /etc/apt/sources.list "$backup_dir/sources.list" || true
+                    $(prefix_cmd) mv /etc/apt/sources.list "$backup_dir/sources.list" || true
                   fi
                   if [ -f /etc/apt/sources.list.d/ubuntu.sources ] && [ ! -f "$backup_dir/ubuntu.sources" ]; then
-                    $(prefix_cmd) cp -a /etc/apt/sources.list.d/ubuntu.sources "$backup_dir/ubuntu.sources" || true
+                    $(prefix_cmd) mv /etc/apt/sources.list.d/ubuntu.sources "$backup_dir/ubuntu.sources" || true
                   fi
                 }
                 restore_source() {
                   if [ -f "$backup_dir/sources.list" ]; then
-                    $(prefix_cmd) cp -a "$backup_dir/sources.list" /etc/apt/sources.list || true
+                    $(prefix_cmd) mv "$backup_dir/sources.list" /etc/apt/sources.list || true
                   fi
                   if [ -f "$backup_dir/ubuntu.sources" ]; then
-                    $(prefix_cmd) cp -a "$backup_dir/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources || true
+                    $(prefix_cmd) mv "$backup_dir/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources || true
                   fi
+                  $(prefix_cmd) rm -f "$skypilot_deb822" || true
                 }
-                update_apt_sources() {
-                  local host=$1
-                  local apt_file=$2
-                  # || true: a sed failure on one sources file (read-only fs,
-                  # immutable bit, full tmpfs) shouldn't kill the whole step;
-                  # restore_source will undo any partial edits on the next
-                  # iteration of the candidate-mirror loop.
-                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$apt_file" || true
+                # Write a single deb822 stanza listing all candidate mirror
+                # URIs as alternatives. apt's acquire layer tries them in
+                # order per resource and only fails if every URI fails — so
+                # one degraded mirror no longer takes down the install, and
+                # we don't need a shell-level candidate-mirror retry loop.
+                write_skypilot_deb822() {
+                  local codename=$1
+                  local path_seg=$2
+                  shift 2
+                  local uris="$*"
+                  $(prefix_cmd) tee "$skypilot_deb822" > /dev/null <<DEB822
+Types: deb
+URIs: $uris
+Suites: $codename $codename-updates $codename-security $codename-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+DEB822
                 }
                 # Surface /tmp/apt-update.log to the pod's stderr on failure.
                 # Without this, users only see the terse summary line — the
@@ -887,60 +902,79 @@ available_node_types:
                 {% endif %}
 
                 INSTALL_SUCCESS=false
-                backup_source
-                for candidate in "" $MIRROR_CANDIDATES; do
-                  restore_source
-                  if [ -n "$candidate" ]; then
-                    echo "Trying APT mirror ($APT_OS): $candidate" >> /tmp/apt-update.log
-                    found_sources=false
-                    if [ -f /etc/apt/sources.list ]; then
-                      update_apt_sources $candidate /etc/apt/sources.list
-                      found_sources=true
-                    fi
-                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-                      update_apt_sources $candidate /etc/apt/sources.list.d/ubuntu.sources
-                      found_sources=true
-                    fi
-                    if [ "$found_sources" = "false" ]; then
-                      echo "Error: no apt sources file found" >> /tmp/apt-update.log
-                      dump_apt_log
-                      break
-                    fi
+                # Configure mirrors via a SkyPilot-owned deb822 file when
+                # MIRROR_CANDIDATES is non-empty for ubuntu. apt's native
+                # multi-URI failover then handles per-URI failure within a
+                # single update — no candidate-mirror retry loop in shell.
+                # Debian relies on the deb.debian.org CDN's own failover, so
+                # we leave its sources untouched.
+                if [ "$APT_OS" = "ubuntu" ] && [ -n "$MIRROR_CANDIDATES" ]; then
+                  CODENAME=""
+                  if [ -f /etc/os-release ]; then
+                    . /etc/os-release
+                    CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
                   fi
-
-                  # Try INSTALL_FIRST (required core packages)
-                  if [ ! -z "$INSTALL_FIRST" ]; then
-                    echo "Installing core packages: $INSTALL_FIRST" >> /tmp/apt-update.log;
-                    apt_update_install_with_retries $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || {
-                      echo "Install failed with ${candidate:-default sources}: $INSTALL_FIRST" >> /tmp/apt-update.log
-                      continue
-                    }
-                  else
-                    # No core packages to install, but we still need to update the
-                    # package index for MISSING_PACKAGES.
-                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || {
-                      echo "apt-get update failed with ${candidate:-default sources}" >> /tmp/apt-update.log
-                      continue
-                    }
-                  fi
-
-                  # INSTALL_FIRST succeeded (or was empty) with this source.
-                  # Install MISSING_PACKAGES individually (optional, some may not exist on certain distros).
-                  set +e
-                  if [ ! -z "$MISSING_PACKAGES" ]; then
-                    echo "Installing missing packages individually: $MISSING_PACKAGES" >> /tmp/apt-update.log;
-                    for pkg in $MISSING_PACKAGES; do
-                      apt_install_with_retries $pkg >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed, skip." >> /tmp/apt-update.log;
+                  if [ -n "$CODENAME" ]; then
+                    ARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+                    case "$ARCH" in
+                      amd64|i386)
+                        UBUNTU_BASE="http://archive.ubuntu.com/ubuntu"
+                        PATH_SEG="ubuntu"
+                        ;;
+                      *)
+                        UBUNTU_BASE="http://ports.ubuntu.com/ubuntu-ports"
+                        PATH_SEG="ubuntu-ports"
+                        ;;
+                    esac
+                    # Canonical archive first (preserves prior intent of
+                    # trying the default before mirrors), then user/built-in
+                    # mirrors as failover URIs.
+                    URIS="$UBUNTU_BASE"
+                    for m in $MIRROR_CANDIDATES; do
+                      URIS="$URIS http://$m/$PATH_SEG"
                     done
+                    backup_source
+                    write_skypilot_deb822 "$CODENAME" "$PATH_SEG" $URIS
+                    echo "Wrote $skypilot_deb822 with URIs: $URIS" >> /tmp/apt-update.log
+                  else
+                    echo "Could not determine ubuntu codename; using existing sources" >> /tmp/apt-update.log
                   fi
+                fi
 
-                  INSTALL_SUCCESS=true
-                  break
-                done
+                # Try INSTALL_FIRST (required core packages). Only one attempt
+                # is needed — apt's multi-URI failover handles mirror outages
+                # internally, and apt_update_with_retries already retries on
+                # transient errors.
+                if [ ! -z "$INSTALL_FIRST" ]; then
+                  echo "Installing core packages: $INSTALL_FIRST" >> /tmp/apt-update.log
+                  if apt_update_install_with_retries $INSTALL_FIRST >> /tmp/apt-update.log 2>&1; then
+                    INSTALL_SUCCESS=true
+                  else
+                    echo "Core package install failed: $INSTALL_FIRST" >> /tmp/apt-update.log
+                  fi
+                else
+                  # No core packages to install, but we still need to update
+                  # the package index for MISSING_PACKAGES.
+                  if apt_update_with_retries >> /tmp/apt-update.log 2>&1; then
+                    INSTALL_SUCCESS=true
+                  else
+                    echo "apt-get update failed" >> /tmp/apt-update.log
+                  fi
+                fi
+
+                # Install MISSING_PACKAGES individually (optional, some may
+                # not exist on certain distros).
+                set +e
+                if [ "$INSTALL_SUCCESS" = "true" ] && [ ! -z "$MISSING_PACKAGES" ]; then
+                  echo "Installing missing packages individually: $MISSING_PACKAGES" >> /tmp/apt-update.log;
+                  for pkg in $MISSING_PACKAGES; do
+                    apt_install_with_retries $pkg >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed, skip." >> /tmp/apt-update.log;
+                  done
+                fi
                 restore_source
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
-                  echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  echo "Error: core package installation failed." >> /tmp/apt-update.log
                   dump_apt_log
                   exit 1
                 fi;

@@ -1637,24 +1637,37 @@ class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
         end = self.template.index(end_marker, begin)
         return self.template[begin:end]
 
-    def test_update_apt_sources_tolerates_sed_failure(self):
-        """sed in update_apt_sources must not abort the step on failure.
+    def test_skypilot_deb822_helper_defined(self):
+        """A write_skypilot_deb822 helper must emit a multi-URI deb822 stanza.
 
-        A sed error on one sources file (read-only fs, immutable bit, full
-        tmpfs) shouldn't kill the whole apt setup — restore_source undoes
-        partial edits on the next iteration of the candidate-mirror loop.
-        Also verifies $apt_file is quoted to tolerate unusual paths.
+        Listing all candidate mirror URIs as alternatives in one stanza is
+        what gives us native apt-level failover — this replaces the old
+        sed-rewrite-per-candidate loop.
         """
-        snippet = self._slice_between('update_apt_sources()', '}')
-        # The sed line must be quoted and tolerant of failure.
-        self.assertIn('"$apt_file"', snippet)
-        sed_line = next(
-            (line for line in snippet.splitlines() if 'sed -i -E' in line),
-            None)
-        self.assertIsNotNone(sed_line,
-                             'expected a sed -i -E line in update_apt_sources')
-        self.assertTrue(sed_line.rstrip().endswith('|| true'),
-                        f'sed line must end with `|| true`; got: {sed_line!r}')
+        self.assertIn('write_skypilot_deb822()', self.template)
+        helper = self._slice_between('write_skypilot_deb822()', '}')
+        # Must emit a heredoc that includes the URIs field with multiple
+        # values and the standard suite/component fields.
+        self.assertIn('Types: deb', helper)
+        self.assertIn('URIs: $uris', helper)
+        self.assertIn('Suites: $codename', helper)
+        self.assertIn('Components: main restricted universe multiverse', helper)
+        self.assertIn('Signed-By:', helper)
+
+    def test_skypilot_deb822_written_for_ubuntu_with_mirrors(self):
+        """The setup script must write the SkyPilot deb822 file when
+        APT_OS=ubuntu and MIRROR_CANDIDATES is non-empty.
+        """
+        # The branch lives between MIRROR_CANDIDATES setup and the
+        # INSTALL_SUCCESS=false sentinel.
+        snippet = self._slice_between('INSTALL_SUCCESS=false',
+                                      'apt_update_install_with_retries')
+        self.assertIn('"$APT_OS" = "ubuntu"', snippet)
+        self.assertIn('-n "$MIRROR_CANDIDATES"', snippet)
+        self.assertIn('write_skypilot_deb822', snippet)
+        # URIs must include the canonical archive plus each mirror.
+        self.assertIn('UBUNTU_BASE', snippet)
+        self.assertIn('for m in $MIRROR_CANDIDATES', snippet)
 
     def test_dump_apt_log_helper_defined(self):
         """A dump_apt_log helper must be defined and tail the log to stderr.
@@ -1670,15 +1683,12 @@ class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
         # Output must go to stderr (>&2) so it appears in pod logs.
         self.assertIn('>&2', helper)
 
-    def test_dump_apt_log_called_on_no_sources_found(self):
-        """No-sources-found branch must dump the log before breaking."""
-        snippet = self._slice_between('no apt sources file found', 'break')
-        self.assertIn('dump_apt_log', snippet)
-
-    def test_dump_apt_log_called_on_all_mirrors_failed(self):
-        """Final 'all sources failed' branch must dump the log before exit."""
-        snippet = self._slice_between(
-            'core package installation failed across all sources', 'fi;')
+    def test_dump_apt_log_called_on_install_failure(self):
+        """Final 'core package installation failed' branch must dump the log
+        before exit.
+        """
+        snippet = self._slice_between('core package installation failed.',
+                                      'fi;')
         self.assertIn('dump_apt_log', snippet)
         # exit 1 must come after the dump.
         self.assertLess(snippet.index('dump_apt_log'), snippet.index('exit 1'))
