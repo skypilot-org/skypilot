@@ -2681,9 +2681,11 @@ def _update_cluster_status(
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
 
-        # Check if the cluster is in the process of autostopping
+        # Check if the cluster is in the process of autostopping.
+        # Skip for clusters without skylet — they have no autostop.
         backend = get_backend_from_handle(handle)
-        if isinstance(backend, backends.CloudVmRayBackend):
+        if (handle.provision_runtime_metadata.has_skylet and
+                isinstance(backend, backends.CloudVmRayBackend)):
             if backend.is_definitely_autostopping(handle, stream_logs=False):
                 return _handle_autostopping_cluster(print_newline=False)
 
@@ -2849,7 +2851,8 @@ def _update_cluster_status(
                         f'{common_utils.format_exception(e)}')
 
             backend = get_backend_from_handle(handle)
-            if isinstance(backend, backends.CloudVmRayBackend):
+            if (handle.provision_runtime_metadata.has_skylet and
+                    isinstance(backend, backends.CloudVmRayBackend)):
                 # Check autostopping first, before head_node_alive check
                 # This ensures we detect AUTOSTOPPING even when Ray becomes
                 # unhealthy during hook execution, or if the actual nodes are
