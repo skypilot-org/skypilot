@@ -143,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 32  # add ephemeral_storage.
+    _VERSION = 33  # remove ephemeral_storage; use disk_size for k8s.
 
     def __init__(
         self,
@@ -161,7 +161,6 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[Union[str, int]] = None,
-        ephemeral_storage: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         local_disk: Optional[str] = None,
@@ -341,18 +340,10 @@ class Resources:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
+        self._disk_size: Optional[int] = None
         if disk_size is not None:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
-        else:
-            self._disk_size = DEFAULT_DISK_SIZE_GB
-
-        if ephemeral_storage is not None:
-            self._ephemeral_storage: Optional[int] = int(
-                resources_utils.parse_memory_resource(ephemeral_storage,
-                                                      'ephemeral_storage'))
-        else:
-            self._ephemeral_storage = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -453,7 +444,6 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
-        self._try_validate_ephemeral_storage()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -533,11 +523,6 @@ class Resources:
         if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        ephemeral_storage = ''
-        if self._ephemeral_storage is not None:
-            ephemeral_storage = (
-                f', ephemeral_storage={self._ephemeral_storage}')
-
         ports = ''
         if self.ports is not None:
             ports = f', ports={self.ports}'
@@ -553,7 +538,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{network_tier}{disk_size}{ephemeral_storage}'
+            f'{disk_tier}{network_tier}{disk_size}'
             f'{local_disk}{max_hourly_cost}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
@@ -678,11 +663,13 @@ class Resources:
 
     @property
     def disk_size(self) -> int:
-        return self._disk_size
+        if self._disk_size is not None:
+            return self._disk_size
+        return DEFAULT_DISK_SIZE_GB
 
     @property
-    def ephemeral_storage(self) -> Optional[int]:
-        return self._ephemeral_storage
+    def disk_size_specified(self) -> bool:
+        return self._disk_size is not None
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -1672,16 +1659,6 @@ class Resources:
                         'max_hourly_cost must be a positive number, '
                         f'got {self._max_hourly_cost}')
 
-    def _try_validate_ephemeral_storage(self) -> None:
-        if self._ephemeral_storage is None:
-            return
-        if self.cloud is not None and not isinstance(self.cloud,
-                                                     clouds.Kubernetes):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'ephemeral_storage is only supported on Kubernetes, '
-                    f'not on {self.cloud}.')
-
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -1970,7 +1947,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == DEFAULT_DISK_SIZE_GB,
+            self._disk_size is None,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -2109,9 +2086,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
-            disk_size=override.pop('disk_size', self.disk_size),
-            ephemeral_storage=override.pop('ephemeral_storage',
-                                           self._ephemeral_storage),
+            disk_size=override.pop('disk_size', self._disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
@@ -2443,8 +2418,6 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        resources_fields['ephemeral_storage'] = config.pop(
-            'ephemeral_storage', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
@@ -2475,17 +2448,30 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            # although it will end up being an int, we don't know at this point
-            # if it has units or not, so we store it as a string
-            resources_fields['disk_size'] = str(resources_fields['disk_size'])
-        if resources_fields['ephemeral_storage'] is not None:
-            resources_fields['ephemeral_storage'] = str(
-                resources_fields['ephemeral_storage'])
+            # TODO (kyuds): remove after v0.14.0
+            disk_size_val = int(
+                resources_utils.parse_memory_resource(
+                    str(resources_fields['disk_size']), 'disk_size'))
+            if disk_size_val == DEFAULT_DISK_SIZE_GB:
+                # Treat the default value as unspecified so that older
+                # configs that always emitted disk_size: 256 don't
+                # trigger ephemeral-storage requests on Kubernetes.
+                resources_fields['disk_size'] = None
+            else:
+                # although it will end up being an int, we don't know at
+                # this point if it has units or not, so we store as string
+                resources_fields['disk_size'] = str(
+                    resources_fields['disk_size'])
         if resources_fields['local_disk'] is not None:
             # may be integer by only specifying exact size.
             resources_fields['local_disk'] = str(resources_fields['local_disk'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
+
+        # Deprecated fields that may still appear in configs written by
+        # older SkyPilot versions. Pop them so the assertion below doesn't
+        # fire. ephemeral_storage was removed in favor of disk_size.
+        config.pop('ephemeral_storage', None)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2513,8 +2499,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
-        add_if_not_none('disk_size', self.disk_size)
-        add_if_not_none('ephemeral_storage', self._ephemeral_storage)
+        add_if_not_none('disk_size', self._disk_size)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
@@ -2561,6 +2546,21 @@ class Resources:
         if self._requires_fuse is not None:
             config['_requires_fuse'] = self._requires_fuse
         return config
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Persist whether disk_size was explicitly specified, and ensure
+        # _disk_size is always serialized as int so that older SkyPilot
+        # versions (which expect int) can unpickle safely.
+        state['_disk_size_specified'] = state.get('_disk_size') is not None
+        # TODO (kyuds): remove the always serialized to int and forward compat
+        # in v0.14.0
+        if state['_disk_size'] is None:
+            state['_disk_size'] = DEFAULT_DISK_SIZE_GB
+        # Forward compat: older versions expect _ephemeral_storage to exist
+        # (it was removed in this version in favor of disk_size).
+        state.setdefault('_ephemeral_storage', None)
+        return state
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
@@ -2732,8 +2732,12 @@ class Resources:
         if version < 31:
             self._max_hourly_cost = None
 
-        if version < 32:
-            self._ephemeral_storage = None
+        if version < 33:
+            state.pop('_ephemeral_storage', None)
+            if isinstance(state.get('_cloud', None), clouds.Kubernetes):
+                state['_disk_size'] = None
+        elif not state['_disk_size_specified']:
+            state['_disk_size'] = None
 
         self.__dict__.update(state)
 

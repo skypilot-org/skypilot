@@ -42,7 +42,6 @@ _DEFAULT_AUTOSTOP = {
         }),
         ('serve', {}, {
             'cpus': '4+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('serve', {
@@ -50,7 +49,6 @@ _DEFAULT_AUTOSTOP = {
         }, {
             'cpus': '4+',
             'memory': '32+',
-            'disk_size': 200,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
     ])
