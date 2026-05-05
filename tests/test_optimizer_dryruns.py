@@ -201,6 +201,47 @@ def test_instance_type_mismatches_memory(enable_all_clouds):
         assert 'does not have the requested memory' in str(e.value)
 
 
+def test_invalid_disk_size(enable_all_clouds):
+    # disk_size must be a positive integer; 0 and negative values were
+    # previously accepted silently and surfaced only at provision time.
+    for bad_size in [0, -1, -100]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(sky.AWS(), disk_size=bad_size)
+        assert 'disk_size' in str(e.value)
+        assert 'positive' in str(e.value)
+
+
+def test_invalid_accelerator_count(enable_all_clouds):
+    # Accelerator counts must be positive. Zero or negative counts were
+    # previously accepted and produced either a misleading "catalog does
+    # not contain" error or (on Kubernetes) a silently-launched pod with
+    # zero GPUs. Test both AWS and Kubernetes paths since the original
+    # bug report was specifically about the Kubernetes zero-GPU pod.
+    for cloud in [sky.AWS(), sky.Kubernetes()]:
+        for bad_accel in ['V100:0', 'V100:-1', {'V100': 0}, {'V100': -2}]:
+            with pytest.raises(ValueError) as e:
+                _test_resources(cloud, accelerators=bad_accel)
+            assert 'positive' in str(e.value).lower()
+
+
+def test_ports_comma_separated(enable_all_clouds):
+    # A string like '8000,9000' was previously passed through as a single
+    # "port", producing an unhelpful range-format error. Split on commas
+    # before validating so the common CLI form works.
+    r = _make_resources(sky.AWS(), ports='8000,9000')
+    assert sorted(r.ports) == ['8000', '9000']
+
+
+def test_ports_comma_separated_with_bad_entry(enable_all_clouds):
+    # '8000,9000,abc' should still error, but name the offending entry
+    # rather than printing the whole string as one bad port.
+    with pytest.raises(ValueError) as e:
+        _make_resources(sky.AWS(), ports='8000,9000,abc')
+    # The error should reference the actual bad token, not the full string.
+    assert 'abc' in str(e.value)
+    assert '8000,9000,abc' not in str(e.value)
+
+
 def test_instance_type_matches_cpus(enable_all_clouds):
     _test_resources_launch(sky.AWS(), instance_type='c6i.8xlarge', cpus=32)
     _test_resources_launch(sky.Azure(),

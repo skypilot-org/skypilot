@@ -344,6 +344,11 @@ class Resources:
         if disk_size is not None:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
+            if self._disk_size <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        '"disk_size" must be a positive integer (in GB). '
+                        f'Got: {disk_size!r}.')
         else:
             self._disk_size = DEFAULT_DISK_SIZE_GB
 
@@ -401,8 +406,15 @@ class Resources:
                 ports = list(ports)
             if not isinstance(ports, list):
                 ports = [str(ports)]
-            ports = resources_utils.simplify_ports(
-                [str(port) for port in ports])
+            # Split comma-separated port entries (e.g. '8000,9000') into
+            # individual tokens so each is validated on its own.
+            flattened_ports: List[str] = []
+            for port in ports:
+                for token in str(port).split(','):
+                    token = token.strip()
+                    if token:
+                        flattened_ports.append(token)
+            ports = resources_utils.simplify_ports(flattened_ports)
             if not ports:
                 # Set to None if empty. This is mainly for resources from
                 # cli, which will comes in as an empty tuple.
@@ -890,6 +902,13 @@ class Resources:
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
+
+            for acc_name, acc_count in accelerators.items():
+                if not isinstance(acc_count, (int, float)) or acc_count <= 0:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Accelerator count must be a positive number. '
+                            f'Got: {acc_name!r}: {acc_count!r}.')
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():

@@ -29,7 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
-    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
 
@@ -325,7 +325,7 @@ Retention period for cluster events in hours (optional). Set to a negative value
 
 Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
 
-Default: ``24.0`` (1 day).
+Default: ``720.0`` (30 days).
 
 Example:
 

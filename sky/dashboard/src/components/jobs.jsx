@@ -452,8 +452,8 @@ export function ManagedJobsTable({
   lastFetchedTime,
 }) {
   const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
+    key: 'id',
+    direction: 'descending',
   });
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);

@@ -560,6 +560,7 @@ class Task:
 
     def _validate_mount_path(self, path: str, location: str):
         self._validate_path(path, location)
+        self._validate_mount_dest_is_absolute(path, location)
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
         if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
@@ -576,6 +577,19 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Mount paths cannot end with a slash '
                                  f'Found: {path} in {location}')
+
+    def _validate_mount_dest_is_absolute(self, path: str, location: str):
+        if data_utils.is_cloud_store_url(path):
+            return
+        # Explicitly use POSIX semantics — `os.path.isabs` treats e.g.
+        # 'C:/foo' as absolute on Windows, but the remote side is always
+        # POSIX. Tilde is allowed as a common shorthand for the remote
+        # home directory (see Task docstring examples).
+        if not (path.startswith('/') or path.startswith('~')):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'File mount destination must be an absolute path '
+                    f'(start with "/" or "~"). Got: {path!r} in {location}.')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -946,9 +960,6 @@ class Task:
             if there are any other parsing errors.
         """
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
             return Task.from_yaml_str(user_specified_yaml)
 
@@ -961,6 +972,8 @@ class Task:
 
                 task = sky.Task.from_yaml_str('yaml_str')
         """
+        with ux_utils.print_exception_no_traceback():
+            yaml_utils.check_no_duplicate_keys(yaml_str)
         config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):

@@ -617,8 +617,6 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
-    const activeClusters = await dashboardCache.get(getClusters);
-
     let allClusters;
     if (showHistory) {
       let historyClusters = [];
@@ -631,22 +629,14 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      const markedActive = activeClusters.map((c) => ({
-        ...c,
-        isHistorical: false,
-      }));
-      const markedHistory = historyClusters.map((c) => ({
-        ...c,
-        isHistorical: true,
-      }));
-
-      allClusters = [...markedActive];
-      markedHistory.forEach((hist) => {
-        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
-          allClusters.push(hist);
-        }
-      });
+      // "Show history" surfaces only truly terminated clusters within the
+      // selected time window. cost_report also returns active clusters, so
+      // drop anything still present in cluster_table (status !== TERMINATED).
+      allClusters = historyClusters
+        .filter((c) => c.status === 'TERMINATED')
+        .map((c) => ({ ...c, isHistorical: true }));
     } else {
+      const activeClusters = await dashboardCache.get(getClusters);
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,
