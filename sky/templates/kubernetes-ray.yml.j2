@@ -739,8 +739,12 @@ available_node_types:
                     # when one mirror in a multi-URI source is degraded but
                     # apt successfully fell over to a sibling — that case
                     # must still count as success.
+                    #
+                    # LC_ALL=C forces apt's messages to English so the
+                    # summary-line grep below isn't defeated by a base
+                    # image with a non-English locale (LANG=fr_FR, etc.).
                     local output
-                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
                     if [ $rc -eq 124 ]; then
