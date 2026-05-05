@@ -149,6 +149,7 @@ def check_capabilities(
     clouds: Optional[Iterable[str]] = None,
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
+    kubernetes_contexts: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
@@ -407,35 +408,47 @@ def check_capabilities(
 
     # --- Main check_capabilities logic ---
 
-    if workspace is not None:
-        # Check only the specified workspace
-        if workspace not in available_workspaces:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Workspace {workspace!r} not found in SkyPilot '
-                    'configuration. '
-                    f'Available workspaces: {", ".join(available_workspaces)}')
+    # Scope `existing_allowed_contexts()` if the caller asked to check
+    # only a subset of Kubernetes contexts. The contextmanager is a
+    # no-op when the filter is None, and class-level rather than
+    # thread-local so the ThreadPool workers spawned by
+    # `subprocess_utils.run_in_parallel` (used inside the per-workspace
+    # check) see the same scope.
+    contexts_scope = sky_clouds.Kubernetes.scoped_allowed_contexts(
+        kubernetes_contexts)
 
-        # Always show details for single specified check (if verbose)
-        hide_per_cloud_details_flag = False
-        with skypilot_config.local_active_workspace_ctx(workspace):
-            enabled_ws_clouds = _execute_check_logic_for_workspace(
-                workspace, hide_per_cloud_details_flag, hide_workspace_str)
-            all_workspaces_results[workspace] = enabled_ws_clouds
-    else:
-        # Check all workspaces
-        workspaces_to_check = available_workspaces
+    with contexts_scope:
+        if workspace is not None:
+            # Check only the specified workspace
+            if workspace not in available_workspaces:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Workspace {workspace!r} not found in SkyPilot '
+                        'configuration. '
+                        f'Available workspaces: '
+                        f'{", ".join(available_workspaces)}')
 
-        hide_per_cloud_details_flag = (not verbose and clouds is None and
-                                       len(workspaces_to_check) > 1)
-
-        for ws_name in workspaces_to_check:
-            if not hide_workspace_str:
-                echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
-            with skypilot_config.local_active_workspace_ctx(ws_name):
+            # Always show details for single specified check (if verbose)
+            hide_per_cloud_details_flag = False
+            with skypilot_config.local_active_workspace_ctx(workspace):
                 enabled_ws_clouds = _execute_check_logic_for_workspace(
-                    ws_name, hide_per_cloud_details_flag, hide_workspace_str)
-                all_workspaces_results[ws_name] = enabled_ws_clouds
+                    workspace, hide_per_cloud_details_flag, hide_workspace_str)
+                all_workspaces_results[workspace] = enabled_ws_clouds
+        else:
+            # Check all workspaces
+            workspaces_to_check = available_workspaces
+
+            hide_per_cloud_details_flag = (not verbose and clouds is None and
+                                           len(workspaces_to_check) > 1)
+
+            for ws_name in workspaces_to_check:
+                if not hide_workspace_str:
+                    echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
+                with skypilot_config.local_active_workspace_ctx(ws_name):
+                    enabled_ws_clouds = _execute_check_logic_for_workspace(
+                        ws_name, hide_per_cloud_details_flag,
+                        hide_workspace_str)
+                    all_workspaces_results[ws_name] = enabled_ws_clouds
 
     # Global "To enable a cloud..." message, printed once if relevant
     if not quiet:
@@ -457,10 +470,16 @@ def check_capability(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
+    kubernetes_contexts: Optional[List[str]] = None,
 ) -> Dict[str, List[str]]:
     clouds_with_capability = collections.defaultdict(list)
-    workspace_enabled_clouds = check_capabilities(quiet, verbose, clouds,
-                                                  [capability], workspace)
+    workspace_enabled_clouds = check_capabilities(
+        quiet,
+        verbose,
+        clouds,
+        [capability],
+        workspace,
+        kubernetes_contexts=kubernetes_contexts)
     for workspace, enabled_clouds in workspace_enabled_clouds.items():
         for cloud, capabilities in enabled_clouds.items():
             if capability in capabilities:
@@ -473,6 +492,7 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
+    kubernetes_contexts: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
     if workspace is not None:
         # Import here to avoid circular import:
@@ -480,9 +500,13 @@ def check(
         from sky.workspaces import core as workspaces_core
         workspaces_core.check_workspace_permission(
             common_utils.get_current_user(), workspace)
-    capabilities_result = check_capabilities(quiet, verbose, clouds,
-                                             sky_cloud.ALL_CAPABILITIES,
-                                             workspace)
+    capabilities_result = check_capabilities(
+        quiet,
+        verbose,
+        clouds,
+        sky_cloud.ALL_CAPABILITIES,
+        workspace,
+        kubernetes_contexts=kubernetes_contexts)
     # Convert CloudCapability enums to strings for JSON serialization.
     result: Dict[str, Dict[str, List[str]]] = {}
     for ws_name, clouds_with_caps in capabilities_result.items():

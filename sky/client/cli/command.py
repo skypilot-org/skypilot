@@ -3769,11 +3769,20 @@ def _down_or_stop_clusters(
     '-w',
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
+@click.option(
+    '--context',
+    'kubernetes_contexts_opt',
+    type=str,
+    multiple=True,
+    help=('Kubernetes context to check. Repeat to scope to several. '
+          'Equivalent to `sky check kubernetes/<context>`. Other clouds '
+          'ignore this flag.'))
 @flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
+          kubernetes_contexts_opt: Tuple[str, ...],
           workspace: Optional[str] = None,
           output_format: str = 'table'):
     """Check which clouds are available to use.
@@ -3797,13 +3806,19 @@ def check(infra_list: Tuple[str],
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
       \b
+      # Check a single Kubernetes context (equivalent to `sky check k8s/ctx-a`).
+      sky check kubernetes --context ctx-a
+      \b
       # Output in JSON format for scripting.
       sky check -o json
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
+    contexts_arg = (tuple(kubernetes_contexts_opt)
+                    if kubernetes_contexts_opt else None)
     request_id = sdk.check(infra_list=infra_arg,
                            verbose=verbose,
-                           workspace=workspace)
+                           workspace=workspace,
+                           kubernetes_contexts=contexts_arg)
 
     if output_format == flags.OUTPUT_FORMAT_JSON:
         # Suppress streamed output and print the result as JSON

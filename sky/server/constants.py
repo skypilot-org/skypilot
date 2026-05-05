@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 49  # sky batch column in managed jobs
+API_VERSION = 50  # sky check per-context (kubernetes_contexts) scope
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -44,6 +44,14 @@ MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
+
+# Minimum API version that supports the per-Kubernetes-context scope on
+# `sky check`. Older servers ignore the `kubernetes_contexts` field on
+# CheckBody (extra='ignore'), so a new client running `sky check
+# --context <ctx>` against an old server would silently fall back to
+# checking every allowed context — surface a warning at SDK call time
+# instead of letting the gesture be silently dropped.
+MIN_KUBERNETES_CONTEXTS_API_VERSION = 50
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3

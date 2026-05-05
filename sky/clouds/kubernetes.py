@@ -5,7 +5,9 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+import contextlib
+from typing import (Any, ClassVar, Dict, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 
@@ -71,6 +73,16 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
+
+    # Scoped allowed-contexts filter set via `scoped_allowed_contexts()`.
+    # When non-None, `existing_allowed_contexts()` returns this list
+    # intersected with what's actually present in kubeconfig, instead of
+    # iterating the full `allowed_contexts` config. Used by
+    # `sky.check.check_capabilities` to honor a per-context CLI scope
+    # (e.g. `sky check --context ctx-a`) without iterating siblings.
+    # Class-level rather than thread-local so it propagates to the
+    # ThreadPool workers run_in_parallel spawns during the check.
+    _scoped_allowed_contexts: ClassVar[Optional[List[str]]] = None
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -173,6 +185,31 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
+    @contextlib.contextmanager
+    def scoped_allowed_contexts(cls, contexts: Optional[List[str]]):
+        """Temporarily restrict `existing_allowed_contexts()` to `contexts`.
+
+        Used by `sky.check.check_capabilities` to honor a per-context
+        scope on `sky check` (e.g. `--context ctx-a`) without iterating
+        every other allowed context. While the contextmanager is active,
+        `existing_allowed_contexts()` returns the requested list
+        intersected with what's actually present in kubeconfig instead
+        of consulting `allowed_contexts` at all.
+
+        No-op when `contexts` is None — falls through to the regular
+        `allowed_contexts` resolution path.
+        """
+        if contexts is None:
+            yield
+            return
+        old = cls._scoped_allowed_contexts
+        cls._scoped_allowed_contexts = list(contexts)
+        try:
+            yield
+        finally:
+            cls._scoped_allowed_contexts = old
+
+    @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts.
 
@@ -185,6 +222,17 @@ class Kubernetes(clouds.Cloud):
             return []
 
         all_contexts = set(all_contexts)
+
+        # When inside a `scoped_allowed_contexts()` block, honor the
+        # explicit per-call scope and bypass the regular allowed_contexts
+        # resolution. Intersect with what's actually in kubeconfig so a
+        # bogus context name silently drops out instead of producing a
+        # disabled-with-not-found row.
+        if cls._scoped_allowed_contexts is not None:
+            return [
+                ctx for ctx in cls._scoped_allowed_contexts
+                if ctx in all_contexts
+            ]
 
         # Allowed_contexts specified for workspace should take precedence over
         # the global allowed_contexts.

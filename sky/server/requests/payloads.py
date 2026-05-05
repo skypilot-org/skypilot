@@ -202,6 +202,12 @@ class CheckBody(RequestBody):
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
     workspace: Optional[str] = None
+    # Optional whitelist of Kubernetes context names to scope the check
+    # to. When None, checks every context allowed by
+    # `kubernetes.allowed_contexts`. When set, intersects with that
+    # list so a per-context invocation only iterates the requested
+    # name(s) and the persisted check_results only updates those leaves.
+    kubernetes_contexts: Optional[Tuple[str, ...]] = None
 
 
 class EnabledCloudsBody(RequestBody):
