@@ -166,6 +166,27 @@ class CachePreloader {
     }
 
     for (const functionName of requiredFunctions) {
+      // Skip the unpaginated full-jobs preload on the Managed Jobs page
+      // when a server-side pagination plugin is loaded. Without this
+      // skip, mounting /jobs at scale (e.g. 50k+ jobs) issues a single
+      // blocking fetch for the entire job set — measured at ~26s /
+      // ~110 MB on a 50k-row PostgreSQL backend — that nothing on the
+      // page actually reads (the table reads its own paginated cache
+      // via the plugin path). The blocked executor pool then makes
+      // subsequent paginated page-click fetches feel slow even though
+      // each individual /plugins/api/pagination/jobs call is ~500 ms.
+      // The cache key the wrapper writes here ({allUsers: true} with no
+      // pagination args) doesn't match what the table or the
+      // dashboardCache.get(getManagedJobs, [{...filterOptions, page,
+      // limit}]) call sites read either, so dropping it costs nothing.
+      if (
+        page === 'jobs' &&
+        functionName === 'getManagedJobs' &&
+        typeof window !== 'undefined' &&
+        typeof window.__skyJobsPaginationFetch === 'function'
+      ) {
+        continue;
+      }
       if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
         // Base function (no arguments)
         const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
@@ -298,6 +319,18 @@ class CachePreloader {
     const preloadPromises = Array.from(allOtherFunctions).map(
       async (functionName) => {
         try {
+          // Same skip as in _loadPageData: don't background-preload the
+          // unpaginated full-jobs cache when a server-side pagination
+          // plugin is present. The /jobs page reads its own paginated
+          // cache via the plugin path; nothing else reads the
+          // {allUsers: true} cache key this wrapper writes.
+          if (
+            functionName === 'getManagedJobs' &&
+            typeof window !== 'undefined' &&
+            typeof window.__skyJobsPaginationFetch === 'function'
+          ) {
+            return;
+          }
           if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
             // Base function (no arguments)
             const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
