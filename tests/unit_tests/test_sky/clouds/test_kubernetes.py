@@ -1371,6 +1371,250 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertNotIn('k8s_ephemeral_storage', deploy_vars)
         self.assertNotIn('k8s_ephemeral_storage_limit', deploy_vars)
 
+    def _setup_mocks_for_apt_mirrors_test(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, apt_mirrors_value):
+        """Helper to set up common mocks for apt_mirrors tests.
+
+        apt_mirrors_value is the value returned for the ('apt_mirrors',) key:
+        - None: simulates the user not setting apt_mirrors at all.
+        - list: simulates an explicit apt_mirrors list (possibly empty).
+        """
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+
+        mock_get_current_context.return_value = "my-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        def workspace_config_side_effect(cloud,
+                                         region,
+                                         keys,
+                                         default_value=None,
+                                         override_configs=None):
+            if keys == ('set_pod_resource_limits',):
+                return False
+            elif keys == ('kueue', 'local_queue_name'):
+                return None
+            return default_value
+
+        mock_get_workspace_region_config.side_effect = (
+            workspace_config_side_effect)
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if keys == ('apt_mirrors',):
+                return apt_mirrors_value
+            elif keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            elif keys == ('provision_timeout',):
+                return 600
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+
+    # Markers in kubernetes-ray.yml.j2 that bracket the apt-mirror selection
+    # logic. Tests render only this slice so they don't depend on the full
+    # deploy-var contract of the rest of the template.
+    _APT_MIRROR_BEGIN_MARKER = '# Build candidate list:'
+    _APT_MIRROR_END_MARKER = 'INSTALL_SUCCESS=false'
+
+    def _render_kubernetes_ray_template(self, deploy_vars):
+        """Render only the apt-mirror snippet of kubernetes-ray.yml.j2.
+
+        Reads the live template, extracts the slice between the two markers,
+        and renders it through Jinja with the provided deploy_vars. This
+        keeps the test coupled to the actual template file (so a future
+        edit can't silently desync it) while avoiding having to provide
+        every unrelated deploy var the full template requires.
+        """
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index(self._APT_MIRROR_BEGIN_MARKER)
+        end = full.index(self._APT_MIRROR_END_MARKER, begin)
+        snippet = full[begin:end]
+        return jinja2.Template(snippet).render(**deploy_vars)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_apt_mirrors_unset_uses_defaults(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Unset apt_mirrors falls back to built-in ubuntu mirror defaults."""
+        self._setup_mocks_for_apt_mirrors_test(mock_detect_network_type,
+                                               mock_get_image,
+                                               mock_get_port_mode,
+                                               mock_get_workspace_cloud,
+                                               mock_get_workspace_region_config,
+                                               mock_get_cloud_config_value,
+                                               mock_is_exec_auth,
+                                               mock_get_accelerator_label_keys,
+                                               mock_get_namespace,
+                                               mock_get_current_context,
+                                               apt_mirrors_value=None)
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertIn('k8s_apt_mirrors', deploy_vars)
+        self.assertIsNone(deploy_vars['k8s_apt_mirrors'])
+
+        rendered = self._render_kubernetes_ray_template(deploy_vars)
+        # Default branch: empty MIRROR_CANDIDATES, then the ubuntu-only
+        # override populating the wikimedia/umd mirrors.
+        self.assertIn('MIRROR_CANDIDATES=""', rendered)
+        self.assertIn(
+            'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
+            rendered)
+        self.assertIn('if [ "$APT_OS" = "ubuntu" ]; then', rendered)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_apt_mirrors_user_list(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """User-specified apt_mirrors list overrides the default fallback."""
+        user_mirrors = ['mirror.example.com', 'foo.example.com']
+        self._setup_mocks_for_apt_mirrors_test(mock_detect_network_type,
+                                               mock_get_image,
+                                               mock_get_port_mode,
+                                               mock_get_workspace_cloud,
+                                               mock_get_workspace_region_config,
+                                               mock_get_cloud_config_value,
+                                               mock_is_exec_auth,
+                                               mock_get_accelerator_label_keys,
+                                               mock_get_namespace,
+                                               mock_get_current_context,
+                                               apt_mirrors_value=user_mirrors)
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['k8s_apt_mirrors'], user_mirrors)
+
+        rendered = self._render_kubernetes_ray_template(deploy_vars)
+        self.assertIn('MIRROR_CANDIDATES="mirror.example.com foo.example.com"',
+                      rendered)
+        # Default ubuntu branch must not be emitted.
+        self.assertNotIn(
+            'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
+            rendered)
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_apt_mirrors_empty_list_disables_fallback(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Empty apt_mirrors list disables the built-in fallback mirrors."""
+        self._setup_mocks_for_apt_mirrors_test(mock_detect_network_type,
+                                               mock_get_image,
+                                               mock_get_port_mode,
+                                               mock_get_workspace_cloud,
+                                               mock_get_workspace_region_config,
+                                               mock_get_cloud_config_value,
+                                               mock_is_exec_auth,
+                                               mock_get_accelerator_label_keys,
+                                               mock_get_namespace,
+                                               mock_get_current_context,
+                                               apt_mirrors_value=[])
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['k8s_apt_mirrors'], [])
+
+        rendered = self._render_kubernetes_ray_template(deploy_vars)
+        self.assertIn('MIRROR_CANDIDATES=""', rendered)
+        # Default ubuntu fallback must not be emitted.
+        self.assertNotIn(
+            'MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"',
+            rendered)
+
 
 class TestEphemeralStorageValidation(unittest.TestCase):
     """Test that ephemeral_storage is rejected on non-Kubernetes clouds."""

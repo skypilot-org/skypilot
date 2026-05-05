@@ -1532,6 +1532,15 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'type': 'string'
         },
     },
+    'apt_mirrors': {
+        # List of APT mirror hostnames (or empty list to disable fallback
+        # mirrors entirely) to try in order when installing packages on a
+        # provisioned pod. When unset, SkyPilot uses a built-in default list.
+        'type': 'array',
+        'items': {
+            'type': 'string',
+        },
+    },
     'set_pod_resource_limits': {
         # Can be:
         # - false: do not set limits (default)
