@@ -4819,16 +4819,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
-    def tail_autostop_logs(self,
-                           handle: CloudVmRayResourceHandle,
-                           follow: bool = True,
-                           tail: int = 0) -> int:
-        """Deprecated. Use ``tail_hook_logs(handle, event='autostop')``."""
-        return self.tail_hook_logs(handle,
-                                   event='autostop',
-                                   follow=follow,
-                                   tail=tail)
-
     def tail_hook_logs(self,
                        handle: CloudVmRayResourceHandle,
                        event: Optional[str] = None,

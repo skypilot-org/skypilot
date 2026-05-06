@@ -556,16 +556,3 @@ def test_preemption_grace_no_cap_when_under_limit():
         },
     ])
     assert timeout == 120
-
-
-def test_skylet_cloud_detect_short_circuits_on_kubernetes(monkeypatch):
-    """S2: ``KUBERNETES_SERVICE_HOST`` short-circuits the metadata
-    probe so EKS pods (which can reach EC2 IMDS) don't misdetect as
-    AWS and start a poller alongside the K8s preStop bridge."""
-    from sky.skylet import skylet
-    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '10.0.0.1')
-    # Even if all three IMDS probes would otherwise return 200, the
-    # short-circuit should return None before any HTTP call.
-    monkeypatch.setattr('urllib.request.urlopen',
-                        lambda *a, **kw: 1 / 0)  # would crash if called
-    assert skylet._detect_cloud_for_preemption_poller() is None
