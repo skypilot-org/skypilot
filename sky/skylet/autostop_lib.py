@@ -236,6 +236,22 @@ def set_last_active_time_to_now() -> None:
 def has_active_ssh_sessions() -> bool:
     """Check if any PTY traces back to sshd in the process tree."""
     try:
+        # psutil memoizes /dev/{tty*,pts/*} -> rdev at first call to
+        # Process.terminal() with no TTL (psutil._psposix.get_terminal_map).
+        # devpts entries are dynamic: if skylet's first tick runs while no
+        # SSH session is active (e.g. right after `sky stop` + `sky start`),
+        # the cache is frozen with no /dev/pts/* entries, and every later
+        # Process.terminal() returns None for PTY-attached processes.
+        # Clear the cache on each tick so newly-allocated PTYs are visible.
+        # See https://github.com/skypilot-org/skypilot/issues/9524.
+        # pylint: disable=protected-access
+        try:
+            cache_clear = psutil._psposix.get_terminal_map.cache_clear
+        except AttributeError:
+            pass
+        else:
+            cache_clear()
+        # pylint: enable=protected-access
         pts_to_pid: dict[str, int] = {}
         for proc in psutil.process_iter(['pid', 'terminal']):
             terminal = proc.info['terminal']
