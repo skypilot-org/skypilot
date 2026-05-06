@@ -95,6 +95,8 @@ class ProvisionRuntimeMetadata:
 
     # Whether ray is running on the cluster.
     has_ray: bool = True
+    # Whether the skylet daemon is running on the cluster.
+    has_skylet: bool = True
     # Whether the cluster runs a job queue (ray + skylet bookkeeping) that
     # can accept multiple ``sky exec`` submissions over its lifetime. False
     # for single-use clusters where the job is baked into the provisioned

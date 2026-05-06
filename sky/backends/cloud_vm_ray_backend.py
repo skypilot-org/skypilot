@@ -5564,6 +5564,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
                      hook_timeout: Optional[int] = None) -> None:
+        if not handle.provision_runtime_metadata.has_skylet:
+            return
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -5654,6 +5656,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
+        if not handle.provision_runtime_metadata.has_skylet:
+            return False
         if handle.head_ip is None:
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
