@@ -1300,8 +1300,11 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
-        runtime_envs = managed_job_runtime.job_group_envs(
-            tasks, self._job_id) or {}
+        runtime_envs: Dict[str, str] = {}
+        if managed_job_runtime.is_registered():
+            runtime_envs = await asyncio.to_thread(
+                managed_job_runtime.job_group_envs, tasks,
+                self._job_id) or {}
         for task in tasks:
             task_envs = task.envs or {}
             task_envs[jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR] = (
