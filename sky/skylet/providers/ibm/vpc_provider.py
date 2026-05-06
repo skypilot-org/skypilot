@@ -502,8 +502,7 @@ class ClusterCleaner:
         self.vpc_id = vpc_id
         self.vpc_region = vpc_region
 
-    function_code = textwrap.dedent(
-        """
+    function_code = textwrap.dedent("""
     import subprocess
     import time
     from concurrent.futures import ThreadPoolExecutor
@@ -667,8 +666,7 @@ class ClusterCleaner:
 
         delete_vpc(vpc_id=vpc_id)
         return {"Status": "Success"}
-    """
-    )
+    """)
 
     def get_headers(self):
         return {

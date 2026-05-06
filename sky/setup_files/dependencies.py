@@ -105,12 +105,13 @@ install_requires = [
 # The grpc version at runtime has to be newer than the version
 # used to generate the code.
 GRPC = 'grpcio>=1.63.0'
-# >= 5.26.1 because the runtime version can't be older than the version
-# used to generate the code.
+# >= 5.29.6 because the runtime version can't be older than the version
+# used to generate the code (see requirements-dev.txt). Bumped from 5.26.1
+# to close CVE-2025-4565 (DoS) and CVE-2026-0994 (JSON recursion bypass).
 # < 7.0.0 because code generated for a major version V will be supported by
 # protobuf runtimes of version V and V+1.
 # https://protobuf.dev/support/cross-version-runtime-guarantee
-PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+PROTOBUF = 'protobuf>=5.29.6, < 7.0.0'
 
 server_dependencies = [
     # TODO: Some of these dependencies are also specified in install_requires,

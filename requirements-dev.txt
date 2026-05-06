@@ -5,7 +5,7 @@ yapf==0.32.0
 pylint==2.14.5
 # formatting the node_providers code from upstream ray-project/ray project
 # match the version with .pre-commit-config.yaml
-black==22.10.0
+black==26.3.1
 # https://github.com/edaniszewski/pylint-quotes
 # match the version with .pre-commit-config.yaml
 pylint-quotes==0.2.3
@@ -63,8 +63,10 @@ webdriver-manager==4.0.2
 # to make sure it's always up to date.
 grpcio-tools==1.63.0
 grpcio==1.63.0
-# The oldest version of protobuf that grpcio 1.63.0 supports.
-protobuf==5.26.1
+# Bumped from 5.26.1 to 5.29.6 to close CVE-2025-4565 (DoS) and
+# CVE-2026-0994 (JSON recursion bypass). grpcio 1.63.0 supports
+# protobuf >= 5.x, so this minor bump is compatible.
+protobuf==5.29.6
 
 # Pin to avoid a runtime break between pydantic>=2.12 (which requires
 # pydantic-core 2.41.x) and typing_extensions 4.13.x. In 2.41.x,
