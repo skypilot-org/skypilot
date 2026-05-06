@@ -2651,9 +2651,8 @@ def logs(
 
     if autostop:
         # Deprecated alias for --hook autostop.
-        sys.stderr.write(
-            'WARNING: --autostop is deprecated. '
-            'Use --hook autostop instead.\n')
+        sys.stderr.write('WARNING: --autostop is deprecated. '
+                         'Use --hook autostop instead.\n')
         sys.exit(
             sdk.tail_hook_logs(cluster_name=cluster,
                                event='autostop',

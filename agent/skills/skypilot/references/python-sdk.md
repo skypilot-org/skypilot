@@ -727,26 +727,10 @@ Tails the provisioning logs (provision.log) for a cluster.
 sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
 ```
 
-Tails the autostop hook logs (autostop_hook.log) for a cluster.
+Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
 
-**Args:**
-    cluster_name: name of the cluster.
-    follow: whether to follow the logs.
-    tail: number of lines to display from the end of the log file.
-
-**Returns:**
-    Exit code 0 on streaming success; non-zero on failure.
-
-**Request Raises:**
-    ValueError: if arguments are invalid or the cluster is not supported.
-    sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-    sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-    sky.exceptions.NotSupportedError: if the cluster is not based on
-      CloudVmRayBackend.
-    sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-      not the same as the user who created the cluster.
-    sky.exceptions.CloudUserIdentityError: if we fail to get the current
-      user identity.
+Emits a stderr deprecation warning; behavior otherwise identical
+to ``tail_hook_logs``. Removed in v0.15.0.
 
 ### `sky.download_logs`
 
@@ -1430,3 +1414,21 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+
+### `sky.tail_hook_logs`
+
+```python
+sky.tail_hook_logs(cluster_name: str, event: Optional[str] = None, follow: bool = True, tail: int = 0) -> int
+```
+
+Tails a per-event lifecycle-hook log on the cluster.
+
+**Args:**
+    cluster_name: name of the cluster.
+    event: one of ``autostop``, ``preemption``, ``down``. When
+        None, auto-selects whichever log exists on the cluster.
+    follow: whether to follow the logs.
+    tail: number of lines to display from the end of the log file.
+
+**Returns:**
+    Exit code 0 on streaming success; non-zero on failure.
