@@ -2403,7 +2403,7 @@ def cost_report(
         for record in all_records:
             r = dict(record)
             if r.get('resources') is not None:
-                r['resources'] = str(r['resources'])
+                r['resources'] = r['resources'].to_yaml_config()
             if r.get('status') is not None:
                 r['status'] = r['status'].value
             json_records.append(r)

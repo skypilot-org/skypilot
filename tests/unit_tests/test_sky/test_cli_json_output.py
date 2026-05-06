@@ -411,6 +411,10 @@ class TestCostReportJsonOutput:
         mock_resources = mock.Mock()
         mock_resources.__str__ = lambda self: 'AWS(m5.xlarge)'
         mock_resources.get_cost = mock.Mock(return_value=0.192)
+        mock_resources.to_yaml_config = mock.Mock(return_value={
+            'infra': 'AWS',
+            'instance_type': 'm5.xlarge',
+        })
         defaults = dict(
             name=name,
             launched_at=1700000000,
@@ -447,7 +451,10 @@ class TestCostReportJsonOutput:
         assert parsed[0]['name'] == 'mycluster'
         assert parsed[0]['status'] == 'UP'
         assert parsed[0]['total_cost'] == 0.192
-        assert parsed[0]['resources'] == 'AWS(m5.xlarge)'
+        assert parsed[0]['resources'] == {
+            'infra': 'AWS',
+            'instance_type': 'm5.xlarge',
+        }
 
     def test_json_output_no_table_text(self, monkeypatch):
         """Test that -o json suppresses table output."""
