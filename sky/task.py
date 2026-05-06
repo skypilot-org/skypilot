@@ -560,10 +560,6 @@ class Task:
 
     def _validate_mount_path(self, path: str, location: str):
         self._validate_path(path, location)
-        # Note: file_mounts intentionally allow relative destinations —
-        # `cloud_vm_ray_backend` resolves them against ~/sky_workdir at
-        # provision time. Volumes do require absolute paths and call
-        # `_validate_mount_dest_is_absolute` separately.
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
         if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
@@ -584,14 +580,13 @@ class Task:
     def _validate_mount_dest_is_absolute(self, path: str, location: str):
         if data_utils.is_cloud_store_url(path):
             return
-        # Explicitly use POSIX semantics — `os.path.isabs` treats e.g.
-        # 'C:/foo' as absolute on Windows, but the remote side is always
-        # POSIX. Tilde is allowed as a common shorthand for the remote
-        # home directory (see Task docstring examples).
+        # POSIX semantics: `os.path.isabs` treats 'C:/foo' as absolute on
+        # Windows, but the remote side is always POSIX. Tilde counts as
+        # a shorthand for the remote home directory.
         if not (path.startswith('/') or path.startswith('~')):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'File mount destination must be an absolute path '
+                    f'Mount destination must be an absolute path '
                     f'(start with "/" or "~"). Got: {path!r} in {location}.')
 
     def expand_and_validate_workdir(self):
