@@ -354,10 +354,21 @@ async def get_job_status(
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
 
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+
+    logger.info('=== Checking the job status... ===')
+
     if managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
                                          handle, cluster_name)
         if result is not None:
+            status, _ = result
+            _log_job_status(status)
             return result
 
     if handle is None:
@@ -368,7 +379,6 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
@@ -376,11 +386,7 @@ async def get_job_status(
                               stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+        _log_job_status(status)
         return status, None
     except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
             ValueError, TypeError, asyncio.TimeoutError) as e:
