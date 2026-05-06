@@ -247,6 +247,30 @@ export function InfrastructureSection({
         safeContexts.length > 0 &&
         !safeContexts.every((c) => loadedContexts.has(c))));
 
+  // Calculate aggregated GPU utilization for each context (for inline utilization column)
+  const getContextUtilization = (context) => {
+    const contextGpus = groupedPerContextGPUs[context] || [];
+    const totalGpus = contextGpus.reduce(
+      (sum, gpu) => sum + (gpu.gpu_total || 0),
+      0
+    );
+    const freeGpus = contextGpus.reduce(
+      (sum, gpu) => sum + (gpu.gpu_free || 0),
+      0
+    );
+    const notReadyGpus = contextGpus.reduce(
+      (sum, gpu) => sum + (gpu.gpu_not_ready || 0),
+      0
+    );
+    const usedGpus = Math.max(0, totalGpus - freeGpus - notReadyGpus);
+    return {
+      total: totalGpus,
+      free: freeGpus,
+      used: usedGpus,
+      notReady: notReadyGpus,
+    };
+  };
+
   // Show table if we have contexts to display, even if some data is still loading
   if (safeContexts.length > 0) {
     return (
@@ -270,9 +294,53 @@ export function InfrastructureSection({
                       : 'contexts'}
               </span>
             </div>
-            {actionButton}
+            <div className="flex items-center gap-4">
+              {gpus && gpus.length > 0 && (
+                <div className="flex items-center gap-3 text-xs">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-gray-400 rounded-sm"></div>
+                    <span className="text-gray-600">Not ready</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-yellow-500 rounded-sm"></div>
+                    <span className="text-gray-600">Used</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-green-700 rounded-sm"></div>
+                    <span className="text-gray-600">Free</span>
+                  </div>
+                </div>
+              )}
+              {actionButton}
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Aggregated GPU Strip */}
+          {gpus && gpus.length > 0 && (
+            <div className="mb-4 space-y-2">
+              {gpus.map((gpu) => {
+                const total = gpu.gpu_total || 0;
+                const free = gpu.gpu_free || 0;
+                return (
+                  <div key={gpu.gpu_name} className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-gray-700 w-32 flex-shrink-0">
+                      {canonicalizeGpuName(gpu.gpu_name)}
+                    </span>
+                    <div className="flex-1">
+                      <GpuUtilizationBar
+                        gpu={gpu}
+                        heightClass="h-5"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
+                    <span className="text-sm text-gray-600 w-24 text-right flex-shrink-0">
+                      {free} / {total} free
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex flex-col gap-6">
             <div>
               <div
                 className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
@@ -282,33 +350,30 @@ export function InfrastructureSection({
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                      <th className="p-3 text-left font-medium text-gray-600">
                         Name
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
-                        Clusters
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
-                        Jobs
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600">
                         Nodes
                       </th>
                       {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        <th className="p-3 text-left font-medium text-gray-600">
                           CPU
                         </th>
                       )}
                       {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                        <th className="p-3 text-left font-medium text-gray-600">
                           Memory
                         </th>
                       )}
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
-                        GPU Types
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU Type
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600">
                         GPUs
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 min-w-[180px]">
+                        Utilization
                       </th>
                       <th className="p-3 text-right font-medium text-gray-600 w-12" />
                     </tr>
@@ -386,6 +451,9 @@ export function InfrastructureSection({
                           ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
+                      // Get utilization data for this context
+                      const utilization = getContextUtilization(context);
+
                       return (
                         <tr
                           key={context}
@@ -396,7 +464,7 @@ export function InfrastructureSection({
                           }`}
                         >
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                               <PluginSlot
                                 name="infra.row.namePrefix"
                                 context={{
@@ -437,25 +505,27 @@ export function InfrastructureSection({
                                   <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
                                 </NonCapitalizedTooltip>
                               )}
+                              {isClusterDataLoading ? (
+                                <SkeletonBadge />
+                              ) : (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium whitespace-nowrap">
+                                  {stats.clusters}{' '}
+                                  {stats.clusters === 1
+                                    ? 'cluster'
+                                    : 'clusters'}
+                                </span>
+                              )}
+                              {isJobsDataLoading ? (
+                                <SkeletonBadge />
+                              ) : (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium whitespace-nowrap">
+                                  {jobsData[contextStatsKey]?.jobs || 0}{' '}
+                                  {(jobsData[contextStatsKey]?.jobs || 0) === 1
+                                    ? 'job'
+                                    : 'jobs'}
+                                </span>
+                              )}
                             </div>
-                          </td>
-                          <td className="p-3">
-                            {isClusterDataLoading ? (
-                              <SkeletonBadge />
-                            ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                {stats.clusters}
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {isJobsDataLoading ? (
-                              <SkeletonBadge />
-                            ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                {jobsData[contextStatsKey]?.jobs || 0}
-                              </span>
-                            )}
                           </td>
                           <td className="p-3">
                             {!hasNodeData ? (
@@ -506,6 +576,28 @@ export function InfrastructureSection({
                               </span>
                             )}
                           </td>
+                          <td className="p-3">
+                            {!hasGpuData ? (
+                              <SkeletonBadge />
+                            ) : utilization.total > 0 ? (
+                              <div className="flex items-center gap-2">
+                                <GpuUtilizationBar
+                                  gpu={{
+                                    gpu_total: utilization.total,
+                                    gpu_free: utilization.free,
+                                    gpu_not_ready: utilization.notReady,
+                                  }}
+                                  heightClass="h-4"
+                                  wrapperClassName="w-24 min-w-[96px]"
+                                />
+                                <span className="text-xs text-gray-500 whitespace-nowrap">
+                                  {utilization.free} free
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
+                          </td>
                           <td className="p-3 text-right">
                             <PluginSlot
                               name="infra.row.actions"
@@ -519,85 +611,6 @@ export function InfrastructureSection({
                 </table>
               </div>
             </div>
-            {gpus && gpus.length > 0 && (
-              <div>
-                <div
-                  className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
-                    isTableRefreshing ? 'infra-table-refreshing' : ''
-                  } ${gpus.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
-                >
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0 z-10">
-                      <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
-                          GPU
-                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
-                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_free, 0)}{' '}
-                            of{' '}
-                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_total, 0)}{' '}
-                            free
-                          </span>
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                          Requestable
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/2">
-                          <div className="flex items-center">
-                            <span>Utilization</span>
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {gpus.map((gpu) => {
-                        // Find the requestable quantities from contexts
-                        const requestableQtys = groupedPerContextGPUs
-                          ? Object.values(groupedPerContextGPUs)
-                              .flat()
-                              .filter((g) => {
-                                if (
-                                  canonicalizeGpuName(g.gpu_name) !==
-                                  gpu.gpu_name
-                                )
-                                  return false;
-                                if (isSlurm) return true; // For Slurm, include all
-                                // For Kubernetes/SSH, filter by context type
-                                const contextKey = g.context || g.cluster;
-                                if (!contextKey) return false;
-                                return isSSH
-                                  ? contextKey.startsWith('ssh-')
-                                  : !contextKey.startsWith('ssh-');
-                              })
-                              .map((g) => g.gpu_requestable_qty_per_node)
-                              .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
-                              .join(', ')
-                          : '-';
-
-                        return (
-                          <tr key={gpu.gpu_name}>
-                            <td className="p-3 font-medium w-24 whitespace-nowrap">
-                              {canonicalizeGpuName(gpu.gpu_name)}
-                            </td>
-                            <td className="p-3 text-xs text-gray-600">
-                              {requestableQtys || '-'} / node
-                            </td>
-                            <td className="p-3 w-2/3">
-                              <div className="flex items-center gap-3">
-                                <GpuUtilizationBar
-                                  gpu={gpu}
-                                  heightClass="h-5"
-                                  wrapperClassName="flex-1 min-w-[100px] w-full"
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
