@@ -18,7 +18,8 @@ class TestCreateTemplateForDockerLogin:
         assert image == 'my-org/my-image:tag'
         assert template_id is None
 
-    def test_docker_login_config_passes_formatted_image_to_create_template(self):
+    def test_docker_login_config_passes_formatted_image_to_create_template(
+            self):
         """Regression test for #9546.
 
         create_template must receive the fully-qualified image name, not None.
