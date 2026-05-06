@@ -120,6 +120,8 @@ class ProvisionRuntimeMetadata:
     # Whether the user's ``run`` command has already been started on the
     # cluster by the provisioner.
     run_started: bool = False
+    # Test field for verifying forward-compatibility of unknown fields.
+    _backcompat_test_field: bool = False
 
 
 @dataclasses.dataclass
