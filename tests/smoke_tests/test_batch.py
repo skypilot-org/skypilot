@@ -372,6 +372,7 @@ def test_batch_cancel(generic_cloud: str):
 # ---------- Test batch HA: kill controller, verify resume from DB ----------
 @pytest.mark.kubernetes
 @pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
 def test_batch_ha_kill_running(generic_cloud: str):
     """Kill the jobs controller while a batch job is RUNNING.
 
