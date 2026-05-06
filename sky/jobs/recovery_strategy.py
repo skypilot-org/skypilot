@@ -152,14 +152,14 @@ class StrategyExecutor:
         """
         return {}
 
-    async def on_resume(self, cluster_name: str) -> None:
+    async def on_resume(self, cluster_name: str) -> None:  # pylint: disable=unused-argument
         """Called before monitoring an already-launched task on resume.
 
         Subclasses use this to rehydrate state from persisted handles.
         """
         return None
 
-    async def monitor_task(
+    async def monitor_task(  # pylint: disable=unused-argument
         self,
         *,
         task_id: int,
@@ -556,8 +556,8 @@ class StrategyExecutor:
                                     _is_launched_by_jobs_controller=True,
                                     _file_mounts_blob_id=(
                                         self.file_mounts_blob_id),
-                                    _extra_launch_context=(
-                                        extra_ctx if extra_ctx else None),
+                                    _extra_launch_context=(extra_ctx if
+                                                           extra_ctx else None),
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')
