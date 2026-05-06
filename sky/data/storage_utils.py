@@ -62,7 +62,8 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
 def _run_git_ls_files_for_ignored_paths(
         src_dir_path: str,
         git_dir: Optional[str] = None,
-        use_standard_excludes: bool = True) -> List[str]:
+        use_standard_excludes: bool = True,
+        env: Optional[dict] = None) -> List[str]:
     cmd = ['git', '-c', 'safe.directory=*']
     if git_dir is None:
         cmd += ['-C', src_dir_path]
@@ -92,7 +93,8 @@ def _run_git_ls_files_for_ignored_paths(
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             check=True,
-                            text=True)
+                            text=True,
+                            env=env)
     # Don't catch any errors here. Callers decide which failures are expected
     # enough to degrade gracefully.
 
@@ -103,17 +105,31 @@ def _run_git_ls_files_for_ignored_paths(
 
 def _get_excluded_files_from_gitignore_without_repo(
         src_dir_path: str) -> List[str]:
-    """Evaluates .gitignore for a directory outside a Git repository."""
+    """Evaluates .gitignore for a directory outside a Git repository.
+
+    Uses a temporary git repo so we can delegate pattern evaluation to git.
+    We isolate the temporary repo from the user's global git config so that
+    global excludes (core.excludesFile) and template directories
+    (init.templateDir) do not leak patterns into the result.
+    """
+    # Prevent git init from reading the user's global/system config, which
+    # could inject exclude patterns via core.excludesFile or populate
+    # .git/info/exclude via init.templateDir.
+    isolated_env = os.environ.copy()
+    isolated_env['GIT_CONFIG_NOSYSTEM'] = '1'
+    isolated_env['GIT_CONFIG_GLOBAL'] = os.devnull
     with tempfile.TemporaryDirectory(prefix='skypilot_gitignore_') as temp_dir:
         subprocess.run(['git', 'init', '--quiet', temp_dir],
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE,
                        check=True,
-                       text=True)
+                       text=True,
+                       env=isolated_env)
         return _run_git_ls_files_for_ignored_paths(src_dir_path,
                                                    git_dir=os.path.join(
                                                        temp_dir, '.git'),
-                                                   use_standard_excludes=False)
+                                                   use_standard_excludes=False,
+                                                   env=isolated_env)
 
 
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
@@ -154,9 +170,6 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                                            check=True,
                                            text=True)
     except subprocess.CalledProcessError as e:
-        gitignore_path = os.path.join(expand_src_dir_path,
-                                      constants.GIT_IGNORE_FILE)
-
         if (e.returncode == exceptions.GIT_FATAL_EXIT_CODE and
                 'not a git repository' in e.stderr):
             if os.path.isdir(expand_src_dir_path):
@@ -164,6 +177,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     expand_src_dir_path)
             return []
 
+        gitignore_path = os.path.join(expand_src_dir_path,
+                                      constants.GIT_IGNORE_FILE)
         if e.returncode == exceptions.COMMAND_NOT_FOUND_EXIT_CODE:
             # Git is not installed. This is fine, skip the check.
             # If .gitignore is present, warn the user.

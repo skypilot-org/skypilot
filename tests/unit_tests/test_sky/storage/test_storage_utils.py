@@ -435,6 +435,44 @@ def test_get_excluded_files_non_git_dir_ignores_global_gitignore():
         assert 'kept.txt' not in norm_excluded_files
 
 
+def test_get_excluded_files_non_git_dir_ignores_template_dir():
+    """Ensures init.templateDir cannot leak patterns via .git/info/exclude."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source_dir = os.path.join(temp_dir, 'source')
+        os.makedirs(source_dir)
+
+        # Create a git template that populates .git/info/exclude
+        template_dir = os.path.join(temp_dir, 'git-template')
+        info_dir = os.path.join(template_dir, 'info')
+        os.makedirs(info_dir)
+        with open(os.path.join(info_dir, 'exclude'), 'w') as f:
+            f.write('*.secret\n')
+
+        git_config_path = os.path.join(temp_dir, 'gitconfig')
+        with open(git_config_path, 'w') as f:
+            f.write(f'[init]\n\ttemplateDir = {template_dir}\n')
+
+        with open(os.path.join(source_dir, '.gitignore'), 'w') as f:
+            f.write('*.local\n')
+
+        for filename in ['leaked.secret', 'ignored.local', 'kept.txt']:
+            with open(os.path.join(source_dir, filename), 'w') as f:
+                f.write('content')
+
+        with mock.patch.dict(os.environ, {
+                'GIT_CONFIG_GLOBAL': git_config_path,
+                'GIT_CONFIG_NOSYSTEM': '1'
+        }):
+            excluded_files = storage_utils.get_excluded_files_from_gitignore(
+                source_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        assert 'ignored.local' in norm_excluded_files
+        # The templateDir's exclude pattern should NOT leak through
+        assert 'leaked.secret' not in norm_excluded_files
+        assert 'kept.txt' not in norm_excluded_files
+
+
 def test_get_excluded_files_git_repo_uses_global_gitignore():
     with tempfile.TemporaryDirectory() as temp_dir:
         source_dir = os.path.join(temp_dir, 'source')

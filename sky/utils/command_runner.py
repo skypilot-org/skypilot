@@ -494,18 +494,36 @@ class CommandRunner:
                             delete=False,
                             encoding='utf-8') as exclude_tmp_file:
                         exclude_tmp_file_path = exclude_tmp_file.name
-                        exclude_tmp_file.write('\n'.join(excluded_files) + '\n')
+                        exclude_tmp_file.write('\0'.join(excluded_files) + '\0')
+                    # --from0 is a global rsync flag that makes all
+                    # --exclude-from files NUL-delimited. This is safe
+                    # here because we only add one --exclude-from file.
+                    rsync_command.append('--from0')
                     rsync_command.append(
                         RSYNC_EXCLUDE_OPTION.format(
                             shlex.quote(exclude_tmp_file_path)))
-            except Exception:  # pylint: disable=broad-except
-                # If git-based exclusion fails unexpectedly, fall back to
-                # rsync's native filter. This is best-effort because native
-                # rsync filters do not support Git negation semantics.
-                logger.debug(
-                    'Failed to get git-based excludes, falling back '
-                    'to rsync filter.',
-                    exc_info=True)
+                else:
+                    # git ls-files returned no excludes (e.g. .gitignore
+                    # has only comments or is empty). Fall back to rsync's
+                    # native filter so .git/info/exclude is still honored.
+                    rsync_command.append(RSYNC_FILTER_GITIGNORE)
+                    if (resolved_source / GIT_EXCLUDE).exists():
+                        rsync_command.append(
+                            RSYNC_EXCLUDE_OPTION.format(
+                                shlex.quote(str(resolved_source /
+                                                GIT_EXCLUDE))))
+            except (subprocess.CalledProcessError, OSError) as exc:
+                # CalledProcessError: git command failed unexpectedly
+                #   (expected failures like "not a repo" or "git not found"
+                #   are already handled inside
+                #   get_excluded_files_from_gitignore and won't reach here).
+                # OSError: temp file I/O failure or git binary not found.
+                logger.warning(
+                    'Failed to get git-based excludes for '
+                    f'{str(resolved_source)!r} ({type(exc).__name__}: '
+                    f'{exc}), falling back to rsync native filter. '
+                    '.gitignore negation patterns (e.g., '
+                    '"!important.txt") will not be honored.')
                 rsync_command.append(RSYNC_FILTER_GITIGNORE)
                 if (resolved_source / GIT_EXCLUDE).exists():
                     rsync_command.append(
@@ -518,7 +536,9 @@ class CommandRunner:
         else:
             # For downloads, use rsync's native filter as before. Download-side
             # .gitignore files are on the remote source and cannot be evaluated
-            # locally with git.
+            # locally with git. Note: this means .gitignore negation patterns
+            # (e.g., "!important.txt") are NOT supported for downloads — rsync
+            # treats all filter patterns as excludes.
             rsync_command.append(RSYNC_FILTER_GITIGNORE)
 
         if rsh_option is not None:
