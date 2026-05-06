@@ -12,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import dotenv
 import filelock
