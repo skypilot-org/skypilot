@@ -134,7 +134,7 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
 
 
 def _build_task_specs(
-        executor: 'recovery_strategy.StrategyExecutor',) -> Dict[str, Any]:
+    executor: 'recovery_strategy.StrategyExecutor',) -> Dict[str, Any]:
     """Merge base and strategy-specific task specs with collision detection."""
     base_specs: Dict[str, Any] = {
         'max_restarts_on_errors': executor.max_restarts_on_errors,
