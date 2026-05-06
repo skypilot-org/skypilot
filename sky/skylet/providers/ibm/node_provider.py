@@ -118,8 +118,10 @@ class IBMVPCNodeProvider(NodeProvider):
                 except ibm.ibm_cloud_sdk_core.ApiException as e:
                     cli_logger.warning(instance_id)
                     if e.message == "Instance not found":
-                        logger.error(f"cached instance {instance_id} not found, \
-                                will be removed from cache")
+                        logger.error(
+                            f"cached instance {instance_id} not found, \
+                                will be removed from cache"
+                        )
             # dump in-memory cache to local cache (file).
             self.set_node_tags(None, None)
 
@@ -339,9 +341,11 @@ class IBMVPCNodeProvider(NodeProvider):
                         # since non_terminated_nodes is called periodically,
                         # prevent access until node is deleted
                         self._delete_node(node["id"], node)
-                        logger.error("""Encountered a failed node.
+                        logger.error(
+                            """Encountered a failed node.
                             Region might be crowded,
-                            Consider retrying later.""")
+                            Consider retrying later."""
+                        )
                     else:
                         logger.debug(
                             f"{node['id']} status {node['status']}"
@@ -392,8 +396,10 @@ class IBMVPCNodeProvider(NodeProvider):
         """returns whether a node is in status running"""
         with self.lock:
             node = self._get_cached_node(node_id)
-            logger.debug(f"""node: {node_id} is_running?
-                {node["status"] == "running"}""")
+            logger.debug(
+                f"""node: {node_id} is_running?
+                {node["status"] == "running"}"""
+            )
             return node["status"] == "running"
 
     def is_terminated(self, node_id) -> bool:
@@ -402,9 +408,11 @@ class IBMVPCNodeProvider(NodeProvider):
         with self.lock:
             try:
                 node = self._get_cached_node(node_id)
-                logger.debug(f"""node: {node_id} is_terminated?
+                logger.debug(
+                    f"""node: {node_id} is_terminated?
                     {node["status"] not in
-                    ["running", "starting", "pending"]}""")
+                    ["running", "starting", "pending"]}"""
+                )
                 return node["status"] not in ["running", "starting", "pending"]
             # pylint: disable=W0703
             except Exception:
@@ -522,8 +530,10 @@ class IBMVPCNodeProvider(NodeProvider):
         key_identity_model = {"id": base_config["key_id"]}
         profile_name = base_config.get("instance_profile_name")
         if not profile_name:
-            raise Exception("""Failed to detect 'instance_profile_name'
-                key in cluster config file""")
+            raise Exception(
+                """Failed to detect 'instance_profile_name'
+                key in cluster config file"""
+            )
 
         instance_prototype = {}
         instance_prototype["name"] = name
@@ -547,9 +557,11 @@ class IBMVPCNodeProvider(NodeProvider):
             elif e.code == 400 and "over quota" in e.message:
                 cli_logger.error(f"Create VM instance {name} failed due to quota limit")
             else:
-                cli_logger.error(f"""Create VM instance for {name}
+                cli_logger.error(
+                    f"""Create VM instance for {name}
                     failed with status code {str(e.code)}
-                    .\nFailed instance prototype:\n""")
+                    .\nFailed instance prototype:\n"""
+                )
                 pprint(instance_prototype)
             raise e
 
@@ -596,8 +608,10 @@ class IBMVPCNodeProvider(NodeProvider):
         fip = fip_data["address"]
         fip_id = fip_data["id"]
 
-        logger.debug(f"""Attaching floating IP {fip} to
-            VM instance {instance["id"]}""")
+        logger.debug(
+            f"""Attaching floating IP {fip} to
+            VM instance {instance["id"]}"""
+        )
 
         # check if floating ip is not attached yet
         inst_p_nic = instance["primary_network_interface"]
@@ -669,9 +683,11 @@ class IBMVPCNodeProvider(NodeProvider):
 
         name_tag = tags[TAG_RAY_NODE_NAME]
         if len(name_tag) > INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1:
-            logger.error(f"""node name: {name_tag} is longer than
+            logger.error(
+                f"""node name: {name_tag} is longer than
                 {INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1}
-                characters""")
+                characters"""
+            )
             raise Exception("Invalid node name: length check failed")
 
         # IBM VPC VSI pattern requirement
@@ -679,8 +695,10 @@ class IBMVPCNodeProvider(NodeProvider):
         res = pattern.match(name_tag)
 
         if not res:
-            logger.error(f"""node name {name_tag} doesn't match the naming pattern
-                 `[a-z]|[a-z][-a-z0-9]*[a-z0-9]` for IBM VPC instance """)
+            logger.error(
+                f"""node name {name_tag} doesn't match the naming pattern
+                 `[a-z]|[a-z][-a-z0-9]*[a-z0-9]` for IBM VPC instance """
+            )
             raise Exception(
                 "Invalid node name: pattern check for IBM VPC instance failed"
             )

@@ -11,7 +11,7 @@ repos:
     -   id: check-added-large-files
 
 -   repo: https://github.com/psf/black
-    rev: 26.3.1  # Match the version from requirements
+    rev: 24.10.0  # Match the version from requirements
     hooks:
     -   id: black
         name: black (IBM specific)
