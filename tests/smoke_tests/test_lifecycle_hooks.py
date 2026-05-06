@@ -8,14 +8,19 @@ Pin to a specific cloud (default is AWS)::
 
     pytest tests/smoke_tests/test_lifecycle_hooks.py --generic-cloud gcp
 
-Run only Kubernetes-specific tests (preemption via ``kubectl delete pod``)::
+Run only Kubernetes-specific tests::
 
     pytest tests/smoke_tests/test_lifecycle_hooks.py -k k8s \\
         --generic-cloud kubernetes
 
 Run a single test::
 
-    pytest tests/smoke_tests/test_lifecycle_hooks.py::test_hook_autostop_fires
+    pytest tests/smoke_tests/test_lifecycle_hooks.py::test_hook_lifecycle_combined
+
+Test layout — these tests are intentionally aggregated to amortize
+launch/teardown cycles. Each combined test calls out the sub-features
+it covers in a leading comment + per-assertion comments so a failure
+narrows down quickly.
 """
 
 import tempfile
@@ -58,46 +63,112 @@ def _write_yaml(resources: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# S1 — autostop hook fires and is retrievable via `sky logs --hook autostop`.
+# Combined autostop + retrieval coverage. One launch + one autostop cycle
+# verifies the union of:
+#   - autostop hook fires and is retrievable
+#   - omitting `events:` defaults to all three events on the stored config
+#   - multi-event hook entry fires only on matching events
+#   - `sky logs --hook` (no event) auto-selects whichever log exists
+#   - `sky logs --autostop` is a deprecated alias (stderr warning + works)
+#   - legacy YAML `autostop.hook` is routed through the new framework with
+#     a stderr deprecation warning at launch
+#   - hook timeout kills the script mid-run; teardown still completes and
+#     the log captures the partial output
+#   - hook with multi-line `run` + literal "EOF" survives JSON round-trip
+#     through skylet sqlite
 # ---------------------------------------------------------------------------
 @_no_autostop
 @pytest.mark.no_kubernetes
-def test_hook_autostop_fires(generic_cloud: str):
+def test_hook_lifecycle_combined(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'hook-autostop-{time.time()}'
+    legacy_marker = f'legacy-{time.time()}'
+    multi_event_marker = f'multi-event-{time.time()}'
+    timeout_marker = f'partial-output-{time.time()}'
+    # Multi-line `run` with embedded "EOF" tests that we don't accidentally
+    # early-terminate when the value round-trips through any heredoc.
+    multiline_run = (f'echo line1\n'
+                     f'echo {multi_event_marker}\n'
+                     f'EOF\n'
+                     f'echo done')
     yaml_path = _write_yaml({
         'autostop': {
             'idle_minutes': 1,
             'down': False,
+            # Legacy back-compat: should be routed into the hooks list.
+            'hook': f'echo {legacy_marker}',
+            'hook_timeout': 60,
         },
-        'hooks': [{
-            'run': f'echo {marker}',
-            'events': ['autostop'],
-            'timeout': 60,
-        }],
+        'hooks': [
+            # Defaults check: omitting `events:` should fill in all three.
+            {
+                'run': 'true',
+            },
+            # Multi-event filter + multi-line + EOF survival.
+            {
+                'run': multiline_run,
+                'events': ['autostop', 'down'],
+            },
+            # Hook timeout: prints, then sleeps until the 5s timeout kills it.
+            {
+                'run': f'echo {timeout_marker} && sleep 9999',
+                'events': ['autostop'],
+                'timeout': 5,
+            },
+        ],
     })
+    inspect = ('sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
     test = smoke_tests_utils.Test(
-        'test_hook_autostop_fires',
+        'test_hook_lifecycle_combined',
         [
+            # Capture stderr so we can verify the legacy autostop.hook
+            # deprecation warning fires at launch time.
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
-                timeout=autostop_timeout),
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
+            # (1) legacy autostop.hook routing → stderr deprecation warning
+            f'echo "$s" | grep -i "deprecated"',
+            # (2) defaults: omitted events → [autostop, preemption, down]
+            # (3) multi-line run + literal "EOF" survives sqlite round-trip
+            # (4) legacy hook routed into the hooks list
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep -q autostop && '
+            f'echo "$out" | grep -q preemption && '
+            f'echo "$out" | grep -q down && '
+            f'echo "$out" | grep -q line1 && '
+            f'echo "$out" | grep -q EOF && '
+            f'echo "$out" | grep -q done && '
+            f'echo "$out" | grep -q "{legacy_marker}"',
+            # Wait for autostop to fire (timeout-killed hook included).
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
             'sleep 30',
+            # Re-launch to refresh the cluster into UP so we can query
+            # the per-event log files via `sky logs`.
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
             f'tests/test_yamls/minimal.yaml) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # (5) autostop log carries every autostop-matching marker
             f'out=$(sky logs {name} --hook autostop --no-follow) && '
-            f'echo "$out" | grep "{marker}"',
+            f'echo "$out" | grep "{legacy_marker}" && '
+            f'echo "$out" | grep "{multi_event_marker}" && '
+            # (6) timeout-killed hook still wrote its initial echo
+            f'echo "$out" | grep "{timeout_marker}"',
+            # (7) `sky logs --hook` (no event) auto-selects the log
+            f'out=$(sky logs {name} --hook --no-follow) && '
+            f'echo "$out" | grep "{legacy_marker}"',
+            # (8) `sky logs --autostop` is the deprecated alias — works
+            # AND prints a deprecation warning to stderr
+            f'out=$(sky logs {name} --autostop --no-follow 2>&1) && '
+            f'echo "$out" | grep "{legacy_marker}" && '
+            f'echo "$out" | grep -i "deprecated"',
+            # (9) multi-event hook with `events:[autostop, down]` did NOT
+            # fire on `down` — its marker must not appear in down.log
+            f'! sky logs {name} --hook down --no-follow 2>&1 | '
+            f'grep -q "{multi_event_marker}"',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
@@ -106,442 +177,61 @@ def test_hook_autostop_fires(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
-# S2 — omitting `events` defaults to all three events on the stored config.
+# Combined down-hook + autostop/down race coverage:
+#   - down-hook fires during `sky down` and is retrievable via
+#     `sky logs --hook down` while teardown is still running
+#   - autostop + `sky down` arriving inside the autostop window resolves
+#     cleanly (cluster terminates, no UP-state leak)
 # ---------------------------------------------------------------------------
 @_no_autostop
-def test_hook_events_default_to_all(generic_cloud: str):
+@pytest.mark.no_kubernetes
+def test_hook_down_and_race(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    down_marker = f'hook-down-{time.time()}'
     yaml_path = _write_yaml({
-        'hooks': [{
-            'run': 'echo default-events',
-        }],
-    })
-    # Inspect the skylet sqlite DB directly — no need for `sky` module
-    # on the cluster side. The `~/.sky/skylet_config.db` file holds
-    # key='lifecycle_hooks' → JSON string of the normalized hooks list.
-    # Output looks like: [{"run": "...", "events": ["autostop",
-    # "preemption", "down"], "timeout": 3600}]. We verify all three
-    # events are present.
-    inspect = ('sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";" '
-               '| tee /tmp/hooks.json && '
-               'grep -q autostop /tmp/hooks.json && '
-               'grep -q preemption /tmp/hooks.json && '
-               'grep -q down /tmp/hooks.json')
-    test = smoke_tests_utils.Test(
-        'test_hook_events_default_to_all',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'sky exec {name} {chr(39)}{inspect}{chr(39)}',
-            f'sky logs {name} 2 --status',
+        # 1-minute autostop + a slow down-hook so we can race them.
+        'autostop': {
+            'idle_minutes': 1,
+            'down': False,
+        },
+        'hooks': [
+            {
+                'run': 'echo autostop-hook',
+                'events': ['autostop'],
+            },
+            {
+                'run': f'echo {down_marker} && sleep 15 && echo down-done',
+                'events': ['down'],
+                'timeout': 60,
+            },
         ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S3 — K8s pod-delete triggers SIGTERM → preemption hook fires.
-# ---------------------------------------------------------------------------
-@pytest.mark.kubernetes
-def test_hook_k8s_preemption_sigterm():
-    name = smoke_tests_utils.get_cluster_name()
-    marker = f'hook-preempt-{time.time()}'
-    # Hook writes to ~/.sky/hooks/preemption.log then sleeps 20s so
-    # the pod is still in the `Terminating` state while the test reads
-    # it via `kubectl exec`. Timeout 60s ensures K8s renders
-    # terminationGracePeriodSeconds >= 60 (PR1 commit 45a870e7b).
-    yaml_path = _write_yaml({
-        'hooks': [{
-            'run': f'echo {marker} > ~/.sky/hooks/preemption.log && sleep 20',
-            'events': ['preemption'],
-            'timeout': 60,
-        }],
     })
-    # The `skypilot-cluster-name` label includes the user-hash suffix,
-    # so grep the name-prefixed pod via `kubectl get pods -o name`
-    # instead of using a label selector.
-    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
-                 f'2>/dev/null | grep {name} | head -n1')
-    k8s_delete = (f'pod=$({pod_query}) && '
-                  f'kubectl delete --context kind-skypilot --wait=false "$pod"')
-    # During the grace period, `kubectl exec` into the terminating pod
-    # and read the preemption log the skylet handler wrote.
-    read_log = (f'sleep 3 && pod=$({pod_query}) && '
-                f'kubectl exec --context kind-skypilot "$pod" -- '
-                f'cat /home/sky/.sky/hooks/preemption.log')
-    test = smoke_tests_utils.Test(
-        'test_hook_k8s_preemption_sigterm',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra kubernetes --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            k8s_delete,
-            f'out=$({read_log}) && echo "$out" | grep "{marker}"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout('kubernetes'),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S4 — down-hook fires during `sky down` and log is retrievable via
-#      `sky logs --hook down` (which tails before teardown completes).
-# ---------------------------------------------------------------------------
-@_no_autostop
-def test_hook_down_fires(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    marker = f'hook-down-{time.time()}'
-    yaml_path = _write_yaml({
-        'hooks': [{
-            'run': f'echo {marker} && sleep 15 && echo down-done',
-            'events': ['down'],
-            'timeout': 60,
-        }],
-    })
-    # Kick off `sky down` in the background so we can race to tail the
-    # down log before teardown finishes.
-    bg_down = (f'nohup sky down -y {name} > /tmp/{name}-down.log 2>&1 & '
+    # Wait ~55s (just before the 60s autostop fires) so `sky down` lands
+    # inside the autostop window — exercises the per-node CAS that keeps
+    # the two paths from double-firing. Then kick off `sky down` in the
+    # background so we can race to tail the down log before teardown
+    # finishes.
+    bg_down = (f'sleep 55 && '
+               f'nohup sky down -y {name} > /tmp/{name}-down.log 2>&1 & '
                f'DOWN_PID=$!; sleep 5; ')
-    tail = (f'sky logs {name} --hook down --no-follow > /tmp/{name}-tail.log '
-            f'2>&1 || true; wait $DOWN_PID; '
-            f'grep "{marker}" /tmp/{name}-tail.log')
+    tail = (
+        f'sky logs {name} --hook down --no-follow > /tmp/{name}-tail.log '
+        f'2>&1 || true; wait $DOWN_PID; '
+        # (1) down-hook fired during teardown
+        f'grep "{down_marker}" /tmp/{name}-tail.log')
     test = smoke_tests_utils.Test(
-        'test_hook_down_fires',
+        'test_hook_down_and_race',
         [
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra {generic_cloud} --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             bg_down + tail,
-        ],
-        # Teardown is driven by the test body itself; use a purge as
-        # belt-and-suspenders in case the background `sky down` fails.
-        f'sky down -y {name} --purge || true',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S5 — multi-event hook entry fires only on matching events.
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_hook_multi_event(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'hook-multi-{time.time()}'
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [{
-            'run': f'echo {marker}',
-            'events': ['autostop', 'down'],
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_hook_multi_event',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            'sleep 30',
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'tests/test_yamls/minimal.yaml) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # autostop log has marker; down log does not exist.
-            f'out=$(sky logs {name} --hook autostop --no-follow) && '
-            f'echo "$out" | grep "{marker}"',
-            # down.log must not exist yet — expect non-zero exit.
-            f'! sky logs {name} --hook down --no-follow 2>&1 | '
-            f'grep -q "{marker}"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S6 — `sky logs --hook <cluster>` (no event) auto-selects.
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_cli_hook_auto_select(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'hook-auto-{time.time()}'
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [{
-            'run': f'echo {marker}',
-            'events': ['autostop'],
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_cli_hook_auto_select',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            'sleep 30',
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'tests/test_yamls/minimal.yaml) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # --hook without an event → auto-select.
-            f'out=$(sky logs {name} --hook --no-follow) && '
-            f'echo "$out" | grep "{marker}"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S7 — `sky logs --autostop` is a deprecated alias (stderr warn).
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_cli_autostop_alias_deprecation(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'hook-alias-{time.time()}'
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [{
-            'run': f'echo {marker}',
-            'events': ['autostop'],
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_cli_autostop_alias_deprecation',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            'sleep 30',
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'tests/test_yamls/minimal.yaml) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'out=$(sky logs {name} --autostop --no-follow 2>&1) && '
-            f'echo "$out" | grep "{marker}" && '
-            f'echo "$out" | grep -i "deprecated"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S8 — legacy YAML `autostop.hook` is routed through the new framework
-#      with a stderr deprecation warning at launch.
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_hook_legacy_autostop_hook_backcompat(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'legacy-hook-{time.time()}'
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-            'hook': f'echo {marker}',
-            'hook_timeout': 60,
-        },
-    })
-    test = smoke_tests_utils.Test(
-        'test_hook_legacy_autostop_hook_backcompat',
-        [
-            # Expect stderr deprecation warning at launch time.
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
-            f'echo "$s" | grep -i "deprecated"',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            'sleep 30',
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'tests/test_yamls/minimal.yaml) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'out=$(sky logs {name} --hook autostop --no-follow) && '
-            f'echo "$out" | grep "{marker}"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S9 — schema rejects unknown events (no cluster launched).
-# ---------------------------------------------------------------------------
-@pytest.mark.no_dependency
-def test_hook_schema_rejects_unknown_event():
-    yaml_path = _write_yaml({
-        'hooks': [{
-            'run': 'true',
-            'events': ['reboot'],
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_hook_schema_rejects_unknown_event',
-        [
-            f'out=$(sky launch --dryrun {yaml_path} 2>&1 || true); '
-            f'echo "$out" | grep -iE "hooks.*events|reboot"',
-        ],
-        teardown=None,
-        timeout=120,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S10 — controller-resources hooks rejected at config load.
-# ---------------------------------------------------------------------------
-@pytest.mark.no_dependency
-def test_hook_controller_rejected():
-    cfg_path = tempfile.NamedTemporaryFile(mode='w',
-                                           suffix='.yaml',
-                                           delete=False).name
-    with open(cfg_path, 'w', encoding='utf-8') as f:
-        f.write(
-            textwrap.dedent("""\
-                jobs:
-                  controller:
-                    resources:
-                      hooks:
-                        - run: "echo on-controller"
-                          events: [down]
-                """))
-    test = smoke_tests_utils.Test(
-        'test_hook_controller_rejected',
-        [
-            f'out=$(SKYPILOT_CONFIG={cfg_path} sky check 2>&1 || true); '
-            f'echo "$out" | grep -iE "hooks|controller"',
-        ],
-        teardown=None,
-        timeout=120,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S11 — hook timeout kills the script mid-run; teardown still completes
-#      and the log contains the partial output.
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_hook_timeout_kill(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    marker = f'partial-output-{time.time()}'
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [{
-            'run': f'echo {marker} && sleep 9999',
-            'events': ['autostop'],
-            'timeout': 5,
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_hook_timeout_kill',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            'sleep 30',
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'tests/test_yamls/minimal.yaml) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'out=$(sky logs {name} --hook autostop --no-follow) && '
-            f'echo "$out" | grep "{marker}"',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------------------------------------------------------------------------
-# S12 — autostop + `sky down` race: exactly one event fires per node.
-# ---------------------------------------------------------------------------
-@_no_autostop
-@pytest.mark.no_kubernetes
-def test_hook_autostop_down_race(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    yaml_path = _write_yaml({
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [{
-            'run': 'echo autostop-hook',
-            'events': ['autostop'],
-        }, {
-            'run': 'echo down-hook',
-            'events': ['down'],
-        }],
-    })
-    test = smoke_tests_utils.Test(
-        'test_hook_autostop_down_race',
-        [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
-            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # Wait ~55s (just before the 60s autostop fires) then down.
-            'sleep 55',
-            f'sky down -y {name}',
-            # After teardown, we can no longer query logs on the cluster
-            # — so instead we assert that exactly one claim was made by
-            # inspecting the skylet log captured server-side before
-            # teardown. Best-effort: count AUTOSTOPPING transitions.
+            # (2) cluster went down cleanly — no UP-state leak.
             f'sky status {name} 2>/dev/null | grep -v "UP" || true',
         ],
-        # Cluster was terminated inline; no further teardown needed.
+        # Background `sky down` already drove teardown; purge as
+        # belt-and-suspenders if it failed.
         f'sky down -y {name} --purge || true',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
@@ -549,30 +239,11 @@ def test_hook_autostop_down_race(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
-# S13 — CLI rejects unknown hook event.
-# ---------------------------------------------------------------------------
-@pytest.mark.no_dependency
-def test_cli_hook_rejects_unknown_event():
-    test = smoke_tests_utils.Test(
-        'test_cli_hook_rejects_unknown_event',
-        [
-            'out=$(sky logs --hook reboot fake-cluster 2>&1 || true); '
-            'echo "$out" | grep -iE "autostop|preemption|down|invalid"',
-        ],
-        teardown=None,
-        timeout=60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# =========================================================================
-# Edge-case coverage (review-driven)
-# =========================================================================
-
-
-# ---------------------------------------------------------------------------
-# C1 — re-launch with `hooks: []` clears the stored hooks list (proto3 has
-#      no presence on `repeated`, so we explicitly send clear_hooks=True).
+# Re-launch dropping `hooks:` clears the skylet's stored list (proto3
+# `repeated` has no presence — implementation sends `clear_hooks=True`).
+# Kept separate from the combined test because the re-launch sequencing
+# (launch → inspect → relaunch → inspect) is long enough to deserve its
+# own pytest function.
 # ---------------------------------------------------------------------------
 @_no_autostop
 def test_hook_clear_via_relaunch(generic_cloud: str):
@@ -609,58 +280,55 @@ def test_hook_clear_via_relaunch(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
-# C6 — hook with a literal newline in `run` survives worker config sync.
-#      Without base64 encoding, the heredoc would treat the newline as a
-#      shell line break (and any "EOF" as a heredoc terminator).
+# K8s preemption: `kubectl delete pod` (no --force) → kubelet runs preStop
+# → SIGTERM forwarded to skylet → preemption hook runs during the grace
+# window. Verified via `kubectl exec` into the still-Terminating pod.
 # ---------------------------------------------------------------------------
-@_no_autostop
-def test_hook_newline_in_run_survives_resync(generic_cloud: str):
+@pytest.mark.kubernetes
+def test_hook_k8s_preemption_sigterm():
     name = smoke_tests_utils.get_cluster_name()
-    # Multi-line `run` exercises both the launch-time write
-    # (start_worker_hook_handler base64) and re-launch re-sync
-    # (`_resync_worker_hooks_config` base64). Embedding "EOF" tests that
-    # we don't accidentally early-terminate a heredoc.
-    multiline_run = ('echo line1\n'
-                     'echo line2\n'
-                     'EOF\n'
-                     'echo done')
+    marker = f'hook-preempt-{time.time()}'
+    # Hook writes to ~/.sky/hooks/preemption.log then sleeps 20s so the
+    # pod is still Terminating when we read it. Timeout 60s ensures K8s
+    # renders terminationGracePeriodSeconds >= 60.
     yaml_path = _write_yaml({
         'hooks': [{
-            'run': multiline_run,
-            'events': ['down'],
+            'run': f'echo {marker} > ~/.sky/hooks/preemption.log && sleep 20',
+            'events': ['preemption'],
+            'timeout': 60,
         }],
     })
-    inspect = ('cat ~/.sky/hooks/config.json 2>/dev/null || '
-               'sqlite3 ~/.sky/skylet_config.db '
-               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+                 f'2>/dev/null | grep {name} | head -n1')
+    k8s_delete = (f'pod=$({pod_query}) && '
+                  f'kubectl delete --context kind-skypilot --wait=false "$pod"')
+    read_log = (f'sleep 3 && pod=$({pod_query}) && '
+                f'kubectl exec --context kind-skypilot "$pod" -- '
+                f'cat /home/sky/.sky/hooks/preemption.log')
     test = smoke_tests_utils.Test(
-        'test_hook_newline_in_run_survives_resync',
+        'test_hook_k8s_preemption_sigterm',
         [
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
-            f'--infra {generic_cloud} --fast '
+            f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # All four marker lines must round-trip intact via JSON.
-            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
-            f'echo "$out" | grep line1 && '
-            f'echo "$out" | grep line2 && '
-            f'echo "$out" | grep EOF && '
-            f'echo "$out" | grep done',
+            k8s_delete,
+            f'out=$({read_log}) && echo "$out" | grep "{marker}"',
         ],
         f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
 
 
 # ---------------------------------------------------------------------------
-# C7 — preemption-hook timeout sum > 600s triggers the autoscaler-cap
-#      warning + is capped at 600s.
+# K8s grace-period cap: sum of preemption-hook timeouts > 600s emits the
+# cluster-autoscaler warning + caps `terminationGracePeriodSeconds` at 600.
 # ---------------------------------------------------------------------------
 @pytest.mark.kubernetes
 def test_hook_grace_capped_at_autoscaler_limit():
     name = smoke_tests_utils.get_cluster_name()
-    # Two hooks × 400s timeout = 800s sum, > 600s cap → warning expected
+    # Two hooks × 400s timeout = 800s sum, > 600s cap → warning expected.
     yaml_path = _write_yaml({
         'hooks': [
             {
@@ -678,13 +346,13 @@ def test_hook_grace_capped_at_autoscaler_limit():
     test = smoke_tests_utils.Test(
         'test_hook_grace_capped_at_autoscaler_limit',
         [
-            # Capture stderr; verify the cap warning fired.
+            # (1) cap warning fires on stderr
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
             f'echo "$s" | grep -i "cluster-autoscaler" && '
             f'echo "$s" | grep -i "Capping"',
-            # Pod's terminationGracePeriodSeconds is 600 (capped), not 800.
+            # (2) pod's terminationGracePeriodSeconds is 600 (capped), not 800
             f'pod=$(kubectl get pods --context kind-skypilot -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'val=$(kubectl get --context kind-skypilot "$pod" '
@@ -693,5 +361,52 @@ def test_hook_grace_capped_at_autoscaler_limit():
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# No-cluster validation tests — combined into one because they're each
+# only a few seconds. Covers:
+#   - schema rejects unknown event names at `sky launch --dryrun`
+#   - controller-resources reject `hooks:` at config-validation time
+#   - CLI `--hook` rejects unknown event names with a click error
+# ---------------------------------------------------------------------------
+@pytest.mark.no_dependency
+def test_hook_invalid_inputs_rejected():
+    bad_events_yaml = _write_yaml({
+        'hooks': [{
+            'run': 'true',
+            'events': ['reboot'],
+        }],
+    })
+    controller_cfg = tempfile.NamedTemporaryFile(mode='w',
+                                                 suffix='.yaml',
+                                                 delete=False).name
+    with open(controller_cfg, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                jobs:
+                  controller:
+                    resources:
+                      hooks:
+                        - run: "echo on-controller"
+                          events: [down]
+                """))
+    test = smoke_tests_utils.Test(
+        'test_hook_invalid_inputs_rejected',
+        [
+            # (1) schema: unknown event name in resources.hooks
+            f'out=$(sky launch --dryrun {bad_events_yaml} 2>&1 || true); '
+            f'echo "$out" | grep -iE "hooks.*events|reboot"',
+            # (2) controller-resources can't have hooks
+            f'out=$(SKYPILOT_CONFIG={controller_cfg} sky check 2>&1 || true); '
+            f'echo "$out" | grep -iE "hooks|controller"',
+            # (3) CLI: --hook with unknown event name
+            'out=$(sky logs --hook reboot fake-cluster 2>&1 || true); '
+            'echo "$out" | grep -iE "autostop|preemption|down|invalid"',
+        ],
+        teardown=None,
+        timeout=180,
     )
     smoke_tests_utils.run_one_test(test)
