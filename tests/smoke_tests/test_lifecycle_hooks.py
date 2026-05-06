@@ -177,11 +177,17 @@ def test_hook_lifecycle_combined(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
-# Combined down-hook + autostop/down race coverage:
-#   - down-hook fires during `sky down` and is retrievable via
-#     `sky logs --hook down` while teardown is still running
-#   - autostop + `sky down` arriving inside the autostop window resolves
-#     cleanly (cluster terminates, no UP-state leak)
+# Down-hook fires during `sky down` and is retrievable via
+# `sky logs --hook down` while teardown is still running. Also asserts
+# the cluster went down cleanly (no UP-state leak).
+#
+# The earlier draft of this test additionally tried to land `sky down`
+# inside a 1-minute autostop window to exercise the autostop+down CAS
+# race. That race is timing-dependent on real clouds — autostop often
+# fires before `sky down` lands, so the down hook never runs and the
+# grep fails. The race is already covered by the per-node file-lock
+# unit tests (`test_hook_executor.py::test_try_claim_teardown_*`).
+# Here we keep autostop disabled so `sky down` reliably wins.
 # ---------------------------------------------------------------------------
 @_no_autostop
 @pytest.mark.no_kubernetes
@@ -189,30 +195,16 @@ def test_hook_down_and_race(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     down_marker = f'hook-down-{time.time()}'
     yaml_path = _write_yaml({
-        # 1-minute autostop + a slow down-hook so we can race them.
-        'autostop': {
-            'idle_minutes': 1,
-            'down': False,
-        },
-        'hooks': [
-            {
-                'run': 'echo autostop-hook',
-                'events': ['autostop'],
-            },
-            {
-                'run': f'echo {down_marker} && sleep 15 && echo down-done',
-                'events': ['down'],
-                'timeout': 60,
-            },
-        ],
+        'hooks': [{
+            'run': f'echo {down_marker} && sleep 15 && echo down-done',
+            'events': ['down'],
+            'timeout': 60,
+        }],
     })
-    # Wait ~55s (just before the 60s autostop fires) so `sky down` lands
-    # inside the autostop window — exercises the per-node CAS that keeps
-    # the two paths from double-firing. Then kick off `sky down` in the
-    # background so we can race to tail the down log before teardown
-    # finishes.
-    bg_down = (f'sleep 55 && '
-               f'nohup sky down -y {name} > /tmp/{name}-down.log 2>&1 & '
+    # Kick off `sky down` in the background so we can race to tail the
+    # down log before teardown finishes. The 15s sleep in the hook
+    # gives us plenty of time to grab the log via `sky logs --hook down`.
+    bg_down = (f'nohup sky down -y {name} > /tmp/{name}-down.log 2>&1 & '
                f'DOWN_PID=$!; sleep 5; ')
     tail = (
         f'sky logs {name} --hook down --no-follow > /tmp/{name}-tail.log '

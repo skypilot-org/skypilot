@@ -425,6 +425,26 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
 
 
+_VALID_HOOK_EVENTS = ('autostop', 'preemption', 'down')
+
+
+def _validate_hook_event(ctx: click.Context, param: click.Parameter,
+                         value: Optional[str]) -> Optional[str]:
+    """Validator for `sky logs --hook [event]`.
+
+    Accepts: ``None`` (option not passed), ``''`` (option passed without
+    a value — auto-select sentinel), or one of the three valid event
+    names. We can't use ``click.Choice`` here because it rejects ``''``
+    even though we set it as ``flag_value``.
+    """
+    if value is None or value == '' or value in _VALID_HOOK_EVENTS:
+        return value
+    valid = ', '.join(repr(v) for v in _VALID_HOOK_EVENTS)
+    raise click.BadParameter(f'{value!r} is not one of {valid}.',
+                             ctx=ctx,
+                             param=param)
+
+
 def _get_click_major_version():
     return int(click.__version__.split('.', maxsplit=1)[0])
 
@@ -2517,7 +2537,7 @@ def queue(clusters: List[str],
               help='Deprecated alias for --hook autostop.')
 @click.option('--hook',
               'hook_event',
-              type=click.Choice(['autostop', 'preemption', 'down']),
+              callback=_validate_hook_event,
               default=None,
               is_flag=False,
               flag_value='',
