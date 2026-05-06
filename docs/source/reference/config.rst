@@ -1997,7 +1997,8 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 
 Override the APT mirrors tried when installing packages on a pod (optional).
 Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
-fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list.
+fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
 
 Example:
 
