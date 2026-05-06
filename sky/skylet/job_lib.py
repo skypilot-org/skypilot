@@ -457,7 +457,7 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
         # Don't check the end_at for FAILED_SETUP, so that the generated
         # ray program can overwrite the status.
         check_end_at_str = ' AND end_at IS NULL'
-        if status != JobStatus.FAILED_SETUP:
+        if status == JobStatus.FAILED_SETUP:
             check_end_at_str = ''
         _DB.cursor.execute(
             'UPDATE jobs SET status=(?), end_at=(?) '
@@ -1184,28 +1184,39 @@ class JobLibCodeGen:
             # it was using ray job submit before #4318, and switched to raw
             # process. Using the old skylet version will cause the job status
             # to be stuck in PENDING state or transition to FAILED_DRIVER state.
-            '\nif int(constants.SKYLET_VERSION) < 9: '
+            '
+if int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\nresult = None',
-            '\nif int(constants.SKYLET_VERSION) < 15: '
-            '\n result = job_lib.add_job('
+            '
+result = None',
+            '
+if int(constants.SKYLET_VERSION) < 15: '
+            '
+ result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            '\nelse: '
-            '\n result = job_lib.add_job('
+            '
+else: '
+            '
+ result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r})',
-            ('\nif isinstance(result, tuple):'
-             '\n  print("Job ID: " + str(result[0]), flush=True)'
-             '\n  print("Log Dir: " + str(result[1]), flush=True)'
-             '\nelse:'
-             '\n  print("Job ID: " + str(result), flush=True)'),
+            ('
+if isinstance(result, tuple):'
+             '
+  print("Job ID: " + str(result[0]), flush=True)'
+             '
+  print("Log Dir: " + str(result[1]), flush=True)'
+             '
+else:'
+             '
+  print("Job ID: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 
@@ -1237,16 +1248,26 @@ class JobLibCodeGen:
         is_primary_in_job_groups_str = ('[' + ','.join(
             str(is_primary) for is_primary in is_primary_in_job_groups) + ']')
         code = [
-            '\nfrom sky.jobs import state as managed_job_state',
-            f'\nnum_jobs = {num_jobs}',
-            f'\ntask_ids = {task_ids_str}',
-            f'\ntask_names = {task_names_str}',
-            f'\nresources_str = {resources_str!r}',
-            f'\nmetadata_jsons = {metadata_jsons_str}',
-            f'\nis_primary_in_job_groups = {is_primary_in_job_groups_str}',
-            '\njob_ids = []',
-            '\nfor _ in range(num_jobs):'
-            '\n  job_id = managed_job_state.set_job_info_without_job_id('
+            '
+from sky.jobs import state as managed_job_state',
+            f'
+num_jobs = {num_jobs}',
+            f'
+task_ids = {task_ids_str}',
+            f'
+task_names = {task_names_str}',
+            f'
+resources_str = {resources_str!r}',
+            f'
+metadata_jsons = {metadata_jsons_str}',
+            f'
+is_primary_in_job_groups = {is_primary_in_job_groups_str}',
+            '
+job_ids = []',
+            '
+for _ in range(num_jobs):'
+            '
+  job_id = managed_job_state.set_job_info_without_job_id('
             f'name={name!r},'
             f'workspace={workspace!r},'
             f'entrypoint={entrypoint!r},'
@@ -1254,13 +1275,20 @@ class JobLibCodeGen:
             f'pool_hash={pool_hash_str},'
             f'user_hash={user_hash_str},'
             f'execution={execution!r})',
-            '\n  job_ids.append(job_id)',
-            '\n  # Set pending state for all tasks',
-            '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
-            '\n      task_ids, task_names, metadata_jsons, is_primary_in_job_groups):'  # pylint: disable=line-too-long
-            '\n    managed_job_state.set_pending('
-            '\n      job_id, task_id, task_name, resources_str, metadata_json, is_primary_in_job_group)',  # pylint: disable=line-too-long
-            '\nprint("Job IDs: " + ",".join(map(str, job_ids)), flush=True)',
+            '
+  job_ids.append(job_id)',
+            '
+  # Set pending state for all tasks',
+            '
+  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
+            '
+      task_ids, task_names, metadata_jsons, is_primary_in_job_groups):'  # pylint: disable=line-too-long
+            '
+    managed_job_state.set_pending('
+            '
+      job_id, task_id, task_name, resources_str, metadata_json, is_primary_in_job_group)',  # pylint: disable=line-too-long
+            '
+print("Job IDs: " + ",".join(map(str, job_ids)), flush=True)',
         ]
         return cls._build(code)
 
@@ -1340,15 +1368,21 @@ class JobLibCodeGen:
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
             # For backward compatibility, use the legacy generation rule for
             # jobs submitted before 0.11.0.
-            ('log_dir = None\n'
-             'if hasattr(job_lib, "get_log_dir_for_job"):\n'
-             '  log_dir = job_lib.get_log_dir_for_job(job_id)\n'
-             'if log_dir is None:\n'
-             '  run_timestamp = job_lib.get_run_timestamp(job_id)\n'
+            ('log_dir = None
+'
+             'if hasattr(job_lib, "get_log_dir_for_job"):
+'
+             '  log_dir = job_lib.get_log_dir_for_job(job_id)
+'
+             'if log_dir is None:
+'
+             '  run_timestamp = job_lib.get_run_timestamp(job_id)
+'
              f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
             ),
             # Add a newline to leave the if indent block above.
-            f'\nlog_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})',
+            f'
+log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})',
             # After tailing, check the job status and exit with appropriate code
             'job_status = job_lib.get_status(job_id)',
             'exit_code = exceptions.JobExitCode.from_job_status(job_status)',
