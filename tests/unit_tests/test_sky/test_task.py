@@ -87,16 +87,14 @@ def test_validate_file_mounts():
         }
         task_obj.expand_and_validate_file_mounts()
 
-        # Relative destinations are resolved against ~/sky_workdir at
-        # provision time (see cloud_vm_ray_backend.py). Validation must
-        # not reject them.
+        # Test relative destinations (resolved against ~/sky_workdir).
         task_obj.file_mounts = {
             'relative_dir': d,
             './dotslash_relative_dir': d,
         }
         task_obj.expand_and_validate_file_mounts()
 
-        # Trailing-slash destinations remain rejected.
+        # Test trailing-slash destinations are still rejected.
         task_obj.file_mounts = {'/remote/': d}
         with pytest.raises(ValueError, match='cannot end with a slash'):
             task_obj.expand_and_validate_file_mounts()
