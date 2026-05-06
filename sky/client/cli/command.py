@@ -88,6 +88,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -2597,13 +2598,14 @@ def logs(
     log. Omit the event name to auto-select whichever log exists.
     """
     # --autostop is a deprecated alias for --hook autostop.
+    # TODO(zpoint): drop the --autostop branch ~2 minors after the
+    # lifecycle-hooks framework ships.
     if autostop:
         if hook_event is not None and hook_event != '' and hook_event != (
                 'autostop'):
             raise click.UsageError(
                 f'--autostop cannot be combined with --hook {hook_event!r}.')
-        sys.stderr.write('WARNING: `sky logs --autostop` is deprecated. '
-                         'Use `sky logs --hook autostop` instead.\n')
+        sys.stderr.write(hooks_deprecation.LOGS_AUTOSTOP_FLAG)
         hook_event = 'autostop'
     # Sentinel `''` means --hook was passed without an event argument.
     hook_auto_select = (hook_event == '')
@@ -2650,17 +2652,6 @@ def logs(
                                     worker=worker,
                                     follow=follow,
                                     tail=tail or 0))
-
-    # TODO(zpoint): deprecated --autostop branch. Remove ~2 minors
-    # after the lifecycle-hooks framework ships.
-    if autostop:
-        sys.stderr.write('WARNING: --autostop is deprecated. '
-                         'Use --hook autostop instead.\n')
-        sys.exit(
-            sdk.tail_hook_logs(cluster_name=cluster,
-                               event='autostop',
-                               follow=follow,
-                               tail=tail or 0))
 
     if hook_event is not None:
         sys.exit(

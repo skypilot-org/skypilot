@@ -57,6 +57,7 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1176,9 +1177,7 @@ def tail_autostop_logs(cluster_name: str,
     to ``tail_hook_logs``. Scheduled for removal a couple of minor
     releases after the lifecycle-hooks framework ships.
     """
-    sys.stderr.write(
-        'WARNING: sky.tail_autostop_logs() is deprecated. Use '
-        'sky.tail_hook_logs(cluster_name, event=\'autostop\') instead.\n')
+    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
     body = payloads.AutostopLogsBody(cluster_name=cluster_name,
                                      follow=follow,
                                      tail=tail)

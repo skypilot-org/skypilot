@@ -26,6 +26,7 @@ from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -1002,10 +1003,7 @@ class Resources:
             if legacy_hook is not None:
                 # TODO(zpoint): remove this autostop.hook routing ~2
                 # minors after the lifecycle-hooks framework ships.
-                sys.stderr.write(
-                    'WARNING: autostop.hook / autostop.hook_timeout are '
-                    'deprecated. Use resources.hooks: [{run, events: '
-                    '[autostop], timeout}] instead (routed for you).\n')
+                sys.stderr.write(hooks_deprecation.AUTOSTOP_HOOK_YAML)
                 legacy_hook_entry = _normalize_hook_entry({
                     'run': legacy_hook,
                     'events': ['autostop'],
