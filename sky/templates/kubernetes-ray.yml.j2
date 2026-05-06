@@ -1203,28 +1203,35 @@ available_node_types:
                 echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
 
                 touch {{k8s_high_availability_restarting_signal_file}}
-                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
-                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
-                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
-                # will delete the service from the database after it is terminated so everything in the database is running.
+                # Get in-progress managed job IDs. For SkyServe this is None
+                # and every service will be recovered (SkyServe deletes
+                # terminated services so everything in the DB is running).
                 ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
-                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
-                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
-                  JOB_ID=$(basename $file | sed 's/sky_job_//')
-                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  # After set_job_info_without_job_id (#7891), the cluster job
+                  # ID in the script filename no longer equals managed job ID.
+                  # Extract managed job IDs from the script content instead
+                  # (job_ids_array set in jobs-controller.yaml.j2).
                   if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
-                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
-                      continue
+                    MANAGED_IDS=$(sed -n 's/.*job_ids_array=(\([^)]*\)).*/\1/p' "$file" | head -1)
+                    if [ -n "$MANAGED_IDS" ]; then
+                      SHOULD_RUN=false
+                      for MID in $MANAGED_IDS; do
+                        if [[ " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${MID} " ]]; then
+                          SHOULD_RUN=true
+                          break
+                        fi
+                      done
+                      if [ "$SHOULD_RUN" == "false" ]; then
+                        continue
+                      fi
                     fi
                   fi
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
-                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
-                  # We should do more tests and make sure it will scale well.
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
                 done
