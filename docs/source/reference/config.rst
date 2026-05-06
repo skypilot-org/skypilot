@@ -1995,26 +1995,9 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
 ``kubernetes.apt_mirrors``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-List of APT mirror hostnames to use when installing packages on a provisioned
-pod (optional).
-
-When SkyPilot launches a pod, it runs ``apt-get`` to install required system
-packages. If the image's default sources are unreachable, SkyPilot retries
-using a built-in fallback list (``mirrors.wikimedia.org``, ``mirror.umd.edu``).
-Use this field to override that fallback list with mirrors of your own choosing
-(for example, an internal mirror reachable from the cluster, or a geographically
-closer public mirror).
-
-Each entry must be a hostname (no scheme, no path); SkyPilot constructs the URL
-as ``http://<host>/ubuntu``. Mirrors are tried in the order listed.
-
-Behavior:
-
-- **Unset** (default): SkyPilot uses its built-in fallback mirrors.
-- **Non-empty list**: SkyPilot tries the listed mirrors in order, instead of
-  the built-in fallback.
-- **Empty list** (``[]``): Disables fallback mirrors entirely. Only the image's
-  default APT sources are used.
+Override the APT mirrors tried when installing packages on a pod (optional).
+Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
+fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list.
 
 Example:
 
@@ -2025,22 +2008,7 @@ Example:
       - mirror.math.princeton.edu
       - mirrors.kernel.org
 
-Disable fallback mirrors entirely:
-
-.. code-block:: yaml
-
-  kubernetes:
-    apt_mirrors: []
-
-This can also be configured per-context using ``context_configs``:
-
-.. code-block:: yaml
-
-  kubernetes:
-    context_configs:
-      prod-cluster:
-        apt_mirrors:
-          - internal-mirror.corp.example.com
+Can also be set per-context via ``context_configs``.
 
 .. _config-yaml-kubernetes-context-configs:
 
