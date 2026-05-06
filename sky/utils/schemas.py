@@ -1490,6 +1490,25 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'local_queue_name': {
                 'type': 'string',
             },
+            # Topology-Aware Scheduling — applied to admitted Workloads
+            # via `kueue.x-k8s.io/podset-{required,preferred}-topology`
+            # PodTemplate annotations. Both fields are optional at the
+            # schema level so MLEs can override only what they need
+            # (e.g. `mode: off` without re-stating `label_key`); semantic
+            # validation (label_key must be set if mode != off) lives
+            # in the consumer that injects the annotations.
+            'tas': {
+                'type': 'object',
+                'additionalProperties': False,
+                'properties': {
+                    'label_key': {
+                        'type': 'string',
+                    },
+                    'mode': {
+                        'type': 'string',
+                    },
+                },
+            },
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
