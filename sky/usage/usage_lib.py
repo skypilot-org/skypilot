@@ -331,12 +331,17 @@ class HeartbeatMessageToReport(MessageToReport):
 
     def get_properties(self) -> Dict[str, Any]:
         properties = super().get_properties()
-        # The run id is set by the skylet, which will always be the same for
-        # the entire lifetime of the run.
-        with open(os.path.expanduser(constants.USAGE_RUN_ID_FILE),
-                  'r',
-                  encoding='utf-8') as f:
-            properties['run_id'] = f.read().strip()
+        # Prefer the run id from the env var if set (e.g. from a request
+        # context in the API server, where contextvars-based isolation
+        # makes it per-job). Fall back to the file the skylet writes at
+        # cluster provisioning time.
+        run_id = os.environ.get(constants.USAGE_RUN_ID_ENV_VAR)
+        if not run_id:
+            with open(os.path.expanduser(constants.USAGE_RUN_ID_FILE),
+                      'r',
+                      encoding='utf-8') as f:
+                run_id = f.read().strip()
+        properties['run_id'] = run_id
         return properties
 
 
