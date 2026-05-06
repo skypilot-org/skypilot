@@ -2508,6 +2508,8 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+# TODO(zpoint): deprecated alias for --hook autostop. Remove ~2 minors
+# after the lifecycle-hooks framework ships.
 @click.option('--autostop',
               is_flag=True,
               default=False,
@@ -2649,8 +2651,9 @@ def logs(
                                     follow=follow,
                                     tail=tail or 0))
 
+    # TODO(zpoint): deprecated --autostop branch. Remove ~2 minors
+    # after the lifecycle-hooks framework ships.
     if autostop:
-        # Deprecated alias for --hook autostop.
         sys.stderr.write('WARNING: --autostop is deprecated. '
                          'Use --hook autostop instead.\n')
         sys.exit(

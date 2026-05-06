@@ -160,6 +160,10 @@ SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+# TODO(zpoint): legacy autostop-hook log path, kept so the new
+# tail_hook_logs(event='autostop') can fall back to it on clusters
+# launched before the lifecycle-hooks framework. Remove ~2 minors
+# after the framework ships.
 AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
 # Lifecycle-hooks framework — per-event log directory on cluster nodes.

@@ -192,6 +192,9 @@ def set_autostop(idle_minutes: int,
     # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
     # translate it into the generalized hooks list so hook_executor
     # sees a single source of truth.
+    # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
+    # this translation once SKYLET_LIB_VERSION's minimum supported
+    # client is ≥ 7.
     if hook:
         set_hooks([{
             'run': hook,

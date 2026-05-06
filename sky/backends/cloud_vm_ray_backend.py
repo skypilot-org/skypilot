@@ -4849,6 +4849,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if event is None:
             # Auto-select: pick whichever per-event log exists. Prefer
             # recency via -t sort (newest first). Fall back to legacy path.
+            # TODO(zpoint): drop the legacy_log_path branch ~2 minors
+            # after the lifecycle-hooks framework ships, once clusters
+            # predating the new ~/.sky/hooks/ layout have aged out.
             cmd = (f'if ls {new_log_dir}/*.log >/dev/null 2>&1; then '
                    f'  latest=$(ls -t {new_log_dir}/*.log | head -n1); '
                    f'  echo "=== $(basename $latest .log) ==="; '
@@ -4863,6 +4866,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if event == 'autostop':
                 # Legacy-path fallback for clusters predating the hooks
                 # framework.
+                # TODO(zpoint): drop the legacy_log_path branch ~2 minors
+                # after the lifecycle-hooks framework ships.
                 cmd = (
                     f'if [ -f {log_path} ]; then tail {tail_flag_str} '
                     f'{log_path}; '

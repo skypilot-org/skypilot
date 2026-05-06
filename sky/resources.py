@@ -1000,7 +1000,8 @@ class Resources:
             legacy_hook = autostop.pop('hook', None)
             legacy_timeout = autostop.pop('hook_timeout', None)
             if legacy_hook is not None:
-                # TODO(zpoint): remove after v0.15.0.
+                # TODO(zpoint): remove this autostop.hook routing ~2
+                # minors after the lifecycle-hooks framework ships.
                 sys.stderr.write(
                     'WARNING: autostop.hook / autostop.hook_timeout are '
                     'deprecated. Use resources.hooks: [{run, events: '

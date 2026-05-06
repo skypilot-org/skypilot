@@ -730,7 +730,8 @@ sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) ->
 Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
 
 Emits a stderr deprecation warning; behavior otherwise identical
-to ``tail_hook_logs``. Removed in v0.15.0.
+to ``tail_hook_logs``. Scheduled for removal a couple of minor
+releases after the lifecycle-hooks framework ships.
 
 ### `sky.download_logs`
 

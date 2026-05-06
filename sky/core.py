@@ -1347,6 +1347,8 @@ def tail_logs(cluster_name: str,
     return returnval
 
 
+# TODO(zpoint): deprecated server-side handler bound to /autostop_logs.
+# Remove ~2 minors after the lifecycle-hooks framework ships.
 @usage_lib.entrypoint
 def tail_autostop_logs(cluster_name: str,
                        follow: bool = True,

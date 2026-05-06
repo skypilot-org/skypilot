@@ -1162,8 +1162,8 @@ def tail_hook_logs(cluster_name: str,
     return stream_and_get(request_id)
 
 
-# TODO(zpoint): remove after v0.15.0 — deprecated alias for
-# tail_hook_logs(event='autostop').
+# TODO(zpoint): deprecated alias for tail_hook_logs(event='autostop').
+# Remove ~2 minors after the lifecycle-hooks framework ships.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -1173,7 +1173,8 @@ def tail_autostop_logs(cluster_name: str,
     """Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
 
     Emits a stderr deprecation warning; behavior otherwise identical
-    to ``tail_hook_logs``. Removed in v0.15.0.
+    to ``tail_hook_logs``. Scheduled for removal a couple of minor
+    releases after the lifecycle-hooks framework ships.
     """
     sys.stderr.write(
         'WARNING: sky.tail_autostop_logs() is deprecated. Use '

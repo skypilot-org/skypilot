@@ -413,6 +413,8 @@ class ProvisionLogsBody(RequestBody):
     worker: Optional[int] = None
 
 
+# TODO(zpoint): deprecated alias for HookLogsBody. Remove ~2 minors
+# after the lifecycle-hooks framework ships.
 class AutostopLogsBody(RequestBody):
     """Autostop logs request body (deprecated alias for HookLogsBody)."""
     cluster_name: str
