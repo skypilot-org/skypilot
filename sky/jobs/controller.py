@@ -133,6 +133,24 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     task.set_resources(new_resources_list)
 
 
+def _build_task_specs(
+    executor: 'recovery_strategy.StrategyExecutor',
+) -> Dict[str, Any]:
+    """Merge base and strategy-specific task specs with collision detection."""
+    base_specs: Dict[str, Any] = {
+        'max_restarts_on_errors': executor.max_restarts_on_errors,
+        'recover_on_exit_codes': executor.recover_on_exit_codes,
+    }
+    strategy_specs = executor.task_specs()
+    overlap = set(base_specs) & set(strategy_specs)
+    if overlap:
+        raise ValueError(
+            f'Strategy task_specs() conflicts with base spec '
+            f'keys: {overlap}')
+    base_specs.update(strategy_specs)
+    return base_specs
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -483,12 +501,7 @@ class JobController:
                 self._backend.run_timestamp,
                 submitted_at,
                 resources_str=resources_str,
-                specs={
-                    'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors,
-                    'recover_on_exit_codes':
-                        self._strategy_executor.recover_on_exit_codes
-                },
+                specs=_build_task_specs(self._strategy_executor),
                 callback_func=callback_func,
                 full_resources_json=full_resources_json)
             logger.info(f'Submitted managed job {self._job_id} '
@@ -582,7 +595,24 @@ class JobController:
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 force_transit_to_recovering = True
 
+            await self._strategy_executor.on_resume(cluster_name)
+
         logger.info('Started monitoring.')
+        # TODO(kevin): If StrategyExecutor grew pluggable detection methods
+        # (check_status, get_recovery_targets), this two-path dispatch could
+        # become a single generic monitor loop on the controller. See the
+        # TODO on StrategyExecutor.monitor_task().
+        result = await self._strategy_executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=job_id_on_pool_cluster,
+            callback_func=callback_func,
+            cleanup_cluster_on_success=True,
+            force_transit_to_recovering=force_transit_to_recovering,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,
@@ -1186,10 +1216,7 @@ class JobController:
             self._backend.run_timestamp,
             time.time(),
             resources_str=resources_str,
-            specs={
-                'max_restarts_on_errors': executor.max_restarts_on_errors,
-                'recover_on_exit_codes': executor.recover_on_exit_codes
-            },
+            specs=_build_task_specs(executor),
             callback_func=callback_func)
 
         return cluster_name, executor

@@ -30,6 +30,19 @@ from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_task_validators: List[Callable[['Task'], None]] = []
+
+
+def register_task_validator(fn: Callable[['Task'], None]) -> None:
+    """Register a plugin-provided task validator.
+
+    Registered functions are called during ``Task.validate()``.
+    Each receives the task and should raise ``ValueError`` on
+    invalid configurations.
+    """
+    _task_validators.append(fn)
+
+
 _VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
@@ -515,6 +528,8 @@ class Task:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
+        for validator_fn in _task_validators:
+            validator_fn(self)
 
     def validate_name(self):
         """Validates if the task name is valid."""
