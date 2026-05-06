@@ -101,6 +101,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         A100: 3.50     # $/accelerator/hr
+    :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -1986,6 +1989,58 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
           # Overrides only the cpu rate; memory and accelerators are
           # inherited from the cloud-level pricing above.
           cpu: 0.08
+
+.. _config-yaml-kubernetes-apt-mirrors:
+
+``kubernetes.apt_mirrors``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of APT mirror hostnames to use when installing packages on a provisioned
+pod (optional).
+
+When SkyPilot launches a pod, it runs ``apt-get`` to install required system
+packages. If the image's default sources are unreachable, SkyPilot retries
+using a built-in fallback list (``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+Use this field to override that fallback list with mirrors of your own choosing
+(for example, an internal mirror reachable from the cluster, or a geographically
+closer public mirror).
+
+Each entry must be a hostname (no scheme, no path); SkyPilot constructs the URL
+as ``http://<host>/ubuntu``. Mirrors are tried in the order listed.
+
+Behavior:
+
+- **Unset** (default): SkyPilot uses its built-in fallback mirrors.
+- **Non-empty list**: SkyPilot tries the listed mirrors in order, instead of
+  the built-in fallback.
+- **Empty list** (``[]``): Disables fallback mirrors entirely. Only the image's
+  default APT sources are used.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    apt_mirrors:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
+
+Disable fallback mirrors entirely:
+
+.. code-block:: yaml
+
+  kubernetes:
+    apt_mirrors: []
+
+This can also be configured per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        apt_mirrors:
+          - internal-mirror.corp.example.com
 
 .. _config-yaml-kubernetes-context-configs:
 
