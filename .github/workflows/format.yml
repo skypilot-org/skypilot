@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9"]
+        # 3.10+ required because black >=25 dropped Python 3.9 support.
+        # Formatter Python version is independent of the project's
+        # supported runtime versions (which still include 3.9).
+        python-version: ["3.11"]
     steps:
     - uses: actions/checkout@v3
     - name: Install the latest version of uv
