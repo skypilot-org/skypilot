@@ -560,7 +560,6 @@ class Task:
 
     def _validate_mount_path(self, path: str, location: str):
         self._validate_path(path, location)
-        self._validate_mount_dest_is_absolute(path, location)
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
         if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
@@ -1004,6 +1003,7 @@ class Task:
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
+            self._validate_mount_dest_is_absolute(dst_path, location='volumes')
             # Shortcut for `dst_path: volume_name` (external persistent volume)
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)

@@ -216,14 +216,13 @@ def test_anyof_error_points_at_inner_problem(tmp_path):
     assert 'ten' in msg
 
 
-def test_file_mounts_dest_must_be_absolute(tmp_path):
-    """Relative file_mount destination paths used to be accepted silently.
+def test_file_mounts_relative_dest_accepted(tmp_path):
+    """Relative file_mount destinations are placed under ~/sky_workdir/.
 
-    A relative remote path is almost never what the user wants and was
-    previously stored verbatim, producing confusing behavior on the
-    remote machine. Reject it with a clear message.
+    The backend prepends SKY_REMOTE_WORKDIR to relative destinations
+    (cloud_vm_ray_backend.py), so they must not be rejected at
+    validation time.
     """
-    # Need a real source file so we don't fail on that check first.
     src = tmp_path / 'local.txt'
     src.write_text('hi')
     config_path = _create_config_file(
@@ -233,15 +232,11 @@ def test_file_mounts_dest_must_be_absolute(tmp_path):
                 relative/dest: {src}
             """), tmp_path)
     task = Task.from_yaml(config_path)
-    with pytest.raises(ValueError) as e:
-        task.expand_and_validate_file_mounts()
-    msg = str(e.value)
-    assert 'relative/dest' in msg
-    assert 'absolute' in msg
+    task.expand_and_validate_file_mounts()
+    assert 'relative/dest' in task.file_mounts
 
 
-def test_file_mounts_empty_task_is_not_triggered_by_file_mounts(tmp_path):
-    # Sanity: an absolute destination still works.
+def test_file_mounts_absolute_dest_accepted(tmp_path):
     src = tmp_path / 'local.txt'
     src.write_text('hi')
     config_path = _create_config_file(
@@ -251,6 +246,7 @@ def test_file_mounts_empty_task_is_not_triggered_by_file_mounts(tmp_path):
                 /remote/dest: {src}
             """), tmp_path)
     task = Task.from_yaml(config_path)
+    task.expand_and_validate_file_mounts()
     assert '/remote/dest' in task.file_mounts
 
 
