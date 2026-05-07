@@ -64,9 +64,15 @@ def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
     that hash on every launch, busting the cache and breaking ``--fast`` for
     every enabled-cloud combo where Nebius is configured -- including launches
     on other clouds (AWS, etc).
+
+    The path is also namespaced by UID so that two users on a host with a
+    shared ``tempfile.gettempdir()`` (e.g. ``/tmp`` on Linux) cannot collide
+    when they happen to share the same content -- one user's restrictive
+    umask would otherwise lock the other user out.
     """
+    uid = os.getuid() if hasattr(os, 'getuid') else 'default'
     digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
-    path = os.path.join(tempfile.gettempdir(), f'{prefix}{digest}')
+    path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
     expected = value + '\n'
     try:
         with open(path, 'r', encoding='utf-8') as existing:
