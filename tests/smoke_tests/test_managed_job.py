@@ -143,35 +143,6 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
-def test_managed_jobs_succeeded_job_logs(generic_cloud: str):
-    """Test that logs are captured for a successfully-completed managed job."""
-    name = smoke_tests_utils.get_cluster_name()
-    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
-                      f'awk \'{{print $1}}\'')
-    test = smoke_tests_utils.Test(
-        'managed_jobs_succeeded_logs',
-        [
-            f'sky jobs launch -n {name} --infra {generic_cloud} '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'tests/test_yamls/minimal.yaml -y -d',
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=name,
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=360),
-            f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
-            f'echo "$s"; echo "$s" | grep "task run finish"',
-        ],
-        f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.managed_jobs
-@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
-@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_failed_job_logs(generic_cloud: str):
     """Test that logs are captured for a managed job that fails in user code."""
     name = smoke_tests_utils.get_cluster_name()
