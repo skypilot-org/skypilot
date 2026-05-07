@@ -2001,6 +2001,54 @@ def reset_dispatched_batches(job_id: int) -> None:
         session.commit()
 
 
+def get_batch_job_config(job_id: int) -> Optional[Dict[str, Any]]:
+    """Read batch metadata from a batch job's stored DAG YAML.
+
+    Returns the task's ``_metadata`` dict if the job exists and has
+    stored YAML content, or ``None`` otherwise.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(job_info_table.c.dag_yaml_content).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+    if row is None or row[0] is None:
+        return None
+    try:
+        import yaml  # pylint: disable=import-outside-toplevel
+        dag_dict = yaml.safe_load(row[0])
+        if isinstance(dag_dict, dict):
+            return dag_dict.get('_metadata')
+        return None
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def save_batch_states_with_status(job_id: int, batches: List[List[int]],
+                                  statuses: List[str]) -> None:
+    """Bulk insert batch records with per-batch status (atomic).
+
+    Like ``save_batch_states`` but allows specifying the initial status
+    for each batch individually, used by cross-job resume to mark
+    previously completed batches as COMPLETED.
+    """
+    assert len(batches) == len(statuses)
+    engine = _db_manager.get_engine()
+    now = time.time()
+    rows = [{
+        'job_id': job_id,
+        'batch_idx': idx,
+        'start_idx': b[0],
+        'end_idx': b[1],
+        'status': statuses[idx],
+        'retry_count': 0,
+        'updated_at': now,
+    } for idx, b in enumerate(batches)]
+    with orm.Session(engine) as session:
+        session.execute(batch_state_table.insert(), rows)
+        session.commit()
+
+
 def update_job_full_resources(job_id: int,
                               full_resources_json: Dict[str, Any]) -> None:
     """Update the full_resources column for a job.

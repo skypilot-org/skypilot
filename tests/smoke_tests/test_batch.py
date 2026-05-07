@@ -369,6 +369,506 @@ def test_batch_cancel(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test batch resume from cancelled job ----------
+@pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
+def test_batch_resume(generic_cloud: str):
+    """Cancel a batch job mid-flight, then resume from its job ID.
+
+    Verifies that:
+    1. Completed batches from the original run are skipped.
+    2. Failed/un-run batches are re-dispatched.
+    3. Final output contains all items.
+    4. The resumed job's metadata contains ``batch_resume_from``.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    bucket = f'sky-batch-rsm-{name}'
+    pool_name = f'batch-rsm-pool-{name}'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
+
+    # Launcher script file; accepts resume_from via RESUME_FROM env var.
+    script = f'/tmp/batch-resume-launcher-{name}.py'
+    run_launcher = f'python {script}'
+
+    test = smoke_tests_utils.Test(
+        'batch_resume',
+        [
+            # --- Write launcher script to file (inspect.getsource needs it) ---
+            (f"cat > {script} << 'PYEOF'\n"
+             "import os, sky\n"
+             f"bucket = '{bucket}'\n"
+             f"store = '{store}'\n"
+             f"pool_name = '{pool_name}'\n"
+             "input_path = f'{store}://{bucket}/test.jsonl'\n"
+             "output_path = f'{store}://{bucket}/output.jsonl'\n"
+             "\n"
+             "@sky.batch.remote_function\n"
+             "def double_text():\n"
+             "    for batch in sky.batch.load():\n"
+             "        results = [{'text': item.get('text', ''),\n"
+             "                     'output': item.get('text', '') * 2}\n"
+             "                    for item in batch]\n"
+             "        sky.batch.save_results(results)\n"
+             "\n"
+             "resume_from = os.environ.get('RESUME_FROM')\n"
+             "resume_from = int(resume_from) if resume_from else None\n"
+             "ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))\n"
+             "ds.map(\n"
+             "    double_text,\n"
+             "    pool_name=pool_name,\n"
+             "    batch_size=2,\n"
+             "    output=sky.batch.JsonWriter(output_path),\n"
+             "    resume_from=resume_from,\n"
+             ")\n"
+             "PYEOF"),
+            # --- Pre-cleanup ---
+            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
+            f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
+            # --- Data setup: 40 items / batch_size 2 = 20 batches ---
+            create_bkt,
+            (f'for i in $(seq 0 39); do '
+             f'echo "{{\\"text\\": \\"item_$i\\"}}"; '
+             f'done > /tmp/batch-resume-input-{name}.jsonl'),
+            f'{cp} /tmp/batch-resume-input-{name}.jsonl {url}/test.jsonl',
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
+
+            # --- Launch batch job in background, wait for some progress,
+            #     then cancel ---
+            (
+                f'( {run_launcher}\n) &\n'
+                f'BGPID=$!\n'
+                # Wait for the job to reach RUNNING.
+                f'JOB_ID=""\n'
+                f'for i in $(seq 1 90); do\n'
+                f'  JOB_ID=$(sky jobs queue 2>/dev/null | '
+                f'awk \'$1 ~ /^[0-9]+$/ && /RUNNING/ {{print $1; exit}}\')\n'
+                f'  if [ -n "$JOB_ID" ]; then break; fi\n'
+                f'  sleep 5\n'
+                f'done\n'
+                f'echo "Found batch job ID=$JOB_ID"\n'
+                # Wait until some batches complete.
+                f'for i in $(seq 1 120); do\n'
+                f'  PROGRESS=$(sky jobs queue 2>/dev/null '
+                f'| grep "{pool_name}" | head -1 '
+                f'| grep -oE "[0-9]+/[0-9]+" | head -1)\n'
+                f'  COMPLETED=${{PROGRESS%%/*}}\n'
+                f'  if [ -n "$COMPLETED" ] && [ "$COMPLETED" -ge 5 ]; then\n'
+                f'    break\n'
+                f'  fi\n'
+                f'  sleep 5\n'
+                f'done\n'
+                f'echo "Progress before cancel: $PROGRESS"\n'
+                f'echo "$JOB_ID" > /tmp/batch-resume-jobid-{name}.txt\n'
+                f'sky jobs cancel $JOB_ID -y\n'
+                f'wait $BGPID 2>/dev/null || true'),
+
+            # --- Verify job is CANCELLED ---
+            (f'sky jobs queue '
+             f'| grep "{pool_name}" | grep CANCELLED'),
+
+            # --- Resume from the cancelled job ---
+            (f'RESUME_FROM=$(cat /tmp/batch-resume-jobid-{name}.txt) '
+             f'{run_launcher}'),
+
+            # --- Verify resumed job SUCCEEDED ---
+            # The resumed job should be the latest; check for SUCCEEDED.
+            (f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED'),
+
+            # --- Verify output has all 40 items ---
+            f'{cp} {url}/output.jsonl /tmp/batch-resume-output-{name}.jsonl',
+            f'test $(wc -l < /tmp/batch-resume-output-{name}.jsonl) -eq 40',
+            (f"python3 << 'PYEOF'\n"
+             "import json\n"
+             f"path = '/tmp/batch-resume-output-{name}.jsonl'\n"
+             "results = [json.loads(l) for l in open(path)]\n"
+             "assert len(results) == 40, f'Expected 40, got {len(results)}'\n"
+             "texts = set()\n"
+             "for r in results:\n"
+             "    assert 'text' in r and 'output' in r, f'Bad record: {r}'\n"
+             "    assert r['output'] == r['text'] * 2, f'Wrong output: {r}'\n"
+             "    texts.add(r['text'])\n"
+             "expected = set(f'item_{i}' for i in range(40))\n"
+             "assert texts == expected, (\n"
+             "    f'Missing: {expected - texts}, Extra: {texts - expected}')\n"
+             "print(f'All {len(results)} results valid after resume')\n"
+             "PYEOF"),
+        ],
+        # Teardown
+        (f'sky jobs pool down {pool_name} -y;'
+         f' sky serve down {pool_name} -y 2>/dev/null || true;'
+         f' {delete_bkt};'
+         f' rm -f /tmp/batch-resume-input-{name}.jsonl'
+         f' /tmp/batch-resume-output-{name}.jsonl'
+         f' /tmp/batch-resume-jobid-{name}.txt'
+         f' {script}'),
+        timeout=40 * 60,
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store,
+            'BATCH_POOL_NAME': pool_name,
+        },
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test batch resume from failed batches ----------
+@pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
+def test_batch_resume_failed(generic_cloud: str):
+    """Run a batch job whose mapper deliberately fails, then resume.
+
+    Verifies that:
+    1. The job reaches FAILED status after batch retries exhaust.
+    2. Resume from FAILED job re-dispatches failed + un-run batches.
+    3. Final output contains all items with correct values.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    bucket = f'sky-batch-rsmf-{name}'
+    pool_name = f'batch-rsmf-pool-{name}'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
+
+    # Script files (inspect.getsource needs file-defined functions).
+    fail_script = f'/tmp/batch-rsmf-fail-launcher-{name}.py'
+    resume_script = f'/tmp/batch-rsmf-resume-launcher-{name}.py'
+    run_fail = f'python {fail_script}'
+    run_resume = f'python {resume_script}'
+
+    test = smoke_tests_utils.Test(
+        'batch_resume_failed',
+        [
+            # --- Write launcher scripts to files ---
+            (f"cat > {fail_script} << 'PYEOF'\n"
+             "import os, sky\n"
+             f"bucket = '{bucket}'\n"
+             f"store = '{store}'\n"
+             f"pool_name = '{pool_name}'\n"
+             "input_path = f'{store}://{bucket}/test.jsonl'\n"
+             "output_path = f'{store}://{bucket}/output.jsonl'\n"
+             "\n"
+             "@sky.batch.remote_function\n"
+             "def failing_mapper():\n"
+             "    for batch in sky.batch.load():\n"
+             "        results = []\n"
+             "        for item in batch:\n"
+             "            text = item.get('text', '')\n"
+             "            if text.startswith('FAIL_'):\n"
+             "                raise RuntimeError('Deliberate failure')\n"
+             "            results.append({'text': text, 'output': text * 2})\n"
+             "        sky.batch.save_results(results)\n"
+             "\n"
+             "ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))\n"
+             "ds.map(\n"
+             "    failing_mapper,\n"
+             "    pool_name=pool_name,\n"
+             "    batch_size=2,\n"
+             "    output=sky.batch.JsonWriter(output_path),\n"
+             ")\n"
+             "PYEOF"),
+            (f"cat > {resume_script} << 'PYEOF'\n"
+             "import os, sky\n"
+             f"bucket = '{bucket}'\n"
+             f"store = '{store}'\n"
+             f"pool_name = '{pool_name}'\n"
+             "input_path = f'{store}://{bucket}/test.jsonl'\n"
+             "output_path = f'{store}://{bucket}/output.jsonl'\n"
+             "resume_from = int(os.environ['RESUME_FROM'])\n"
+             "\n"
+             "@sky.batch.remote_function\n"
+             "def working_mapper():\n"
+             "    for batch in sky.batch.load():\n"
+             "        results = [{'text': item.get('text', ''),\n"
+             "                     'output': item.get('text', '') * 2}\n"
+             "                    for item in batch]\n"
+             "        sky.batch.save_results(results)\n"
+             "\n"
+             "ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))\n"
+             "ds.map(\n"
+             "    working_mapper,\n"
+             "    pool_name=pool_name,\n"
+             "    batch_size=2,\n"
+             "    output=sky.batch.JsonWriter(output_path),\n"
+             "    resume_from=resume_from,\n"
+             ")\n"
+             "PYEOF"),
+            # --- Pre-cleanup: also remove stale pools from aborted runs ---
+            (f'for p in $(sky jobs pool ls 2>/dev/null '
+             f'| awk \'/batch-rsmf-pool-/ {{print $1}}\' | sort -u); do '
+             f'sky jobs pool down "$p" -y 2>/dev/null || true; done || true'),
+            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
+            f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
+            # --- Data setup: 20 items, FAIL_ at indices 4-5 (batch 2) ---
+            create_bkt,
+            (f'{{ for i in $(seq 0 3); do '
+             f'echo "{{\\"text\\": \\"item_$i\\"}}"; done; '
+             f'echo "{{\\"text\\": \\"FAIL_0\\"}}"; '
+             f'echo "{{\\"text\\": \\"FAIL_1\\"}}"; '
+             f'for i in $(seq 4 17); do '
+             f'echo "{{\\"text\\": \\"item_$i\\"}}"; done; '
+             f'}} > /tmp/batch-rsmf-input-{name}.jsonl'),
+            f'{cp} /tmp/batch-rsmf-input-{name}.jsonl {url}/test.jsonl',
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
+
+            # --- Launch failing job in background, wait for it to finish ---
+            (f'( {run_fail}\n'
+             f') > /tmp/batch-rsmf-fail-log-{name}.txt 2>&1 &\n'
+             f'BGPID=$!\n'
+             f'JOB_ID=""\n'
+             f'for i in $(seq 1 90); do\n'
+             f'  JOB_ID=$(sky jobs queue 2>/dev/null | '
+             f'grep "{pool_name}" | '
+             f'awk \'$1 ~ /^[0-9]+$/ {{print $1; exit}}\')\n'
+             f'  if [ -n "$JOB_ID" ]; then break; fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             f'echo "Failing job: $JOB_ID"\n'
+             f'echo "$JOB_ID" > /tmp/batch-rsmf-jobid-{name}.txt\n'
+             f'wait $BGPID 2>/dev/null || true'),
+
+            # --- Verify FAILED ---
+            (f'JOB_ID=$(cat /tmp/batch-rsmf-jobid-{name}.txt)\n'
+             f'for i in $(seq 1 60); do\n'
+             f'  if sky jobs queue 2>/dev/null | '
+             f'awk -v id="$JOB_ID" \'$1 == id\' | '
+             f'grep -q FAILED; then break; fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             f'sky jobs queue | '
+             f'awk -v id="$(cat /tmp/batch-rsmf-jobid-{name}.txt)" '
+             f"'$1 == id' | grep FAILED"),
+
+            # --- Resume from FAILED job with working mapper ---
+            (f'RESUME_FROM=$(cat /tmp/batch-rsmf-jobid-{name}.txt) '
+             f'{run_resume}'),
+
+            # --- Verify resumed job SUCCEEDED ---
+            f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
+
+            # --- Verify output has all 20 items ---
+            f'{cp} {url}/output.jsonl /tmp/batch-rsmf-output-{name}.jsonl',
+            f'test $(wc -l < /tmp/batch-rsmf-output-{name}.jsonl) -eq 20',
+            (f"python3 << 'PYEOF'\n"
+             "import json\n"
+             f"path = '/tmp/batch-rsmf-output-{name}.jsonl'\n"
+             "results = [json.loads(l) for l in open(path)]\n"
+             "assert len(results) == 20, f'Expected 20, got {len(results)}'\n"
+             "texts = set()\n"
+             "for r in results:\n"
+             "    assert 'text' in r and 'output' in r, f'Bad record: {r}'\n"
+             "    assert r['output'] == r['text'] * 2, f'Wrong output: {r}'\n"
+             "    texts.add(r['text'])\n"
+             "expected = (set(f'item_{i}' for i in range(18))\n"
+             "            | {'FAIL_0', 'FAIL_1'})\n"
+             "assert texts == expected, (\n"
+             "    f'Missing: {expected - texts}, Extra: {texts - expected}')\n"
+             "print(f'All {len(results)} results valid after resume "
+             "from FAILED')\n"
+             "PYEOF"),
+        ],
+        # Teardown
+        (f'sky jobs pool down {pool_name} -y;'
+         f' sky serve down {pool_name} -y 2>/dev/null || true;'
+         f' {delete_bkt};'
+         f' rm -f /tmp/batch-rsmf-input-{name}.jsonl'
+         f' /tmp/batch-rsmf-output-{name}.jsonl'
+         f' /tmp/batch-rsmf-jobid-{name}.txt'
+         f' /tmp/batch-rsmf-fail-log-{name}.txt'
+         f' {fail_script} {resume_script}'),
+        timeout=40 * 60,
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store,
+            'BATCH_POOL_NAME': pool_name,
+        },
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test resume from RUNNING rejected, cancel, then resume ----------
+@pytest.mark.batch
+@pytest.mark.no_remote_server  # see note 1 above
+def test_batch_resume_running_guard(generic_cloud: str):
+    """Try resume from RUNNING job, verify rejection, cancel, then resume.
+
+    Verifies that:
+    1. Resume from a RUNNING job is rejected (managed job fails).
+    2. After cancelling the original, resume succeeds.
+    3. Final output contains all items.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    bucket = f'sky-batch-rsgd-{name}'
+    pool_name = f'batch-rsgd-pool-{name}'
+    url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
+        generic_cloud, bucket)
+    store = 'gs' if generic_cloud == 'gcp' else 's3'
+
+    script = f'/tmp/batch-rsgd-launcher-{name}.py'
+    run_launcher = f'python {script}'
+
+    test = smoke_tests_utils.Test(
+        'batch_resume_running_guard',
+        [
+            # --- Write launcher script to file ---
+            (f"cat > {script} << 'PYEOF'\n"
+             "import os, sky\n"
+             f"bucket = '{bucket}'\n"
+             f"store = '{store}'\n"
+             f"pool_name = '{pool_name}'\n"
+             "input_path = f'{store}://{bucket}/test.jsonl'\n"
+             "output_path = f'{store}://{bucket}/output.jsonl'\n"
+             "\n"
+             "@sky.batch.remote_function\n"
+             "def double_text():\n"
+             "    for batch in sky.batch.load():\n"
+             "        results = [{'text': item.get('text', ''),\n"
+             "                     'output': item.get('text', '') * 2}\n"
+             "                    for item in batch]\n"
+             "        sky.batch.save_results(results)\n"
+             "\n"
+             "resume_from = os.environ.get('RESUME_FROM')\n"
+             "resume_from = int(resume_from) if resume_from else None\n"
+             "ds = sky.batch.Dataset(sky.batch.JsonReader(input_path))\n"
+             "ds.map(\n"
+             "    double_text,\n"
+             "    pool_name=pool_name,\n"
+             "    batch_size=2,\n"
+             "    output=sky.batch.JsonWriter(output_path),\n"
+             "    resume_from=resume_from,\n"
+             ")\n"
+             "PYEOF"),
+            # --- Pre-cleanup: also remove stale pools from aborted runs ---
+            (f'for p in $(sky jobs pool ls 2>/dev/null '
+             f'| awk \'/batch-rsgd-pool-/ {{print $1}}\' | sort -u); do '
+             f'sky jobs pool down "$p" -y 2>/dev/null || true; done || true'),
+            f'sky jobs pool down {pool_name} -y 2>/dev/null || true',
+            f'sky serve down {pool_name} -y 2>/dev/null || true',
+            # --- Create pool ---
+            (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
+             f' examples/batch/simple/pool.yaml -y); '
+             f'echo "$s"; '
+             f'echo "$s" | grep "Successfully created pool"'),
+            # --- Data setup: 20 items (10 batches of 2) ---
+            create_bkt,
+            (f'for i in $(seq 0 19); do '
+             f'echo "{{\\"text\\": \\"item_$i\\"}}"; '
+             f'done > /tmp/batch-rsgd-input-{name}.jsonl'),
+            f'{cp} /tmp/batch-rsgd-input-{name}.jsonl {url}/test.jsonl',
+            f'{rm} {url}/output.jsonl 2>/dev/null || true',
+            f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
+
+            # --- Launch batch job in background, wait for RUNNING ---
+            (f'( {run_launcher}\n'
+             f') > /tmp/batch-rsgd-bg-{name}.log 2>&1 &\n'
+             f'BGPID=$!\n'
+             f'echo $BGPID > /tmp/batch-rsgd-bgpid-{name}.txt\n'
+             f'JOB_ID=""\n'
+             f'for i in $(seq 1 90); do\n'
+             f'  JOB_ID=$(sky jobs queue 2>/dev/null | '
+             f'grep "{pool_name}" | '
+             f'awk \'$1 ~ /^[0-9]+$/ && /RUNNING/ '
+             f'{{print $1; exit}}\')\n'
+             f'  if [ -n "$JOB_ID" ]; then break; fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             f'if [ -z "$JOB_ID" ]; then\n'
+             f'  echo "ERROR: no RUNNING job found"\n'
+             f'  exit 1\n'
+             f'fi\n'
+             f'echo "$JOB_ID" > /tmp/batch-rsgd-jobid-{name}.txt\n'
+             f'echo "Found running job: $JOB_ID"'),
+
+            # --- Try resume from RUNNING job — should fail ---
+            (f'( RESUME_FROM=$(cat /tmp/batch-rsgd-jobid-{name}.txt) '
+             f'{run_launcher}\n'
+             f') > /tmp/batch-rsgd-resume-log-{name}.txt 2>&1; '
+             f'RESUME_EXIT=$?\n'
+             f'if [ $RESUME_EXIT -eq 0 ]; then\n'
+             f'  echo "ERROR: resume from RUNNING should have failed"\n'
+             f'  exit 1\n'
+             f'fi\n'
+             f'echo "Resume from RUNNING correctly rejected '
+             f'(exit=$RESUME_EXIT)"'),
+
+            # --- Cancel the original job ---
+            (f'JOB_ID=$(cat /tmp/batch-rsgd-jobid-{name}.txt)\n'
+             f'sky jobs cancel $JOB_ID -y\n'
+             f'for i in $(seq 1 60); do\n'
+             f'  if sky jobs queue 2>/dev/null | '
+             f'awk -v id="$JOB_ID" \'$1 == id\' | '
+             f'grep -q CANCELLED; then break; fi\n'
+             f'  sleep 5\n'
+             f'done\n'
+             f'kill $(cat /tmp/batch-rsgd-bgpid-{name}.txt) '
+             f'2>/dev/null || true'),
+
+            # --- Verify original is CANCELLED ---
+            (f'sky jobs queue | '
+             f'awk -v id="$(cat /tmp/batch-rsgd-jobid-{name}.txt)" '
+             f"'$1 == id' | grep CANCELLED"),
+
+            # --- Resume from CANCELLED job ---
+            (f'RESUME_FROM=$(cat /tmp/batch-rsgd-jobid-{name}.txt) '
+             f'{run_launcher}'),
+
+            # --- Verify resumed job SUCCEEDED ---
+            f'sky jobs queue | grep "{pool_name}" | grep SUCCEEDED',
+
+            # --- Verify output has all 20 items ---
+            f'{cp} {url}/output.jsonl /tmp/batch-rsgd-output-{name}.jsonl',
+            f'test $(wc -l < /tmp/batch-rsgd-output-{name}.jsonl) -eq 20',
+            (f"python3 << 'PYEOF'\n"
+             "import json\n"
+             f"path = '/tmp/batch-rsgd-output-{name}.jsonl'\n"
+             "results = [json.loads(l) for l in open(path)]\n"
+             "assert len(results) == 20, f'Expected 20, got "
+             "{len(results)}'\n"
+             "texts = set()\n"
+             "for r in results:\n"
+             "    assert 'text' in r and 'output' in r, f'Bad record: {r}'\n"
+             "    assert r['output'] == r['text'] * 2, f'Wrong output: {r}'\n"
+             "    texts.add(r['text'])\n"
+             "expected = set(f'item_{i}' for i in range(20))\n"
+             "assert texts == expected, (\n"
+             "    f'Missing: {expected - texts}, Extra: {texts - expected}')\n"
+             "print(f'All {len(results)} results valid after resume')\n"
+             "PYEOF"),
+        ],
+        # Teardown
+        (f'sky jobs pool down {pool_name} -y;'
+         f' sky serve down {pool_name} -y 2>/dev/null || true;'
+         f' {delete_bkt};'
+         f' rm -f /tmp/batch-rsgd-input-{name}.jsonl'
+         f' /tmp/batch-rsgd-output-{name}.jsonl'
+         f' /tmp/batch-rsgd-jobid-{name}.txt'
+         f' /tmp/batch-rsgd-bgpid-{name}.txt'
+         f' /tmp/batch-rsgd-bg-{name}.log'
+         f' /tmp/batch-rsgd-resume-log-{name}.txt'
+         f' {script}'),
+        timeout=40 * 60,
+        env={
+            'SKY_BATCH_BUCKET': bucket,
+            'SKY_BATCH_STORE': store,
+            'BATCH_POOL_NAME': pool_name,
+        },
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test batch HA: kill controller, verify resume from DB ----------
 @pytest.mark.kubernetes
 @pytest.mark.batch

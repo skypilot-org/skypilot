@@ -665,6 +665,7 @@ class JobController:
             is_resume=is_resume,
             input_format_dict=metadata['batch_input_format'],
             output_formats_dict=metadata['batch_output_formats'],
+            resume_from=metadata.get('batch_resume_from'),
         )
 
         if not is_resume:
@@ -687,6 +688,20 @@ class JobController:
                 task_id=task_id,
                 start_time=time.time(),
                 callback_func=callback_func)
+
+        # When the asyncio task is cancelled (sky jobs cancel),
+        # asyncio.to_thread does NOT interrupt the coordinator thread.
+        # Register a callback so coordinator._cancelled is set
+        # immediately, preventing the zombie thread from launching
+        # workers or dispatching batches.
+        current_task = asyncio.current_task()
+        assert current_task is not None
+
+        def _on_task_done(task: asyncio.Task) -> None:
+            if task.cancelled():
+                coordinator.cancel()
+
+        current_task.add_done_callback(_on_task_done)
 
         try:
             await asyncio.to_thread(coordinator.run)
