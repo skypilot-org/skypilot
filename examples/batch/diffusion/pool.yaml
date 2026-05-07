@@ -4,12 +4,6 @@
 pool:
   workers: 3  # Number of parallel workers
 
-envs:
-  # HuggingFace's Xet CDN (us.aws.cdn.hf.co) returns frequent HTTP 403s
-  # to AWS workers, stalling Stable Diffusion weight downloads. The
-  # legacy LFS path (direct S3) works reliably from the same workers.
-  HF_HUB_DISABLE_XET: "1"
-
 resources:
   accelerators: L4:1  # 1x L4 GPU per worker
 
