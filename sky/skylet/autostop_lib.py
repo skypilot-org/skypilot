@@ -248,20 +248,31 @@ def has_active_ssh_sessions() -> bool:
         try:
             cache_clear = psutil._psposix.get_terminal_map.cache_clear
         except AttributeError:
-            pass
+            logger.debug('[has_active_ssh] psutil._psposix.get_terminal_map'
+                         ' has no cache_clear; psutil internal API moved.')
         else:
             cache_clear()
         # pylint: enable=protected-access
         pts_to_pid: dict[str, int] = {}
-        for proc in psutil.process_iter(['pid', 'terminal']):
+        all_terminal_procs: list = []
+        for proc in psutil.process_iter(['pid', 'name', 'terminal']):
             terminal = proc.info['terminal']
+            if terminal:
+                all_terminal_procs.append(
+                    (proc.info['pid'], proc.info.get('name'), terminal))
             if terminal and terminal.startswith('/dev/pts/'):
                 pts_to_pid.setdefault(terminal, proc.info['pid'])
+        logger.debug(f'[has_active_ssh] processes with non-None terminal: '
+                     f'{all_terminal_procs}')
+        logger.debug(f'[has_active_ssh] pts_to_pid: {pts_to_pid}')
 
-        for pid in pts_to_pid.values():
+        for terminal, pid in pts_to_pid.items():
             try:
                 for parent in psutil.Process(pid).parents():
                     if parent.name() == 'sshd':
+                        logger.debug(
+                            f'[has_active_ssh] sshd ancestor found for '
+                            f'pid={pid} on {terminal} -> returning True')
                         return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue

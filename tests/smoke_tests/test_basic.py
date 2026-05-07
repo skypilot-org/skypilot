@@ -543,24 +543,32 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
 
-            # Give skylet at least one AutostopEvent tick (~60s) with no
-            # SSH attached so the (buggy) psutil cache locks in as empty.
+            # Arm autostop FIRST so AutostopEvent ticks actually call
+            # has_active_ssh_sessions() (otherwise they early-exit on
+            # boot_time mismatch and never touch psutil's terminal-map
+            # cache). idle_minutes=3 leaves a buffer past the assertion
+            # at T+270s so the post-SSH race cannot trigger a legit
+            # autostop before we kill SSH.
+            f'sky autostop -y {name} -i 3',
+            f'sky status | grep {name} | grep "3m"',
+
+            # Now wait 90s with NO SSH so skylet's first 1-2
+            # AutostopEvent ticks call has_active_ssh_sessions() while
+            # /dev/pts/ is empty, priming the buggy psutil cache as
+            # empty. Without this step (the bug we previously had in
+            # this test), the cache was first primed AFTER SSH was
+            # already up, so it happened to contain a working PTY entry
+            # and the test passed even on master.
             'sleep 90',
 
-            # Now arm autostop and open an interactive SSH that outlives
-            # the idle timeout. Without the fix, skylet's stale cache
-            # never sees this PTY and the cluster autostops mid-session.
-            f'sky autostop -y {name} -i 1',
-            f'sky status | grep {name} | grep "1m"',
-
-            # Background a `-tt` SSH that holds a remote PTY for 240s
-            # (4x idle_minutes), then assert UP at the 180s mark while
-            # SSH is still alive. This avoids the post-SSH race where
-            # the next AutostopEvent tick fires within ~60s and stops
-            # the cluster legitimately. With the bug, the stale psutil
-            # cache makes the cluster autostop within ~120s of arming;
-            # the assertion at 180s catches that.
-            f'ssh -tt {name} "sleep 240" </dev/null '
+            # Background a `-tt` SSH that holds a remote PTY past the
+            # idle window. With the bug, every later tick still sees no
+            # PTY (stale cache) -> at ~T_arm+180s idle hits 3 min and
+            # the cluster autostops despite the active SSH. Assertion
+            # at T_arm+90+180=T_arm+270s catches the STOPPED state.
+            # With the fix, every tick re-globs /dev/pts/, sees the SSH
+            # PTY, resets last_active, and the cluster stays UP.
+            f'ssh -tt {name} "sleep 300" </dev/null '
             f'>/tmp/sky-9524-ssh.out 2>&1 & '
             f'SSH_PID=$!; sleep 180; '
             f's=$(sky status -r {name}); echo "$s"; '
@@ -622,13 +630,14 @@ def test_autostop_ssh_alive_after_stop_start_with_docker_image(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # See test_autostop_ssh_alive_after_stop_start for the
+            # rationale of this ordering: arm autostop FIRST, then
+            # sleep 90s with no SSH so the buggy psutil cache locks
+            # empty before SSH starts.
+            f'sky autostop -y {name} -i 3',
+            f'sky status | grep {name} | grep "3m"',
             'sleep 90',
-            f'sky autostop -y {name} -i 1',
-            f'sky status | grep {name} | grep "1m"',
-
-            # Same background-SSH pattern as the non-docker variant —
-            # see that test for the rationale.
-            f'ssh -tt {name} "sleep 240" </dev/null '
+            f'ssh -tt {name} "sleep 300" </dev/null '
             f'>/tmp/sky-9524-ssh.out 2>&1 & '
             f'SSH_PID=$!; sleep 180; '
             f's=$(sky status -r {name}); echo "$s"; '
