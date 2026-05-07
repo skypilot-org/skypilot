@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import re
+import sys
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
@@ -22,6 +23,7 @@ from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import git
+from sky.utils import hooks_deprecation
 from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -901,13 +903,36 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Handle the top-level config field
-        config_override = config.pop('config', None)
+        config_override = config.pop('config', None) or {}
+        # Lifecycle hooks live under `config.hooks:` but they are not a
+        # SkyPilot-config override — they are task lifecycle metadata.
+        # Pull them out of the override block and forward to Resources
+        # via the same path master's `resources.hooks:` used (kept for
+        # backward compat — see below).
+        config_hooks = config_override.pop('hooks', None)
 
-        # Store the final config override for use in resource setup
-        cluster_config_override = config_override
+        # Store the final config override for use in resource setup.
+        # Restore None semantics if the override block was hooks-only.
+        cluster_config_override = config_override or None
 
         # Parse resources field.
         resources_config = config.pop('resources', {})
+        # Backward-compat: `resources.hooks:` (PR1 form) still parses,
+        # with a stderr deprecation warning that points users at
+        # `config.hooks:`.
+        legacy_resources_hooks = resources_config.pop('hooks', None)
+        if legacy_resources_hooks is not None:
+            sys.stderr.write(hooks_deprecation.RESOURCES_HOOKS_FORM)
+            if config_hooks is None:
+                config_hooks = legacy_resources_hooks
+            else:
+                # Both new and old forms specified — prefer the new
+                # form; just warn that the old one was ignored.
+                sys.stderr.write(
+                    'WARNING: both config.hooks and resources.hooks were '
+                    'specified; resources.hooks ignored.\n')
+        if config_hooks is not None:
+            resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
             assert resources_config.get('_cluster_config_overrides') is None, (
                 'Cannot set _cluster_config_overrides in both resources and '

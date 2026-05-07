@@ -53,9 +53,33 @@ def _no_autostop(fn):
 
 
 def _write_yaml(resources: dict) -> str:
-    """Dump minimal.yaml with a custom resources block to a temp file."""
+    """Dump minimal.yaml with a custom resources block to a temp file.
+
+    Tests historically pass `hooks` inside the `resources` dict (the
+    PR1 form). The canonical location is now `config.hooks:` at the
+    task-YAML top level. We auto-relocate so existing test bodies don't
+    need rewrites: any `hooks` key in the `resources` dict is moved to
+    `config.hooks`. Tests that explicitly want to exercise the
+    deprecated `resources.hooks:` routing should use `_write_yaml_raw`.
+    """
     cfg = yaml_utils.read_yaml('tests/test_yamls/minimal.yaml')
+    resources = dict(resources)  # avoid mutating caller
+    hooks = resources.pop('hooks', None)
     cfg['resources'] = resources
+    if hooks is not None:
+        cfg.setdefault('config', {})['hooks'] = hooks
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+    yaml_utils.dump_yaml(f.name, cfg)
+    f.flush()
+    return f.name
+
+
+def _write_yaml_raw(top_level: dict) -> str:
+    """Like _write_yaml but writes the dict at the top level of the
+    task YAML — no auto-relocation. Use this for tests that need to
+    exercise the deprecated `resources.hooks` path."""
+    cfg = yaml_utils.read_yaml('tests/test_yamls/minimal.yaml')
+    cfg.update(top_level)
     f = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
     yaml_utils.dump_yaml(f.name, cfg)
     f.flush()

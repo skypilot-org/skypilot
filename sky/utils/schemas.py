@@ -514,7 +514,6 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
-            'hooks': _HOOKS_SCHEMA,
             'priority': {
                 'type': 'integer',
                 'minimum': constants.MIN_PRIORITY,
@@ -1086,6 +1085,28 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     return new_schema
 
 
+def _task_config_schema():
+    """Schema for task-YAML's `config:` block.
+
+    Hand-merged from the global config schema (filtered to overrideable
+    keys) plus the task-only `hooks` property. `hooks` is intentionally
+    NOT exposed in the global ``~/.sky/config.yaml`` schema — lifecycle
+    hooks are task-scoped (preserving the original ``resources.hooks:``
+    placement).
+    """
+    overrideable = _filter_schema(
+        get_config_schema(),
+        constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
+    return {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            **overrideable,
+            'hooks': _HOOKS_SCHEMA,
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1212,9 +1233,11 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
-            'config': _filter_schema(
-                get_config_schema(),
-                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # Per-task config block. Hand-merged so we can add a
+            # task-only `hooks:` key that is intentionally NOT part of
+            # the global `~/.sky/config.yaml` schema (lifecycle hooks
+            # are task-scoped, not workspace/operator-scoped).
+            'config': _task_config_schema(),
             # volumes config is validated separately using get_volume_schema
             'volumes': {
                 'type': 'object',
@@ -1676,9 +1699,6 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    # Controller lifecycle is SkyPilot-managed infrastructure; hooks are
-    # not user-configurable here. Reject at schema-validation time.
-    resources_schema['properties'].pop('hooks', None)
 
     def _get_controller_schema(extra_properties: Optional[Dict[str,
                                                                Any]] = None,):

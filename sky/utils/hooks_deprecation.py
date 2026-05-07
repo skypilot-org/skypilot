@@ -1,8 +1,10 @@
-"""Deprecation messages emitted to stderr when callers reach the
-master ``autostop.hook`` / ``--autostop`` / ``tail_autostop_logs``
-surfaces. The ``resources.hooks`` framework supersedes them; the
-messages route users to the new APIs while we keep the old ones
-working through the deprecation window.
+"""Deprecation messages emitted to stderr when callers reach a
+deprecated lifecycle-hooks surface. The canonical form is
+``config.hooks:`` at the top level of a task YAML; older forms route
+through with a one-line stderr warning each.
+
+Chain (oldest → newest):
+    autostop.hook (master)  →  resources.hooks (PR1 form)  →  config.hooks
 
 # TODO(zpoint): remove this module ~2 minors after the lifecycle-hooks
 # framework ships.
@@ -10,8 +12,13 @@ working through the deprecation window.
 
 AUTOSTOP_HOOK_YAML = (
     'WARNING: autostop.hook / autostop.hook_timeout are deprecated. '
-    'Use resources.hooks: [{run, events: [autostop], timeout}] '
+    'Use config.hooks: [{run, events: [autostop], timeout}] '
     'instead (routed for you).\n')
+
+RESOURCES_HOOKS_FORM = (
+    'WARNING: resources.hooks is deprecated. Move the list under '
+    'config.hooks at the top level of your task YAML '
+    '(routed for you).\n')
 
 TAIL_AUTOSTOP_LOGS_SDK = (
     'WARNING: sky.tail_autostop_logs() is deprecated. '

@@ -34,11 +34,16 @@ DEFAULT_TIMEOUT = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
 ALL_EVENTS = ['autostop', 'preemption', 'down']
 
 
-def _validate(resources_config):
-    """Run the resources schema validator; raises on invalid."""
-    common_utils.validate_schema(resources_config,
-                                 schemas.get_resources_schema(),
-                                 'Invalid resources YAML: ')
+def _validate(hooks_payload):
+    """Run the task-YAML schema validator on `{config: {hooks: ...}}`.
+
+    The schema lives at task.yaml's `config.hooks:`. We wrap the
+    caller's payload (which is already a `{'hooks': [...]}` dict) as
+    `{'config': payload}` and validate the whole task YAML.
+    """
+    task_config = {'config': hooks_payload}
+    common_utils.validate_schema(task_config, schemas.get_task_schema(),
+                                 'Invalid task YAML: ')
 
 
 # ---------------------------------------------------------------------------
@@ -556,3 +561,90 @@ def test_preemption_grace_no_cap_when_under_limit():
         },
     ])
     assert timeout == 120
+
+
+# ---------------------------------------------------------------------------
+# config.hooks YAML routing — task.from_yaml_config picks up hooks under
+# `config:` and forwards them to Resources._hooks. The deprecated
+# `resources.hooks:` form still parses but emits a stderr warning.
+# ---------------------------------------------------------------------------
+
+
+def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
+    """Canonical form: `config.hooks:` at the top level."""
+    from sky.task import Task
+    yaml_str = ('name: test\n'
+                'config:\n'
+                '  hooks:\n'
+                '    - run: echo from-config-hooks\n'
+                '      events: [autostop]\n'
+                '      timeout: 30\n'
+                'resources:\n'
+                '  cpus: 2\n')
+    p = tmp_path / 'task.yaml'
+    p.write_text(yaml_str)
+    task = Task.from_yaml(str(p))
+    (r,) = list(task.resources)
+    assert r.hooks and len(r.hooks) == 1
+    assert r.hooks[0]['run'] == 'echo from-config-hooks'
+    assert sorted(r.hooks[0]['events']) == ['autostop']
+    assert r.hooks[0]['timeout'] == 30
+
+
+def test_task_yaml_resources_hooks_routes_with_warning(tmp_path, capsys):
+    """Deprecated form: `resources.hooks:` still works + stderr warns."""
+    from sky.task import Task
+    yaml_str = ('name: test\n'
+                'resources:\n'
+                '  cpus: 2\n'
+                '  hooks:\n'
+                '    - run: echo from-resources-hooks\n'
+                '      events: [down]\n')
+    p = tmp_path / 'task.yaml'
+    p.write_text(yaml_str)
+    task = Task.from_yaml(str(p))
+    (r,) = list(task.resources)
+    assert r.hooks and r.hooks[0]['run'] == 'echo from-resources-hooks'
+    err = capsys.readouterr().err
+    assert 'resources.hooks is deprecated' in err
+    assert 'config.hooks' in err
+
+
+def test_task_yaml_both_forms_prefers_config_hooks(tmp_path, capsys):
+    """If both forms specified, config.hooks wins; resources.hooks
+    ignored with a warning."""
+    from sky.task import Task
+    yaml_str = ('name: test\n'
+                'config:\n'
+                '  hooks:\n'
+                '    - run: echo new\n'
+                '      events: [autostop]\n'
+                'resources:\n'
+                '  cpus: 2\n'
+                '  hooks:\n'
+                '    - run: echo old\n'
+                '      events: [autostop]\n')
+    p = tmp_path / 'task.yaml'
+    p.write_text(yaml_str)
+    task = Task.from_yaml(str(p))
+    (r,) = list(task.resources)
+    assert r.hooks and r.hooks[0]['run'] == 'echo new'
+    err = capsys.readouterr().err
+    assert 'resources.hooks ignored' in err
+
+
+def test_task_yaml_config_hooks_schema_rejects_unknown_event(tmp_path):
+    """Schema validation runs against the new task.config.hooks
+    location, so unknown event names are rejected."""
+    from sky.task import Task
+    yaml_str = ('name: test\n'
+                'config:\n'
+                '  hooks:\n'
+                '    - run: echo bad\n'
+                '      events: [reboot]\n'
+                'resources:\n'
+                '  cpus: 2\n')
+    p = tmp_path / 'task.yaml'
+    p.write_text(yaml_str)
+    with pytest.raises(Exception):
+        Task.from_yaml(str(p))

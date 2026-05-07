@@ -2359,8 +2359,17 @@ class Resources:
         if ordered is not None and isinstance(ordered, list):
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
+        # `hooks` is task-scoped and lives at task.config.hooks. The
+        # task-YAML loader (sky/task.py::Task.from_yaml_config) routes
+        # it into resources_config['hooks'] so the existing
+        # `_from_yaml_config_single` path still wires it onto each
+        # Resources instance. The resources schema itself does not
+        # accept `hooks`, so pop it out before validation here.
+        hooks_passthrough = config.pop('hooks', None)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
+        if hooks_passthrough is not None:
+            config['hooks'] = hooks_passthrough
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
