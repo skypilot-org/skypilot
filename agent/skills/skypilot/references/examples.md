@@ -664,42 +664,6 @@ sky serve status llama-8b --endpoint
 sky serve status llama-70b --endpoint
 ```
 
-### TGI (Text Generation Inference) Example
-
-Serve a model using HuggingFace TGI with Docker.
-
-```yaml
-# tgi-serve.yaml
-name: tgi-service
-
-resources:
-  accelerators: A100:1
-  ports: 8080
-
-envs:
-  MODEL_ID: meta-llama/Llama-3.1-8B-Instruct
-
-secrets:
-  HF_TOKEN: null
-
-run: |
-  docker run --gpus all --shm-size 1g \
-    -p 8080:80 \
-    -e HUGGING_FACE_HUB_TOKEN=$HF_TOKEN \
-    -v ~/data:/data \
-    ghcr.io/huggingface/text-generation-inference \
-    --model-id $MODEL_ID
-
-service:
-  readiness_probe: /health
-  replicas: 2
-```
-
-```bash
-HF_TOKEN=hf_xxx sky serve up tgi-serve.yaml -n tgi-llama --secret HF_TOKEN
-sky serve status tgi-llama --endpoint
-```
-
 ### Service with Custom Readiness Probe (POST)
 
 Use a POST request with custom data for the readiness check.

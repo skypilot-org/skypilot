@@ -119,7 +119,6 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 ## Serving Examples
 
 - [vLLM]({{BASE_URL}}/examples/serving/vllm.html.md): Serve LLMs with vLLM
-- [TGI]({{BASE_URL}}/examples/serving/tgi.html.md): Text Generation Inference
 - [SGLang]({{BASE_URL}}/examples/serving/sglang.html.md): SGLang serving
 - [Ollama]({{BASE_URL}}/examples/serving/ollama.html.md): Ollama integration
 - [LoRAX]({{BASE_URL}}/examples/serving/lorax.html.md): LoRA serving
