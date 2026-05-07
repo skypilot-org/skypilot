@@ -1513,11 +1513,14 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set.
+    # when both are set. Permissive so external schedulers (registered
+    # via plugins) can layer their own sub-fields under `quota` without
+    # requiring per-key OSS schema updates; sub-field validation is the
+    # consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
-        'additionalProperties': False,
+        'additionalProperties': True,
         'properties': {
             'queue': {
                 'type': 'string',
@@ -2349,7 +2352,10 @@ def get_config_schema():
                         'quota': {
                             'type': 'object',
                             'required': [],
-                            'additionalProperties': False,
+                            # Permissive — see the per-context quota block
+                            # below; mirrors that policy at the workspace
+                            # cloud level.
+                            'additionalProperties': True,
                             'properties': {
                                 'queue': {
                                     'type': 'string',
@@ -2386,7 +2392,10 @@ def get_config_schema():
                                     'quota': {
                                         'type': 'object',
                                         'required': [],
-                                        'additionalProperties': False,
+                                        # Permissive — see the per-context
+                                        # quota block under
+                                        # _CONTEXT_CONFIG_SCHEMA_KUBERNETES.
+                                        'additionalProperties': True,
                                         'properties': {
                                             'queue': {
                                                 'type': 'string',
