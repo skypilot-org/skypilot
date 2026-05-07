@@ -5,7 +5,7 @@ Plugins can register callbacks here to react to events emitted by core code
 by a callback is logged and swallowed so it cannot affect the originating
 operation.
 """
-from typing import Callable, List, TYPE_CHECKING
+from typing import Callable, Dict, TYPE_CHECKING
 
 from sky import sky_logging
 
@@ -16,16 +16,26 @@ logger = sky_logging.init_logger(__name__)
 
 VolumeDeletedHook = Callable[[str, 'models.VolumeConfig'], None]
 
-_VOLUME_DELETED_HOOKS: List[VolumeDeletedHook] = []
+_VOLUME_DELETED_HOOKS: Dict[str, VolumeDeletedHook] = {}
 
 
-def register_volume_deleted_hook(fn: VolumeDeletedHook) -> None:
+def register_volume_deleted_hook(hook_id: str, fn: VolumeDeletedHook) -> None:
     """Register a callback to run after a volume is removed from the database.
 
     The callback receives the volume name and its ``VolumeConfig``. It is
     invoked whether the deletion path is normal or ``purge=True``.
+
+    Args:
+        hook_id: A stable, unique identifier for this hook (e.g.
+            ``"automount.volume_delete_cleanup"``). Re-registering with the
+            same ID replaces the previous callback so a plugin loaded twice
+            in the same process does not fire its hook twice.
+        fn: The callback to invoke.
     """
-    _VOLUME_DELETED_HOOKS.append(fn)
+    if hook_id in _VOLUME_DELETED_HOOKS:
+        logger.debug(
+            f'Replacing existing volume-deleted hook for id {hook_id!r}.')
+    _VOLUME_DELETED_HOOKS[hook_id] = fn
 
 
 def fire_volume_deleted(name: str, config: 'models.VolumeConfig') -> None:
@@ -34,9 +44,11 @@ def fire_volume_deleted(name: str, config: 'models.VolumeConfig') -> None:
     Each callback runs in isolation; an exception in one does not affect
     other callbacks or the caller.
     """
-    for fn in _VOLUME_DELETED_HOOKS[:]:
+    # Iterate over a snapshot so a hook that registers another hook (or a
+    # concurrent register call) cannot mutate the dict mid-iteration.
+    for hook_id, fn in list(_VOLUME_DELETED_HOOKS.items()):
         try:
             fn(name, config)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
-                f'volume-deleted hook {fn!r} raised for {name!r}: {e}')
+                f'volume-deleted hook {hook_id!r} raised for {name!r}: {e}')

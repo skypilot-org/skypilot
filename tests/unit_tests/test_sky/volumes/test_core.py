@@ -722,7 +722,8 @@ class TestVolumeCore:
         handle = self._setup_volume_delete_mocks(monkeypatch)
         captured = []
         plugin_hooks.register_volume_deleted_hook(
-            lambda name, config: captured.append((name, config)))
+            'test.fires_hook', lambda name, config: captured.append(
+                (name, config)))
 
         core.volume_delete(['test-volume'])
 
@@ -735,7 +736,8 @@ class TestVolumeCore:
             provision_delete_side_effect=Exception('cloud delete failed'))
         captured = []
         plugin_hooks.register_volume_deleted_hook(
-            lambda name, config: captured.append((name, config)))
+            'test.purge_fires_hook', lambda name, config: captured.append(
+                (name, config)))
 
         core.volume_delete(['test-volume'], purge=True)
 
@@ -749,7 +751,8 @@ class TestVolumeCore:
             provision_delete_side_effect=Exception('cloud delete failed'))
         captured = []
         plugin_hooks.register_volume_deleted_hook(
-            lambda name, config: captured.append((name, config)))
+            'test.no_fire_on_failure', lambda name, config: captured.append(
+                (name, config)))
 
         with pytest.raises(Exception, match='cloud delete failed'):
             core.volume_delete(['test-volume'])
@@ -764,10 +767,27 @@ class TestVolumeCore:
         def bad_hook(name, config):
             raise RuntimeError('hook boom')
 
-        plugin_hooks.register_volume_deleted_hook(bad_hook)
+        plugin_hooks.register_volume_deleted_hook('test.bad_hook', bad_hook)
 
         # Should not raise.
         core.volume_delete(['test-volume'])
+
+    def test_register_replaces_hook_with_same_id(self, monkeypatch):
+        """Re-registering with the same ID replaces the previous callback."""
+        handle = self._setup_volume_delete_mocks(monkeypatch)
+        first_calls = []
+        second_calls = []
+
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: first_calls.append((name, config)))
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: second_calls.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'])
+
+        assert first_calls == []
+        assert second_calls == [('test-volume', handle)]
 
     def test_volume_delete_multiple_fires_hook_per_volume(self, monkeypatch):
         """Hook fires once per volume in a multi-volume delete call."""
@@ -795,7 +815,8 @@ class TestVolumeCore:
 
         captured = []
         plugin_hooks.register_volume_deleted_hook(
-            lambda name, config: captured.append((name, config)))
+            'test.multi_volume', lambda name, config: captured.append(
+                (name, config)))
 
         core.volume_delete(['v1', 'v2'])
 
