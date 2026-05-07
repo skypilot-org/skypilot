@@ -1,4 +1,5 @@
 """ Nebius Cloud. """
+import hashlib
 import json
 import os
 import tempfile
@@ -52,14 +53,36 @@ def nebius_profile_in_aws_cred_and_config() -> bool:
 
 
 def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
-    """Materialize effective Nebius config into a temporary uploadable file."""
-    with tempfile.NamedTemporaryFile(prefix=prefix,
-                                     mode='w',
-                                     delete=False,
-                                     encoding='utf-8') as temp_file:
-        temp_file.write(value)
-        temp_file.write('\n')
-        return temp_file.name
+    """Materialize effective Nebius config into a stable, uploadable file.
+
+    The path is deterministic from ``value`` so repeated calls return the same
+    path. ``Cloud.get_credential_file_mounts()`` runs on every launch for every
+    enabled cloud (see ``sky/check.py::get_cloud_credential_file_mounts``), and
+    its return value feeds the file-mounts hash that SkyPilot uses to dedupe
+    rsync uploads to controllers and to decide whether ``sky launch --fast``
+    may skip re-setup. A fresh ``NamedTemporaryFile`` per call would change
+    that hash on every launch, busting the cache and breaking ``--fast`` for
+    every enabled-cloud combo where Nebius is configured -- including launches
+    on other clouds (AWS, etc).
+
+    The path is also namespaced by UID so that two users on a host with a
+    shared ``tempfile.gettempdir()`` (e.g. ``/tmp`` on Linux) cannot collide
+    when they happen to share the same content -- one user's restrictive
+    umask would otherwise lock the other user out.
+    """
+    uid = os.getuid() if hasattr(os, 'getuid') else 'default'
+    digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
+    path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
+    expected = value + '\n'
+    try:
+        with open(path, 'r', encoding='utf-8') as existing:
+            if existing.read() == expected:
+                return path
+    except OSError:
+        pass
+    with open(path, 'w', encoding='utf-8') as new_file:
+        new_file.write(expected)
+    return path
 
 
 @registry.CLOUD_REGISTRY.register
