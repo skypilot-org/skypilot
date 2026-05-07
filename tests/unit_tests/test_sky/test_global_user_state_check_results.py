@@ -175,14 +175,12 @@ def test_scoped_run_preserves_sibling_contexts_within_cloud(
     # Scoped run that only re-probes ctx-b — ctx-a and ctx-c must
     # survive intact, and ctx-b's leaf must update.
     global_user_state.set_check_results(
-        {
-            'Kubernetes': {
-                'ctx-b': {
-                    'enabled': False,
-                    'reason': 'Forbidden'
-                }
+        {'Kubernetes': {
+            'ctx-b': {
+                'enabled': False,
+                'reason': 'Forbidden'
             }
-        },
+        }},
         workspace='default',
         is_full_workspace_run=False)
     assert global_user_state.get_cached_check_results('default') == {
