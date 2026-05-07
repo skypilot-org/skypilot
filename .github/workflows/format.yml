@@ -32,28 +32,16 @@ jobs:
         source ~/test-env/bin/activate
         uv pip install yapf==0.32.0
         uv pip install toml==0.10.2
-        uv pip install black==24.10.0
         uv pip install isort==5.12.0
     - name: Running yapf
       run: |
         source ~/test-env/bin/activate
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
-            --exclude 'sky/skylet/providers/ibm/**' \
             --exclude 'sky/schemas/generated/**' \
             --exclude 'tests/unit_tests/test_sky/backends/testdata/**'
-    - name: Running black
-      run: |
-        source ~/test-env/bin/activate
-        black --diff --check sky/skylet/providers/ibm/
-    - name: Running isort for black formatted files
-      run: |
-        source ~/test-env/bin/activate
-        isort --diff --check --profile black -l 88 -m 3 \
-            sky/skylet/providers/ibm/
     - name: Running isort for yapf formatted files
       run: |
         source ~/test-env/bin/activate
         isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
-            --sg 'sky/skylet/providers/ibm/**' \
             --sg 'sky/schemas/generated/**' \
             --sg 'tests/unit_tests/test_sky/backends/testdata/**'
