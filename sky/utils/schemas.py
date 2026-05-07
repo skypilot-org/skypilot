@@ -5,7 +5,7 @@ https://json-schema.org/
 """
 import enum
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -36,6 +36,8 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
     _extra_job_recovery_properties[name] = schema
 
 
+_extra_jobs_properties: Dict[str, Any] = {}
+
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
 # Registry for plugin-provided properties under the top-level
@@ -63,6 +65,24 @@ def _allow_additional_properties() -> bool:
     # Import here to avoid circular imports (plugins imports from sky.utils).
     from sky.server import plugins  # pylint: disable=import-outside-toplevel
     return not plugins.plugins_loaded()
+
+
+def register_jobs_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the jobs controller schema.
+
+    This allows plugins to extend the ``jobs`` config section with
+    custom configuration fields.  The property is merged into the
+    schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'boolean'}).
+    """
+    if name in _extra_jobs_properties:
+        raise ValueError(f'Jobs property {name!r} is already registered.')
+    _extra_jobs_properties[name] = schema
 
 
 def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
@@ -1621,47 +1641,51 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema():
+    def _get_controller_schema(extra_properties: Optional[Dict[str,
+                                                               Any]] = None,):
+        props: Dict[str, Any] = {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                        'default': False,
+                    },
+                    'autostop': _AUTOSTOP_SCHEMA,
+                    'consolidation_mode': {
+                        'type': 'boolean',
+                        # When unset, automatically enabled for deploy-mode
+                        # servers (--deploy) if no existing controller
+                        # clusters are found.
+                    },
+                    'controller_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                    'task_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                },
+            },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            },
+            'force_disable_cloud_bucket': {
+                'type': 'boolean',
+                'default': False,
+            },
+        }
+        if extra_properties:
+            props.update(extra_properties)
         return {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'controller': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'resources': resources_schema,
-                        'high_availability': {
-                            'type': 'boolean',
-                            'default': False,
-                        },
-                        'autostop': _AUTOSTOP_SCHEMA,
-                        'consolidation_mode': {
-                            'type': 'boolean',
-                            # When unset, automatically enabled for deploy-mode
-                            # servers (--deploy) if no existing controller
-                            # clusters are found.
-                        },
-                        'controller_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                        'task_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                    },
-                },
-                'bucket': {
-                    'type': 'string',
-                    'pattern': '^(https|s3|gs|r2|cos)://.+',
-                    'required': [],
-                },
-                'force_disable_cloud_bucket': {
-                    'type': 'boolean',
-                    'default': False,
-                },
-            }
+            'additionalProperties': _allow_additional_properties(),
+            'properties': props,
         }
 
     cloud_configs = {
@@ -2517,7 +2541,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(),
+            'jobs': _get_controller_schema(
+                extra_properties=_extra_jobs_properties,),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
