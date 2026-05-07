@@ -517,7 +517,6 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    # idle_minutes=1; wait_for defaults to jobs_and_ssh.
     test = smoke_tests_utils.Test(
         'test_autostop_ssh_alive_after_stop_start',
         [
@@ -554,11 +553,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
             # Now wait 90s with NO SSH so skylet's first 1-2
             # AutostopEvent ticks call has_active_ssh_sessions() while
-            # /dev/pts/ is empty, priming the buggy psutil cache as
-            # empty. Without this step (the bug we previously had in
-            # this test), the cache was first primed AFTER SSH was
-            # already up, so it happened to contain a working PTY entry
-            # and the test passed even on master.
+            # /dev/pts/ is empty, priming the buggy psutil cache as empty.
             'sleep 90',
 
             # Background a `-tt` SSH that holds a remote PTY past the
