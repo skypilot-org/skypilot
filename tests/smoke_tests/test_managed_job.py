@@ -153,14 +153,15 @@ def test_managed_jobs_failed_job_logs(generic_cloud: str):
         [
             f'sky jobs launch -n {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d '
-            f'-- "echo job ran before failing && exit 1"',
+            f'-- "echo job ran before failing && exit 7"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.FAILED],
                 timeout=360),
             f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
-            f'echo "$s"; echo "$s" | grep "job ran before failing"',
+            f'echo "$s"; echo "$s" | grep "job ran before failing" && '
+            f'echo "$s" | grep "failed with return code list" | grep "7"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
