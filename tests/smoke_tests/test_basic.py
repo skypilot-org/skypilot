@@ -505,6 +505,161 @@ def test_autostop_with_docker_image(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
+    """Active SSH must prevent autostop after `sky stop` + `sky start`.
+
+    Regression test for https://github.com/skypilot-org/skypilot/issues/9524.
+    psutil's get_terminal_map() is module-globally memoized; if skylet's
+    first AutostopEvent tick after `sky start` runs with no SSH attached,
+    the cache freezes empty and any later SSH session is invisible. The
+    cluster then autostops despite an active interactive session even
+    when wait_for=jobs_and_ssh.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'test_autostop_ssh_alive_after_stop_start',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+
+            # The #9524 trigger: stop, then start. Crucially, do not SSH
+            # during `sky start` so /dev/pts/ is empty when skylet's first
+            # AutostopEvent tick fires (~60s after boot) and primes the
+            # buggy cache.
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+
+            # Arm autostop FIRST so AutostopEvent ticks actually call
+            # has_active_ssh_sessions() (otherwise they early-exit on
+            # boot_time mismatch and never touch psutil's terminal-map
+            # cache). idle_minutes=3 leaves a buffer past the assertion
+            # at T+270s so the post-SSH race cannot trigger a legit
+            # autostop before we kill SSH.
+            f'sky autostop -y {name} -i 3',
+            f'sky status | grep {name} | grep "3m"',
+
+            # Now wait 90s with NO SSH so skylet's first 1-2
+            # AutostopEvent ticks call has_active_ssh_sessions() while
+            # /dev/pts/ is empty, priming the buggy psutil cache as empty.
+            'sleep 90',
+
+            # Background a `-tt` SSH that holds a remote PTY past the
+            # idle window. With the bug, every later tick still sees no
+            # PTY (stale cache) -> at ~T_arm+180s idle hits 3 min and
+            # the cluster autostops despite the active SSH. Assertion
+            # at T_arm+90+180=T_arm+270s catches the STOPPED state.
+            # With the fix, every tick re-globs /dev/pts/, sees the SSH
+            # PTY, resets last_active, and the cluster stays UP.
+            f'ssh -tt {name} "sleep 300" </dev/null '
+            f'>/tmp/sky-9524-ssh.out 2>&1 & '
+            f'SSH_PID=$!; sleep 180; '
+            f's=$(sky status -r {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep UP; rc=$?; '
+            f'kill $SSH_PID 2>/dev/null; '
+            f'wait $SSH_PID 2>/dev/null; exit $rc',
+
+            # SSH closed; cluster eventually autostops normally.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+        2 * autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_autostop_ssh_alive_after_stop_start_with_docker_image(
+        generic_cloud: str):
+    """#9524 regression test on a Docker-image cluster.
+
+    Same scenario as test_autostop_ssh_alive_after_stop_start, but the
+    cluster runs `image_id: docker:ubuntu:22.04`. The container's
+    entrypoint holds a PTY (see test_autostop_with_docker_image), which
+    must NOT be misclassified as an active SSH session, while a real
+    SSH session opened after `sky stop` + `sky start` MUST be detected.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'test_autostop_ssh_alive_after_stop_start_with_docker_image',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:ubuntu:22.04 '
+            f'tests/test_yamls/minimal.yaml) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # See test_autostop_ssh_alive_after_stop_start for the
+            # rationale of this ordering: arm autostop FIRST, then
+            # sleep 90s with no SSH so the buggy psutil cache locks
+            # empty before SSH starts.
+            f'sky autostop -y {name} -i 3',
+            f'sky status | grep {name} | grep "3m"',
+            'sleep 90',
+            f'ssh -tt {name} "sleep 300" </dev/null '
+            f'>/tmp/sky-9524-ssh.out 2>&1 & '
+            f'SSH_PID=$!; sleep 180; '
+            f's=$(sky status -r {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep UP; rc=$?; '
+            f'kill $SSH_PID 2>/dev/null; '
+            f'wait $SSH_PID 2>/dev/null; exit $rc',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+        2 * autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
 def test_launch_waits_for_autostopping(generic_cloud: str):
     """Test that launch waits for autostopping to complete.
 

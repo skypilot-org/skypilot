@@ -12,6 +12,7 @@ from sky import models
 from sky import provision
 from sky import sky_logging
 from sky.schemas.api import responses
+from sky.server import plugin_hooks
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -297,6 +298,7 @@ def volume_delete(names: List[str],
                     else:
                         raise
                 global_user_state.delete_volume(name)
+                plugin_hooks.fire_volume_deleted(name, config)
         logger.info(f'Deleted volumes: {names}')
 
 
