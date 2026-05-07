@@ -2546,8 +2546,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     await callback_func('STARTED')
 
 
-def get_job_status_with_task_id(
-        job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
+def get_job_status_with_task_id(job_id: int,
+                                task_id: int) -> Optional[ManagedJobStatus]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         result = session.execute(
