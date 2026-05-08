@@ -5,11 +5,11 @@ Managed Jobs
 
 SkyPilot **managed jobs** (:code:`sky jobs`) manage the full lifecycle of a user job:
 
-* **Provisioning and managing the resources**, on either reserved clusters or elastic instances (including cost-saving spot instances).
+* **Provisioning and managing the resources**, on either reserved clusters or elastic instances.
 * **Automatically recovering from failures** (job preemptions, GPU errors, node crashes, etc.) and retrying application errors.
 * **Cleaning up the resources** when done.
 
-Use managed jobs for auto-recovery when scaling out --- running a single job for long durations, or running many jobs in parallel.
+Use managed jobs for scaling out --- running a single job for long durations, or running many jobs in parallel.
 
 .. seealso::
 
@@ -119,7 +119,7 @@ To launch this YAML as a managed job, use :code:`sky jobs launch`:
 
 .. code-block:: console
 
-  $ sky jobs launch -n qwen-finetune-job qwen_finetune.yaml
+  $ sky jobs launch -n qwen-finetune qwen_finetune.yaml
 
 To see all flags, you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
 
@@ -168,9 +168,9 @@ See a list of managed jobs:
 
   Fetching managed jobs...
   Managed jobs:
-  ID  NAME           RESOURCES          SUBMITTED  TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-  2   roberta        1x [A100:8]        2 hrs ago  2h 47m 18s     2h 36m 18s    0            RUNNING
-  1   qwen-finetune  1x [V100:1][Spot]  4 hrs ago  4h 24m 26s     4h 17m 54s    0            RUNNING
+  ID  NAME           RESOURCES    SUBMITTED  TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  2   roberta        1x [A100:8]  2 hrs ago  2h 47m 18s     2h 36m 18s    0            RUNNING
+  1   qwen-finetune  1x [B200:8]  4 hrs ago  4h 24m 26s     4h 17m 54s    0            RUNNING
 
 This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 

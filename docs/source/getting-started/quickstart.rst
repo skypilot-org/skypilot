@@ -37,7 +37,7 @@ Create a directory from anywhere on your machine:
 
       resources:
         # Optional; if left out, automatically pick the cheapest cloud.
-        infra: kubernetes/coreweave
+        infra: k8s/coreweave  # Or k8s/my-neocloud; aws; gcp; ...
         # 8x NVIDIA B300 GPU
         accelerators: B300:8
 
@@ -75,7 +75,7 @@ Create a directory from anywhere on your machine:
       # Define a resource object.
       #   infra: (Optional) if left out, automatically pick cheapest available.
       #   accelerators: 8x NVIDIA B300 GPU
-      resource = sky.Resources(infra='kubernetes/coreweave', accelerators='B300:8')
+      resource = sky.Resources(infra='k8s/coreweave', accelerators='B300:8')  # Or 'k8s/my-neocloud', 'aws', 'gcp', ...
 
       # Define a task object.
       #   setup: Typical use: pip install -r requirements.txt

@@ -1,7 +1,7 @@
 .. _sky-api-server-upgrade:
 
-Upgrading and High Availability
-===============================
+Upgrades and High Availability
+==============================
 
 This page covers how to keep a remote SkyPilot API server resilient and up to date:
 
@@ -14,7 +14,7 @@ This page covers how to keep a remote SkyPilot API server resilient and up to da
 High availability
 -----------------
 
-The SkyPilot API server can be configured for high availability by backing it with an external PostgreSQL database. This decouples API server state from the API server pod, allowing the pod to be restarted, rescheduled, or upgraded (including via :ref:`rolling updates <sky-api-server-upgrade-strategy>`) without losing state.
+The SkyPilot API server can be configured for high availability by making it fully stateless and using multiple replicas. This decouples API server state from the API server pod, allowing each pod to be restarted, rescheduled, or upgraded (including via :ref:`rolling updates <sky-api-server-upgrade-strategy>`) without interrupting in-flight workloads.
 
 .. tip::
 

@@ -122,7 +122,7 @@ To verify that the API server is working, run ``sky api info``:
    :hidden:
 
    Deploying API Server <api-server-admin-deploy>
-   Upgrading and High Availability <api-server-upgrade>
+   Upgrades and High Availability <api-server-upgrade>
    Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
    Helm Chart Reference <helm-values-spec>
