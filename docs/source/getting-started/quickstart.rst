@@ -48,13 +48,13 @@ Create a directory from anywhere on your machine:
       # Typical use: pip install -r requirements.txt
       # Invoked under the workdir (i.e., can use its files).
       setup: |
-        echo "Running setup."
+        uv pip install torch
 
       # Typical use: make use of resources, such as running training.
       # Invoked under the workdir (i.e., can use its files).
       run: |
         echo "Hello, SkyPilot!"
-        conda env list
+        nvidia-smi
 
   .. tab-item:: Python
     :sync: python
@@ -69,7 +69,7 @@ Create a directory from anywhere on your machine:
       # List of commands to run
       commands = [
           'echo "Hello, SkyPilot!"',
-          'conda env list'
+          'nvidia-smi'
       ]
 
       # Define a resource object.
@@ -83,7 +83,7 @@ Create a directory from anywhere on your machine:
       #   workdir: Working directory (optional) containing the project codebase.
       #     Its contents are synced to ~/sky_workdir/ on the cluster.
       #     Both `setup` and `run` is invoked under the workdir (i.e., can use its files).
-      task = sky.Task(setup='echo "Running setup."',
+      task = sky.Task(setup='uv pip install torch',
                       run=commands,
                       workdir='.',
                       resources=resource)
@@ -118,7 +118,7 @@ Create a directory from anywhere on your machine:
           echo "Hello, SkyPilot!"
         done
 
-        conda env list
+        nvidia-smi
         """)
 
         task = sky.Task(run=commands)
@@ -245,9 +245,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       INFRA                RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
-  mygcp      GCP (us-central1-a)  1x(cpus=4, mem=16, n2-standard-4, ...)      STOPPED  -         1 day ago
-  mycluster  Kubernetes (coreweave)  1x(gpus=B300:8, ...)                     UP       -         4 mins ago
+  NAME       INFRA                   RESOURCES                                 STATUS   AUTOSTOP  LAUNCHED
+  mygcp      GCP (us-central1-a)     1x(cpus=4, mem=16, n2-standard-4, ...)    STOPPED  -         1 day ago
+  mycluster  Kubernetes (coreweave)  1x(gpus=B300:8, ...)                      UP       -         4 mins ago
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
