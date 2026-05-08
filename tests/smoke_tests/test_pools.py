@@ -299,7 +299,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -327,7 +327,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -437,7 +437,6 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 @pytest.mark.skip(
     'Skipping vllm pool test until more remote server testing is done.')
-@pytest.mark.no_remote_server  # see note 1 above
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_available_gpus()
@@ -568,7 +567,6 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_setup_logs_in_starting_pool(generic_cloud: str):
     """Test that setup logs are streamed in starting state."""
     # Do a very long setup so we know the setup logs are streamed in
@@ -594,7 +592,6 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_setup_logs_in_pool_exits(generic_cloud: str):
     """Test that setup logs are streamed and exit once the setup is complete."""
     """We omit --no-follow to test that we exit."""
@@ -616,7 +613,6 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers(generic_cloud: str):
     """Test that we can update the number of workers in a pool, both
     up and down.
@@ -646,7 +642,6 @@ def test_update_workers(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers_and_yaml(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
@@ -666,7 +661,6 @@ def test_update_workers_and_yaml(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_update_workers_no_pool(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
@@ -686,7 +680,6 @@ def test_update_workers_no_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_queueing(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1,
@@ -726,7 +719,6 @@ def test_pool_queueing(generic_cloud: str):
 
 
 @pytest.mark.aws
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_preemption(generic_cloud: str):
     region = 'us-east-2'
     name = smoke_tests_utils.get_cluster_name()
@@ -781,7 +773,6 @@ def test_pool_preemption(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -823,7 +814,6 @@ def test_pool_job_cancel_running(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible after a pool job is cancelled."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -870,7 +860,6 @@ def test_pool_job_cancelled_logs(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -910,7 +899,6 @@ def test_pool_job_cancel_instant(generic_cloud: str):
 
 
 @pytest.mark.aws
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_recovery(generic_cloud: str):
     region = 'us-east-2'
     name = smoke_tests_utils.get_cluster_name()
@@ -970,7 +958,6 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1027,7 +1014,6 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -1082,7 +1068,6 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -1133,7 +1118,6 @@ def test_pool_job_cancel_instant_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
@@ -1181,7 +1165,6 @@ def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_job_cancel_no_jobs(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1206,7 +1189,6 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1247,7 +1229,6 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_worker_assignment_in_queue(generic_cloud: str):
     """Test that sky jobs queue shows the worker assignment for running jobs."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1285,7 +1266,6 @@ def test_pool_worker_assignment_in_queue(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_option(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1314,7 +1294,6 @@ def test_pools_num_jobs_option(generic_cloud: str):
 
 
 @pytest.mark.gcp
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_setup_num_gpus(generic_cloud: str):
     """Test that the number of GPUs is set correctly in the setup script."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1341,7 +1320,6 @@ def test_pools_setup_num_gpus(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_single_yaml(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1368,7 +1346,6 @@ def test_pools_single_yaml(generic_cloud: str):
 
 
 @pytest.mark.resource_heavy
-@pytest.mark.no_remote_server  # see note 1 above
 @pytest.mark.no_kubernetes  # Kubernetes may not have multiple GPU types
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
@@ -1409,7 +1386,6 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
 
 @pytest.mark.aws
 @pytest.mark.resource_heavy
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     """Test resource-aware scheduling with heterogeneous job requirements.
 
@@ -1507,7 +1483,6 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_double_launch(generic_cloud: str):
     """Test that we can launch a pool with the same name twice.
     """
@@ -1569,7 +1544,6 @@ def check_pool_not_in_status(pool_name: str,
 
 
 @pytest.mark.resource_heavy
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
 
@@ -1655,7 +1629,6 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_single_pool(generic_cloud: str):
     """Test that `sky jobs pool down <pool_name> -y` downs a single pool.
 
@@ -1710,7 +1683,6 @@ def test_pool_down_single_pool(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_scale_with_workdir(generic_cloud: str):
     """Test that we can scale a pool with workdir without errors. This makes
     sure that the workdir is not deleted when the pool is scaled."""
@@ -1757,7 +1729,6 @@ def test_pool_scale_with_workdir(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
     """Test that multiple jobs can run on a single worker when resources allow."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1821,7 +1792,6 @@ def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -1893,7 +1863,6 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
                         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers_some_available(
         generic_cloud: str):
     """Test that only one job runs when one resource allows both jobs to run but
@@ -1967,7 +1936,6 @@ def test_pool_resource_contention_two_workers_some_available(
                         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_reclamation(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -2032,7 +2000,6 @@ def test_pool_resource_reclamation(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_fallback_to_unaware(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -2111,7 +2078,6 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
 
 @pytest.mark.resource_heavy
 @pytest.mark.gcp
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_fractional_gpu_scheduling(generic_cloud: str):
     """Test that 6 jobs requesting 0.5 L4 each can run on a pool with 3 workers each with 1 L4."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
@@ -2185,7 +2151,6 @@ def test_pool_fractional_gpu_scheduling(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
     """Test that when no resources are specified, only 1 job runs per worker.
 
@@ -2259,7 +2224,6 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
     """Test that secrets provided via CLI are preserved when updating pool workers.
 
@@ -2338,7 +2302,6 @@ def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_rank(generic_cloud: str):
     """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
 
@@ -2399,7 +2362,6 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_speed(generic_cloud: str):
     """Test that we can launch a large number of jobs quickly.
     """
@@ -2455,7 +2417,7 @@ def autoscaling_pool_conf(
     setup_cmd: str = 'echo "setup message"',
 ):
     """Create a pool config with autoscaling enabled.
-    
+
     Args:
         num_workers: Initial number of workers (also used as min if min_workers not set)
         max_workers: Maximum number of workers for autoscaling
@@ -2508,10 +2470,9 @@ def check_workers_do_not_exceed(pool_name: str,
         'echo "Workers did not exceed max_workers during the check period"')
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up(generic_cloud: str):
     """Test that pool autoscales up when jobs are queued.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=3 (2 higher than initial)
     2. Launches multiple jobs that will queue up
@@ -2570,10 +2531,9 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
     """Test that pool does not scale above workers when max_workers == workers.
-    
+
     This test:
     1. Creates a pool with workers=2, max_workers=2 (same as workers)
     2. Launches multiple jobs that will queue up
@@ -2634,10 +2594,9 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
     """Test that pool autoscales down to zero when no jobs and min_workers=0.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=2, min_workers=0
     2. Launches a job that completes quickly
@@ -2689,10 +2648,9 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
     """Test that pool autoscales up to max_workers then down to zero.
-    
+
     This test:
     1. Creates a pool with workers=0, max_workers=3, min_workers=0
     2. Queues up enough quick jobs (echo hi) to trigger scaling to 3 workers
