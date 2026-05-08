@@ -294,6 +294,13 @@ class LaunchBody(RequestBody):
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
     extra_launch_context: Dict[str, Any] = {}
+    # When True and the server supports it (API_VERSION >=
+    # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
+    # 3-tuple (job_id, handle, credentials) instead of (job_id, handle).
+    # Old servers ignore this field via Pydantic ``extra='ignore'`` and
+    # continue to return the 2-tuple, so it is safe for new clients to
+    # set against any server.
+    include_credentials: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -316,6 +323,7 @@ class LaunchBody(RequestBody):
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
         kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
+        kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
 
 

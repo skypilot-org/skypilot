@@ -121,8 +121,19 @@ def decode_status_kubernetes(
 @register_decoders('launch', 'exec', 'jobs.launch')
 def decode_launch(
     return_value: Dict[str, Any]
-) -> Tuple[str, 'backends.CloudVmRayResourceHandle']:
-    return return_value['job_id'], decode_handle(return_value['handle'])
+) -> Union[Tuple[str, 'backends.CloudVmRayResourceHandle'], Tuple[
+        str, 'backends.CloudVmRayResourceHandle', Optional[Dict[str, Any]]]]:
+    # New servers (>= MIN_LAUNCH_CREDENTIALS_API_VERSION) include a
+    # ``credentials`` key when the caller opted in via
+    # ``_include_credentials``. Pass it through as a 3-tuple so the CLI
+    # can write the SSH config without a follow-up ``/status`` RTT.
+    # Older servers (or callers that didn't opt in) emit a 2-key dict
+    # and we return the legacy 2-tuple unchanged.
+    job_id = return_value['job_id']
+    handle = decode_handle(return_value['handle'])
+    if 'credentials' in return_value:
+        return job_id, handle, return_value['credentials']
+    return job_id, handle
 
 
 @register_decoders('start')

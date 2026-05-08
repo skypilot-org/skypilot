@@ -578,6 +578,7 @@ def launch(
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -744,6 +745,7 @@ def launch(
             _disable_controller_check,
             _file_mounts_blob_id,
             _extra_launch_context,
+            _include_credentials,
         )
 
 
@@ -768,6 +770,7 @@ def _launch(
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
     _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -844,6 +847,18 @@ def _launch(
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
+    # Only request credential bundling when the remote server advertises
+    # support for it. Old servers ignore the field via Pydantic
+    # ``extra='ignore'`` so this is also safe to send unconditionally,
+    # but checking up-front lets us skip the work on servers that would
+    # discard it anyway and makes the gating intent explicit.
+    include_credentials = _include_credentials
+    if include_credentials:
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is None or remote_api_version <
+                server_constants.MIN_LAUNCH_CREDENTIALS_API_VERSION):
+            include_credentials = False
+
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -862,6 +877,7 @@ def _launch(
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
         extra_launch_context=_extra_launch_context or {},
+        include_credentials=include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)

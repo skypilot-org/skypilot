@@ -629,6 +629,7 @@ def launch(
     _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
+    _include_credentials: bool = False,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -801,6 +802,15 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
+    # ``_include_credentials`` is accepted unconditionally so the
+    # request payload's ``LaunchBody.to_kwargs`` mapping always type-
+    # checks against this signature. The in-tree implementation does
+    # not bundle credentials with the response; a downstream extension
+    # may override this function and re-register the ``launch``
+    # response encoder to return a 3-tuple when the flag is set.
+    # Without such an override, the client decodes the legacy 2-key
+    # response shape and falls back to the ``/status`` SSH-config path.
+    del _include_credentials
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
