@@ -37,9 +37,9 @@ Create a directory from anywhere on your machine:
 
       resources:
         # Optional; if left out, automatically pick the cheapest cloud.
-        infra: aws
-        # 8x NVIDIA A100 GPU
-        accelerators: A100:8
+        infra: kubernetes/coreweave
+        # 8x NVIDIA B300 GPU
+        accelerators: B300:8
 
       # Working directory (optional) containing the project codebase.
       # Its contents are synced to ~/sky_workdir/ on the cluster.
@@ -74,8 +74,8 @@ Create a directory from anywhere on your machine:
 
       # Define a resource object.
       #   infra: (Optional) if left out, automatically pick cheapest available.
-      #   accelerators: 8x NVIDIA A100 GPU
-      resource = sky.Resources(infra='aws', accelerators='A100:8')
+      #   accelerators: 8x NVIDIA B300 GPU
+      resource = sky.Resources(infra='kubernetes/coreweave', accelerators='B300:8')
 
       # Define a task object.
       #   setup: Typical use: pip install -r requirements.txt
@@ -198,7 +198,7 @@ Instead of launching a new cluster every time, we can execute tasks on an existi
       .. code-block:: console
 
         $ sky exec mycluster python train_cpu.py
-        $ sky exec mycluster --gpus=A100:8 python train_gpu.py
+        $ sky exec mycluster --gpus=B300:8 python train_gpu.py
 
       For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -247,7 +247,7 @@ This may show multiple clusters, if you have created several:
 
   NAME       INFRA                RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
   mygcp      GCP (us-central1-a)  1x(cpus=4, mem=16, n2-standard-4, ...)      STOPPED  -         1 day ago
-  mycluster  AWS (us-east-1)      1x(gpus=A100:8, p4d.24xlarge, ...)          UP       -         4 mins ago
+  mycluster  Kubernetes (coreweave)  1x(gpus=B300:8, ...)                     UP       -         4 mins ago
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
