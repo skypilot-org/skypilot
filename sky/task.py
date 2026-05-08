@@ -915,8 +915,10 @@ class Task:
         # Restore None semantics if the override block was hooks-only.
         cluster_config_override = config_override or None
 
-        # Parse resources field.
-        resources_config = config.pop('resources', {})
+        # Parse resources field. Coerce `resources: null` / `resources:`
+        # (empty value) to {} so the hook-routing pop() below doesn't
+        # AttributeError.
+        resources_config = config.pop('resources', None) or {}
         # Backward-compat: `resources.hooks:` (PR1 form) still parses,
         # with a stderr deprecation warning that points users at
         # `config.hooks:`.
