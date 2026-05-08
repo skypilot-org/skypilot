@@ -397,7 +397,7 @@ Scaling out
 =========================
 
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
-When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
+When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**.
 
 .. tab-set::
 
@@ -409,7 +409,7 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
     .. code-block:: console
 
       $ for i in $(seq 100) # launch 100 jobs
-          do sky jobs launch --use-spot --detach-run --async --yes -n hello-$i hello_sky.yaml
+          do sky jobs launch --detach-run --async --yes -n hello-$i hello_sky.yaml
         done
 
   .. tab-item:: Python
