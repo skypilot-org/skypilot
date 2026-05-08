@@ -290,6 +290,7 @@ Follow updates:
    Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop
+   ../reference/lifecycle-hooks
 
 .. toctree::
    :hidden:
