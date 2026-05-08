@@ -1579,7 +1579,7 @@ def stream_logs_by_id(
                 assert cluster_name is not None, (job_id, task_id)
                 if managed_job_runtime.is_registered():
                     runtime_result = managed_job_runtime.get_job_status(
-                        handle, cluster_name)
+                        handle, cluster_name, returncode=returncode)
                     if runtime_result is not None:
                         job_status, _ = runtime_result
                 if job_status is None:

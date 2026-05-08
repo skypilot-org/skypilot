@@ -39,6 +39,7 @@ class ManagedJobRuntime(Protocol):
         self,
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         cluster_name: str,
+        returncode: Optional[int] = None,
     ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
         """Query job status from the underlying runtime."""
         ...
@@ -161,10 +162,11 @@ def is_registered() -> bool:
 def get_job_status(
     handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
     cluster_name: str,
+    returncode: Optional[int] = None,
 ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
     if _current is None:
         return None
-    return _current.get_job_status(handle, cluster_name)
+    return _current.get_job_status(handle, cluster_name, returncode=returncode)
 
 
 def get_job_submitted_at(
