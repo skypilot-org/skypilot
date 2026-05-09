@@ -177,9 +177,9 @@ Autopilot. Set this in your config:
 
 - **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
   storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``,
-  which Autopilot rejects. Use the
-  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
-  directly instead.
+  which Autopilot rejects. Instead, mount a GCS bucket through a :ref:`SkyPilot volume
+  <volumes-all>` backed by the
+  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_.
 - **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
   BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
 - **``k8s-hostpath`` volume type.**
