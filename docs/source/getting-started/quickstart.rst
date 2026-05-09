@@ -38,8 +38,8 @@ Create a directory from anywhere on your machine:
       resources:
         # Optional; if left out, automatically pick the cheapest cloud.
         infra: k8s/coreweave  # Or k8s/my-neocloud; aws; gcp; ...
-        # 8x NVIDIA B300 GPU
-        accelerators: B300:8
+        # 8x NVIDIA B200 GPU
+        accelerators: B200:8
 
       # Working directory (optional) containing the project codebase.
       # Its contents are synced to ~/sky_workdir/ on the cluster.
@@ -74,8 +74,8 @@ Create a directory from anywhere on your machine:
 
       # Define a resource object.
       #   infra: (Optional) if left out, automatically pick cheapest available.
-      #   accelerators: 8x NVIDIA B300 GPU
-      resource = sky.Resources(infra='k8s/coreweave', accelerators='B300:8')  # Or 'k8s/my-neocloud', 'aws', 'gcp', ...
+      #   accelerators: 8x NVIDIA B200 GPU
+      resource = sky.Resources(infra='k8s/coreweave', accelerators='B200:8')  # Or 'k8s/my-neocloud', 'aws', 'gcp', ...
 
       # Define a task object.
       #   setup: Typical use: pip install -r requirements.txt
@@ -198,7 +198,7 @@ Instead of launching a new cluster every time, we can execute tasks on an existi
       .. code-block:: console
 
         $ sky exec mycluster python train_cpu.py
-        $ sky exec mycluster --gpus=B300:8 python train_gpu.py
+        $ sky exec mycluster --gpus=B200:8 python train_gpu.py
 
       For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -247,7 +247,7 @@ This may show multiple clusters, if you have created several:
 
   NAME       INFRA                   RESOURCES                                 STATUS   AUTOSTOP  LAUNCHED
   mygcp      GCP (us-central1-a)     1x(cpus=4, mem=16, n2-standard-4, ...)    STOPPED  -         1 day ago
-  mycluster  Kubernetes (coreweave)  1x(gpus=B300:8, ...)                      UP       -         4 mins ago
+  mycluster  Kubernetes (coreweave)  1x(gpus=B200:8, ...)                      UP       -         4 mins ago
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 

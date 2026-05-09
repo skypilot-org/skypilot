@@ -224,8 +224,8 @@ Example configuration:
       H200:8
       B200:8
 
-Robust checkpoint for hardware failures and preemption
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Robust checkpointing for hardware failures and preemption
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Robust checkpointing is crucial for recovering from hardware failures (GPU errors, node crashes, etc.) and spot preemptions. Your job should follow two key principles:
 
