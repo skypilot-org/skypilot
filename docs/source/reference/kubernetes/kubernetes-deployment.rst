@@ -164,10 +164,7 @@ Deploying on Google Cloud GKE
 Using SkyPilot on GKE Autopilot
 """""""""""""""""""""""""""""""
 
-GKE Autopilot is supported with the limitations below. We recommend GKE Standard for
-production; use Autopilot only if you accept these caveats.
-
-Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
+GKE Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
 Autopilot. Set this in your config:
 
 .. code-block:: yaml
@@ -176,27 +173,19 @@ Autopilot. Set this in your config:
       autoscaler: gke
       provision_timeout: 600
 
-**Supported:**
-
-- ``sky launch`` for CPU and GPU jobs. SkyPilot's nodeSelector matches Autopilot's
-  ``cloud.google.com/gke-accelerator`` label, and Autopilot installs NVIDIA drivers
-  automatically. Initial GPU node provisioning takes ~3–5 minutes via Autopilot's
-  Node Auto-Provisioning.
-- ``LoadBalancer`` services for exposing ports.
-
-**Not supported** (blocked by Autopilot's GKE Warden policy):
+**Limitations:**
 
 - **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
-  storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``. Use
-  the `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
+  storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``,
+  which Autopilot rejects. Use the
+  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
   directly instead.
 - **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
   BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
 - **``k8s-hostpath`` volume type.**
-
-**Pod preemption.** Autopilot may evict pods to consolidate workloads. For long-running
-work, use :code:`sky jobs launch` instead of :code:`sky launch` so SkyPilot's managed
-jobs automatically recover from preemption.
+- **Pod preemption.** Autopilot may evict pods to consolidate workloads. For
+  long-running work, use :code:`sky jobs launch` so SkyPilot's managed jobs
+  automatically recover from preemption.
 
 .. _kubernetes-setup-eks:
 
