@@ -7,36 +7,6 @@ SkyPilot provides an official skill that teaches AI agents (Claude Code,
 Codex, etc.) how to use SkyPilot. With it installed, your agent can launch
 clusters, run jobs, serve models, and manage cloud resources effectively.
 
-See `SKILL.md <https://github.com/skypilot-org/skypilot/blob/master/agent/skills/skypilot/SKILL.md>`__.
-
-What you can do
----------------
-
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Capability
-     - Example
-   * - Interactive dev environment
-     - "Launch a cluster with H100 GPU, connect my VS Code to it, and set it to auto-stop after 30 min idle."
-   * - Launch dev clusters
-     - "Launch a cluster with 4 A100 GPUs. Install PyTorch and auto-stop it after 30 min idle."
-   * - Fine-tune models
-     - "Fine-tune Llama 3.1 8B on my dataset at s3://my-data/train.jsonl. Use spot instances and recover from preemptions."
-   * - Distributed training
-     - "Run PyTorch DDP training across 4 nodes with 8 H100s each."
-   * - Hyperparameter sweep
-     - "Sweep learning rates [1e-4, 1e-5, 1e-6] in parallel across whatever clouds have availability."
-   * - Serve models
-     - "Deploy Llama 3.1 70B with vLLM. Autoscale from 1 to 3 replicas based on QPS."
-   * - Multi-cloud failover
-     - "Submit training jobs that try our Slurm cluster first and fall back to AWS if it's full."
-   * - Compare GPU pricing
-     - "What's the cheapest 8x H200 across AWS, GCP, Lambda, and CoreWeave?"
-   * - Debug skypilot usage
-     - "My task.yaml gets 'resources not available' errors. Help me debug and fix it."
-
 Installation
 ------------
 
@@ -75,3 +45,53 @@ Installation
   The agent will install the SkyPilot CLI and guide you to set up cloud credentials
   when it decides to use SkyPilot to do something. You can also ask it to do this immediately
   by telling it "Bootstrap SkyPilot".
+
+End-to-end recipes
+------------------
+
+The SkyPilot skill lets the agent fan out hundreds of jobs across available GPUs, recover from preemptions, and auto-clean up resources.
+
+.. grid:: 1 1 2 2
+    :gutter: 2
+
+    .. grid-item-card::  🧪 Parallel Autoresearch
+        :link: /examples/agents/autoresearch
+        :link-type: doc
+
+        An agent ran ~910 experiments across 16 GPUs in 8 hours and improved validation loss by 2.87%.
+
+    .. grid-item-card::  ⚡ Autonomous Code Optimization
+        :link: /examples/agents/autonomous-code-optimization
+        :link-type: doc
+
+        Reading literature before coding let the agent find kernel-fusion wins in llama.cpp — 15% faster CPU generation.
+
+What you can do
+---------------
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Capability
+     - Example
+   * - Interactive dev environment
+     - "Launch a cluster with H100 GPU, connect my VS Code to it, and set it to auto-stop after 30 min idle."
+   * - Launch dev clusters
+     - "Launch a cluster with 4 A100 GPUs. Install PyTorch and auto-stop it after 30 min idle."
+   * - Fine-tune models
+     - "Fine-tune Llama 3.1 8B on my dataset at s3://my-data/train.jsonl. Use spot instances and recover from preemptions."
+   * - Distributed training
+     - "Run PyTorch DDP training across 4 nodes with 8 H100s each."
+   * - Hyperparameter sweep
+     - "Sweep learning rates [1e-4, 1e-5, 1e-6] in parallel across whatever clouds have availability."
+   * - Serve models
+     - "Deploy Llama 3.1 70B with vLLM. Autoscale from 1 to 3 replicas based on QPS."
+   * - Multi-cloud failover
+     - "Submit training jobs that try our Slurm cluster first and fall back to AWS if it's full."
+   * - Compare GPU pricing
+     - "What's the cheapest 8x H200 across AWS, GCP, Lambda, and CoreWeave?"
+   * - Debug skypilot usage
+     - "My task.yaml gets 'resources not available' errors. Help me debug and fix it."
+
+For details on what the skill teaches the agent, see `SKILL.md <https://github.com/skypilot-org/skypilot/blob/master/agent/skills/skypilot/SKILL.md>`__.

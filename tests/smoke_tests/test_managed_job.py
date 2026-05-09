@@ -576,25 +576,16 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    user_hash = common_utils.get_user_hash()
-    # Use a short stable prefix plus user_hash anchor. When the user
-    # hash is long (e.g., 19 chars for service accounts),
-    # make_cluster_name_on_cloud truncates the display name to fit
-    # within K8s's 42-char limit, so name_on_cloud is no longer a
-    # prefix of the actual pod name.
     stable_prefix = name_on_cloud[:15]
-    # Exclude the cloud-cmd helper cluster: its head/worker pods share the
-    # same {stable_prefix} and {user_hash} suffix, so without this filter
-    # `kubectl delete` would also kill the pod running this very command,
-    # producing exit code 137 and a spurious test failure.
-    terminate_head_cmd = (
-        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
-        f'grep -- "{user_hash}-head" | xargs kubectl delete pod')
+    # Use label selector to narrow to skypilot pods, then sort by name
+    # and pick first/last to identify head vs non-head node.
+    _get_job_pods = (
+        f'kubectl get pods -l skypilot-cluster-name '
+        f'--no-headers -o custom-columns=":metadata.name" | '
+        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | sort')
+    terminate_head_cmd = f'{_get_job_pods} | head -1 | xargs kubectl delete pod'
     terminate_worker_cmd = (
-        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
-        f'grep -- "{user_hash}-worker" | xargs kubectl delete pod')
+        f'{_get_job_pods} | tail -1 | xargs kubectl delete pod')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [
@@ -617,7 +608,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
                 # check, but should be significantly shorter than the timeout of
                 # a transient error retries, as the controller should discover
                 # the cluster termination immediately.
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -630,7 +622,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.RECOVERING],
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,

@@ -12,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import dotenv
 import filelock
@@ -33,6 +33,7 @@ from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
 from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -130,6 +131,22 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
 
     # Set the new resources back to the task
     task.set_resources(new_resources_list)
+
+
+def _build_task_specs(
+    executor: 'recovery_strategy.StrategyExecutor',) -> Dict[str, Any]:
+    """Merge base and strategy-specific task specs with collision detection."""
+    base_specs: Dict[str, Any] = {
+        'max_restarts_on_errors': executor.max_restarts_on_errors,
+        'recover_on_exit_codes': executor.recover_on_exit_codes,
+    }
+    strategy_specs = executor.task_specs()
+    overlap = set(base_specs) & set(strategy_specs)
+    if overlap:
+        raise ValueError(f'Strategy task_specs() conflicts with base spec '
+                         f'keys: {overlap}')
+    base_specs.update(strategy_specs)
+    return base_specs
 
 
 class JobController:
@@ -267,12 +284,18 @@ class JobController:
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
-        log_file = controller_utils.download_and_stream_job_log(
-            self._backend,
-            handle,
-            managed_job_logs_dir,
-            job_ids=[str(job_id_on_pool_cluster)]
-            if job_id_on_pool_cluster is not None else None)
+
+        log_file = None
+        if managed_job_runtime.is_registered():
+            log_file = managed_job_runtime.download_logs(
+                handle, self._job_id, task_id)
+        if log_file is None:
+            log_file = controller_utils.download_and_stream_job_log(
+                self._backend,
+                handle,
+                managed_job_logs_dir,
+                job_ids=[str(job_id_on_pool_cluster)]
+                if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
@@ -289,6 +312,10 @@ class JobController:
         if cluster_name is None:
             return
         if self._pool is None:
+            tmp_handle = await asyncio.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            if tmp_handle is not None and managed_job_runtime.is_registered():
+                await asyncio.to_thread(managed_job_runtime.cleanup, tmp_handle)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 
@@ -305,6 +332,10 @@ class JobController:
         Returns:
             List of exit codes, or None if not available.
         """
+        if managed_job_runtime.is_registered():
+            exit_codes = managed_job_runtime.get_exit_codes(handle)
+            if exit_codes is not None:
+                return exit_codes
         try:
             # Try gRPC first if enabled
             if handle.is_grpc_enabled_with_flag:
@@ -468,12 +499,7 @@ class JobController:
                 self._backend.run_timestamp,
                 submitted_at,
                 resources_str=resources_str,
-                specs={
-                    'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors,
-                    'recover_on_exit_codes':
-                        self._strategy_executor.recover_on_exit_codes
-                },
+                specs=_build_task_specs(self._strategy_executor),
                 callback_func=callback_func,
                 full_resources_json=full_resources_json)
             logger.info(f'Submitted managed job {self._job_id} '
@@ -567,7 +593,24 @@ class JobController:
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 force_transit_to_recovering = True
 
+            await self._strategy_executor.on_resume(cluster_name)
+
         logger.info('Started monitoring.')
+        # TODO(kevin): If StrategyExecutor grew pluggable detection methods
+        # (check_status, get_recovery_targets), this two-path dispatch could
+        # become a single generic monitor loop on the controller. See the
+        # TODO on StrategyExecutor.monitor_task().
+        result = await self._strategy_executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=job_id_on_pool_cluster,
+            callback_func=callback_func,
+            cleanup_cluster_on_success=True,
+            force_transit_to_recovering=force_transit_to_recovering,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,
@@ -1130,10 +1173,19 @@ class JobController:
         # - If we block in setup, it times out before Phase 3 can run
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
-        if wait_script:
-            # Prepend wait script to task run
+        # When non-empty, this prelude is prepended to the task's run
+        # section to start the JobGroup DNS updater from there. Phase 3
+        # below does the same delivery via SSH for tasks not covered here.
+        inline_networking_setup_script = (
+            job_group_networking.generate_inline_networking_setup_script(
+                job_group_name, self._dag.tasks, self._job_id))
+        run_prefixes = [
+            script for script in (inline_networking_setup_script, wait_script)
+            if script
+        ]
+        if run_prefixes:
             current_run = task.run or ''
-            task.run = wait_script + '\n\n' + current_run
+            task.run = '\n\n'.join(run_prefixes + [current_run])
 
         # JobGroups don't support pools, so cluster name is always deterministic
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
@@ -1162,10 +1214,7 @@ class JobController:
             self._backend.run_timestamp,
             time.time(),
             resources_str=resources_str,
-            specs={
-                'max_restarts_on_errors': executor.max_restarts_on_errors,
-                'recover_on_exit_codes': executor.recover_on_exit_codes
-            },
+            specs=_build_task_specs(executor),
             callback_func=callback_func)
 
         return cluster_name, executor
@@ -1200,7 +1249,12 @@ class JobController:
         """
 
         async def on_recovery() -> None:
-            """Re-setup networking after recovery (new node may have new IP)."""
+            """Re-setup networking after recovery (new node may have new IP).
+
+            Unlike Phase 3, we do NOT skip tasks that inline the DNS
+            mapping — a recovered peer may have a new IP, so every
+            task's /etc/hosts needs refreshing.
+            """
             updated_handles = []
             for t, _ in all_tasks_handles:
                 t_name = t.name
@@ -1246,10 +1300,17 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
+        runtime_envs: Dict[str, str] = {}
+        if managed_job_runtime.is_registered():
+            extra_envs = await asyncio.to_thread(
+                managed_job_runtime.job_group_envs, tasks, self._job_id)
+            if extra_envs:
+                runtime_envs = extra_envs
         for task in tasks:
             task_envs = task.envs or {}
             task_envs[jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR] = (
                 job_group_name)
+            task_envs.update(runtime_envs)
             task.update_envs(task_envs)
 
         # Collect task statuses and determine which tasks need launch vs resume.
@@ -1423,13 +1484,19 @@ class JobController:
 
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
-        # Build list of (task, handle) for non-terminal tasks with valid handles
+        # Build list of (task, handle) for non-terminal tasks with valid
+        # handles. Skip tasks that inline the DNS mapping — they already
+        # start the DNS updater from task.run.
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
             task_handle = handles[tid]
-            if task_handle is not None:
-                tasks_handles.append((task, task_handle))
+            if task_handle is None:
+                continue
+            if (job_group_networking.dns_addresses_for_task(task, self._job_id)
+                    is not None):
+                continue
+            tasks_handles.append((task, task_handle))
 
         if tasks_handles:
             networking_success = await (

@@ -4,6 +4,9 @@
 Using Reservations
 ===================================
 
+.. tip::
+
+   For long-term reservations, we recommend using a managed Kubernetes cluster from your GPU vendor (e.g., AWS EKS, GCP GKE, CoreWeave managed Kubernetes, or Nebius managed Kubernetes) and running SkyPilot on top of it. See :ref:`Using Kubernetes <kubernetes-overview>` for details.
 
 With the recent GPU shortage, reservations from cloud providers have become a common way to ensure GPU availability for a specific duration. These reservations can be short-term (e.g., 1-30 days) capacity guarantees, or long-term (e.g., 1-3 years) contracts.
 

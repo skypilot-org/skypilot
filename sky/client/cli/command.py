@@ -742,6 +742,13 @@ def _check_yaml_only(
                                       'Please check syntax.\n'
                                       f'{detailed_error}')
                 is_yaml = False
+            except UnicodeDecodeError as e:
+                if yaml_file_provided:
+                    logger.debug(e)
+                    invalid_reason = (
+                        'is not a valid UTF-8 text file and cannot be '
+                        'parsed as YAML.')
+                is_yaml = False
 
     except OSError:
         if yaml_file_provided:
@@ -5570,6 +5577,9 @@ def jobs_launch(
     """
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify --num-jobs without --pool.')
+    if num_jobs is not None and num_jobs < 1:
+        raise click.UsageError(
+            f'--num-jobs must be a positive integer. Got: {num_jobs}.')
 
     if cluster is not None:
         if name is not None and name != cluster:

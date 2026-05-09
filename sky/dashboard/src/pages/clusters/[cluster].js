@@ -102,12 +102,24 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
+        // The URL parameter may be either a cluster hash (when navigated
+        // from the historical clusters list) or a cluster name (when the
+        // user opened the active cluster page and the cluster was later
+        // torn down via `sky down`). Send both filters; the server returns
+        // rows matching either, which resolves the cluster in a single
+        // round trip without fetching the entire history (which can
+        // contain tens of thousands of rows).
         const historyData = await dashboardCache.get(getClusterHistory, [
           cluster,
+          30,
+          cluster,
         ]);
-        const foundHistoryCluster = historyData.find(
-          (c) => c.cluster_hash === cluster || c.cluster === cluster
-        );
+        // Prefer an exact hash match; otherwise fall back to a name match.
+        // A reused cluster name can produce multiple history rows, in which
+        // case the most recent (server-ordered by launched_at desc) wins.
+        const foundHistoryCluster =
+          historyData.find((c) => c.cluster_hash === cluster) ||
+          historyData.find((c) => c.cluster === cluster);
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);

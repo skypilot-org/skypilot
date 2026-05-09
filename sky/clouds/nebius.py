@@ -1,6 +1,8 @@
 """ Nebius Cloud. """
+import hashlib
 import json
 import os
+import tempfile
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -50,13 +52,44 @@ def nebius_profile_in_aws_cred_and_config() -> bool:
             nebius_profile_exists_in_config)
 
 
+def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
+    """Materialize effective Nebius config into a stable, uploadable file.
+
+    The path is deterministic from ``value`` so repeated calls return the same
+    path. ``Cloud.get_credential_file_mounts()`` runs on every launch for every
+    enabled cloud (see ``sky/check.py::get_cloud_credential_file_mounts``), and
+    its return value feeds the file-mounts hash that SkyPilot uses to dedupe
+    rsync uploads to controllers and to decide whether ``sky launch --fast``
+    may skip re-setup. A fresh ``NamedTemporaryFile`` per call would change
+    that hash on every launch, busting the cache and breaking ``--fast`` for
+    every enabled-cloud combo where Nebius is configured -- including launches
+    on other clouds (AWS, etc).
+
+    The path is also namespaced by UID so that two users on a host with a
+    shared ``tempfile.gettempdir()`` (e.g. ``/tmp`` on Linux) cannot collide
+    when they happen to share the same content -- one user's restrictive
+    umask would otherwise lock the other user out.
+    """
+    uid = os.getuid() if hasattr(os, 'getuid') else 'default'
+    digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
+    path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
+    expected = value + '\n'
+    try:
+        with open(path, 'r', encoding='utf-8') as existing:
+            if existing.read() == expected:
+                return path
+    except OSError:
+        pass
+    with open(path, 'w', encoding='utf-8') as new_file:
+        new_file.write(expected)
+    return path
+
+
 @registry.CLOUD_REGISTRY.register
 class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTODOWN:
-            ('Autodown not supported. Can\'t delete OS disk.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
@@ -481,10 +514,21 @@ class Nebius(clouds.Cloud):
         return (False, hints) if hints else (True, hints)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        credential_file_mounts = {
-            filepath: filepath
-            for filepath in nebius.get_credential_file_paths()
-        }
+        credential_file_mounts = {}
+        tenant_id_path = nebius.tenant_id_path()
+        tenant_id = nebius.get_tenant_id()
+        if tenant_id is not None:
+            # NOTE: We can't guarantee that the file will be deleted eventually,
+            # but it doesn't contain sensitive information and should be cleaned
+            # up by the OS eventually.
+            credential_file_mounts[tenant_id_path] = (
+                _write_nebius_temp_credential_file('nebius-tenant-id-',
+                                                   tenant_id))
+
+        for filepath in nebius.get_credential_file_paths():
+            if filepath == tenant_id_path:
+                continue
+            credential_file_mounts[filepath] = filepath
         if nebius_profile_in_aws_cred_and_config():
             credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
             credential_file_mounts['~/.aws/config'] = '~/.aws/config'

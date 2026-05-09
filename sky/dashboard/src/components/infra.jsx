@@ -41,7 +41,11 @@ import {
   getSlurmInfrastructure,
 } from '@/data/connectors/infra';
 import { CLOUDS_LIST } from '@/data/connectors/constants';
-import { runSkyCheck, getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  runSkyCheck,
+  getWorkspaces,
+  getEnabledCloudsBatch,
+} from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
@@ -71,6 +75,12 @@ import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import { PluginSlot } from '@/plugins/PluginSlot';
+import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
+import {
+  useAllDataProviders,
+  usePluginComponents,
+} from '@/plugins/PluginProvider';
 import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
@@ -183,6 +193,7 @@ export function InfrastructureSection({
   gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
+  statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -299,6 +310,7 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         GPUs
                       </th>
+                      <th className="p-3 text-right font-medium text-gray-600 w-12" />
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -363,6 +375,10 @@ export function InfrastructureSection({
                         ? context.replace(/^ssh-/, '')
                         : context;
 
+                      // Stable id/kind for both row PluginSlots below.
+                      const rowId = displayName;
+                      const rowKind = isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s';
+
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
@@ -381,6 +397,16 @@ export function InfrastructureSection({
                         >
                           <td className="p-3">
                             <div className="flex items-center gap-1.5">
+                              <PluginSlot
+                                name="infra.row.namePrefix"
+                                context={{
+                                  id: rowId,
+                                  kind: rowKind,
+                                  status: statusByKey?.get(
+                                    `${rowKind}:${rowId}`
+                                  ),
+                                }}
+                              />
                               <NonCapitalizedTooltip
                                 content={`${displayName}${workspaceDisplay}`}
                                 className="text-sm text-muted-foreground"
@@ -399,7 +425,11 @@ export function InfrastructureSection({
                                   )}
                                 </span>
                               </NonCapitalizedTooltip>
-                              {contextErrors[context] && (
+                              {contextErrors[context] && !statusByKey && (
+                                // Hidden when a plugin is contributing status data
+                                // via the infra.row.namePrefix slot — the plugin's
+                                // status dot + per-context detail page cover this
+                                // information already.
                                 <NonCapitalizedTooltip
                                   content={`Context unreachable: ${contextErrors[context]}`}
                                   className="text-sm text-muted-foreground"
@@ -475,6 +505,12 @@ export function InfrastructureSection({
                                 {totalGpus}
                               </span>
                             )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <PluginSlot
+                              name="infra.row.actions"
+                              context={{ id: rowId, kind: rowKind }}
+                            />
                           </td>
                         </tr>
                       );
@@ -707,6 +743,14 @@ export function ContextDetails({
 
   return (
     <div className="mb-4">
+      {/* infra.contextDetail.headerActions used to render here, but the
+          actions look right next to the page heading rather than above
+          the panels. The slot is now rendered alongside the h1 in the
+          GPUs component's return. */}
+      <PluginSlot
+        name="infra.contextDetail.statusPanel"
+        context={{ contextName, isSlurm }}
+      />
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -1468,6 +1512,7 @@ function SSHNodePoolDetails({
 
   return (
     <div>
+      <PluginSlot name="infra.sshDetail.statusPanel" context={{ poolName }} />
       {/* SSH Node Pool Info Card */}
       <div className="mb-6">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -1895,6 +1940,55 @@ function InfrastructureHint() {
 }
 
 export function GPUs() {
+  // Plugin-contributed extra rows + status data.
+  //
+  // OSS does not know any plugin id; we discover providers by hook name.
+  // Each provider's `useExtraInfraRows` hook is called inside its own
+  // child component (`ProviderInfraRowsLoader`, defined below GPUs)
+  // rather than directly in GPUs, so adding/removing data providers does
+  // NOT change the count of hooks called per GPUs render — that would
+  // be a Rules-of-Hooks violation.
+  const allDataProviders = useAllDataProviders();
+  const extraInfraProviders = React.useMemo(
+    () => allDataProviders.filter((p) => p.hooks?.useExtraInfraRows),
+    [allDataProviders]
+  );
+  const [extraInfraResultsById, setExtraInfraResultsById] = useState({});
+  const recordExtraInfraResult = React.useCallback((id, result) => {
+    setExtraInfraResultsById((prev) => {
+      if (prev[id] === result) return prev;
+      return { ...prev, [id]: result };
+    });
+  }, []);
+  const hasInfraExtension = extraInfraProviders.length > 0;
+  const extraInfraResults = React.useMemo(
+    () => Object.values(extraInfraResultsById),
+    [extraInfraResultsById]
+  );
+  const extraInfraRows = React.useMemo(
+    () => extraInfraResults.flatMap((r) => r?.rows ?? []),
+    [extraInfraResults]
+  );
+  const extraStatusByKey = React.useMemo(() => {
+    const m = new Map();
+    for (const r of extraInfraResults) {
+      if (!r?.statusByKey) continue;
+      for (const [k, v] of r.statusByKey) m.set(k, v);
+    }
+    return m;
+  }, [extraInfraResults]);
+  const pluginInfraLoading =
+    hasInfraExtension &&
+    (extraInfraResults.length < extraInfraProviders.length ||
+      extraInfraResults.some((r) => r?.loading));
+  const refreshExtraInfra = React.useCallback(
+    () =>
+      Promise.all(
+        extraInfraResults.map((r) => r?.refresh?.(true)).filter(Boolean)
+      ),
+    [extraInfraResults]
+  );
+
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
   const [cloudLoading, setCloudLoading] = useState(true);
@@ -2466,7 +2560,12 @@ export function GPUs() {
     };
   }, []);
 
-  const handleRefresh = async () => {
+  // Memoized so the keyboard-shortcut and `skydashboard:infra:refresh`
+  // listeners below close over a fresh refreshExtraInfra each render.
+  // Without this, the listeners capture the first-render handleRefresh
+  // (which closes over an empty extraInfraResults) and never see the
+  // plugin-contributed results that resolve after first paint.
+  const handleRefresh = React.useCallback(async () => {
     trackInfraAction('refresh');
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
@@ -2476,6 +2575,12 @@ export function GPUs() {
     dashboardCache.invalidate(getWorkspaceContexts);
     dashboardCache.invalidate(getWorkspaceInfrastructure); // Keep for backwards compatibility
     dashboardCache.invalidate(getEnabledCloudsList);
+    // `getWorkspaceContexts` reads `getEnabledCloudsBatch` internally
+    // through the cache; without this invalidation, re-running
+    // `getWorkspaceContexts` after Refresh sees a stale batch and
+    // reports outdated context lists. invalidateFunction clears every
+    // (workspaces, expand) variant in one call.
+    dashboardCache.invalidateFunction(getEnabledCloudsBatch);
     dashboardCache.invalidate(getCloudInfrastructure, [false]); // Keep for backwards compatibility
     dashboardCache.invalidate(getSSHNodePools);
     dashboardCache.invalidate(getSlurmInfrastructure);
@@ -2483,13 +2588,20 @@ export function GPUs() {
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
 
-    if (refreshDataRef.current) {
-      await refreshDataRef.current({
-        showLoadingIndicators: true,
-        forceRefresh: true, // Force refresh to run sky check
-      });
-    }
-  };
+    // Run OSS data refresh and plugin extras refresh in parallel so the
+    // status dots update as soon as the (much faster) plugin call returns
+    // — without this, dots stay frozen on stale data until the slower
+    // sky-check pass finishes.
+    await Promise.all([
+      refreshDataRef.current
+        ? refreshDataRef.current({
+            showLoadingIndicators: true,
+            forceRefresh: true, // Force refresh to run sky check
+          })
+        : Promise.resolve(),
+      refreshExtraInfra(),
+    ]);
+  }, [refreshExtraInfra]);
 
   // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to force refresh
   useEffect(() => {
@@ -2506,7 +2618,18 @@ export function GPUs() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [handleRefresh]);
+
+  // Listen for plugin-emitted refresh requests, e.g. when a plugin's
+  // "Add infra" / "Remove infra" flow finishes, so the host page picks up
+  // the new state without the user having to click Refresh manually.
+  useEffect(() => {
+    const onRefreshEvent = () => handleRefresh();
+    window.addEventListener('skydashboard:infra:refresh', onRefreshEvent);
+    return () => {
+      window.removeEventListener('skydashboard:infra:refresh', onRefreshEvent);
+    };
+  }, [handleRefresh]);
 
   // Calculate summary data
   const totalGpuTypes = (allGPUs || []).length;
@@ -2582,20 +2705,30 @@ export function GPUs() {
     }
   }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
-  // Filter cloud infrastructure data based on selected workspace
+  // Filter cloud infrastructure data based on selected workspace, then merge
+  // in any plugin-contributed cloud rows (e.g. misconfigured clouds that have
+  // credentials registered but didn't show up in workspace-enabled clouds).
   const filteredCloudInfraData = React.useMemo(() => {
-    if (!cloudInfraData || cloudInfraData.length === 0) {
-      return [];
-    }
-    // If workspaceEnabledClouds is null (Kubernetes still loading),
-    // show all enabled clouds without filtering by workspace
-    if (workspaceEnabledClouds === null) {
-      return cloudInfraData;
-    }
-    return cloudInfraData.filter((cloud) => {
-      return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
-    });
-  }, [cloudInfraData, workspaceEnabledClouds]);
+    const base = (() => {
+      if (!cloudInfraData || cloudInfraData.length === 0) return [];
+      if (workspaceEnabledClouds === null) return cloudInfraData;
+      return cloudInfraData.filter((cloud) =>
+        workspaceEnabledClouds.includes(cloud.name.toLowerCase())
+      );
+    })();
+    // Merge plugin-contributed cloud rows by id (case-insensitive).
+    const seen = new Set(base.map((c) => (c.id || c.name || '').toLowerCase()));
+    const extras = extraInfraRows
+      .filter((r) => r.kind === 'cloud')
+      .filter((r) => !seen.has((r.id || '').toLowerCase()))
+      .map((r) => ({
+        id: r.id,
+        name: r.name || r.id,
+        clusters: 0,
+        jobs: 0,
+      }));
+    return [...base, ...extras];
+  }, [cloudInfraData, workspaceEnabledClouds, extraInfraRows]);
 
   // Calculate enabled clouds count for the selected workspace
   const filteredEnabledCloudsCount = React.useMemo(() => {
@@ -2723,8 +2856,11 @@ export function GPUs() {
   // Check URL on component mount to set initial context
   useEffect(() => {
     if (router.isReady && router.query.context) {
+      // The dynamic route is a catch-all (`[...context].js`), so the
+      // segments come back as an array — rejoin them so context names
+      // containing slashes (e.g. EKS ARNs) survive a page refresh.
       const contextParam = Array.isArray(router.query.context)
-        ? router.query.context[0]
+        ? router.query.context.join('/')
         : router.query.context;
       setSelectedContext(decodeURIComponent(contextParam));
     }
@@ -2733,10 +2869,15 @@ export function GPUs() {
   // Handler for clicking on a context
   const handleContextClick = (context) => {
     trackInfraAction('view_context');
-    setSelectedContext(context);
-    // Use push instead of replace for proper browser history
+    // Don't setSelectedContext here — let the URL effect on the
+    // destination page set it. Setting it locally causes the source
+    // /infra page to render the context-detail view briefly (firing
+    // its data fetches and mounting any plugin slots) right before
+    // router.push unmounts it, which doubles every fetch on
+    // navigation and delays the user-visible status by the time the
+    // destination's mount fights for connection slots against OSS's
+    // own enabled_clouds calls.
     const targetPath = `/infra/${encodeURIComponent(context)}`;
-    // Only navigate if we're not already on the target path
     if (router.asPath !== targetPath) {
       router.push(targetPath);
     }
@@ -2764,15 +2905,6 @@ export function GPUs() {
     const nodesInContext = isSlurmCluster
       ? groupedPerNodeSlurmGPUs[contextName] || []
       : groupedPerNodeGPUs[contextName] || [];
-
-    if (kubeLoading && !kubeDataLoaded) {
-      return (
-        <div className="flex flex-col items-center justify-center h-64">
-          <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">Loading Context...</span>
-        </div>
-      );
-    }
 
     // Check if this is an SSH context
     const isSSHContext = contextName.startsWith('ssh-');
@@ -2805,6 +2937,12 @@ export function GPUs() {
     );
   };
 
+  // Cloud rows are only styled as clickable links when a plugin is wrapping
+  // them with the infra.cloudRow.link slot — pure OSS has no per-cloud
+  // detail page, so making them look clickable would be misleading.
+  const cloudRowIsClickable =
+    usePluginComponents('infra.cloudRow.link').length > 0;
+
   const renderCloudInfrastructure = () => {
     // Show panel-level loading spinner only during initial load when no cloud data at all
     // On subsequent loads, show the table structure with cell-level spinners instead
@@ -2836,11 +2974,22 @@ export function GPUs() {
             </span>
           </div>
           {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              {selectedWorkspace === 'all'
-                ? 'No enabled clouds available.'
-                : `No enabled clouds for workspace "${selectedWorkspace}".`}
-            </p>
+            (cloudLoading && !cloudDataLoaded) ||
+            (hasInfraExtension && pluginInfraLoading) ? (
+              // Don't show "No enabled clouds" while we're still waiting on
+              // either OSS's cloud fetch or a plugin-contributed data feed —
+              // either could still surface clouds before the table renders.
+              <div className="flex items-center py-2 text-sm text-gray-500">
+                <CircularProgress size={16} className="mr-2" />
+                Loading...
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">
+                {selectedWorkspace === 'all'
+                  ? 'No enabled clouds available.'
+                  : `No enabled clouds for workspace "${selectedWorkspace}".`}
+              </p>
+            )
           ) : (
             <div
               className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
@@ -2862,6 +3011,7 @@ export function GPUs() {
                     <th className="p-3 text-left font-medium text-gray-600 w-24">
                       Jobs
                     </th>
+                    <th className="p-3 text-right font-medium text-gray-600 w-12" />
                   </tr>
                 </thead>
                 <tbody className="bg-card divide-y divide-gray-200">
@@ -2871,11 +3021,36 @@ export function GPUs() {
                     const clusterCount =
                       cloudClusterCounts[cloud.name] ?? cloud.clusters;
                     const jobCount = cloudJobCounts[cloud.name] ?? cloud.jobs;
+                    const cloudId = (
+                      cloud.id ||
+                      cloud.name ||
+                      ''
+                    ).toLowerCase();
 
-                    return (
-                      <tr key={cloud.name} className="hover:bg-muted/50">
-                        <td className="p-3 font-medium text-gray-700">
-                          {cloud.name}
+                    const rowInner = (
+                      <>
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            <PluginSlot
+                              name="infra.row.namePrefix"
+                              context={{
+                                id: cloudId,
+                                kind: 'cloud',
+                                status: extraStatusByKey?.get(
+                                  `cloud:${cloudId}`
+                                ),
+                              }}
+                            />
+                            <span
+                              className={
+                                cloudRowIsClickable
+                                  ? 'text-blue-600 hover:underline cursor-pointer font-medium'
+                                  : 'font-medium text-gray-700'
+                              }
+                            >
+                              {cloud.name}
+                            </span>
+                          </div>
                         </td>
                         <td className="p-3">
                           {clusterDataLoading ? (
@@ -2895,7 +3070,25 @@ export function GPUs() {
                             </span>
                           )}
                         </td>
-                      </tr>
+                        <td className="p-3 text-right">
+                          <PluginSlot
+                            name="infra.row.actions"
+                            context={{ id: cloudId, kind: 'cloud' }}
+                          />
+                        </td>
+                      </>
+                    );
+
+                    // PluginWrapperSlot renders `children` when no plugin is
+                    // registered, so we don't need an explicit fallback.
+                    return (
+                      <PluginWrapperSlot
+                        key={cloud.name}
+                        name="infra.cloudRow.link"
+                        context={{ id: cloudId }}
+                      >
+                        <tr className="hover:bg-muted/50">{rowInner}</tr>
+                      </PluginWrapperSlot>
                     );
                   })}
                 </tbody>
@@ -2928,6 +3121,7 @@ export function GPUs() {
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2964,6 +3158,7 @@ export function GPUs() {
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
       />
     );
   };
@@ -2987,21 +3182,20 @@ export function GPUs() {
         isSlurm={true}
         contextWorkspaceMap={{}}
         isInitialLoad={isInitialLoad}
+        statusByKey={extraStatusByKey}
       />
     );
   };
 
   const renderKubernetesTab = () => {
-    // If a context is selected, show its details instead of the summary
+    // If a context is selected, show its details immediately. Don't gate
+    // on kubeLoading — the page-level fetch can take 5-10s on tenants
+    // with many contexts (some failing K8s API calls), and gating the
+    // entire detail view behind it makes plugin-contributed content
+    // (status panels, etc.) wait for OSS data they don't depend on.
+    // ContextDetails handles empty gpus/nodes arrays gracefully; OSS
+    // sub-sections render their own skeletons while data loads.
     if (selectedContext) {
-      if (kubeLoading && !kubeDataLoaded) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64">
-            <CircularProgress size={32} className="mb-4" />
-            <span className="text-gray-500 text-lg">Loading Context...</span>
-          </div>
-        );
-      }
       return renderContextDetails(selectedContext);
     }
 
@@ -3020,55 +3214,63 @@ export function GPUs() {
       });
     };
 
-    // If all infrastructure is disabled, add hint card at the top
+    // If all infrastructure is disabled, show ONLY the empty-state hint —
+    // hide the per-type cards (which would all be empty anyway). Plugins can
+    // replace the default OSS hint via the `infra.emptyState` slot (e.g. to
+    // show a richer "Connect your first infrastructure" CTA).
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
-        render: () => <InfrastructureHint />,
+        render: () => (
+          <PluginSlot
+            name="infra.emptyState"
+            fallback={<InfrastructureHint />}
+          />
+        ),
         hasActivity: false,
         priority: 0, // Highest priority, always show at the top
       });
+    } else {
+      // Add per-type sections (each handles its own loading/empty states).
+
+      // Add Kubernetes section (always show) - Priority 1 to show at top
+      // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
+      const kubeHasActivity = kubeContexts.length > 0;
+      sections.push({
+        name: 'Kubernetes',
+        render: renderKubernetesInfrastructure,
+        hasActivity: kubeHasActivity,
+        priority: 1, // Kubernetes gets priority 1 within same activity level
+      });
+
+      // Add Slurm section (always show)
+      const slurmHasActivity = slurmClusters.length > 0;
+      sections.push({
+        name: 'Slurm',
+        render: renderSlurmInfrastructure,
+        hasActivity: slurmHasActivity,
+        priority: 2, // Slurm gets priority 2 within same activity level
+      });
+
+      // Add Cloud section (always show)
+      // Cloud section is active if there are any enabled clouds
+      const cloudHasActivity = enabledClouds > 0;
+      sections.push({
+        name: 'Cloud',
+        render: renderCloudInfrastructure,
+        hasActivity: cloudHasActivity,
+        priority: 3, // Cloud gets priority 3 within same activity level
+      });
+
+      // Add SSH section (always show)
+      const sshHasActivity = sshContexts.length > 0;
+      sections.push({
+        name: 'SSH Node Pool',
+        render: renderSSHNodePoolInfrastructure,
+        hasActivity: sshHasActivity,
+        priority: 4, // SSH gets priority 4 within same activity level
+      });
     }
-
-    // Always add all sections (they handle their own loading/empty states)
-
-    // Add Kubernetes section (always show) - Priority 1 to show at top
-    // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
-    const kubeHasActivity = kubeContexts.length > 0;
-    sections.push({
-      name: 'Kubernetes',
-      render: renderKubernetesInfrastructure,
-      hasActivity: kubeHasActivity,
-      priority: 1, // Kubernetes gets priority 1 within same activity level
-    });
-
-    // Add Slurm section (always show)
-    const slurmHasActivity = slurmClusters.length > 0;
-    sections.push({
-      name: 'Slurm',
-      render: renderSlurmInfrastructure,
-      hasActivity: slurmHasActivity,
-      priority: 2, // Slurm gets priority 2 within same activity level
-    });
-
-    // Add Cloud section (always show)
-    // Cloud section is active if there are any enabled clouds
-    const cloudHasActivity = enabledClouds > 0;
-    sections.push({
-      name: 'Cloud',
-      render: renderCloudInfrastructure,
-      hasActivity: cloudHasActivity,
-      priority: 3, // Cloud gets priority 3 within same activity level
-    });
-
-    // Add SSH section (always show)
-    const sshHasActivity = sshContexts.length > 0;
-    sections.push({
-      name: 'SSH Node Pool',
-      render: renderSSHNodePoolInfrastructure,
-      hasActivity: sshHasActivity,
-      priority: 4, // SSH gets priority 4 within same activity level
-    });
 
     // Dynamic sorting: enabled/active sections move to front automatically
     // This re-sorts every render as data becomes available
@@ -3095,7 +3297,9 @@ export function GPUs() {
     allKubeContextNames.length > 0 &&
     loadedContexts.size < allKubeContextNames.length;
 
-  // Check if any data is currently loading (all panels and subcomponents)
+  // Check if any data is currently loading (all panels and subcomponents).
+  // Plugin-contributed rows count toward "any loading" so Refresh disables
+  // and the indicator stays visible until plugin data resolves too.
   const isAnyLoading =
     kubeLoading ||
     cloudLoading ||
@@ -3103,7 +3307,8 @@ export function GPUs() {
     sshAndKubeJobsDataLoading ||
     clusterDataLoading ||
     isKubeContextsLoading ||
-    isFetching;
+    isFetching ||
+    (hasInfraExtension && pluginInfraLoading);
 
   // Check if all data has been loaded at least once
   const isAllDataLoaded =
@@ -3120,96 +3325,126 @@ export function GPUs() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
+      {/* One loader component per registered data-provider that exposes
+          `useExtraInfraRows`. Each loader owns its own hook calls; the
+          plugin's hook count never affects GPUs's hook count. */}
+      {extraInfraProviders.map((p) => (
+        <ProviderInfraRowsLoader
+          key={p.id}
+          providerId={p.id}
+          useHook={p.hooks.useExtraInfraRows}
+          onResult={recordExtraInfraResult}
+        />
+      ))}
+      {selectedContext && (
+        // Detail-view header: small back button on its own line, then a
+        // larger h1 row below (rendered further down). This matches the
+        // dashboard's other detail pages and gives the leaf identifier
+        // proper visual weight.
+        <div className="mb-2">
           <Link
             href="/infra"
-            className={`text-sky-blue hover:underline ${selectedContext ? '' : 'cursor-default'}`}
+            className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 cursor-pointer"
           >
-            Infrastructure
+            ← Infrastructure
           </Link>
-          {selectedContext && (
-            <>
-              <span className="mx-2 text-gray-500">›</span>
-              {selectedContext.startsWith('ssh-') ? (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  SSH Node Pool
-                </Link>
-              ) : slurmClusters.includes(selectedContext) ? (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  Slurm
-                </Link>
-              ) : (
-                <Link
-                  href="/infra"
-                  className="text-sky-blue hover:underline cursor-pointer"
-                >
-                  Kubernetes
-                </Link>
-              )}
-              <span className="mx-2 text-gray-500">›</span>
-              <span className="text-sky-blue">
-                {selectedContext.startsWith('ssh-')
-                  ? selectedContext.replace(/^ssh-/, '')
-                  : selectedContext}
-              </span>
-            </>
-          )}
         </div>
-        <div className="flex items-center">
-          {/* Workspace Selector */}
-          {availableWorkspaces.length > 0 && (
-            <div className="flex items-center mr-4">
-              <label className="text-sm font-medium text-gray-700 mr-2">
-                Workspace:
-              </label>
-              <Select
-                value={selectedWorkspace}
-                onValueChange={setSelectedWorkspace}
-              >
-                <SelectTrigger className="w-40 h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Workspaces</SelectItem>
-                  {availableWorkspaces.map((workspace) => (
-                    <SelectItem key={workspace} value={workspace}>
-                      {workspace}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+      )}
+      {/* List-view top bar: title link + workspace selector + Refresh +
+          plugin header actions. Skipped entirely on a detail page —
+          the back link above already serves as the leaf navigation,
+          and the page-level Refresh / Add Infra controls don't apply
+          when viewing one infra. Hiding the whole row also closes the
+          ~36px gap (h-5 + mb-4) between the back link and the h1. */}
+      {!selectedContext && (
+        <div className="flex items-center justify-between mb-4 h-5">
+          <div className="text-base flex items-center">
+            <Link href="/infra" className="text-sky-blue cursor-default">
+              Infrastructure
+            </Link>
+          </div>
+          <div className="flex items-center">
+            {/* Workspace Selector */}
+            {availableWorkspaces.length > 0 && (
+              <div className="flex items-center mr-4">
+                <label className="text-sm font-medium text-gray-700 mr-2">
+                  Workspace:
+                </label>
+                <Select
+                  value={selectedWorkspace}
+                  onValueChange={setSelectedWorkspace}
+                >
+                  <SelectTrigger className="w-40 h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Workspaces</SelectItem>
+                    {availableWorkspaces.map((workspace) => (
+                      <SelectItem key={workspace} value={workspace}>
+                        {workspace}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-          {isAnyLoading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          {!isAnyLoading && lastFetchedTime && (
-            <LastUpdatedTimestamp
-              timestamp={lastFetchedTime}
-              className="mr-2"
-            />
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={isAnyLoading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && 'Refresh'}
-          </button>
+            {isAnyLoading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            {!isAnyLoading && lastFetchedTime && (
+              <LastUpdatedTimestamp
+                timestamp={lastFetchedTime}
+                className="mr-2"
+              />
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={isAnyLoading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && 'Refresh'}
+            </button>
+            <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
+          </div>
         </div>
-      </div>
+      )}
+
+      <PluginSlot name="infra.attentionBanner" />
+
+      {selectedContext && (
+        // Large h1 title + plugin-injected header actions (e.g. Remove)
+        // on a single row.
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <h1
+            className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${
+              selectedContext.startsWith('ssh-') ||
+              slurmClusters.includes(selectedContext)
+                ? ''
+                : 'font-mono'
+            }`}
+          >
+            {selectedContext.startsWith('ssh-')
+              ? selectedContext.replace(/^ssh-/, '')
+              : selectedContext}
+          </h1>
+          <PluginSlot
+            name="infra.contextDetail.headerActions"
+            context={{
+              contextName: selectedContext.startsWith('ssh-')
+                ? selectedContext.replace(/^ssh-/, '')
+                : selectedContext,
+              isSlurm: slurmClusters.includes(selectedContext),
+              isSsh: selectedContext.startsWith('ssh-'),
+            }}
+            wrapperClassName="flex items-center gap-2"
+          />
+        </div>
+      )}
 
       {/* Each section handles its own loading state */}
       {renderKubernetesTab()}
@@ -3224,6 +3459,24 @@ export function GPUs() {
       />
     </>
   );
+}
+
+// Renders nothing, but calls a plugin-provided custom hook in its own
+// component scope. This isolates the plugin's hook calls from the parent
+// page's render — so adding/removing data providers doesn't change the
+// number of hooks called per parent render (which would be a Rules-of-
+// Hooks violation). Used by GPUs to enumerate `useExtraInfraRows`
+// hooks contributed by plugin data providers.
+//
+// The effect MUST depend on `result` (not run on every render) — otherwise
+// any plugin hook that returns a fresh object literal each render will
+// re-fire onResult forever, the parent re-renders, and the page stalls.
+function ProviderInfraRowsLoader({ providerId, useHook, onResult }) {
+  const result = useHook();
+  React.useEffect(() => {
+    onResult(providerId, result);
+  }, [providerId, result, onResult]);
+  return null;
 }
 
 // Helper table component for cloud GPUs

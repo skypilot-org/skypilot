@@ -40,6 +40,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
@@ -352,6 +353,24 @@ async def get_job_status(
     # TODO(luca) make this async
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
+
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+
+    logger.info('=== Checking the job status... ===')
+
+    if managed_job_runtime.is_registered():
+        result = await asyncio.to_thread(managed_job_runtime.get_job_status,
+                                         handle, cluster_name)
+        if result is not None:
+            status, _ = result
+            _log_job_status(status)
+            return result
+
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
@@ -360,7 +379,6 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
@@ -368,11 +386,7 @@ async def get_job_status(
                               stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+        _log_job_status(status)
         return status, None
     except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
             ValueError, TypeError, asyncio.TimeoutError) as e:
@@ -718,6 +732,12 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
+    if managed_job_runtime.is_registered():
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        runtime_ended_at = managed_job_runtime.get_job_ended_at(
+            handle, cluster_name)
+        if runtime_ended_at is not None:
+            return runtime_ended_at
     try:
         return get_job_timestamp(backend,
                                  cluster_name,
@@ -1524,21 +1544,49 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-            tail_param = tail if tail is not None else 0
-            returncode = backend.tail_logs(handle,
-                                           job_id=job_id_to_tail,
-                                           managed_job_id=job_id,
-                                           follow=follow,
-                                           tail=tail_param,
-                                           tail_offset=tail_offset)
+            returncode = None
+            if managed_job_runtime.is_registered():
+                returncode = managed_job_runtime.tail_logs(
+                    handle,
+                    backend=backend,
+                    job_id=job_id,
+                    task_id=task_id,
+                    job_id_on_cluster=job_id_to_tail,
+                    follow=follow,
+                    tail=tail,
+                    tail_offset=tail_offset)
+            if returncode is None:
+                # OSS default: stream via backend.tail_logs (skylet/SSH/gRPC).
+                # require_outputs defaults to False, so the return is int
+                # (not Tuple[int, str, str]).
+                tail_param = tail if tail is not None else 0
+                returncode = typing.cast(
+                    int,
+                    backend.tail_logs(handle,
+                                      job_id=job_id_to_tail,
+                                      managed_job_id=job_id,
+                                      follow=follow,
+                                      tail=tail_param,
+                                      tail_offset=tail_offset))
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
                 # succeeded (even though the real job can be SUCCEEDED or
                 # FAILED). We use the status in job queue to show the
                 # information, as the ManagedJobStatus is not updated yet.
-                job_statuses = backend.get_job_status(handle, stream_logs=False)
-                job_status = list(job_statuses.values())[0]
+                job_status: Optional[job_lib.JobStatus] = None
+                # handle being non-None implies cluster_name was set.
+                assert cluster_name is not None, (job_id, task_id)
+                if managed_job_runtime.is_registered():
+                    runtime_result = managed_job_runtime.get_job_status(
+                        handle, cluster_name)
+                    if runtime_result is not None:
+                        job_status, _ = runtime_result
+                if job_status is None:
+                    # OSS default: query skylet via backend.
+                    job_statuses = backend.get_job_status(handle,
+                                                          stream_logs=False)
+                    job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 

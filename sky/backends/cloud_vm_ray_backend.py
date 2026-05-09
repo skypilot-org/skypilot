@@ -827,7 +827,10 @@ class RetryingVmProvisioner(object):
                  wheel_hash: str,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
-                 is_managed: Optional[bool] = None):
+                 is_managed: Optional[bool] = None,
+                 *,
+                 extra_launch_context: Dict[str, Any],
+                 is_launched_by_jobs_controller: bool = False):
         self._blocked_resources: Set[resources_lib.Resources] = set()
         if blocked_resources:
             # blocked_resources is not None and not empty.
@@ -840,6 +843,8 @@ class RetryingVmProvisioner(object):
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
         self._is_managed = is_managed
+        self._extra_launch_context: Dict[str, Any] = extra_launch_context
+        self._is_launched_by_jobs_controller = is_launched_by_jobs_controller
 
     def _yield_zones(
             self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -1016,6 +1021,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         volume_mounts: Optional[List[volume_lib.VolumeMount]],
+        task: task_lib.Task,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1116,13 +1122,32 @@ class RetryingVmProvisioner(object):
                 zone_str = ','.join(z.name for z in zones)
                 zone_str = f' ({zone_str})'
 
+            # Let the registered Provisioner (if any) override the cluster
+            # config template by returning a ``TemplateSpec``; otherwise
+            # fall back to the default template for the cloud.
+            plugin = provision_lib.get_registered_provisioner(
+                to_provision.cloud.canonical_name())
+            template_spec = (plugin.template_override(
+                task,
+                _extra_launch_context=self._extra_launch_context,
+                _is_launched_by_jobs_controller=self.
+                _is_launched_by_jobs_controller,
+            ) if plugin is not None and plugin.template_override is not None
+                             else None)
+            if template_spec is not None:
+                template = template_spec.template_path
+                extra_vars = template_spec.variables
+            else:
+                template = _get_cluster_config_template(to_provision.cloud)
+                extra_vars = None
+
             for failover_overrides in to_provision.cloud.yield_cloud_specific_failover_overrides(
                     region=to_provision.region):
                 try:
                     config_dict = backend_utils.write_cluster_config(
                         to_provision,
                         num_nodes,
-                        _get_cluster_config_template(to_provision.cloud),
+                        template,
                         cluster_name,
                         self._local_wheel_path,
                         self._wheel_hash,
@@ -1132,6 +1157,7 @@ class RetryingVmProvisioner(object):
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
+                        extra_template_variables=extra_vars,
                     )
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
@@ -1815,6 +1841,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     volume_mounts=task.volume_mounts,
+                    task=task,
                 )
                 if dryrun:
                     return config_dict
@@ -1948,7 +1975,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compatibility logic in __setstate__ and/or __getstate__.
-    _VERSION = 12
+    _VERSION = 13
 
     # Set by from_dict() since cached_cluster_info is not available
     # when reconstructing from a dict.
@@ -1986,6 +2013,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
+        self.provision_runtime_metadata = (
+            provision_common.ProvisionRuntimeMetadata())
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2602,6 +2631,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             'docker_user': self.docker_user,
             'is_grpc_enabled': self.is_grpc_enabled,
             'ssh_user': self.ssh_user,
+            'provision_runtime_metadata': dataclasses.asdict(
+                self.provision_runtime_metadata),
         }
 
     @classmethod
@@ -2630,6 +2661,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
         handle.cached_cluster_info = None
         handle._ssh_user = d.get('ssh_user')
+        runtime_metadata = d.get('provision_runtime_metadata')
+        if runtime_metadata is not None:
+            known = {
+                f.name for f in dataclasses.fields(
+                    provision_common.ProvisionRuntimeMetadata)
+            }
+            handle.provision_runtime_metadata = (
+                provision_common.ProvisionRuntimeMetadata(
+                    **{k: v
+                       for k, v in runtime_metadata.items()
+                       if k in known}))
+        else:
+            handle.provision_runtime_metadata = (
+                provision_common.ProvisionRuntimeMetadata())
         return handle
 
     def __getstate__(self):
@@ -2637,6 +2682,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # For backwards compatibility. Refer to
         # https://github.com/skypilot-org/skypilot/pull/7133
         state.setdefault('skylet_ssh_tunnel', None)
+        # Serialize provision_runtime_metadata as a plain dict.
+        runtime_metadata = state.get('provision_runtime_metadata')
+        if isinstance(runtime_metadata,
+                      provision_common.ProvisionRuntimeMetadata):
+            state['provision_runtime_metadata'] = dataclasses.asdict(
+                runtime_metadata)
         return state
 
     def __setstate__(self, state):
@@ -2699,6 +2750,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version >= 12:
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
+
+        # provision_runtime_metadata is serialized as a plain dict (see
+        # __getstate__). Reconstruct the dataclass here, defaulting if absent.
+        runtime_metadata = state.get('provision_runtime_metadata')
+        if isinstance(runtime_metadata, dict):
+            known = {
+                f.name for f in dataclasses.fields(
+                    provision_common.ProvisionRuntimeMetadata)
+            }
+            state['provision_runtime_metadata'] = (
+                provision_common.ProvisionRuntimeMetadata(
+                    **{k: v
+                       for k, v in runtime_metadata.items()
+                       if k in known}))
+        elif runtime_metadata is None:
+            state['provision_runtime_metadata'] = (
+                provision_common.ProvisionRuntimeMetadata())
 
         self.__dict__.update(state)
 
@@ -2995,6 +3063,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._requested_features = set()
         self._dump_final_script = False
         self._is_managed = False
+        self._extra_launch_context: Dict[str, Any] = {}
+        self._is_launched_by_jobs_controller = False
         # Optional planner (via register_info): used under the per-cluster lock
         # to produce a fresh concrete plan when neither a reusable snapshot nor
         # a caller plan is available.
@@ -3016,6 +3086,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         self._dump_final_script = kwargs.pop('dump_final_script', False)
         self._is_managed = kwargs.pop('is_managed', False)
+        self._extra_launch_context = kwargs.pop('extra_launch_context', {})
+        self._is_launched_by_jobs_controller = kwargs.pop(
+            'is_launched_by_jobs_controller', False)
         # Optional planner callback for a fresh plan under lock when no
         # reusable snapshot/caller plan exists. Keeps optimizer in upper layer.
         self._planner = kwargs.pop('planner', self._planner)
@@ -3285,7 +3358,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources,
-                        is_managed=self._is_managed)
+                        is_managed=self._is_managed,
+                        extra_launch_context=self._extra_launch_context,
+                        is_launched_by_jobs_controller=(
+                            self._is_launched_by_jobs_controller))
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching',
@@ -3371,30 +3447,47 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # New provisioner is used here.
                 handle = config_dict['handle']
                 provision_record = config_dict['provision_record']
+                runtime_metadata = provision_record.runtime_metadata
+                handle.provision_runtime_metadata = runtime_metadata
                 resources_vars = config_dict['resources_vars']
                 config_hash = config_dict.get('config_hash', None)
 
-                # Setup SkyPilot runtime after the cluster is provisioned
-                # 1. Wait for SSH to be ready.
-                # 2. Mount the cloud credentials, skypilot wheel,
-                #    and other necessary files to the VM.
-                # 3. Run setup commands to install dependencies.
-                # 4. Starting ray cluster and skylet.
+                if runtime_metadata.runtime_setup_done:
+                    logger.info('Skipping runtime setup: provisioner reported '
+                                'SkyPilot runtime is ready.')
+                    logger.info(
+                        ux_utils.finishing_message(
+                            f'Cluster launched: {handle.cluster_name}.',
+                            cluster_name=str(handle.cluster_name)))
+                    config_from_yaml = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
+                    cluster_info = provision_lib.get_cluster_info(
+                        repr(handle.launched_resources.cloud),
+                        provision_record.region,
+                        handle.cluster_name_on_cloud,
+                        provider_config=config_from_yaml.get('provider'))
+                else:
+                    # Setup SkyPilot runtime after the cluster is provisioned
+                    # 1. Wait for SSH to be ready.
+                    # 2. Mount the cloud credentials, skypilot wheel,
+                    #    and other necessary files to the VM.
+                    # 3. Run setup commands to install dependencies.
+                    # 4. Starting ray cluster and skylet.
 
-                # Add cluster event for runtime setup start
-                global_user_state.add_cluster_event(
-                    handle.cluster_name, status_lib.ClusterStatus.INIT,
-                    'Setting up SkyPilot runtime on cluster',
-                    global_user_state.ClusterEventType.STATUS_CHANGE)
+                    # Add cluster event for runtime setup start
+                    global_user_state.add_cluster_event(
+                        handle.cluster_name, status_lib.ClusterStatus.INIT,
+                        'Setting up SkyPilot runtime on cluster',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
 
-                cluster_info = provisioner.post_provision_runtime_setup(
-                    handle.launched_resources,
-                    resources_utils.ClusterName(handle.cluster_name,
-                                                handle.cluster_name_on_cloud),
-                    handle.cluster_yaml,
-                    provision_record=provision_record,
-                    custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir)
+                    cluster_info = provisioner.post_provision_runtime_setup(
+                        handle.launched_resources,
+                        resources_utils.ClusterName(
+                            handle.cluster_name, handle.cluster_name_on_cloud),
+                        handle.cluster_yaml,
+                        provision_record=provision_record,
+                        custom_resource=resources_vars.get('custom_resources'),
+                        log_dir=self.log_dir)
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
                 # are up-to-date.
@@ -3508,9 +3601,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
+        runtime_metadata = handle.provision_runtime_metadata
+
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
-        if prev_cluster_status == status_lib.ClusterStatus.INIT:
+        if (prev_cluster_status == status_lib.ClusterStatus.INIT and
+                runtime_metadata.has_job_queue):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
@@ -3535,7 +3631,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         handle, cmd, require_outputs=True)
                     subprocess_utils.handle_returncode(
                         returncode, cmd, 'Failed to update job status.', stderr)
-        if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
+        if (prev_cluster_status == status_lib.ClusterStatus.STOPPED and
+                runtime_metadata.has_job_queue):
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
             # An edge case here due to racing:
@@ -3606,20 +3703,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 status_lib.ClusterStatus.UP)
             # We still add the cluster to ssh config file on API server, this
             # is helpful for people trying to use `sky launch`'ed cluster for
-            # ssh proxy jump.
-            auth_config = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml,
-                ssh_user=handle.ssh_user,
-                docker_user=handle.docker_user)
-            cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cluster_name_on_cloud,
-                handle.cached_external_ips, auth_config,
-                handle.cached_external_ssh_ports, handle.docker_user,
-                handle.ssh_user)
+            # ssh proxy jump. Skip if the cluster is not SSH-reachable in the
+            # way the SSH config entry would assume.
+            if runtime_metadata.ssh_available:
+                auth_config = backend_utils.ssh_credential_from_yaml(
+                    handle.cluster_yaml,
+                    ssh_user=handle.ssh_user,
+                    docker_user=handle.docker_user)
+                cluster_utils.SSHConfigHelper.add_cluster(
+                    handle.cluster_name, handle.cluster_name_on_cloud,
+                    handle.cached_external_ips, auth_config,
+                    handle.cached_external_ssh_ports, handle.docker_user,
+                    handle.ssh_user)
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
                       workdir: Union[Path, Dict[str, Any]],
                       envs_and_secrets: Dict[str, str]) -> None:
+        if handle.provision_runtime_metadata.workdir_synced:
+            logger.info('Skipping workdir sync: provisioner reported ready.')
+            return
+
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -3739,6 +3842,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
+        if handle.provision_runtime_metadata.file_mounts_synced:
+            logger.info('Skipping file mounts sync: provisioner reported '
+                        'ready.')
+            return
+
         launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
@@ -3762,6 +3870,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                detach_setup: bool) -> None:
 
         start = time.time()
+
+        if handle.provision_runtime_metadata.setup_done:
+            logger.info('Skipping setup: provisioner reported done.')
+            return
 
         if task.setup is None:
             return
@@ -4272,6 +4384,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
+        if handle.provision_runtime_metadata.run_started:
+            logger.info('Skipping run: provisioner reported run already '
+                        'started.')
+            return None
+
         if task.run is None and self._setup_cmd is None:
             # This message is fine without mentioning setup, as there are two
             # cases when run section is empty:
@@ -5107,21 +5224,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
-            try:
-                # We do not check the return code, since Ray returns
-                # non-zero return code when calling Ray stop,
-                # even when the command was executed successfully.
-                self.run_on_head(handle,
-                                 f'{constants.SKY_RAY_CMD} stop --force')
-            except exceptions.FetchClusterInfoError:
-                # This error is expected if the previous cluster IP is
-                # failed to be found,
-                # i.e., the cluster is already stopped/terminated.
-                if prev_cluster_status == status_lib.ClusterStatus.UP:
-                    logger.warning(
-                        'Failed to take down Ray autoscaler on the head node. '
-                        'It might be because the cluster\'s head node has '
-                        'already been terminated. It is fine to skip this.')
+            if handle.provision_runtime_metadata.has_ray:
+                try:
+                    # We do not check the return code, since Ray returns
+                    # non-zero return code when calling Ray stop,
+                    # even when the command was executed successfully.
+                    self.run_on_head(handle,
+                                     f'{constants.SKY_RAY_CMD} stop --force')
+                except exceptions.FetchClusterInfoError:
+                    # This error is expected if the previous cluster IP is
+                    # failed to be found,
+                    # i.e., the cluster is already stopped/terminated.
+                    if prev_cluster_status == status_lib.ClusterStatus.UP:
+                        logger.warning(
+                            'Failed to take down Ray autoscaler on the head '
+                            'node. It might be because the cluster\'s head '
+                            'node has already been terminated. It is fine to '
+                            'skip this.')
 
             try:
                 provisioner.teardown_cluster(repr(cloud),
@@ -5459,6 +5578,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
                      hook_timeout: Optional[int] = None) -> None:
+        if not handle.provision_runtime_metadata.has_skylet:
+            return
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -5549,6 +5670,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
+        if not handle.provision_runtime_metadata.has_skylet:
+            return False
         if handle.head_ip is None:
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.

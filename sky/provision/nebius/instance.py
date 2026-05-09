@@ -173,7 +173,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
                     f'{len(stopped_instances)} instances are stopped.')
         if state == status_lib.ClusterStatus.STOPPED:
             running_instances = _filter_instances(region, cluster_name_on_cloud,
-                                                  ['RUNNIG'])
+                                                  ['RUNNING'])
 
             if running_instances:
                 raise RuntimeError(
@@ -189,10 +189,10 @@ def stop_instances(
     assert provider_config is not None
     exist_instances = _filter_instances(provider_config['region'],
                                         cluster_name_on_cloud, ['RUNNING'])
-    for instance in exist_instances:
-        if worker_only and instance.endswith('-head'):
+    for instance_id, instance in exist_instances.items():
+        if worker_only and instance['name'].endswith('-head'):
             continue
-        utils.stop(instance)
+        utils.stop(instance_id)
 
 
 def terminate_instances(
@@ -218,7 +218,8 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
-    utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
+    if not worker_only:
+        utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
 
 
 def get_cluster_info(

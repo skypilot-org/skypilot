@@ -293,6 +293,7 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    extra_launch_context: Dict[str, Any] = {}
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -314,6 +315,7 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
         return kwargs
 
 
@@ -915,6 +917,11 @@ class CostReportBody(RequestBody):
     # we use hashes instead of names to avoid the case where
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
+    # Filter by cluster name. Useful for the dashboard, which routes a
+    # torn-down cluster's detail page by name (the URL param is the
+    # cluster name, not the hash). When both cluster_hashes and
+    # cluster_names are set, rows matching either are returned.
+    cluster_names: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False

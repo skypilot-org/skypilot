@@ -19,12 +19,13 @@ Design Goals:
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
+import base64
 import os
 import tempfile
 import textwrap
 import traceback
 import typing
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -136,27 +137,93 @@ def _generate_k8s_dns_mappings(
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
     """
-    mappings = []
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
+
+    mappings: List[Tuple[str, str]] = []
     for task, handle in tasks_handles:
         if handle is None or not _is_kubernetes(handle):
             continue
-
+        addresses = None
+        if managed_job_runtime.is_registered():
+            addresses = managed_job_runtime.k8s_dns_addresses_for_handle(handle)
+        if addresses is None:
+            cluster_name_on_cloud = handle.cluster_name_on_cloud
+            namespace = _get_k8s_namespace_from_handle(handle)
+            num_nodes = (len(handle.stable_internal_external_ips)
+                         if handle.stable_internal_external_ips else 1)
+            addresses = [
+                _construct_k8s_internal_svc(cluster_name_on_cloud, namespace,
+                                            node_idx)
+                for node_idx in range(num_nodes)
+            ]
         job_name = task.name
-        cluster_name_on_cloud = handle.cluster_name_on_cloud
-        namespace = _get_k8s_namespace_from_handle(handle)
-        num_nodes = (len(handle.stable_internal_external_ips)
-                     if handle.stable_internal_external_ips else 1)
-
-        for node_idx in range(num_nodes):
+        for node_idx, dns_name in enumerate(addresses):
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
-            internal_svc = _construct_k8s_internal_svc(cluster_name_on_cloud,
-                                                       namespace, node_idx)
-            mappings.append((internal_svc, hostname))
-            node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
-            logger.debug(f'K8s DNS mapping ({node_type}): '
-                         f'{internal_svc} -> {hostname}')
-
+            mappings.append((dns_name, hostname))
+            logger.debug(f'K8s DNS mapping (node {node_idx}): '
+                         f'{dns_name} -> {hostname}')
     return mappings
+
+
+def dns_addresses_for_task(
+    task: 'task_lib.Task',
+    job_id: int,
+) -> Optional[List[str]]:
+    """K8s DNS addresses for this task, or ``None``."""
+    # pylint: disable-next=import-outside-toplevel
+    from sky.jobs import runtime as managed_job_runtime
+
+    if not managed_job_runtime.is_registered():
+        return None
+    return managed_job_runtime.k8s_dns_addresses_for_task(task, job_id)
+
+
+def _generate_k8s_dns_mappings_from_runtime(
+    job_group_name: str,
+    tasks: List['task_lib.Task'],
+    job_id: int,
+) -> List[Tuple[str, str]]:
+    """Build K8s DNS mappings from runtime-supplied addresses."""
+    mappings: List[Tuple[str, str]] = []
+    for task in tasks:
+        addresses = dns_addresses_for_task(task, job_id)
+        if addresses is None:
+            continue
+        for node_idx, dns_name in enumerate(addresses):
+            hostname = f'{task.name}-{node_idx}.{job_group_name}'
+            mappings.append((dns_name, hostname))
+            logger.debug(f'K8s DNS mapping from runtime (node {node_idx}): '
+                         f'{dns_name} -> {hostname}')
+    return mappings
+
+
+def generate_inline_networking_setup_script(
+    job_group_name: str,
+    tasks: List['task_lib.Task'],
+    job_id: int,
+) -> str:
+    """Bash to prepend to task.run that starts the JobGroup DNS updater
+    from there, or empty if the task does not inline the DNS mapping."""
+    dns_mappings = _generate_k8s_dns_mappings_from_runtime(
+        job_group_name, tasks, job_id)
+    if not dns_mappings:
+        return ''
+
+    updater_script = generate_k8s_dns_updater_script(dns_mappings,
+                                                     job_group_name)
+    encoded_script = base64.b64encode(updater_script.encode()).decode()
+    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    script_path = f'/tmp/{process_id}.sh'
+    log_path = f'/tmp/{process_id}.log'
+    marker_file = get_network_ready_marker_path(job_group_name)
+    return textwrap.dedent(f"""\
+        # Start JobGroup DNS updater inside the task runtime.
+        echo '{encoded_script}' | base64 -d > {script_path}
+        chmod +x {script_path}
+        (nohup {script_path} < /dev/null > {log_path} 2>&1 &) || true
+        touch {marker_file}
+        """).strip()
 
 
 def _generate_hosts_entries(

@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -133,6 +134,58 @@ class StrategyExecutor:
         if config:
             logger.debug('Unused job_recovery config keys for strategy '
                          f'{type(self).__name__}: {list(config.keys())}')
+
+    def extra_launch_context(self) -> Dict[str, Any]:
+        """Return strategy-specific context for the launch pipeline.
+
+        The returned dict is merged into ``_extra_launch_context``
+        passed through ``sdk.launch()`` to the provisioner's
+        ``template_override()``.
+        """
+        return {}
+
+    def task_specs(self) -> Dict[str, Any]:
+        """Return strategy-specific keys for the persisted task specs.
+
+        Merged into the ``specs`` dict written by
+        ``set_starting_async()``. Must not collide with base spec keys.
+        """
+        return {}
+
+    async def on_resume(self, cluster_name: str) -> None:  # pylint: disable=unused-argument
+        """Called before monitoring an already-launched task on resume.
+
+        Subclasses use this to rehydrate state from persisted handles.
+        """
+        return None
+
+    async def monitor_task(  # pylint: disable=unused-argument
+        self,
+        *,
+        task_id: int,
+        task: 'task_lib.Task',
+        cluster_name: str,
+        job_id_on_pool_cluster: Optional[int] = None,
+        callback_func: Optional[Callable[..., Any]] = None,
+        cleanup_cluster_on_success: bool = True,
+        force_transit_to_recovering: bool = False,
+        on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+    ) -> Optional[bool]:
+        """Strategy-owned monitoring loop override.
+
+        # TODO(kevin): The default monitor (JobController._monitor_one_task)
+        # bakes in cluster-level detection logic (skylet polling, cluster
+        # status refresh, ExternalFailureSource). If we refactor detection
+        # into pluggable strategy methods (e.g. check_status() returning a
+        # uniform result), the controller could own a single generic loop
+        # and this override would be unnecessary.
+
+        Returns:
+            None: fall back to OSS default monitor.
+            True: task succeeded (strategy handled monitoring).
+            False: task failed (strategy handled monitoring).
+        """
+        return None
 
     @classmethod
     def make(
@@ -352,6 +405,15 @@ class StrategyExecutor:
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
+                if managed_job_runtime.is_registered():
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        self.cluster_name)
+                    runtime_submitted_at = await asyncio.to_thread(
+                        managed_job_runtime.get_job_submitted_at, handle,
+                        self.cluster_name)
+                    if runtime_submitted_at is not None:
+                        return runtime_submitted_at
                 try:
                     job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
@@ -474,6 +536,7 @@ class StrategyExecutor:
 
                             request_id = None
                             try:
+                                extra_ctx = self.extra_launch_context()
                                 request_id = await asyncio.to_thread(
                                     sdk.launch,
                                     self.dag,
@@ -493,6 +556,8 @@ class StrategyExecutor:
                                     _is_launched_by_jobs_controller=True,
                                     _file_mounts_blob_id=(
                                         self.file_mounts_blob_id),
+                                    _extra_launch_context=(extra_ctx if
+                                                           extra_ctx else None),
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')

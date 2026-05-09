@@ -803,7 +803,24 @@ available_node_types:
                 update_apt_sources() {
                   local host=$1
                   local apt_file=$2
-                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                  # || true: a sed failure on one sources file (read-only fs,
+                  # immutable bit, full tmpfs) shouldn't kill the whole step;
+                  # restore_source will undo any partial edits on the next
+                  # iteration of the candidate-mirror loop.
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$apt_file" || true
+                }
+                # Surface /tmp/apt-update.log to the pod's stderr on failure.
+                # Without this, users only see the terse summary line — the
+                # actual apt error stays inside the (often torn-down) pod.
+                dump_apt_log() {
+                  local log=/tmp/apt-update.log
+                  if [ -f "$log" ]; then
+                    echo "=== /tmp/apt-update.log (last 200 lines) ===" >&2
+                    tail -n 200 "$log" >&2 || true
+                    echo "=== end /tmp/apt-update.log ===" >&2
+                  else
+                    echo "/tmp/apt-update.log not found" >&2
+                  fi
                 }
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
@@ -854,10 +871,14 @@ available_node_types:
                 # so we only add mirror candidates for ubuntu here.
                 # Selected from https://launchpad.net/ubuntu/+archivemirrors
                 # and results from apt-select
+                {% if k8s_apt_mirrors is not none %}
+                MIRROR_CANDIDATES="{{ k8s_apt_mirrors | join(' ') }}"
+                {% else %}
                 MIRROR_CANDIDATES=""
                 if [ "$APT_OS" = "ubuntu" ]; then
                   MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
                 fi
+                {% endif %}
 
                 INSTALL_SUCCESS=false
                 backup_source
@@ -876,6 +897,7 @@ available_node_types:
                     fi
                     if [ "$found_sources" = "false" ]; then
                       echo "Error: no apt sources file found" >> /tmp/apt-update.log
+                      dump_apt_log
                       break
                     fi
                   fi
@@ -913,6 +935,7 @@ available_node_types:
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  dump_apt_log
                   exit 1
                 fi;
 
@@ -930,7 +953,11 @@ available_node_types:
                   https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
                   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
                   | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
-                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1 || {
+                  echo "Error: failed to install Docker CLI / buildx plugin." >> /tmp/apt-update.log
+                  dump_apt_log
+                  exit 1
+                }
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}
@@ -1203,28 +1230,35 @@ available_node_types:
                 echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
 
                 touch {{k8s_high_availability_restarting_signal_file}}
-                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
-                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
-                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
-                # will delete the service from the database after it is terminated so everything in the database is running.
+                # Get in-progress managed job IDs. For SkyServe this is None
+                # and every service will be recovered (SkyServe deletes
+                # terminated services so everything in the DB is running).
                 ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
-                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
-                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
-                  JOB_ID=$(basename $file | sed 's/sky_job_//')
-                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  # After set_job_info_without_job_id (#7891), the cluster job
+                  # ID in the script filename no longer equals managed job ID.
+                  # Extract managed job IDs from the script content instead
+                  # (job_ids_array set in jobs-controller.yaml.j2).
                   if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
-                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
+                    MANAGED_IDS=$(sed -n 's/.*job_ids_array=(\([^)]*\)).*/\1/p' "$file" | head -1)
+                    FOUND_IN_PROGRESS=false
+                    if [ -n "$MANAGED_IDS" ]; then
+                      for MID in $MANAGED_IDS; do
+                        if [[ " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${MID} " ]]; then
+                          FOUND_IN_PROGRESS=true
+                          break
+                        fi
+                      done
+                    fi
+                    if [ "$FOUND_IN_PROGRESS" == "false" ]; then
                       continue
                     fi
                   fi
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
-                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
-                  # We should do more tests and make sure it will scale well.
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
                 done

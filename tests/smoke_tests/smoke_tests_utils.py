@@ -295,16 +295,21 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+            _ALL_JOB_STATUSES,
+            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
+                                               'sleep {gap_seconds}')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
-        timeout: int):
+        job_name: str,
+        job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int,
+        gap_seconds: int = 10):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
-        timeout=timeout)
+        timeout=timeout,
+        gap_seconds=gap_seconds)
 
 
 _WAIT_UNTIL_PIPELINE_TASK_STATUS = (

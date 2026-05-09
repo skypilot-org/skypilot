@@ -283,45 +283,15 @@ def launch(cluster_name_on_cloud: str,
                 f'Requested {disk_size} GiB, rounding up to '
                 f'{actual_disk_size} GiB.')
 
-    service = nebius.compute().DiskServiceClient(nebius.sdk())
-
-    spec = nebius.compute().DiskSpec(
+    disk_spec = nebius.compute().DiskSpec(
         size_gibibytes=actual_disk_size,
         type=_disk_tier_to_disk_type(disk_tier),
     )
     if image_id_or_family.startswith('computeimage-'):
-        spec.source_image_id = image_id_or_family
+        disk_spec.source_image_id = image_id_or_family
     else:
-        spec.source_image_family = nebius.compute().SourceImageFamily(
+        disk_spec.source_image_family = nebius.compute().SourceImageFamily(
             image_family=image_id_or_family)
-
-    disk = nebius.sync_call(
-        service.create(nebius.compute().CreateDiskRequest(
-            metadata=nebius.nebius_common().ResourceMetadata(
-                parent_id=project_id,
-                name=disk_name,
-            ),
-            spec=spec)))
-    disk_id = disk.resource_id
-    retry_count = 0
-    while retry_count < nebius.MAX_RETRIES_TO_DISK_CREATE:
-        disk = nebius.sync_call(
-            service.get_by_name(nebius.nebius_common().GetByNameRequest(
-                parent_id=project_id,
-                name=disk_name,
-            )))
-        if disk.status.state.name == 'READY':
-            break
-        logger.debug(f'Waiting for disk {disk_name} to be ready.')
-        time.sleep(POLL_INTERVAL)
-        retry_count += 1
-
-    if retry_count == nebius.MAX_RETRIES_TO_DISK_CREATE:
-        raise TimeoutError(
-            f'Exceeded maximum retries '
-            f'({nebius.MAX_RETRIES_TO_DISK_CREATE * POLL_INTERVAL}'
-            f' seconds) while waiting for disk {disk_name}'
-            f' to be ready.')
 
     filesystems_spec = []
     if filesystems:
@@ -349,8 +319,10 @@ def launch(cluster_name_on_cloud: str,
                     boot_disk=nebius.compute().AttachedDiskSpec(
                         attach_mode=nebius.compute(
                         ).AttachedDiskSpec.AttachMode.READ_WRITE,
-                        existing_disk=nebius.compute().ExistingDisk(
-                            id=disk_id)),
+                        managed_disk=nebius.compute().ManagedDisk(
+                            spec=disk_spec,
+                            name=disk_name,
+                        )),
                     cloud_init_user_data=user_data,
                     resources=nebius.compute().ResourcesSpec(platform=platform,
                                                              preset=preset),
@@ -428,16 +400,7 @@ def launch(cluster_name_on_cloud: str,
                 f' seconds) while waiting for instance {instance_name}'
                 f' to be ready.')
     except nebius.request_error() as e:
-        # Handle ResourceExhausted quota limit error. In this case, we need to
-        # clean up the disk as VM creation failed and we can't proceed.
-        # It cannot be handled by the caller (provisioner)'s teardown logic,
-        # as we cannot retrieve the disk id, after the instance creation
-        # fails
         logger.warning(f'Failed to launch instance {instance_name}: {e}')
-        service = nebius.compute().DiskServiceClient(nebius.sdk())
-        nebius.sync_call(
-            service.delete(nebius.compute().DeleteDiskRequest(id=disk_id)))
-        logger.debug(f'Disk {disk_id} deleted.')
         raise e
     return instance_id
 
@@ -447,9 +410,15 @@ def remove(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     result = nebius.sync_call(
         service.get(nebius.compute().GetInstanceRequest(id=instance_id)))
-    disk_id = result.spec.boot_disk.existing_disk.id
     nebius.sync_call(
         service.delete(nebius.compute().DeleteInstanceRequest(id=instance_id)))
+
+    if result.spec.boot_disk.existing_disk is None:
+        return
+    # Instances create by older versions might still be using
+    # attached disks rather than managed disks
+    disk_id = result.spec.boot_disk.existing_disk.id
+
     retry_count = 0
     # The instance begins deleting and attempts to delete the disk.
     # Must wait until the disk is unlocked and becomes deletable.

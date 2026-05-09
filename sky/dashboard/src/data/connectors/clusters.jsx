@@ -155,7 +155,11 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null, days = 30) {
+export async function getClusterHistory(
+  clusterHash = null,
+  days = 30,
+  clusterName = null
+) {
   try {
     const requestBody = {
       days: days,
@@ -165,6 +169,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
+    }
+    // The server filters on hash OR name when both are set, which lets the
+    // dashboard look up a cluster by either identifier in a single call.
+    // This avoids fetching the entire history (potentially tens of
+    // thousands of rows) just to resolve a name-keyed URL.
+    if (clusterName) {
+      requestBody.cluster_names = [clusterName];
     }
 
     const history = await apiClient.fetch('/cost_report', requestBody);
@@ -617,8 +628,6 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
-    const activeClusters = await dashboardCache.get(getClusters);
-
     let allClusters;
     if (showHistory) {
       let historyClusters = [];
@@ -631,22 +640,14 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      const markedActive = activeClusters.map((c) => ({
-        ...c,
-        isHistorical: false,
-      }));
-      const markedHistory = historyClusters.map((c) => ({
-        ...c,
-        isHistorical: true,
-      }));
-
-      allClusters = [...markedActive];
-      markedHistory.forEach((hist) => {
-        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
-          allClusters.push(hist);
-        }
-      });
+      // "Show history" surfaces only truly terminated clusters within the
+      // selected time window. cost_report also returns active clusters, so
+      // drop anything still present in cluster_table (status !== TERMINATED).
+      allClusters = historyClusters
+        .filter((c) => c.status === 'TERMINATED')
+        .map((c) => ({ ...c, isHistorical: true }));
     } else {
+      const activeClusters = await dashboardCache.get(getClusters);
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,

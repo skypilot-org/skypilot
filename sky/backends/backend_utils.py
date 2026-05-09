@@ -4,6 +4,7 @@ from datetime import datetime
 import enum
 import fnmatch
 import hashlib
+import math
 import os
 import pathlib
 import pprint
@@ -682,6 +683,7 @@ def write_cluster_config(
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
+    extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -1214,6 +1216,8 @@ def write_cluster_config(
     )
     if cloud_specific_failover_overrides is not None:
         variables.update(cloud_specific_failover_overrides)
+    if extra_template_variables is not None:
+        variables.update(extra_template_variables)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -2664,8 +2668,12 @@ def _update_cluster_status(
     # provider.
     cloud = handle.launched_resources.cloud
 
-    # For Slurm, skip Ray health check since it doesn't use Ray.
-    should_check_ray = cloud is not None and cloud.uses_ray()
+    # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
+    # or when the provisioner reports no Ray runtime.
+    # TODO(kevin): migrate cloud.uses_ray() -> ProvisionRuntimeMetadata, i.e.
+    # from cloud -> provision layer.
+    should_check_ray = (cloud is not None and cloud.uses_ray() and
+                        handle.provision_runtime_metadata.has_ray)
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
             not external_cluster_failures):
@@ -3985,6 +3993,16 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     if resources is not None and resources.accelerators is not None:
         resources_dict.update(resources.accelerators)
     return resources_dict
+
+
+def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
+    """Returns the number of GPUs per node for the task."""
+    demands = get_task_demands_dict(task)
+    demands.pop('CPU', None)
+    if not demands:
+        return 0
+    acc_count = list(demands.values())[0]
+    return int(math.ceil(acc_count))
 
 
 def get_task_resources_str(task: 'task_lib.Task',

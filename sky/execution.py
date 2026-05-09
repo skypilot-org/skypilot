@@ -9,7 +9,7 @@ import os
 import tempfile
 import time
 import typing
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -178,6 +178,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -236,6 +237,8 @@ def _execute(
         elif _is_launched_by_sky_serve_controller:
             _request_name = (
                 request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
+    if _extra_launch_context is None:
+        _extra_launch_context = {}
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         for resource in task.resources:
@@ -287,6 +290,7 @@ def _execute(
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
             _is_launched_by_sky_serve_controller,
+            _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
 
 
@@ -308,6 +312,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    _extra_launch_context: Dict[str, Any],
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
@@ -495,7 +500,9 @@ def _execute_dag(
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
         is_managed=is_managed,
-        planner=planner)
+        planner=planner,
+        extra_launch_context=_extra_launch_context,
+        is_launched_by_jobs_controller=_is_launched_by_jobs_controller)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -619,6 +626,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
@@ -813,6 +821,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
         job_logger=job_logger)
 

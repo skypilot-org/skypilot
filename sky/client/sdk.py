@@ -577,6 +577,7 @@ def launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -742,6 +743,7 @@ def launch(
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
             _file_mounts_blob_id,
+            _extra_launch_context,
         )
 
 
@@ -765,6 +767,7 @@ def _launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -858,6 +861,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        extra_launch_context=_extra_launch_context or {},
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)

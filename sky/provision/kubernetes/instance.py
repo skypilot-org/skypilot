@@ -5,7 +5,8 @@ import json
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (Any, Dict, List, Mapping, Optional, Set, Tuple,
+                    TYPE_CHECKING, Union)
 
 from sky import exceptions
 from sky import global_user_state
@@ -2428,10 +2429,15 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
     retry_if_missing: bool = False,
+    status_map_overrides: Optional[Mapping[
+        str, Optional['status_lib.ClusterStatus']]] = None,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     # Mapping from pod phase to skypilot status. These are the only valid pod
     # phases.
     # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
+    # ``status_map_overrides`` lets callers (e.g. plugin provisioners whose
+    # pods don't follow the ray-cluster lifecycle) selectively remap a
+    # subset of phases without duplicating this whole function.
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
@@ -2439,6 +2445,8 @@ def query_instances(
         'Unknown': None,
         'Succeeded': None,
     }
+    if status_map_overrides:
+        status_map = {**status_map, **status_map_overrides}
 
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
