@@ -162,7 +162,7 @@ Deploying on Google Cloud GKE
 .. _kubernetes-setup-gke-autopilot:
 
 Using SkyPilot on GKE Autopilot
-"""""""""""""""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 GKE Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
 Autopilot. Set this in your config:
