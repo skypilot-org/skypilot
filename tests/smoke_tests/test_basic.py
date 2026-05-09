@@ -1484,8 +1484,10 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             queue_response = (
                 smoke_tests_utils.get_response_from_request_id_dashboard(
                     queue_request_id))
+            jobs = (queue_response.get('jobs', []) if isinstance(
+                queue_response, dict) else queue_response)
             job_exist = False
-            for job in queue_response:
+            for job in jobs:
                 if job['job_id'] == job_id:
                     job_exist = True
                     break
