@@ -245,7 +245,7 @@ function ClusterDetails() {
             refreshClusterJobsOnly={() => {}}
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
-            isGrafanaAvailable={false}
+            isGrafanaAvailable={isGrafanaAvailable}
             telemetryRefreshTrigger={0}
             isHistoricalCluster={true}
           />
@@ -661,6 +661,8 @@ function ActiveTab({
               refreshTrigger={telemetryRefreshTrigger}
               storageKey="skypilot-clusters-telemetry-expanded"
               hasGpu={hasAccelerator(clusterData?.gpus)}
+              startTime={clusterData?.time || clusterData?.start_at}
+              endTime={clusterData?.end_at}
             />
           </div>
         )}
