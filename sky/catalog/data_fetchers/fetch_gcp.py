@@ -182,9 +182,10 @@ TPU_V4_HOST_DF = pd.read_csv(
 SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
-    # NOTE: GCP does not provide separate CPU/RAM pricing for A4 instances.
-    # The B200 GPU pricing includes the full VM cost. See special handling in
-    # get_vm_price() which sets A4 VM price to 0.
+    # NOTE: GCP does not provide separate CPU/RAM pricing for A4 or G4
+    # instances. The GPU SKU (B200 / RTX PRO 6000) includes the full VM
+    # cost. See special handling in get_vm_price() which sets A4 / G4 VM
+    # price to 0.
     'a4': 'A4 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
@@ -196,6 +197,7 @@ SERIES_TO_DESCRIPTION = {
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
     'g2': 'G2 Instance',
+    'g4': 'G4 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
     'm3': 'M3 Memory-optimized Instance',
@@ -403,12 +405,13 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         if series in ['f1', 'g1']:
             memory_price = 0.0
 
-        # Special case for A4 instances.
-        # GCP does not provide separate CPU/RAM pricing for A4 instances in the
-        # SKUs API. The GPU pricing (B200) includes the full VM cost.
-        # We set the VM price to 0 so the entry is not dropped, and the GPU
-        # pricing will provide the total cost.
-        if series == 'a4':
+        # Special case for A4 and G4 instances.
+        # GCP does not provide separate CPU/RAM pricing for A4 or G4
+        # instances in the SKUs API. The GPU pricing (B200 for A4, RTX PRO
+        # 6000 for G4) includes the full VM cost. We set the VM price to 0
+        # so the entry is not dropped, and the GPU pricing will provide the
+        # total cost.
+        if series in ('a4', 'g4'):
             cpu_price = 0.0
             memory_price = 0.0
 
@@ -470,6 +473,8 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                 gpu_name = 'B200'
                 if count != 8:
                     continue
+            elif 'RTX-PRO-6000' in gpu_name:
+                gpu_name = 'RTX-PRO-6000'
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -501,6 +506,7 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'H100-MEGA': 80 * 1024,
         'H200': 141 * 1024,
         'B200': 180 * 1024,
+        'RTX-PRO-6000': 96 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
@@ -563,6 +569,13 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             if not spot and row_gpu_name == 'B200' and is_spot_description:
                 continue
 
+            # Skip Dynamic Workload Scheduler "Defined Duration" SKUs. GCP
+            # publishes them alongside the regular OnDemand SKU for some
+            # accelerators (notably G4's RTX 6000), but they represent a
+            # separate reservation product, not the standard hourly rate.
+            if 'dws defined duration' in description.lower():
+                continue
+
             gpu_names = [f'{row_gpu_name} GPU']
             if row_gpu_name == 'A100-80GB':
                 gpu_names = ['A100 80GB GPU']
@@ -579,6 +592,10 @@ def get_gpu_df(skus: List[Dict[str, Any]],
                 gpu_names = ['H200 141GB GPU']
             elif row_gpu_name == 'B200':
                 gpu_names = ['Nvidia B200 (1 gpu slice)']
+            elif row_gpu_name == 'RTX-PRO-6000':
+                # GCP's billing description for the G4 GPU SKU is
+                # "RTX 6000 96GB" (e.g. "RTX 6000 96GB running in Iowa").
+                gpu_names = ['RTX 6000 96GB']
             if not any(
                     gpu_name in sku['description'] for gpu_name in gpu_names):
                 continue
