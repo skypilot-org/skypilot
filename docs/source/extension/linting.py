@@ -43,6 +43,7 @@ ALLOWED_TERMS = {
     'Sky',
     'Llama',
     'Llama2',
+    'Autopilot',
     'Pods',
     'Samsung',
     'Google',
