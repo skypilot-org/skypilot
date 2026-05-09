@@ -344,7 +344,7 @@ def test_batch_cancel(generic_cloud: str):
              f"JOB_ID=''\n"
              f"for i in $(seq 1 90); do\n"
              f"  JOB_ID=$(sky jobs queue 2>/dev/null | "
-             f"grep \"{pool_name}\" | "
+             f"grep -w \"{pool_name}\" | "
              f"awk '$1 ~ /^[0-9]+$/ && /RUNNING/ {{print $1; exit}}')\n"
              f"  if [ -n \"$JOB_ID\" ]; then break; fi\n"
              f"  sleep 5\n"
