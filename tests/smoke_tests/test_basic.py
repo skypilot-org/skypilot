@@ -1484,13 +1484,11 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             queue_response = (
                 smoke_tests_utils.get_response_from_request_id_dashboard(
                     queue_request_id))
-            jobs = (queue_response.get('jobs', []) if isinstance(
-                queue_response, dict) else queue_response)
-            job_exist = False
-            for job in jobs:
-                if job['job_id'] == job_id:
-                    job_exist = True
-                    break
+            # queue_v2 decoder returns (jobs, total, status_counts,
+            # total_no_filter); legacy queue returned a plain list.
+            jobs = queue_response[0] if isinstance(queue_response,
+                                                   tuple) else queue_response
+            job_exist = any(job.job_id == job_id for job in jobs)
             assert job_exist
             try:
                 with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
