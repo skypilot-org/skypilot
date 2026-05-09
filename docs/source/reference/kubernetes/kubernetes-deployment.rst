@@ -164,15 +164,11 @@ Deploying on Google Cloud GKE
 Using SkyPilot on GKE Autopilot
 """""""""""""""""""""""""""""""
 
-GKE Autopilot is partially supported. Basic CPU and GPU jobs can be launched, but
-several SkyPilot features are blocked by Autopilot's PodSecurity policy. We recommend
-GKE Standard clusters for production use; the limitations below apply if you choose
-Autopilot.
+GKE Autopilot is supported with the limitations below. We recommend GKE Standard for
+production; use Autopilot only if you accept these caveats.
 
-**Required configuration.** Autopilot has no fixed nodes — they are provisioned on demand
-when pods are submitted. Set the autoscaler config so SkyPilot defers node-fitting decisions
-to Autopilot, and increase the provision timeout because Autopilot provisioning takes
-several minutes:
+Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
+Autopilot. Set this in your config:
 
 .. code-block:: yaml
 
@@ -180,40 +176,27 @@ several minutes:
       autoscaler: gke
       provision_timeout: 600
 
-**What works:**
+**Supported:**
 
-- ``sky launch`` for CPU jobs (cold-start included). Autopilot accepts SkyPilot's pod spec
-  and auto-fills missing fields (e.g. ``ephemeral-storage``).
-- ``sky launch --gpus <type>`` for GPU jobs. SkyPilot's ``cloud.google.com/gke-accelerator``
-  nodeSelector matches Autopilot's GPU labels directly, and Autopilot installs NVIDIA
-  drivers automatically (verified with T4; ``nvidia-smi`` works out of the box). Initial
-  GPU node provisioning takes 3–5 minutes via Autopilot's Node Auto-Provisioning (NAP).
+- ``sky launch`` for CPU and GPU jobs. SkyPilot's nodeSelector matches Autopilot's
+  ``cloud.google.com/gke-accelerator`` label, and Autopilot installs NVIDIA drivers
+  automatically. Initial GPU node provisioning takes ~3–5 minutes via Autopilot's
+  Node Auto-Provisioning.
 - ``LoadBalancer`` services for exposing ports.
 
-**What does not work:**
+**Not supported** (blocked by Autopilot's GKE Warden policy):
 
 - **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
-  storage URIs in ``MOUNT`` mode). SkyPilot deploys a privileged DaemonSet with a
-  ``hostPath`` volume to broker FUSE syscalls; both are rejected by Autopilot's
-  GKE Warden admission policy. Use the
-  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
-  directly instead, or use a GKE Standard cluster.
-- **Privileged or host-namespace features:** Docker-in-Docker (``run`` blocks needing
-  Docker), GPUDirect TCPX/TCPXO high-speed networking, BuildKit image builds, RDMA
-  workloads requiring ``IPC_LOCK``, and SSH node pools (the bundled ``nvidia-device-plugin``
-  DaemonSet uses ``hostPID``). All are rejected by Autopilot.
-- **``k8s-hostpath`` volume type** is rejected by Autopilot.
+  storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``. Use
+  the `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
+  directly instead.
+- **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
+  BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
+- **``k8s-hostpath`` volume type.**
 
-**Other caveats:**
-
-- **Pod preemption by Autopilot's bin-packer.** Autopilot may evict a SkyPilot pod
-  shortly after it schedules in order to consolidate workloads, which can interrupt
-  cluster setup before Ray finishes starting. There is no fully reliable mitigation
-  today; if you hit this, retry ``sky launch``.
-- **Application-default credentials required.** When ``autoscaler: gke`` is set,
-  SkyPilot calls the GKE container API to inspect node pools. Run
-  ``gcloud auth application-default login`` on the API server host so this call
-  does not fail.
+**Pod preemption.** Autopilot may evict pods to consolidate workloads. For long-running
+work, use :code:`sky jobs launch` instead of :code:`sky launch` so SkyPilot's managed
+jobs automatically recover from preemption.
 
 .. _kubernetes-setup-eks:
 
