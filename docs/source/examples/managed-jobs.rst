@@ -169,7 +169,7 @@ See a list of managed jobs:
   Fetching managed jobs...
   Managed jobs:
   ID  NAME           RESOURCES    SUBMITTED  TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-  2   roberta        1x [A100:8]  2 hrs ago  2h 47m 18s     2h 36m 18s    0            RUNNING
+  2   qwen-rl        1x [H200:8]  2 hrs ago  2h 47m 18s     2h 36m 18s    0            RUNNING
   1   qwen-finetune  1x [B200:8]  4 hrs ago  4h 24m 26s     4h 17m 54s    0            RUNNING
 
 This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
