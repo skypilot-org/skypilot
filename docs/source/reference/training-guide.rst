@@ -536,7 +536,7 @@ Examples
 
 .. _qwen:
 
-End-to-end Post-training
+End-to-end post-training
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 We can take the SkyPilot YAML for Qwen fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
