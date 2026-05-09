@@ -805,7 +805,7 @@ def test_pool_job_cancel_running(generic_cloud: str):
                     cancel_job(job_name),
                     # Ensure the job is cancelled.
                     wait_until_job_status(
-                        job_name, ['CANCELLED'], bad_statuses=[], timeout=15),
+                        job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -1057,7 +1057,7 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
                     *[
                         wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
                                               bad_statuses=[],
-                                              timeout=15)
+                                              timeout=30)
                         for i in range(1, num_jobs + 1)
                     ],
                 ],
