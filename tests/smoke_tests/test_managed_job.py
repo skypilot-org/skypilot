@@ -587,7 +587,7 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     # from inside the cloud-cmd pod via `sky exec`, so a stray match would
     # self-kill the helper pod and fail the test with exit code 137.
     _get_job_pods = (
-        'kubectl get pods --no-headers -o custom-columns='
+        'kubectl get pods -l skypilot-cluster-name --no-headers -o custom-columns='
         '"NAME:.metadata.name,CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
         f'grep -- "{name_on_cloud}" | grep -v -- "-cloud-cmd" | '
         'awk \'{print $1}\' | sort')
