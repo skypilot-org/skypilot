@@ -159,9 +159,61 @@ Deploying on Google Cloud GKE
        my-cluster-2               A100      2 of 2 free
        my-cluster-3               A100      0 of 2 free
 
-.. note::
-    GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
+.. _kubernetes-setup-gke-autopilot:
 
+Using SkyPilot on GKE Autopilot
+"""""""""""""""""""""""""""""""
+
+GKE Autopilot is partially supported. Basic CPU and GPU jobs can be launched, but
+several SkyPilot features are blocked by Autopilot's PodSecurity policy. We recommend
+GKE Standard clusters for production use; the limitations below apply if you choose
+Autopilot.
+
+**Required configuration.** Autopilot has no fixed nodes — they are provisioned on demand
+when pods are submitted. Set the autoscaler config so SkyPilot defers node-fitting decisions
+to Autopilot, and increase the provision timeout because Autopilot provisioning takes
+several minutes:
+
+.. code-block:: yaml
+
+    kubernetes:
+      autoscaler: gke
+      provision_timeout: 600
+
+**What works:**
+
+- ``sky launch`` for CPU jobs (cold-start included). Autopilot accepts SkyPilot's pod spec
+  and auto-fills missing fields (e.g. ``ephemeral-storage``).
+- ``sky launch --gpus <type>`` for GPU jobs. SkyPilot's ``cloud.google.com/gke-accelerator``
+  nodeSelector matches Autopilot's GPU labels directly, and Autopilot installs NVIDIA
+  drivers automatically (verified with T4; ``nvidia-smi`` works out of the box). Initial
+  GPU node provisioning takes 3–5 minutes via Autopilot's Node Auto-Provisioning (NAP).
+- ``LoadBalancer`` services for exposing ports.
+
+**What does not work:**
+
+- **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
+  storage URIs in ``MOUNT`` mode). SkyPilot deploys a privileged DaemonSet with a
+  ``hostPath`` volume to broker FUSE syscalls; both are rejected by Autopilot's
+  GKE Warden admission policy. Use the
+  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_
+  directly instead, or use a GKE Standard cluster.
+- **Privileged or host-namespace features:** Docker-in-Docker (``run`` blocks needing
+  Docker), GPUDirect TCPX/TCPXO high-speed networking, BuildKit image builds, RDMA
+  workloads requiring ``IPC_LOCK``, and SSH node pools (the bundled ``nvidia-device-plugin``
+  DaemonSet uses ``hostPID``). All are rejected by Autopilot.
+- **``k8s-hostpath`` volume type** is rejected by Autopilot.
+
+**Other caveats:**
+
+- **Pod preemption by Autopilot's bin-packer.** Autopilot may evict a SkyPilot pod
+  shortly after it schedules in order to consolidate workloads, which can interrupt
+  cluster setup before Ray finishes starting. There is no fully reliable mitigation
+  today; if you hit this, retry ``sky launch``.
+- **Application-default credentials required.** When ``autoscaler: gke`` is set,
+  SkyPilot calls the GKE container API to inspect node pools. Run
+  ``gcloud auth application-default login`` on the API server host so this call
+  does not fail.
 
 .. _kubernetes-setup-eks:
 

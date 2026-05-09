@@ -976,6 +976,18 @@ class GKEAutoscaler(Autoscaler):
             logger.debug(f'{e.message}', exc_info=True)
             return True
 
+        # GKE Autopilot uses Node Auto-Provisioning (NAP) to create node
+        # pools on demand for any requested instance type, including GPUs.
+        # The static node pool list returned by the API only reflects the
+        # CPU bootstrap pools and does not advertise what NAP can provision,
+        # so the per-pool fit check below would falsely reject GPU requests.
+        # Trust NAP to satisfy the request.
+        if cluster.get('autopilot', {}).get('enabled'):
+            logger.debug(f'Cluster {cluster_name} is Autopilot-managed; '
+                         'trusting Node Auto-Provisioning to satisfy '
+                         f'{instance_type}.')
+            return True
+
         # Check if any node pool with autoscaling enabled can
         # fit the instance type.
         node_pools = cluster.get('nodePools', [])
