@@ -182,7 +182,9 @@ Autopilot. Set this in your config:
   `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_.
 - **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
   BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
-- **``k8s-hostpath`` volume type.**
+- **Mounting a directory from the Kubernetes node** (via SkyPilot's ``k8s-hostpath``
+  volume type or ``hostPath`` in ``pod_config`` overrides). Autopilot does not allow
+  workloads to access the node filesystem directly.
 - **Pod preemption.** Autopilot may evict pods to consolidate workloads. For
   long-running work, use :code:`sky jobs launch` so SkyPilot's managed jobs
   automatically recover from preemption.
