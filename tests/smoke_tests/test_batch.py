@@ -139,6 +139,7 @@ def test_batch_simple(generic_cloud: str):
 # ---------- Test diffusion batch (image generation) ----------
 @pytest.mark.batch
 @pytest.mark.resource_heavy
+@pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
