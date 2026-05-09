@@ -128,6 +128,12 @@ _ACC_INSTANCE_TYPE_DICTS = {
     'B200': {
         8: ['a4-highgpu-8g'],
     },
+    'RTX-PRO-6000': {
+        1: ['g4-standard-48'],
+        2: ['g4-standard-96'],
+        4: ['g4-standard-192'],
+        8: ['g4-standard-384'],
+    },
 }
 # Enable GPU type inference from instance types
 _INSTANCE_TYPE_TO_ACC = {
