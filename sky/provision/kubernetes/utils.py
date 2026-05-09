@@ -982,7 +982,9 @@ class GKEAutoscaler(Autoscaler):
         # CPU bootstrap pools and does not advertise what NAP can provision,
         # so the per-pool fit check below would falsely reject GPU requests.
         # Trust NAP to satisfy the request.
-        if cluster.get('autopilot', {}).get('enabled'):
+        # Use `is True` so a non-boolean value (e.g. accidentally a string)
+        # cannot inadvertently bypass the fit check on Standard clusters.
+        if cluster.get('autopilot', {}).get('enabled') is True:
             logger.debug(f'Cluster {cluster_name} is Autopilot-managed; '
                          'trusting Node Auto-Provisioning to satisfy '
                          f'{instance_type}.')
