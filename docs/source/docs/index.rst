@@ -280,6 +280,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
+   For Frontier AI <../frontier-ai>
 
 .. toctree::
    :hidden:
