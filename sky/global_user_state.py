@@ -223,11 +223,11 @@ class ClusterEventType(enum.Enum):
     """Used to denote events that are directly related to
     a cluster's termination."""
 
+    # Progress milestones emitted during a cluster launch
+    # (e.g. 'Launching (Kubernetes cluster is autoscaling)',
+    # 'Launching (1 pod(s) pending due to Pulling)'). Read for the
+    # LAUNCHING-state badge tooltip on the dashboard.
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
-    """Progress milestones emitted during a cluster launch
-    (e.g. 'Launching (Kubernetes cluster is autoscaling)',
-    'Launching (1 pod(s) pending due to Pulling)'). Read for the
-    LAUNCHING-state badge tooltip on the dashboard."""
 
 
 # Table for cluster status change events.
@@ -1032,7 +1032,7 @@ def _get_last_or_terminal_cluster_event_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
-def _get_last_cluster_event_of_type_multiple(
+def get_last_cluster_event_of_type_multiple(
         cluster_hashes: Set[str],
         event_type: ClusterEventType) -> Dict[str, str]:
     """Returns the latest event of `event_type` per cluster_hash.
@@ -1964,7 +1964,7 @@ def get_clusters(
         for row in rows
         if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
     }
-    launch_progress_dict = _get_last_cluster_event_of_type_multiple(
+    launch_progress_dict = get_last_cluster_event_of_type_multiple(
         init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
 
     # get last cluster event for each row

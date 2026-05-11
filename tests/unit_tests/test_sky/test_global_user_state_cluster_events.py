@@ -143,7 +143,7 @@ def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
         transitioned_at=10,
     )
 
-    result = global_user_state._get_last_cluster_event_of_type_multiple(
+    result = global_user_state.get_last_cluster_event_of_type_multiple(
         {h1, h2},
         event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     )
