@@ -864,7 +864,16 @@ def _launch(
         extra_launch_context=_extra_launch_context or {},
     )
     response = server_common.make_authenticated_request(
-        'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
+        'POST',
+        '/launch',
+        json=json.loads(body.model_dump_json()),
+        # /launch should return a request_id quickly, but under burst load
+        # against a remote API server the read can take more than the bare
+        # 5s the literal used to allow. Keep the short connect timeout so
+        # we still fail fast against a wedged server, but give the read
+        # leg room.
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 30))
     return server_common.get_request_id(response)
 
 
@@ -947,7 +956,12 @@ def exec(  # pylint: disable=redefined-builtin
     )
 
     response = server_common.make_authenticated_request(
-        'POST', '/exec', json=json.loads(body.model_dump_json()), timeout=5)
+        'POST',
+        '/exec',
+        json=json.loads(body.model_dump_json()),
+        # See /launch above for rationale.
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 30))
     return server_common.get_request_id(response)
 
 
