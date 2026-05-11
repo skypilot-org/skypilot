@@ -1,10 +1,9 @@
 """Tests for sky/serve/service.py.
 
-Focused on the helpers added for HA leader-aware routing (changes C.2 / C.3
-from plans/jobs-pool-consolidation-ha-architecture.md):
+Focused on the helpers added for HA leader-aware routing:
 
 - _wait_for_controller_ready: must block until the uvicorn subprocess is
-  actually accepting connections. Used to gate the PG flip in the recovery
+  actually accepting connections. Used to gate the DB flip in the recovery
   path so that clients never route to a pod whose listener isn't bound yet.
 - _orphan_exit: must NOT call _cleanup. The whole point of this exit path
   is that another instance has already taken over the row, so any cleanup
@@ -85,7 +84,7 @@ class TestWaitForControllerReady:
 
     def test_raises_on_timeout(self):
         """Listener never comes up — must raise RuntimeError, not block
-        forever (would otherwise leave the daemon stuck with the old PG row
+        forever (would otherwise leave the daemon stuck with the old DB row
         intact, blocking subsequent recoveries)."""
         port = _free_port()
         # Don't bind anything.
@@ -107,7 +106,7 @@ class TestWaitForControllerReady:
 
 
 class TestOrphanExit:
-    """Critical contract: _orphan_exit must NOT touch any PG state. It only
+    """Critical contract: _orphan_exit must NOT touch any DB state. It only
     kills our forked subprocesses and calls os._exit(0). This is what
     distinguishes orphan exit from normal cleanup — the new owner is now
     responsible for replica state, version cleanup, services row deletion,
@@ -124,10 +123,6 @@ class TestOrphanExit:
             mock_exit.assert_called_once_with(0)
 
     def test_does_not_call_cleanup(self):
-        """Regression guard: a previous version of the plan had _orphan_exit
-        going through _cleanup with an `orphan` flag; sub-agent review caught
-        that _cleanup writes replica state and would race the new owner.
-        Verify we don't call into _cleanup at all."""
         with mock.patch('os._exit'), \
              mock.patch('sky.serve.service.subprocess_utils.'
                         'kill_children_processes'), \

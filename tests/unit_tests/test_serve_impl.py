@@ -24,8 +24,7 @@ class TestApplyRefusesTerminalStates:
     """`apply` should refuse to update a row that's in a terminal state.
     The previous behavior was to call `update()` regardless, which would
     POST to the (likely-dead) controller HTTP listener and surface a
-    confusing ECONNREFUSED to the user. We saw 12 SHUTTING_DOWN zombies
-    on the test cluster that all hit this path."""
+    confusing ECONNREFUSED to the user."""
 
     def _service_record(self, status):
         return {

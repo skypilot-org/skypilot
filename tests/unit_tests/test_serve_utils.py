@@ -153,19 +153,19 @@ class TestIsConsolidationMode:
 
 
 # ---------------------------------------------------------------------------
-# Tests for HA leader-aware controller URL routing (changes A.2 / C.4 / D)
+# Tests for HA leader-aware controller URL routing
 # ---------------------------------------------------------------------------
 # pylint: disable=protected-access
 
 
 class TestGetControllerUrl:
     """`_get_controller_url` should:
-    - fall back to localhost when no controller_ip is recorded (single-pod /
-      pre-migration), so existing single-replica deployments are unaffected;
+    - fall back to localhost when no controller_ip is recorded (
+      pre-migration), so existing deployments are unaffected;
     - fall back to localhost when controller_ip equals our own POD_IP, so the
       pod that owns the controller doesn't pay for an extra cross-pod hop;
     - return http://<controller_ip>:<port> only when running on a different
-      pod than the one hosting the controller (multi-replica HA case).
+      pod than the one hosting the controller.
     """
 
     def _patch_record(self, controller_ip):
@@ -180,7 +180,7 @@ class TestGetControllerUrl:
             })
 
     def test_no_record_returns_localhost(self):
-        """Service row missing → fall back to localhost (no PG to route by)."""
+        """Service row missing → fall back to localhost."""
         with mock.patch(
                 'sky.serve.serve_utils.serve_state.'
                 'get_service_from_name',
@@ -222,15 +222,6 @@ class TestGetControllerUrl:
 
 
 class TestControllerHttpRetry:
-    """The retry wrappers cover the only realistic failure mode after change
-    C: a brief window when a follower pod races a recovery — the controller
-    process on the new owner may already be listening but PG may still point
-    at the old owner (or the old pod is mid-shutdown). 3 attempts × 0.5s
-    backoff (~1s total) is enough for the PG-flip race and bounded enough
-    not to hang the user. Intermediate attempts log at DEBUG; only the
-    final-attempt failure logs at WARN, so each refresh tick produces at
-    most one WARN line even when the controller is intentionally absent
-    (CONTROLLER_INIT / SHUTTING_DOWN / FAILED_CLEANUP)."""
 
     def _patch_record(self, controller_ip):
         return mock.patch(
@@ -288,11 +279,11 @@ class TestControllerHttpRetry:
                 assert m.call_count == 1
 
     def test_get_retries_url_is_re_resolved_each_attempt(self):
-        """Between retries we re-call _get_controller_url so that if PG
+        """Between retries we re-call _get_controller_url so that if DB
         finished flipping during the backoff, we route to the new owner on
         the next try."""
 
-        # Simulate PG flip mid-retry: first lookup says 10.0.0.7, second
+        # Simulate DB flip mid-retry: first lookup says 10.0.0.7, second
         # lookup says 10.0.0.8.
         records = [
             {
@@ -328,12 +319,6 @@ class TestControllerHttpRetry:
         assert urls_called[1] == 'http://10.0.0.8:20001/autoscaler/info'
 
     def test_log_levels_one_warn_per_cycle(self):
-        """Each refresh tick during SHUTTING_DOWN spams retries into the
-        daemon log; we want at most one WARN line per cycle (final attempt)
-        with intermediate attempts at DEBUG. Catches the regression where
-        every retry was a WARN. We patch logger directly (caplog doesn't
-        capture sky_logging-initialized loggers because they
-        `propagate=False`)."""
         with self._patch_record(None), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch(

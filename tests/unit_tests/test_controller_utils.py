@@ -701,8 +701,7 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tests for the SKYPILOT_CONFIG env / file_mount consistency fix (change A1
-# from plans/jobs-pool-consolidation-ha-architecture.md).
+# Tests for the SKYPILOT_CONFIG env / file_mount consistency fix.
 #
 # Bug: previously, the SKYPILOT_CONFIG env var on the controller was set
 # whenever `skypilot_config.loaded()` was True (i.e. the API server itself
@@ -749,9 +748,7 @@ def test_skypilot_config_env_NOT_set_when_local_config_empty(
     """Regression test: even if the API server's own config is loaded
     (skypilot_config.loaded() is True), if the config we're passing to the
     controller is empty, we MUST NOT set SKYPILOT_CONFIG — otherwise the
-    controller process tries to read a non-existent file and crashes
-    (this is the exact build #403 failure mode for controllers running
-    outside of the original recovery context)."""
+    controller process tries to read a non-existent file and crashes."""
     from sky import skypilot_config
 
     monkeypatch.setattr(

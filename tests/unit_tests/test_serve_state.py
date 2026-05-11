@@ -1,8 +1,7 @@
 """Tests for serve_state.
 
 Focused on the new controller_ip column + atomic update introduced for HA
-multi-replica leader-aware routing (changes C.1 from
-plans/jobs-pool-consolidation-ha-architecture.md).
+leader-aware routing.
 """
 # Pytest fixture name collides with pylint's "private name" rule (leading
 # underscore is the standard convention for fixtures injected for side
@@ -25,20 +24,6 @@ def _read_row(engine, name):
             sqlalchemy.select(serve_state.services_table).where(
                 serve_state.services_table.c.name == name)).fetchone()
     return None if result is None else dict(result._mapping)  # pylint: disable=protected-access
-
-
-@pytest.fixture
-def _mock_serve_db(tmp_path, monkeypatch):
-    """Point serve_state at a fresh sqlite DB for the duration of one test."""
-    db_path = tmp_path / 'serve_state_testing.db'
-    engine = create_engine(f'sqlite:///{db_path}')
-
-    monkeypatch.setattr(serve_state._db_manager, '_engine', engine)
-    # `metadata.create_all` only creates tables that don't already exist; this
-    # is enough since we're starting from a brand-new DB and the alembic
-    # upgrade step in `create_table` would otherwise need a full env.
-    serve_state.Base.metadata.create_all(engine)
-    yield engine
 
 
 def _add_minimal_service(name: str, controller_ip=None):
@@ -91,21 +76,6 @@ class TestAddServiceWritesControllerIp:
 
 
 class TestGetServiceFromNameReturnsControllerIp:
-    """Regression guard: `_get_service_from_row` originally constructed the
-    record dict without `controller_ip`. Even though PG had the column and
-    `add_service` wrote to it, every reader that came through
-    `get_service_from_name` saw `record.get('controller_ip') == None`.
-
-    This silently broke HA cross-pod routing in `_get_controller_url`:
-    callers always fell through to `http://localhost:<port>` even when the
-    controller was on a different pod, so any non-controller pod handling
-    a status / down / update request hit ECONNREFUSED.
-
-    These tests assert that `get_service_from_name` returns the field and
-    that the value round-trips. If a future schema change adds another
-    column without updating `_get_service_from_row`, the same class of bug
-    can resurface; the assertion list below is the canary.
-    """
 
     def _add_with_version(self, service_name, controller_ip):
         # Reading via get_service_from_name requires a version_specs row
@@ -155,14 +125,14 @@ class TestGetServiceFromNameReturnsControllerIp:
 
 
 class TestUpdateServiceControllerPidIpAndPort:
-    """The atomic update is the core of the HA-recovery PG flip — it must
+    """The atomic update is the core of the HA-recovery DB flip — it must
     write pid, ip, AND port in a single transaction so clients never
     observe a half-flipped row (e.g. new pid + old ip + stale port that
     points at a different service's listener on the new pod).
 
     Recovery picks port locally (find_free_port on the recovery pod);
-    that new port has to land in PG together with pid/ip, otherwise
-    a `_get_controller_url` consumer reading PG between writes could
+    that new port has to land in DB together with pid/ip, otherwise
+    a `_get_controller_url` consumer reading DB between writes could
     route to the new pod with the old port and hit the wrong listener.
     """
 
@@ -244,17 +214,10 @@ class TestRemoveServiceCompletely:
     """`remove_service_completely` deletes services / version_specs /
     serve_ha_recovery_script in one transaction. Sequential deletes had
     a real-world failure mode where the last call
-    (`remove_ha_recovery_script`) was the one most likely to be skipped
+    was the one most likely to be skipped
     when the subprocess died mid-cleanup, leaving the row orphaned across
     many test runs while the other tables stayed clean. This guarantees
     all-or-nothing teardown for service metadata.
-
-    Replicas are NOT touched: both callers (`_cleanup` success path,
-    `_terminate_failed_services` on `--purge`) iterate replicas with
-    per-replica logic (cluster-existence probes, terminate-thread join,
-    failure marking) and clear the rows themselves before reaching this
-    function. The tests below explicitly assert that pre-existing
-    replica rows survive.
     """
 
     def _populate(self, engine, name):

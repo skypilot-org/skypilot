@@ -239,7 +239,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
     # makes the `services` row invisible to `get_service_from_name` (it
     # uses an INNER JOIN with `version_specs`), so `sky ... status` /
     # `sky ... down --purge` can no longer locate the FAILED_CLEANUP row,
-    # and the only way out is to manually delete the PG row.
+    # and the only way out is to manually delete the DB row.
     return failed
 
 
@@ -261,10 +261,9 @@ def _cleanup_task_run_script(job_id: int) -> None:
 def _wait_for_controller_ready(host: str, port: int, timeout: int = 30) -> None:
     """Block until the controller HTTP server is accepting connections.
 
-    Used by HA recovery in consolidation mode: we must not flip DB
-    `controller_pid`/`controller_ip` until the new subprocess is actually
-    listening, otherwise clients routed by PG hit the new pod's IP before
-    its uvicorn binds and get ECONNREFUSED.
+    We must not flip DB `controller_pid`/`controller_ip` until the new
+    subprocess is actually listening, otherwise clients routed by DB hit
+    the new pod's IP before its uvicorn binds and get ECONNREFUSED.
     """
     # When binding 0.0.0.0, probe via loopback.
     probe_host = '127.0.0.1' if host == '0.0.0.0' else host
@@ -406,7 +405,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
             # Start the controller.
             # NOTE: also pick a fresh free port on recovery — do NOT reuse
-            # the port from PG. The port in PG was chosen on the previous
+            # the port from DB. The port in DB was chosen on the previous
             # controller's pod (e.g. Pod A); on a different recovery pod
             # (Pod B), that port may be in use by another service's
             # controller, in which case our subprocess would fail to bind
@@ -482,7 +481,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                     controller_port=controller_port)
             else:
                 # Fresh up: add_service already wrote pid/ip with the row.
-                # Only the port needs to land in PG now (after bind).
+                # Only the port needs to land in DB now (after bind).
                 serve_state.set_service_controller_port(service_name,
                                                         controller_port)
 

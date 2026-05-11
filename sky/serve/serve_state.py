@@ -368,7 +368,7 @@ def update_service_controller_pid_ip_and_port(service_name: str,
     """Atomically updates controller pid + IP + port for a service.
 
     Used during HA recovery: the controller subprocess on the new pod must be
-    listening on the chosen port before we flip PG to point requests at it.
+    listening on the chosen port before we flip DB to point requests at it.
     By updating all three fields in one statement, clients never see a
     half-flipped row (e.g. new pid + old ip, or new ip + stale port that
     points at a different service's listener on the new pod).
