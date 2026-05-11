@@ -8,6 +8,7 @@ from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision.vast import utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -323,7 +324,6 @@ def query_ports(
     externally-accessible endpoint is ssh_host:(ssh_port+1).
     """
     del head_ip, provider_config  # Unused.
-    from sky.utils import resources_utils  # pylint: disable=import-outside-toplevel
     ports_to_query = resources_utils.port_ranges_to_set(ports)
 
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'],
