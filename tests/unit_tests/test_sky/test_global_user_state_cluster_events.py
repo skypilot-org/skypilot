@@ -101,3 +101,45 @@ def test_launch_progress_retention_cleans_old_rows(tmp_path, monkeypatch):
         event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     )
     assert remaining == 'recent-launch-step'
+
+
+def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    h1 = _add_cluster('a')
+    h2 = _add_cluster('b')
+
+    global_user_state.add_cluster_event(
+        'a',
+        new_status=None,
+        reason='a-old',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=1,
+    )
+    global_user_state.add_cluster_event(
+        'a',
+        new_status=None,
+        reason='a-new',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=2,
+    )
+    global_user_state.add_cluster_event(
+        'b',
+        new_status=None,
+        reason='b-only',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=5,
+    )
+    # Wrong-type row for 'b' to verify the filter:
+    global_user_state.add_cluster_event(
+        'b',
+        new_status=None,
+        reason='b-status-change',
+        event_type=global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=10,
+    )
+
+    result = global_user_state._get_last_cluster_event_of_type_multiple(
+        {h1, h2},
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+    assert result == {h1: 'a-new', h2: 'b-only'}

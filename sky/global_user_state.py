@@ -1032,6 +1032,39 @@ def _get_last_or_terminal_cluster_event_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
+def _get_last_cluster_event_of_type_multiple(
+        cluster_hashes: Set[str],
+        event_type: ClusterEventType) -> Dict[str, str]:
+    """Returns the latest event of `event_type` per cluster_hash.
+
+    Mirrors _get_last_or_terminal_cluster_event_multiple but filters to a
+    single event type (no TERMINAL-priority ordering).
+    """
+    if not cluster_hashes:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+
+        ranked = session.query(
+            cluster_event_table.c.cluster_hash,
+            cluster_event_table.c.reason,
+            row_number,
+        ).filter(
+            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+            cluster_event_table.c.type == event_type.value,
+        ).subquery()
+
+        rows = session.query(
+            ranked.c.cluster_hash,
+            ranked.c.reason,
+        ).filter(ranked.c.rn == 1).all()
+
+    return {row.cluster_hash: row.reason for row in rows}
+
+
 def cleanup_cluster_events_with_retention(retention_hours: float,
                                           event_type: ClusterEventType) -> None:
     engine = _db_manager.get_engine()
