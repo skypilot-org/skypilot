@@ -114,8 +114,8 @@ class SshBenchGenerator(GeneratorBase):
     @property
     def is_bounded(self) -> bool:
         """True iff every op has a finite total_connections > 0."""
-        return bool(self.spec.ops) and all(op.total_connections > 0
-                                           for op in self.spec.ops)
+        return bool(self.spec.ops) and all(
+            op.total_connections > 0 for op in self.spec.ops)
 
     def summarize(self) -> Dict[str, Any]:
         rows = self.records()
@@ -224,8 +224,7 @@ class SshBenchGenerator(GeneratorBase):
 
     # ── sky logs --no-follow ─────────────────────────────────────
 
-    def _run_sky_logs(self, state: _OpState, slot_id: int,
-                      victim: str) -> None:
+    def _run_sky_logs(self, state: _OpState, slot_id: int, victim: str) -> None:
         if self._sky_sdk is None:
             with state.lock:
                 state.failed += 1

@@ -2,7 +2,7 @@
 #
 # Run with:
 #   python tests/load_tests/benchmark_ctl.py \
-#       --config tests/load_tests/configs/mixed.yaml \
+#       --config tests/load_tests/configs/ssh.yaml \
 #       --target-endpoint http://user:pass@your-api-server
 #
 # Notes
@@ -35,11 +35,10 @@ victim_pool:
   memory: 4
   name_prefix: bench-victim
   provision: true
-  teardown: false
+  teardown: true
 
 generators:
-  # Heavy lifecycle pressure (slow, closed-loop). Optional — uncomment to
-  # layer it on top of the other generators.
+  # Heavy lifecycle pressure (slow, closed-loop). Comment out if not needed.
   - name: shell-lifecycle
     type: shell
     workload: workloads/basic.sh
