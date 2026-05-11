@@ -8,6 +8,11 @@ on:
         description: 'SkyPilot PyPI package name'
         required: true
         type: string
+      release_environment:
+        description: 'Release environment: production or staging'
+        required: false
+        type: string
+        default: 'production'
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -15,6 +20,8 @@ on:
         required: true
       HELM_DEPLOY_KEY:
         required: true
+      STAGING_HELM_DEPLOY_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       package_name:
@@ -25,6 +32,14 @@ on:
           - 'skypilot-nightly'
           - 'skypilot'
         default: 'skypilot-nightly'
+      release_environment:
+        description: 'Release environment: production or staging'
+        required: false
+        type: choice
+        options:
+          - 'production'
+          - 'staging'
+        default: 'production'
 
 jobs:
   set-package:
@@ -46,6 +61,7 @@ jobs:
     uses: ./.github/workflows/docker-build.yaml
     with:
       package_name: ${{ needs.set-package.outputs.package_name }}
+      release_environment: ${{ inputs.release_environment }}
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
@@ -57,12 +73,16 @@ jobs:
       version: ${{ needs.docker-build.outputs.version }}
       commit_message: 'Update Helm charts for ${{ needs.set-package.outputs.package_name }} version ${{ needs.docker-build.outputs.version }}'
       package_name: ${{ needs.set-package.outputs.package_name }}
+      release_environment: ${{ inputs.release_environment }}
+      docker_image: ${{ needs.docker-build.outputs.effective_docker_image }}
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}
+      STAGING_HELM_DEPLOY_KEY: ${{ secrets.STAGING_HELM_DEPLOY_KEY }}
 
   smoke-tests-gke:
     needs: [set-package, docker-build, publish-helm]
+    if: inputs.release_environment != 'staging'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
@@ -76,6 +96,7 @@ jobs:
 
   smoke-tests-eks:
     needs: [set-package, docker-build, publish-helm]
+    if: inputs.release_environment != 'staging'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}

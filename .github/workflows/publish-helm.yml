@@ -1,7 +1,7 @@
 name: Publish Helm Charts
 
 # Do not change this
-concurrency: publish-helm
+concurrency: publish-helm-${{ inputs.release_environment || 'production' }}
 
 env:
   HELM_REPO_URL: https://helm.skypilot.co
@@ -26,11 +26,22 @@ on:
         required: false
         type: string
         default: "skypilot-nightly"
+      release_environment:
+        description: "Release environment: production or staging"
+        required: false
+        type: string
+        default: "production"
+      docker_image:
+        description: "Docker image to reference in values.yaml (e.g. berkeleyskypilot/skypilot). Defaults to DOCKER_USERNAME/package_name."
+        required: false
+        type: string
     secrets:
       DOCKER_USERNAME:
         required: true
       HELM_DEPLOY_KEY:
         required: true
+      STAGING_HELM_DEPLOY_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -47,11 +58,22 @@ on:
         required: false
         type: string
         default: "skypilot-nightly"
+      release_environment:
+        description: "Release environment: production or staging"
+        required: false
+        type: string
+        default: "production"
+      docker_image:
+        description: "Docker image to reference in values.yaml (e.g. berkeleyskypilot/skypilot). Defaults to DOCKER_USERNAME/package_name."
+        required: false
+        type: string
     secrets:
       DOCKER_USERNAME:
         required: true
       HELM_DEPLOY_KEY:
         required: true
+      STAGING_HELM_DEPLOY_KEY:
+        required: false
 
 jobs:
   publish-helm:
@@ -68,7 +90,11 @@ jobs:
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          if [ "${{ inputs.release_environment }}" == "staging" ]; then
+            echo "${{ secrets.STAGING_HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          else
+            echo "${{ secrets.HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          fi
           chmod 600 ~/.ssh/deploy_key
           cat >> ~/.ssh/config << EOF
           Host github.com
@@ -80,8 +106,9 @@ jobs:
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           path: 'dest'
-          repository: 'skypilot-org/skypilot-helm'
-          ssh-key: ${{ secrets.HELM_DEPLOY_KEY }}
+          repository: ${{ inputs.release_environment == 'staging' && 'skypilot-org/skypilot-helm-staging' || 'skypilot-org/skypilot-helm' }}
+          ssh-key: ${{ inputs.release_environment == 'staging' && secrets.STAGING_HELM_DEPLOY_KEY || secrets.HELM_DEPLOY_KEY }}
+          ref: main
           fetch-depth: 0
 
       - name: Install Helm
@@ -118,8 +145,14 @@ jobs:
       - name: Update docker image in charts
         if: inputs.version != ''
         run: |
+          # Compute the docker image reference
+          if [ -n "${{ inputs.docker_image }}" ]; then
+            DOCKER_IMG="${{ inputs.docker_image }}"
+          else
+            DOCKER_IMG="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
+          fi
           # Update the apiService.image in values.yaml using yq
-          yq -i '.apiService.image = "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ inputs.version }}"' src/charts/skypilot/values.yaml
+          yq -i ".apiService.image = \"${DOCKER_IMG}:${{ inputs.version }}\"" src/charts/skypilot/values.yaml
           # Print the new values.yaml for debugging
           cat src/charts/skypilot/values.yaml
 
@@ -136,7 +169,12 @@ jobs:
         shell: bash
         working-directory: dest
         run: |
-          helm repo index . --url ${{ env.HELM_REPO_URL }}
+          if [ "${{ inputs.release_environment }}" == "staging" ]; then
+            HELM_URL="https://raw.githubusercontent.com/skypilot-org/skypilot-helm-staging/main"
+          else
+            HELM_URL="${{ env.HELM_REPO_URL }}"
+          fi
+          helm repo index . --url $HELM_URL
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Add both untracked files and .tgz files explicitly

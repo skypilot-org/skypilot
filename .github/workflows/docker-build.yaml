@@ -23,6 +23,14 @@ on:
           - 'source'
           - 'pypi'
         default: 'pypi'
+      release_environment:
+        description: 'Release environment: production or staging'
+        required: false
+        type: choice
+        options:
+          - 'production'
+          - 'staging'
+        default: 'production'
   workflow_call:
     inputs:
       package_name:
@@ -33,10 +41,18 @@ on:
         description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
         required: false
         type: string
+      release_environment:
+        description: 'Release environment: production or staging'
+        required: false
+        type: string
+        default: 'production'
     outputs:
       version:
         description: "The version used for the Docker build"
         value: ${{ jobs.prepare.outputs.version }}
+      effective_docker_image:
+        description: "The Docker image used for the build"
+        value: ${{ jobs.prepare.outputs.effective_docker_image }}
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -50,6 +66,7 @@ jobs:
       version: ${{ steps.version.outputs.latest_version }}
       trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
       install_from_source: ${{ steps.install_method.outputs.install_from_source }}
+      effective_docker_image: ${{ steps.docker_image.outputs.effective_docker_image }}
     steps:
       # Always checkout repository (Docker build always needs Dockerfile)
       - name: Checkout repository
@@ -111,7 +128,7 @@ jobs:
         if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: skypilot-artifacts-${{ inputs.package_name }}
+          name: skypilot-artifacts-${{ inputs.package_name }}${{ inputs.release_environment == 'staging' && '-staging' || '' }}
           path: dist/
 
       # For trigger by other file through workflow_call or PyPI fetch: download all artifacts
@@ -119,13 +136,24 @@ jobs:
         if: steps.install_method.outputs.install_from_source == 'false'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: skypilot-artifacts-${{ inputs.package_name }}
+          name: skypilot-artifacts-${{ inputs.package_name }}${{ inputs.release_environment == 'staging' && '-staging' || '' }}
           path: dist/
 
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           version: "latest"
+
+      - name: Compute effective Docker image
+        id: docker_image
+        run: |
+          if [ "${{ inputs.release_environment }}" == "staging" ]; then
+            IMAGE="berkeleyskypilot/skypilot-staging"
+          else
+            IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
+          fi
+          echo "effective_docker_image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "Using Docker image: $IMAGE"
 
       - name: Find and verify version
         id: version
@@ -181,7 +209,7 @@ jobs:
       - name: Upload build context
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: skypilot-build-context-${{ inputs.package_name }}
+          name: skypilot-build-context-${{ inputs.package_name }}${{ inputs.release_environment == 'staging' && '-staging' || '' }}
           path: .
 
   build:
@@ -200,7 +228,7 @@ jobs:
       - name: Download build context
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: skypilot-build-context-${{ inputs.package_name }}
+          name: skypilot-build-context-${{ inputs.package_name }}${{ inputs.release_environment == 'staging' && '-staging' || '' }}
           path: .
 
       - name: Set up Docker Buildx
@@ -224,7 +252,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
+          tags: "${{ needs.prepare.outputs.effective_docker_image }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
           build-args: |
             INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
           cache-from: |
@@ -249,53 +277,55 @@ jobs:
         run: |
           # Create multi-platform manifest from temporary tags
           VERSION="${{ needs.prepare.outputs.version }}"
-          
-          # Determine if this is a pre-release version (contains rc, alpha, beta, or dev)
-          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
-            echo "Pre-release version detected ($VERSION), skipping :latest tag"
-            TAGS="-t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
+          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+
+          # Determine if :latest tag should be applied
+          # Skip :latest for pre-release versions or staging environment
+          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]] || [ "${{ inputs.release_environment }}" == "staging" ]; then
+            echo "Pre-release or staging ($VERSION), skipping :latest tag"
+            TAGS="-t $IMAGE:$VERSION"
           else
-            echo "Stable release version detected ($VERSION), updating :latest tag"
-            TAGS="-t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
+            echo "Stable release ($VERSION), updating :latest tag"
+            TAGS="-t $IMAGE:latest -t $IMAGE:$VERSION"
           fi
-          
+
           docker buildx imagetools create \
             $TAGS \
-            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-amd64 \
-            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-arm64
+            $IMAGE:$VERSION-linux-amd64 \
+            $IMAGE:$VERSION-linux-arm64
 
       - name: Clean up temporary tags
         if: always()
         run: |
-          echo "🧹 Cleaning up temporary tags..."
+          echo "Cleaning up temporary tags..."
 
           # Get auth token for Docker Hub API
           TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
             -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' \
             https://hub.docker.com/v2/users/login/ | jq -r .token)
 
+          # Extract repo path from effective_docker_image for API call
+          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+
           # Delete temporary tags
           for tag in "${{ needs.prepare.outputs.version }}-linux-amd64" "${{ needs.prepare.outputs.version }}-linux-arm64"; do
             echo "Deleting tag: $tag"
             curl -X DELETE \
               -H "Authorization: JWT $TOKEN" \
-              "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}/tags/$tag/" || true
+              "https://hub.docker.com/v2/repositories/$IMAGE/tags/$tag/" || true
           done
 
       - name: Summary of final tags
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          echo "✅ Multi-platform tags created:"
-          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
-          
+          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+          echo "Multi-platform tags created:"
+          echo "   - $IMAGE:$VERSION"
+
           # Check if latest tag was updated
-          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
+          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]] || [ "${{ inputs.release_environment }}" == "staging" ]; then
             echo ""
-            echo "ℹ️  Pre-release version - :latest tag not updated"
+            echo "Pre-release or staging - :latest tag not updated"
           else
-            echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
+            echo "   - $IMAGE:latest"
           fi
-          
-          echo ""
-          echo "🚀 Built with native runners for maximum performance!"
-          echo "🧹 Temporary tags cleaned up automatically!"

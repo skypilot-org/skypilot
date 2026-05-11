@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_environment:
+        description: 'Release environment: production or staging. Staging skips real PyPI.'
+        required: false
+        default: 'production'
+        type: string
     secrets:
       TEST_PYPI_API_TOKEN:
         description: 'API token for Test PyPI'
@@ -36,7 +41,7 @@ jobs:
 
   publish-and-validate-pypi:
     needs: [publish-and-validate-test-pypi]
-    if: always() && (needs.publish-and-validate-test-pypi.result == 'success' || inputs.skip_test_pypi)
+    if: always() && inputs.release_environment != 'staging' && (needs.publish-and-validate-test-pypi.result == 'success' || inputs.skip_test_pypi)
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: ${{ inputs.package_name }}
