@@ -595,10 +595,35 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        # Poll `pool logs` until the user task is submitted (signaled by
+        # "Job submitted, ID:" in the streamed launch log) before running
+        # the actual setup-message assertion. The replica enters STARTING
+        # after provisioning finishes, but the user's setup is detached
+        # — `Noisy setup` only flows once `sky.launch` submits the user
+        # task as a Ray job.
+        # One-shot calling `pool logs` immediately after
+        # STARTING races: skylet returns "Skip streaming logs as no job
+        # has been submitted" → exit 102 → assertion fails. Polling for
+        # the milestone first sidesteps the race without a fixed sleep.
+        wait_for_job_submitted = (
+            f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  if (( $SECONDS - $start_time > 120 )); then '
+            f'    echo "Timeout waiting for user task submission in '
+            f'launch log"; exit 1; '
+            f'  fi; '
+            f'  s=$(sky jobs pool logs {pool_name} 1 --no-follow 2>&1); '
+            f'  if echo "$s" | grep -q "Job submitted, ID:"; then '
+            f'    echo "User task submitted, proceeding to assert "'
+            f'"setup output"; break; '
+            f'  fi; '
+            f'  sleep 5; '
+            f'done')
         test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
             _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                   pool_yaml=pool_yaml.name),
             wait_until_worker_status(pool_name, 'STARTING', timeout=timeout),
+            wait_for_job_submitted,
             check_for_setup_message(pool_name, 'Noisy setup 1', follow=False),
         ],
                                       timeout=timeout,
