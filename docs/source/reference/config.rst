@@ -241,6 +241,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+    :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
@@ -2469,6 +2470,63 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-nebius-security-group-name:
+
+``nebius.security_group_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Security group (optional).
+
+Name of an existing Nebius security group to attach to launched VMs. If not
+specified, SkyPilot creates and manages a per-cluster security group named
+``sky-sg-<cluster-name-on-cloud>``.
+
+Note: the user-supplied security group must already exist in the **same Nebius
+network** as the subnet SkyPilot uses for the cluster. SkyPilot will not create
+the security group on your behalf when this option is set. You can check a
+security group's network in the Nebius console under VPC > Security Groups.
+
+The security group must already have at least one rule before launch. SkyPilot
+deliberately does not modify a user-managed security group — silently adding
+default rules (e.g., SSH from anywhere) would conflict with the "you own the
+rules" intent of BYO. Pre-configure at minimum:
+
+- An ingress rule allowing your operator CIDR to reach SSH on ports 22 and 10022
+- A self-referencing ingress rule for intra-cluster traffic (head/worker Ray
+  on 6379, 8265, 52365, the worker port range, etc.)
+- Any application ports your task declares via ``ports:``
+
+When ``security_group_name`` is set and the task declares ``ports:``, SkyPilot
+will warn at launch and skip ``open_ports`` — adding the matching ingress rules
+is the user's responsibility.
+
+Some example use cases are shown below.
+
+- ``<string>``: Use the named security group for all clusters.
+
+- ``<list of single-element dict>``: A list of single-element dictionaries
+  mapping from the cluster name (pattern) to the security group name to use.
+  The matching is done in the same order as the list.
+
+  NOTE: If none of the wildcard expressions match the cluster name, SkyPilot
+  will fall back to creating its own security group named
+  ``sky-sg-<cluster-name-on-cloud>``. To specify a default, use ``*`` as the
+  wildcard expression.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1 — single SG for all clusters
+    security_group_name: my-sg
+
+    # Format 2 — per-cluster pattern matching
+    security_group_name:
+      - my-training-*: my-training-sg
+      - sky-serve-controller-*: my-serving-sg
+      - "*": my-default-sg
 
 .. _config-yaml-vast:
 

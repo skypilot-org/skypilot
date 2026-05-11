@@ -1,4 +1,6 @@
 """ Nebius Cloud. """
+import fnmatch
+import hashlib
 import json
 import os
 import tempfile
@@ -52,14 +54,36 @@ def nebius_profile_in_aws_cred_and_config() -> bool:
 
 
 def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
-    """Materialize effective Nebius config into a temporary uploadable file."""
-    with tempfile.NamedTemporaryFile(prefix=prefix,
-                                     mode='w',
-                                     delete=False,
-                                     encoding='utf-8') as temp_file:
-        temp_file.write(value)
-        temp_file.write('\n')
-        return temp_file.name
+    """Materialize effective Nebius config into a stable, uploadable file.
+
+    The path is deterministic from ``value`` so repeated calls return the same
+    path. ``Cloud.get_credential_file_mounts()`` runs on every launch for every
+    enabled cloud (see ``sky/check.py::get_cloud_credential_file_mounts``), and
+    its return value feeds the file-mounts hash that SkyPilot uses to dedupe
+    rsync uploads to controllers and to decide whether ``sky launch --fast``
+    may skip re-setup. A fresh ``NamedTemporaryFile`` per call would change
+    that hash on every launch, busting the cache and breaking ``--fast`` for
+    every enabled-cloud combo where Nebius is configured -- including launches
+    on other clouds (AWS, etc).
+
+    The path is also namespaced by UID so that two users on a host with a
+    shared ``tempfile.gettempdir()`` (e.g. ``/tmp`` on Linux) cannot collide
+    when they happen to share the same content -- one user's restrictive
+    umask would otherwise lock the other user out.
+    """
+    uid = os.getuid() if hasattr(os, 'getuid') else 'default'
+    digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
+    path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
+    expected = value + '\n'
+    try:
+        with open(path, 'r', encoding='utf-8') as existing:
+            if existing.read() == expected:
+                return path
+    except OSError:
+        pass
+    with open(path, 'w', encoding='utf-8') as new_file:
+        new_file.write(expected)
+    return path
 
 
 @registry.CLOUD_REGISTRY.register
@@ -96,6 +120,9 @@ class Nebius(clouds.Cloud):
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    # Ports are managed via Nebius security groups, mutated post-launch by
+    # `sky/provision/nebius/instance.py:open_ports`.
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.UPDATABLE
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -266,7 +293,7 @@ class Nebius(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del dryrun, cluster_name
+        del dryrun
         assert zones is None, ('Nebius does not support zones', zones)
 
         resources = resources.assert_launchable()
@@ -317,6 +344,44 @@ class Nebius(clouds.Cloud):
             logger.debug(f'Getting disk tier for Nebius {resources.disk_tier}.')
             return Nebius._translate_disk_tier(resources.disk_tier)
 
+        # Resolve BYO vs SkyPilot-managed security group. Mirrors the
+        # `aws.security_group_name` resolution in `sky.clouds.aws.AWS`.
+        # The result flows through the rendered Ray YAML
+        # (`provider.security_group`) to bootstrap_instances and
+        # terminate_instances, which branch on the ManagedBySkyPilot flag.
+        user_sg_config = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=region.name,
+            keys=('security_group_name',),
+            default_value=None)
+        user_sg: Optional[str] = None
+        if isinstance(user_sg_config, str):
+            user_sg = user_sg_config
+        elif isinstance(user_sg_config, list):
+            for profile in user_sg_config:
+                pattern, sg_name = next(iter(profile.items()))
+                if fnmatch.fnmatchcase(cluster_name.display_name, pattern):
+                    user_sg = sg_name
+                    break
+
+        if user_sg is None:
+            security_group = nebius_constants.SECURITY_GROUP_TEMPLATE.format(
+                cluster_name.name_on_cloud)
+            security_group_managed_by_skypilot = True
+        else:
+            security_group = user_sg
+            security_group_managed_by_skypilot = False
+            if resources.ports is not None:
+                logger.warning(
+                    f'Skip opening ports {resources.ports} for cluster '
+                    f'{cluster_name.display_name!r}, as '
+                    f'`nebius.security_group_name` in `~/.sky/config.yaml` '
+                    f'is specified as {security_group!r}. Please ensure '
+                    f'the specified security group has the requested ports '
+                    f'configured; or, leave out '
+                    f'`nebius.security_group_name` in '
+                    f'`~/.sky/config.yaml`.')
+
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -329,6 +394,9 @@ class Nebius(clouds.Cloud):
             'filesystems': resources_vars_fs,
             'network_tier': resources.network_tier,
             'disk_tier': _get_disk_tier(),
+            'security_group': security_group,
+            'security_group_managed_by_skypilot':
+                str(security_group_managed_by_skypilot).lower(),
         }
 
         docker_run_options = []

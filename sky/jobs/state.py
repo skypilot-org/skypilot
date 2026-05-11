@@ -2546,6 +2546,18 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     await callback_func('STARTED')
 
 
+def get_job_status_with_task_id(job_id: int,
+                                task_id: int) -> Optional[ManagedJobStatus]:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(spot_table.c.status).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
+        status = result.fetchone()
+        return ManagedJobStatus(status[0]) if status else None
+
+
 async def get_job_status_with_task_id_async(
         job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
     engine = await _db_manager.get_async_engine()

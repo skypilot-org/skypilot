@@ -236,16 +236,43 @@ def set_last_active_time_to_now() -> None:
 def has_active_ssh_sessions() -> bool:
     """Check if any PTY traces back to sshd in the process tree."""
     try:
+        # psutil memoizes /dev/{tty*,pts/*} -> rdev at first call to
+        # Process.terminal() with no TTL (psutil._psposix.get_terminal_map).
+        # devpts entries are dynamic: if skylet's first tick runs while no
+        # SSH session is active (e.g. right after `sky stop` + `sky start`),
+        # the cache is frozen with no /dev/pts/* entries, and every later
+        # Process.terminal() returns None for PTY-attached processes.
+        # Clear the cache on each tick so newly-allocated PTYs are visible.
+        # See https://github.com/skypilot-org/skypilot/issues/9524.
+        # pylint: disable=protected-access
+        try:
+            cache_clear = psutil._psposix.get_terminal_map.cache_clear
+        except AttributeError:
+            logger.debug('[has_active_ssh] psutil._psposix.get_terminal_map'
+                         ' has no cache_clear; psutil internal API moved.')
+        else:
+            cache_clear()
+        # pylint: enable=protected-access
         pts_to_pid: dict[str, int] = {}
-        for proc in psutil.process_iter(['pid', 'terminal']):
+        all_terminal_procs: list = []
+        for proc in psutil.process_iter(['pid', 'name', 'terminal']):
             terminal = proc.info['terminal']
+            if terminal:
+                all_terminal_procs.append(
+                    (proc.info['pid'], proc.info.get('name'), terminal))
             if terminal and terminal.startswith('/dev/pts/'):
                 pts_to_pid.setdefault(terminal, proc.info['pid'])
+        logger.debug(f'[has_active_ssh] processes with non-None terminal: '
+                     f'{all_terminal_procs}')
+        logger.debug(f'[has_active_ssh] pts_to_pid: {pts_to_pid}')
 
-        for pid in pts_to_pid.values():
+        for terminal, pid in pts_to_pid.items():
             try:
                 for parent in psutil.Process(pid).parents():
                     if parent.name() == 'sshd':
+                        logger.debug(
+                            f'[has_active_ssh] sshd ancestor found for '
+                            f'pid={pid} on {terminal} -> returning True')
                         return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue

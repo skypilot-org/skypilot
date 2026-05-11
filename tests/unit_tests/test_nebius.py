@@ -4,6 +4,7 @@ from unittest.mock import patch
 from sky import clouds
 from sky import resources as resources_lib
 from sky.clouds import nebius
+from sky.utils import resources_utils
 
 
 class TestNebiusNetworkTier:
@@ -65,7 +66,8 @@ class TestNebiusNetworkTier:
 
         deploy_vars = cloud.make_deploy_resources_variables(
             resources=resources,
-            cluster_name='test-cluster',
+            cluster_name=resources_utils.ClusterName(
+                display_name='test-cluster', name_on_cloud='test-cluster'),
             region=region,
             zones=None,
             num_nodes=1)
@@ -100,7 +102,8 @@ class TestNebiusNetworkTier:
 
         deploy_vars = cloud.make_deploy_resources_variables(
             resources=resources,
-            cluster_name='test-cluster',
+            cluster_name=resources_utils.ClusterName(
+                display_name='test-cluster', name_on_cloud='test-cluster'),
             region=region,
             zones=None,
             num_nodes=1)

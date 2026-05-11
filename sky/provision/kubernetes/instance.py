@@ -645,6 +645,19 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 rich_utils.force_update_status(
                     ux_utils.spinner_message(f'Launching ({msg})',
                                              cluster_name=cluster_name))
+                # The cluster row is written by add_or_update_cluster
+                # earlier in the launch flow, so the hash lookup inside
+                # add_cluster_event is guaranteed to succeed here.
+                # TODO(kev): mirror this emit on AWS / GCP / Slurm autoscaler
+                # paths.
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason=f'Launching ({msg})',
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
         if not is_autoscaling:
             _update_spinner_message(iteration=iteration,
                                     pods=pods,
@@ -829,6 +842,22 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                                   cluster_name=cluster_name)
         if new_status_msg != last_status_msg:
             rich_utils.force_update_status(new_status_msg)
+            if pending_reasons_count:
+                # Skip the bare 'Launching' status_text — it duplicates
+                # the badge label and would produce a useless tooltip.
+                # The cluster row is written by add_or_update_cluster
+                # earlier in the launch flow, so the hash lookup inside
+                # add_cluster_event is guaranteed to succeed here.
+                # TODO(kev): mirror this emit on AWS / GCP / Slurm
+                # wait-for-instance loops.
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason=status_text,
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
             last_status_msg = new_status_msg
         time.sleep(1)
 

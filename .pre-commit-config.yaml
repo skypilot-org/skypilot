@@ -10,28 +10,12 @@ repos:
         exclude: ^charts/
     -   id: check-added-large-files
 
--   repo: https://github.com/psf/black
-    rev: 24.10.0  # Match the version from requirements
-    hooks:
-    -   id: black
-        name: black (IBM specific)
-        files: "^sky/skylet/providers/ibm/.*"  # Match only files in the IBM directory
-
 -   repo: https://github.com/pycqa/isort
     rev: 5.12.0  # Match the version from requirements
     hooks:
-    # First isort command
     -   id: isort
         name: isort (general)
-        exclude: "(build/.*|sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
-    # Second isort command
-    -   id: isort
-        name: isort (IBM specific)
-        args:
-          - "--profile=black"
-          - "-l=88"
-          - "-m=3"
-        files: "^sky/skylet/providers/ibm/.*"  # Only match IBM-specific directory
+        exclude: "(build/.*|sky/schemas/generated/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.19.1  # Match the version from requirements
@@ -62,7 +46,7 @@ repos:
     hooks:
     -   id: yapf
         name: yapf
-        exclude: (sky/skylet/providers/ibm/.*|sky/schemas/generated/.*)  # Matches exclusions from the script
+        exclude: sky/schemas/generated/.*  # Matches exclusions from the script
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2] # Match the version from requirements
 

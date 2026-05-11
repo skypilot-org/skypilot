@@ -11,7 +11,7 @@ module-level dispatch (``runtime.get_job_status(...)``,
 private to this module.
 """
 import typing
-from typing import List, Optional, Protocol, Tuple
+from typing import Dict, List, Optional, Protocol, Tuple
 
 from sky import sky_logging
 
@@ -39,6 +39,7 @@ class ManagedJobRuntime(Protocol):
         self,
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         cluster_name: str,
+        returncode: Optional[int] = None,
     ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
         """Query job status from the underlying runtime."""
         ...
@@ -103,6 +104,18 @@ class ManagedJobRuntime(Protocol):
         to the call site's default (``backend.tail_logs``)."""
         ...
 
+    def job_group_envs(
+        self,
+        tasks: List['task_lib.Task'],
+        job_id: int,
+    ) -> Optional[Dict[str, str]]:
+        """Return extra env vars to inject into all JobGroup tasks.
+
+        Called once before launching any task in a JobGroup. Returns a
+        dict of env vars merged into every task, or ``None`` to skip.
+        """
+        ...
+
     def k8s_dns_addresses_for_task(
         self,
         task: 'task_lib.Task',
@@ -149,10 +162,11 @@ def is_registered() -> bool:
 def get_job_status(
     handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
     cluster_name: str,
+    returncode: Optional[int] = None,
 ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
     if _current is None:
         return None
-    return _current.get_job_status(handle, cluster_name)
+    return _current.get_job_status(handle, cluster_name, returncode=returncode)
 
 
 def get_job_submitted_at(
@@ -223,6 +237,15 @@ def tail_logs(
         tail=tail,
         tail_offset=tail_offset,
     )
+
+
+def job_group_envs(
+    tasks: List['task_lib.Task'],
+    job_id: int,
+) -> Optional[Dict[str, str]]:
+    if _current is None:
+        return None
+    return _current.job_group_envs(tasks, job_id)
 
 
 def k8s_dns_addresses_for_task(

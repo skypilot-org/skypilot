@@ -1300,10 +1300,17 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
+        runtime_envs: Dict[str, str] = {}
+        if managed_job_runtime.is_registered():
+            extra_envs = await asyncio.to_thread(
+                managed_job_runtime.job_group_envs, tasks, self._job_id)
+            if extra_envs:
+                runtime_envs = extra_envs
         for task in tasks:
             task_envs = task.envs or {}
             task_envs[jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR] = (
                 job_group_name)
+            task_envs.update(runtime_envs)
             task.update_envs(task_envs)
 
         # Collect task statuses and determine which tasks need launch vs resume.

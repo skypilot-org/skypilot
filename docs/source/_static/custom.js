@@ -35,7 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
         { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
         { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },

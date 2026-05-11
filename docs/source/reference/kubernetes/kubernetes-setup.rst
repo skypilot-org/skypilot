@@ -3,6 +3,10 @@
 Kubernetes Cluster Setup
 ========================
 
+.. tip::
+
+    Setting up Kubernetes and SkyPilot on reserved GPUs? The SkyPilot team is happy to help —
+    `fill out this form <https://forms.gle/4nMWXKFQP63EXCYz9>`_ to get in touch.
 
 .. note::
     This is a guide for cluster administrators on how to set up Kubernetes clusters

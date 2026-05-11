@@ -1,6 +1,12 @@
 # auth.yaml
 envs:
   MODEL_NAME: Qwen/Qwen3-0.6B
+  # HuggingFace's Xet CDN (us.aws.cdn.hf.co) returns ~25-40% HTTP 403s to
+  # AWS workers in some regions, stalling vLLM's model download until the
+  # initial-delay probe times out. The legacy LFS path (direct S3 over
+  # HTTPS) works fine — same model downloads in 6s vs Xet's stall in 120s
+  # on the same worker. Keep this off until HF's Xet CDN is stable from AWS.
+  HF_HUB_DISABLE_XET: "1"
 
 secrets:
   AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --secret to pass.
