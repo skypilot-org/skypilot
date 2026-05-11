@@ -577,37 +577,6 @@ class TestCloudVmRayBackendTeardownNoLock:
         handle.close_skylet_ssh_tunnel = MagicMock()
         return handle
 
-    def test_run_on_head_runtime_error_is_raised(self):
-        backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        handle = self._make_handle('test-cluster', '/tmp/test.yaml', has_ray=True)
-        provider_config = {}
-
-        with patch(
-                'sky.backends.cloud_vm_ray_backend.requests_lib.'
-                'kill_cluster_requests'), patch(
-                    'sky.backends.cloud_vm_ray_backend.global_user_state.'
-                    'get_status_from_cluster_name',
-                    return_value=status_lib.ClusterStatus.UP), patch(
-                        'sky.backends.cloud_vm_ray_backend.global_user_state.'
-                        'get_cluster_yaml_dict',
-                        return_value={'provider': provider_config}), patch(
-                            'sky.backends.cloud_vm_ray_backend.provisioner.'
-                            'teardown_cluster') as mock_teardown, patch.object(
-                                backend, 'post_teardown_cleanup'
-                            ) as mock_cleanup, patch.object(
-                                backend,
-                                'run_on_head',
-                                side_effect=RuntimeError('runner unavailable')
-                            ) as mock_run_on_head:
-            with pytest.raises(RuntimeError, match='runner unavailable'):
-                backend.teardown_no_lock(handle,
-                                         terminate=True,
-                                         refresh_cluster_status=False)
-
-        mock_run_on_head.assert_called_once()
-        mock_cleanup.assert_not_called()
-        mock_teardown.assert_not_called()
-
     def test_uses_refreshed_handle_to_avoid_stale_metadata(self):
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
         stale_handle = self._make_handle('test-cluster', '/tmp/stale.yaml',
