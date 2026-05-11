@@ -153,7 +153,12 @@ class LazyDataFrame:
         return self._df
 
     def get_dataframe(self) -> 'pd.DataFrame':
-        """Force-load (refreshing if stale) and return the underlying df."""
+        """Return the underlying df, loading it on first use per request.
+
+        Backed by `_load_df`, which is request-scoped LRU-cached: the first
+        call in a request checks staleness and reads the CSV; subsequent
+        calls in the same request reuse the cached frame.
+        """
         return self._load_df()
 
     @property

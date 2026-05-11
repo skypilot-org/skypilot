@@ -28,6 +28,7 @@ import filelock
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog.vast import _offer_processing as proc
+from sky.utils import annotations
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -36,12 +37,29 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Tunables (env vars, read at import time).
 # ---------------------------------------------------------------------------
-_TTL_SEC = int(os.environ.get('SKYPILOT_VAST_LIVE_TTL_SEC', '600'))
-_FETCH_TIMEOUT_SEC = int(
-    os.environ.get('SKYPILOT_VAST_LIVE_FETCH_TIMEOUT_SEC', '8'))
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var; on bad input, log and fall back to the default.
+
+    The overlay is fail-open; a malformed env var must not break catalog
+    loading.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(f'vast live overlay: ignoring invalid {name}={raw!r}; '
+                       f'using default {default}.')
+        return default
+
+
+_TTL_SEC = _env_int('SKYPILOT_VAST_LIVE_TTL_SEC', 600)
+_FETCH_TIMEOUT_SEC = _env_int('SKYPILOT_VAST_LIVE_FETCH_TIMEOUT_SEC', 8)
 _DISABLED_BY_ENV = os.environ.get('SKYPILOT_VAST_DISABLE_LIVE_OVERLAY',
                                   '0') == '1'
 
@@ -197,9 +215,7 @@ def _refresh_locked() -> None:
     # Back off if a recent fetch failed — otherwise a Vast outage causes
     # every catalog read to re-fire the SDK once the inflight watchdog
     # window elapses.
-    meta = _read_meta()
-    if (meta is not None and meta.get('status') == 'fetch_failed' and
-            time.time() - meta.get('ts', 0) < _TTL_SEC):
+    if _recent_fetch_failed():
         return
     offers = _search_offers_safely()
     if offers is None:
@@ -235,14 +251,29 @@ def _refresh_safely() -> None:
             _REFRESH_INFLIGHT = False
 
 
+def _recent_fetch_failed() -> bool:
+    """True if the last refresh wrote status=fetch_failed within the TTL.
+
+    Used to back off so a Vast outage doesn't cause every catalog read to
+    spawn a thread that immediately bails inside the file lock.
+    """
+    meta = _read_meta()
+    if meta is None or meta.get('status') != 'fetch_failed':
+        return False
+    return time.time() - meta.get('ts', 0) < _TTL_SEC
+
+
 def _maybe_spawn_refresh() -> None:
     """Spawn a single background refresh if none is in flight.
 
     Includes a watchdog so a hung SDK call doesn't permanently disable
-    refreshes for the life of the process.
+    refreshes for the life of the process. Backs off when the previous
+    fetch failed recently.
     """
     global _REFRESH_INFLIGHT, _REFRESH_SPAWN_TS
     if _TEST_REFRESH_DISABLED:
+        return
+    if _recent_fetch_failed():
         return
     with _REFRESH_LOCK:
         now = time.time()
@@ -277,30 +308,27 @@ def get_overlay_dataframe() -> Optional['pd.DataFrame']:
     return _read_cached_df()
 
 
-def _coerce_price(value: Any) -> float:
-    """Treat 0 and NaN as 'no price'; return a float for valid prices."""
-    if value is None:
-        return float('nan')
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return float('nan')
-    if v <= 0.0:
-        return float('nan')
-    return v
+def _dedupe_overlay(df: 'pd.DataFrame', keys: List[str]) -> 'pd.DataFrame':
+    """Collapse overlay rows sharing `keys`.
 
-
-def _min_or_other(a: Any, b: Any) -> float:
-    """Min of two prices, treating 0/NaN as missing on either side."""
-    fa = _coerce_price(a)
-    fb = _coerce_price(b)
-    if fa != fa and fb != fb:  # both NaN
-        return 0.0
-    if fa != fa:
-        return fb
-    if fb != fb:
-        return fa
-    return min(fa, fb)
+    Multiple Vast offers can normalize to the same (InstanceType, Region,
+    HostingType) tuple. Left untouched, the outer merge in `merge_with_base`
+    multiply-matches base rows and silently inflates the catalog. We take
+    the min real (>0) Price/SpotPrice and the first value for other columns.
+    """
+    if not df.duplicated(subset=keys).any():
+        return df
+    df = df.copy()
+    for col in ('Price', 'SpotPrice'):
+        df[col] = pd.to_numeric(df[col],
+                                errors='coerce').replace(0, float('nan'))
+    agg: Dict[str, str] = {c: 'first' for c in df.columns if c not in keys}
+    agg['Price'] = 'min'
+    agg['SpotPrice'] = 'min'
+    df = df.groupby(keys, as_index=False).agg(agg)
+    df['Price'] = df['Price'].fillna(0.0)
+    df['SpotPrice'] = df['SpotPrice'].fillna(0.0)
+    return df
 
 
 def merge_with_base(base_df: 'pd.DataFrame',
@@ -325,6 +353,7 @@ def merge_with_base(base_df: 'pd.DataFrame',
         return base_df
 
     keys = ['InstanceType', 'Region', 'HostingType']
+    overlay_df = _dedupe_overlay(overlay_df, keys)
     overlay_keep = overlay_df[keys + ['Price', 'SpotPrice']].copy()
     overlay_keep = overlay_keep.rename(columns={
         'Price': '_live_price',
@@ -425,6 +454,12 @@ class OverlayDataFrame:
     def __init__(self, base_lazy):
         self._base = base_lazy
 
+    # Snapshot the merged dataframe once per request. This makes patterns
+    # like `df[df['HostingType'] >= 1]` safe: the boolean mask produced by
+    # the first call is indexed against the same frame the second call
+    # operates on, even if the background refresh writes a new overlay
+    # between them.
+    @annotations.lru_cache(scope='request')
     def _df(self) -> 'pd.DataFrame':
         return get_merged_dataframe(self._base)
 

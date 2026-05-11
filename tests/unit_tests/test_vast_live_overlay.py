@@ -190,6 +190,50 @@ def test_merge_returns_base_when_overlay_none_or_empty():
         live_overlay.merge_with_base(base, pd.DataFrame()), base)
 
 
+def test_env_int_falls_back_on_garbage(monkeypatch):
+    monkeypatch.setenv('SKYPILOT_VAST_LIVE_TTL_SEC', 'not-an-int')
+    assert live_overlay._env_int('SKYPILOT_VAST_LIVE_TTL_SEC', 600) == 600
+
+
+def test_env_int_uses_default_when_unset(monkeypatch):
+    monkeypatch.delenv('SKYPILOT_VAST_LIVE_TTL_SEC', raising=False)
+    assert live_overlay._env_int('SKYPILOT_VAST_LIVE_TTL_SEC', 600) == 600
+
+
+def test_maybe_spawn_refresh_skips_during_recent_failure(monkeypatch):
+    monkeypatch.setattr(live_overlay, '_TEST_REFRESH_DISABLED', False)
+    monkeypatch.setattr(
+        live_overlay, '_read_meta', lambda: {
+            'status': 'fetch_failed',
+            'ts': live_overlay.time.time(),
+        })
+    spawned: list = []
+
+    class _FakeThread:
+
+        def __init__(self, *args, **kwargs):
+            spawned.append((args, kwargs))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(live_overlay.threading, 'Thread', _FakeThread)
+    live_overlay._maybe_spawn_refresh()
+    assert not spawned
+
+
+def test_merge_dedupes_overlay_and_takes_min_price():
+    base = pd.DataFrame([_csv_row(price=2.50, spot=0.40)])
+    overlay = pd.DataFrame([
+        _live_row(price=1.99, spot=0.00),
+        _live_row(price=1.50, spot=0.30),
+    ])
+    out = live_overlay.merge_with_base(base, overlay)
+    assert out.shape[0] == 1
+    assert math.isclose(out.iloc[0]['Price'], 1.50)
+    assert math.isclose(out.iloc[0]['SpotPrice'], 0.30)
+
+
 # ---------------------------------------------------------------------------
 # _search_offers_safely
 # ---------------------------------------------------------------------------
@@ -254,6 +298,51 @@ def test_overlay_dataframe_splices_live_prices(monkeypatch):
     odf = live_overlay.OverlayDataFrame(fake_lazy)
     out = odf._df()
     assert math.isclose(out.iloc[0]['Price'], 1.20)
+
+
+def test_overlay_dataframe_caches_snapshot_per_request(monkeypatch):
+    # The @lru_cache(scope='request') on _df() must bind on self so that
+    # repeated calls within a request reuse the same DataFrame object.
+    # Two odf._df() invocations are `is`-identical, and the underlying
+    # merge runs only once.
+    live_overlay.OverlayDataFrame._df.cache_clear()
+    call_count = {'n': 0}
+
+    def _fake_merged(_):
+        call_count['n'] += 1
+        return pd.DataFrame([_csv_row(price=2.50)])
+
+    monkeypatch.setattr(live_overlay, 'get_merged_dataframe', _fake_merged)
+    odf = live_overlay.OverlayDataFrame(mock.Mock())
+    first = odf._df()
+    second = odf._df()
+    assert first is second
+    assert call_count['n'] == 1
+    live_overlay.OverlayDataFrame._df.cache_clear()
+
+
+def test_overlay_dataframe_boolean_mask_survives_overlay_refresh(monkeypatch):
+    live_overlay.OverlayDataFrame._df.cache_clear()
+    frame_a = pd.DataFrame(
+        [_csv_row(hosting_type=0),
+         _csv_row(hosting_type=1)],
+        index=[10, 11],
+    )
+    frame_b = pd.DataFrame(
+        [_csv_row(hosting_type=1)],
+        index=[200],
+    )
+    frames = iter([frame_a, frame_b])
+
+    monkeypatch.setattr(live_overlay, 'get_merged_dataframe',
+                        lambda _: next(frames))
+    odf = live_overlay.OverlayDataFrame(mock.Mock())
+
+    mask = odf['HostingType'] >= 1
+    filtered = odf[mask]  # would raise without the request-scoped cache.
+    assert filtered.shape[0] == 1
+    assert filtered.iloc[0]['HostingType'] == 1
+    live_overlay.OverlayDataFrame._df.cache_clear()
 
 
 # ---------------------------------------------------------------------------
