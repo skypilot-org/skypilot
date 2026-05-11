@@ -1019,8 +1019,10 @@ def _get_last_or_terminal_cluster_event_multiple(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
             row_number).filter(
                 cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type !=
-                ClusterEventType.DEBUG.value).subquery()
+                cluster_event_table.c.type.notin_([
+                    ClusterEventType.DEBUG.value,
+                    ClusterEventType.LAUNCH_PROGRESS.value,
+                ])).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(
