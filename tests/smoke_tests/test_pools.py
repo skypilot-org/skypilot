@@ -451,7 +451,7 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 @pytest.mark.skip(
     'Skipping vllm pool test until more remote server testing is done.')
-def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
+def test_1pool_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_available_gpus()
     else:
@@ -581,7 +581,7 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_setup_logs_in_starting_pool(generic_cloud: str):
+def test_1pool_setup_logs_in_starting_pool(generic_cloud: str):
     """Test that setup logs are streamed in starting state."""
     # Do a very long setup so we know the setup logs are streamed in
     pool_config = basic_pool_conf(
@@ -631,7 +631,7 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_setup_logs_in_pool_exits(generic_cloud: str):
+def test_1pool_setup_logs_in_pool_exits(generic_cloud: str):
     """Test that setup logs are streamed and exit once the setup is complete."""
     """We omit --no-follow to test that we exit."""
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -652,7 +652,7 @@ def test_setup_logs_in_pool_exits(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_update_workers(generic_cloud: str):
+def test_1pool_update_workers(generic_cloud: str):
     """Test that we can update the number of workers in a pool, both
     up and down.
     """
@@ -681,7 +681,7 @@ def test_update_workers(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_update_workers_and_yaml(generic_cloud: str):
+def test_1pool_update_workers_and_yaml(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -700,7 +700,7 @@ def test_update_workers_and_yaml(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_update_workers_no_pool(generic_cloud: str):
+def test_1pool_update_workers_no_pool(generic_cloud: str):
     """Test that we error if the user specifies a yaml and --workers.
     """
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -719,7 +719,7 @@ def test_update_workers_no_pool(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_queueing(generic_cloud: str):
+def test_1pool_pool_queueing(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
@@ -812,7 +812,7 @@ def test_pool_preemption(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_running(generic_cloud: str):
+def test_1pool_pool_job_cancel_running(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
 
@@ -853,7 +853,7 @@ def test_pool_job_cancel_running(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancelled_logs(generic_cloud: str):
+def test_1pool_pool_job_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible after a pool job is cancelled."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -899,7 +899,7 @@ def test_pool_job_cancelled_logs(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_instant(generic_cloud: str):
+def test_1pool_pool_job_cancel_instant(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
 
@@ -997,7 +997,7 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_running_multiple(generic_cloud: str):
+def test_1pool_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
@@ -1053,7 +1053,8 @@ def test_pool_job_cancel_running_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
+def test_1pool_pool_job_cancel_running_multiple_simultaneous(
+        generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
     pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
@@ -1107,7 +1108,7 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_instant_multiple(generic_cloud: str):
+def test_2pool_pool_job_cancel_instant_multiple(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
     pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
@@ -1157,7 +1158,8 @@ def test_pool_job_cancel_instant_multiple(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
+def test_2pool_pool_job_cancel_instant_multiple_simultaneous(
+        generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     num_jobs = 4
     pool_config = basic_pool_conf(num_workers=num_jobs, infra=generic_cloud)
@@ -1204,7 +1206,7 @@ def test_pool_job_cancel_instant_multiple_simultaneous(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_job_cancel_no_jobs(generic_cloud: str):
+def test_2pool_pools_job_cancel_no_jobs(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
 
@@ -1228,7 +1230,7 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_num_jobs_basic(generic_cloud: str):
+def test_2pool_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1279,7 +1281,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_worker_assignment_in_queue(generic_cloud: str):
+def test_2pool_pool_worker_assignment_in_queue(generic_cloud: str):
     """Test that sky jobs queue shows the worker assignment for running jobs."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1316,7 +1318,7 @@ def test_pool_worker_assignment_in_queue(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_num_jobs_option(generic_cloud: str):
+def test_2pool_pools_num_jobs_option(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1370,7 +1372,7 @@ def test_pools_setup_num_gpus(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_single_yaml(generic_cloud: str):
+def test_2pool_pools_single_yaml(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
     job_name = f'{name}-job'
@@ -1533,7 +1535,7 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_double_launch(generic_cloud: str):
+def test_2pool_pools_double_launch(generic_cloud: str):
     """Test that we can launch a pool with the same name twice.
     """
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -1594,7 +1596,7 @@ def check_pool_not_in_status(pool_name: str,
 
 
 @pytest.mark.resource_heavy
-def test_pool_down_all_with_running_jobs(generic_cloud: str):
+def test_2pool_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
 
     This test:
@@ -1679,7 +1681,7 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_down_single_pool(generic_cloud: str):
+def test_2pool_pool_down_single_pool(generic_cloud: str):
     """Test that `sky jobs pool down <pool_name> -y` downs a single pool.
 
     This test:
@@ -1733,7 +1735,7 @@ def test_pool_down_single_pool(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_scale_with_workdir(generic_cloud: str):
+def test_2pool_pool_scale_with_workdir(generic_cloud: str):
     """Test that we can scale a pool with workdir without errors. This makes
     sure that the workdir is not deleted when the pool is scaled."""
 
@@ -1779,7 +1781,7 @@ def test_pool_scale_with_workdir(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
+def test_2pool_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
     """Test that multiple jobs can run on a single worker when resources allow."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -1842,7 +1844,7 @@ def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_resource_contention_two_workers(generic_cloud: str):
+def test_3pool_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -1913,7 +1915,7 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
                         smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_resource_contention_two_workers_some_available(
+def test_3pool_pool_resource_contention_two_workers_some_available(
         generic_cloud: str):
     """Test that only one job runs when one resource allows both jobs to run but
     the other doesn't."""
@@ -1986,7 +1988,7 @@ def test_pool_resource_contention_two_workers_some_available(
                         smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_resource_reclamation(generic_cloud: str):
+def test_3pool_pool_resource_reclamation(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -2050,7 +2052,7 @@ def test_pool_resource_reclamation(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_resource_fallback_to_unaware(generic_cloud: str):
+def test_3pool_pool_resource_fallback_to_unaware(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -2201,7 +2203,7 @@ def test_pool_fractional_gpu_scheduling(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
+def test_3pool_pool_one_job_per_worker_no_resources(generic_cloud: str):
     """Test that when no resources are specified, only 1 job runs per worker.
 
     This test validates that jobs without resource specifications are
@@ -2274,7 +2276,7 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
+def test_3pool_pool_secrets_preserved_on_worker_update(generic_cloud: str):
     """Test that secrets provided via CLI are preserved when updating pool workers.
 
     This test:
@@ -2352,7 +2354,7 @@ def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_num_jobs_rank(generic_cloud: str):
+def test_3pool_pools_num_jobs_rank(generic_cloud: str):
     """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
 
     Launches 3 jobs with --num-jobs 3, waits for each to succeed, and verifies
@@ -2419,7 +2421,7 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pools_num_jobs_speed(generic_cloud: str):
+def test_3pool_pools_num_jobs_speed(generic_cloud: str):
     """Test that we can launch a large number of jobs quickly.
     """
     name = smoke_tests_utils.get_cluster_name()
@@ -2527,7 +2529,7 @@ def check_workers_do_not_exceed(pool_name: str,
         'echo "Workers did not exceed max_workers during the check period"')
 
 
-def test_pool_autoscaling_scale_up(generic_cloud: str):
+def test_3pool_pool_autoscaling_scale_up(generic_cloud: str):
     """Test that pool autoscales up when jobs are queued.
 
     This test:
@@ -2588,7 +2590,8 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
+def test_3pool_pool_autoscaling_no_scale_when_max_equals_workers(
+        generic_cloud: str):
     """Test that pool does not scale above workers when max_workers == workers.
 
     This test:
@@ -2651,7 +2654,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
+def test_3pool_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
     """Test that pool autoscales down to zero when no jobs and min_workers=0.
 
     This test:
@@ -2705,7 +2708,8 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
+def test_3pool_pool_autoscaling_scale_up_to_max_then_down_to_zero(
+        generic_cloud: str):
     """Test that pool autoscales up to max_workers then down to zero.
 
     This test:
