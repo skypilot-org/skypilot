@@ -19,8 +19,9 @@ PORT_SELECTION_FILE_LOCK_PATH = '~/.sky/skyserve_port_selection.lock'
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '~/.sky/signals/sky_serve_controller_signal_{}'
 
-# PG advisory lock IDs ensuring only one pod runs the pool/serve HA recovery
-# at a time.
+# The consolidation mode lock ensures that if multiple API servers are running
+# at the same time (e.g. during a rolling update), recovery can only happen once
+# the previous API server has exited.
 POOL_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/pool_consolidation_mode_lock'
 SERVE_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/serve_consolidation_mode_lock'
 
