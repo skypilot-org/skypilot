@@ -390,7 +390,12 @@ function ActiveTab({
                   <PluginSlot
                     name="clusters.detail.status.badge"
                     context={clusterData}
-                    fallback={<StatusBadge status={clusterData.status} />}
+                    fallback={
+                      <StatusBadge
+                        status={clusterData.status}
+                        statusTooltip={clusterData.statusTooltip}
+                      />
+                    }
                   />
                 </div>
               </div>
