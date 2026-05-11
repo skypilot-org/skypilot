@@ -107,6 +107,10 @@ def launch(name: str,
          catalog/vast_catalog.py for the current construction
          of the type.
     """
+    # Vast.ai SDK v6+ no longer accepts port mappings via the env field, so
+    # `ports` is currently unused. Keep it in the signature for caller
+    # compatibility and future use (port-forwarding is handled separately).
+    del ports
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))

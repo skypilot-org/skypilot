@@ -236,8 +236,8 @@ def get_cluster_info(
                     instance_info.get('public_ipaddr', ''))
         ports_dict = instance_info.get('ports') or {}
         tcp22 = ports_dict.get('22/tcp') or []
-        ssh_port = (int(tcp22[0]['HostPort']) if tcp22 else
-                    instance_info.get('ssh_port'))
+        ssh_port = (int(tcp22[0]['HostPort'])
+                    if tcp22 else instance_info.get('ssh_port'))
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
@@ -353,7 +353,8 @@ def query_ports(
                 f'port 8080 via ssh_host:(ssh_port+1). Port {port} may not '
                 f'be reachable. Use port 8080 for service endpoints.')
             external_port = port
-        result[port] = [common.SocketEndpoint(host=ssh_host,
-                                               port=external_port)]
+        result[port] = [
+            common.SocketEndpoint(host=ssh_host, port=external_port)
+        ]
 
     return result
