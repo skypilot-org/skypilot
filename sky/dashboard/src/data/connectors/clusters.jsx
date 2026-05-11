@@ -125,6 +125,8 @@ export async function getClusters({ clusterNames = null } = {}) {
         workspace: cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
+        statusTooltip:
+          cluster.status === 'INIT' ? cluster.launch_status_reason : null,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
