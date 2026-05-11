@@ -551,6 +551,7 @@ class TestCloudVmRayBackendTeardownNoLock:
 
     @staticmethod
     def _make_handle(cluster_name: str, cluster_yaml: str, has_ray: bool):
+
         class _FakeLaunchedResources:
 
             def __init__(self, cloud_obj):
@@ -579,7 +580,8 @@ class TestCloudVmRayBackendTeardownNoLock:
 
     def test_uses_refreshed_handle_to_avoid_stale_metadata(self):
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        stale_handle = self._make_handle('test-cluster', '/tmp/stale.yaml',
+        stale_handle = self._make_handle('test-cluster',
+                                         '/tmp/stale.yaml',
                                          has_ray=True)
         refreshed_handle = self._make_handle('test-cluster',
                                              '/tmp/refreshed.yaml',
@@ -590,20 +592,19 @@ class TestCloudVmRayBackendTeardownNoLock:
                 'kill_cluster_requests'), patch(
                     'sky.backends.cloud_vm_ray_backend.backend_utils.'
                     'refresh_cluster_status_handle',
-                    return_value=(status_lib.ClusterStatus.UP,
-                                  refreshed_handle)), patch(
-                                      'sky.backends.cloud_vm_ray_backend.'
-                                      'global_user_state.'
-                                      'get_cluster_yaml_dict',
-                                      return_value={'provider': {}}) as (
-                                          mock_get_yaml), patch(
-                                              'sky.backends.cloud_vm_ray_backend'
-                                              '.provisioner.teardown_cluster'
-                                          ), patch.object(
-                                              backend, 'post_teardown_cleanup'
-                                          ), patch.object(
-                                              backend,
-                                              'run_on_head') as mock_run_on_head:
+                    return_value=(
+                        status_lib.ClusterStatus.UP, refreshed_handle)), patch(
+                            'sky.backends.cloud_vm_ray_backend.'
+                            'global_user_state.'
+                            'get_cluster_yaml_dict',
+                            return_value={'provider': {
+                            }}) as (mock_get_yaml), patch(
+                                'sky.backends.cloud_vm_ray_backend'
+                                '.provisioner.teardown_cluster'), patch.object(
+                                    backend,
+                                    'post_teardown_cleanup'), patch.object(
+                                        backend,
+                                        'run_on_head') as mock_run_on_head:
             backend.teardown_no_lock(stale_handle,
                                      terminate=True,
                                      refresh_cluster_status=True)
