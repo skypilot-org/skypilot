@@ -223,6 +223,12 @@ class ClusterEventType(enum.Enum):
     """Used to denote events that are directly related to
     a cluster's termination."""
 
+    LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
+    """Progress milestones emitted during a cluster launch
+    (e.g. 'Launching (Kubernetes cluster is autoscaling)',
+    'Launching (1 pod(s) pending due to Pulling)'). Read for the
+    LAUNCHING-state badge tooltip on the dashboard."""
+
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
