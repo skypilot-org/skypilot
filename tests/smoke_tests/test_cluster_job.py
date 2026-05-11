@@ -380,7 +380,10 @@ def test_large_job_queue(generic_cloud: str):
         'large_job_queue',
         [
             f'sky launch -y -c {name} --cpus {cpus} --infra {generic_cloud}',
-            f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
+            # Retry each submission a couple of times so a single transient
+            # client read timeout against a remote API server doesn't drop
+            # a job and skew the PENDING count assertion below.
+            f'for i in `seq 1 75`; do for t in 1 2 3; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000" && break || sleep 3; done; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 90',
 
@@ -2714,6 +2717,11 @@ def test_long_setup_run_script(generic_cloud: str):
             ],
             debug_command +
             f'; sky down -y {name}; sky jobs cancel -n {name} -y',
+            # The YAML has 400K echo lines (200K setup + 200K run) and runs
+            # twice on the cluster plus once as a managed job. Under a
+            # remote API server the framework's default 15-minute step
+            # timeout is not enough; bump explicitly.
+            timeout=45 * 60,
         )
         smoke_tests_utils.run_one_test(test)
 

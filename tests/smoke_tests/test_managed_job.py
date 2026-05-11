@@ -1098,13 +1098,16 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                     # TODO(zhwu): Check why the logs does not return immediately
                     # after job status FAILED.
                     f'sky jobs logs -n {name} | tee {log_file.name} ',
-                    # First attempt
-                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                    # Retry actually happened: the user's "Task 1 starting"
+                    # echo runs once per attempt, so it appears twice. This
+                    # works for both the legacy Ray path and the v1 K8s
+                    # path, which differ in how many times they re-render
+                    # the controller-side "Job started" header.
+                    f'cat {log_file.name} | grep "Task 1 starting" | wc -l | grep 2',
+                    # The final task failure is acknowledged in the stream.
                     f'cat {log_file.name} | grep "Job 1 failed"',
-                    # Second attempt
-                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
-                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
-                    # Task 2 is not reached
+                    # Task 2 of the pipeline is never reached.
+                    f'! cat {log_file.name} | grep "Task 2 starting"',
                     f'! cat {log_file.name} | grep "Job 2"',
                 ],
                 f'sky jobs cancel -y -n {name}',
