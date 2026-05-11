@@ -1,10 +1,14 @@
 """REST API for managed jobs."""
 
+import json
+import os
 import pathlib
+from typing import Any, Dict
 
 import fastapi
 
 from sky import sky_logging
+from sky.jobs import constants as jobs_constants
 from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.server import core
 from sky.server import common as server_common
@@ -284,3 +288,19 @@ async def events(request: fastapi.Request,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
         auth_user=request.state.auth_user,
     )
+
+
+@router.get('/timeline')
+async def timeline(job_id: int) -> Dict[str, Any]:
+    """Returns the saved timeline trace for a managed job.
+
+    Used by the client-side auto-merge to fetch controller-side events
+    when the job was launched with SKYPILOT_TIMELINE_FILE_PATH set.
+    """
+    path = jobs_constants.jobs_timeline_file_path(job_id)
+    if not os.path.exists(path):
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Timeline not found for job {job_id}')
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)

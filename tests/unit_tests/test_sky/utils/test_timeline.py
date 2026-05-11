@@ -1,5 +1,6 @@
 """Test for sky.utils.timeline."""
 
+import asyncio
 import contextvars
 import json
 import os
@@ -230,3 +231,63 @@ def test_disabled_tracing_no_events():
         with timeline.Event('should_skip'):
             pass
         assert len(timeline._process_events) == 0
+
+
+def test_concurrent_async_jobs_isolated(tmp_path):
+    """Per-job tracing in the jobs controller is isolated by contextvars.
+
+    Mirrors the controller's run_job_loop path: each job's coroutine runs
+    inside its own contextvars Context (created by
+    @context.contextual_async, equivalent to copy_context().run), with the
+    *same* asyncio event loop. ContextVars must keep their events
+    separate even though the tasks interleave.
+    """
+    path_a = str(tmp_path / 'job_A.json')
+    path_b = str(tmp_path / 'job_B.json')
+    n_events = 20
+
+    async def simulate_job(request_id, save_path, event_prefix, peer_started):
+        timeline.init_request_timeline(request_id, save_path)
+        peer_started.set()
+        # Force interleaving — yield to the loop between events so the
+        # other job's task gets to run while we record.
+        for i in range(n_events):
+            with timeline.Event(f'{event_prefix}_{i}'):
+                await asyncio.sleep(0)
+        timeline.save_timeline()
+
+    def run_in_context(coro):
+        # @context.contextual_async wraps the coroutine in
+        # copy_context().run; replicate that here.
+        ctx = contextvars.copy_context()
+        return ctx.run(asyncio.ensure_future, coro)
+
+    async def driver():
+        peer_a = asyncio.Event()
+        peer_b = asyncio.Event()
+        task_a = run_in_context(
+            simulate_job('A', path_a, 'event_a', peer_a))
+        task_b = run_in_context(
+            simulate_job('B', path_b, 'event_b', peer_b))
+        # Make sure both tasks have started before we let them complete.
+        await peer_a.wait()
+        await peer_b.wait()
+        await asyncio.gather(task_a, task_b)
+
+    asyncio.run(driver())
+
+    events_a = json.load(open(path_a))['traceEvents']
+    events_b = json.load(open(path_b))['traceEvents']
+
+    assert len(events_a) == n_events * 2
+    assert len(events_b) == n_events * 2
+
+    for e in events_a:
+        assert e['name'].startswith('event_a'), e['name']
+        assert e['args']['request_id'] == 'A'
+    for e in events_b:
+        assert e['name'].startswith('event_b'), e['name']
+        assert e['args']['request_id'] == 'B'
+
+    # Process-global list should be untouched.
+    assert len(timeline._process_events) == 0

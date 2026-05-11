@@ -304,6 +304,16 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode))
+        # Propagate client-side tracing opt-in: if the request was made with
+        # SKYPILOT_TIMELINE_FILE_PATH set, drop a marker file so the
+        # controller knows to capture a per-job timeline. Done before
+        # set_pending so the controller can never observe the job without
+        # also seeing the marker.
+        if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+            marker = managed_job_constants.jobs_timeline_marker_path(
+                consolidation_mode_job_id)
+            pathlib.Path(marker).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(marker).touch()
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)

@@ -177,15 +177,23 @@ def _write_events_to_file(events: List[Dict[str, Any]], path: str) -> None:
         json.dump(json_output, f)
 
 
-def save_timeline() -> None:
-    """Save and clear timeline events for the current context."""
+def save_timeline(clear: bool = True) -> None:
+    """Save timeline events for the current context.
+
+    Args:
+        clear: If True (default), drop the saved events from the in-memory
+            buffer so subsequent saves don't re-emit them. Set to False to
+            flush an intermediate snapshot mid-execution — the next save
+            will write a superset of this file.
+    """
     save_path = _get_save_path()
     if not save_path:
         return
     with _events_lock:
         events = _get_events()
         events_to_write = list(events)
-        events.clear()
+        if clear:
+            events.clear()
     if not events_to_write:
         return
     _write_events_to_file(events_to_write, save_path)
