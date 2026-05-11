@@ -1960,8 +1960,9 @@ def get_clusters(
     # short-circuits on an empty set, so this is a no-op when no INIT
     # clusters are in the result.
     init_cluster_hashes = {
-        row.cluster_hash for row in rows if status_lib.ClusterStatus[row.status]
-        is status_lib.ClusterStatus.INIT
+        row.cluster_hash
+        for row in rows
+        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
     }
     launch_progress_dict = _get_last_cluster_event_of_type_multiple(
         init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
