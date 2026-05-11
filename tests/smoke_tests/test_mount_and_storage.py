@@ -1065,7 +1065,7 @@ exclude.py
         # For .gitignore, verify negation patterns work on the cluster.
         if ignore_file == constants.GIT_IGNORE_FILE:
             test_commands.append(
-                f'sky exec {name} -- bash -c '
+                f'sky exec {name} -- '
                 f'"test -f ~/sky_workdir/important.log && '
                 f'test -f ~/sky_workdir/keep_dir/important.log"')
 
