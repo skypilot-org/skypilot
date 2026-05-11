@@ -645,6 +645,16 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 rich_utils.force_update_status(
                     ux_utils.spinner_message(f'Launching ({msg})',
                                              cluster_name=cluster_name))
+                # TODO(kev): mirror this emit on AWS / GCP / Slurm autoscaler
+                # paths.
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason=f'Launching ({msg})',
+                    event_type=global_user_state.ClusterEventType
+                    .LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
         if not is_autoscaling:
             _update_spinner_message(iteration=iteration,
                                     pods=pods,

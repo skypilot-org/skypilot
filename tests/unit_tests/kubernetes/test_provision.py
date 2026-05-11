@@ -1558,6 +1558,43 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
             f'No autoscaler configured → short user timeout must not be '
             f'bumped, but loop ran for {clock.now}s.')
 
+    def test_emits_launch_progress_on_autoscale_detection(self, monkeypatch):
+        """When the autoscaler is detected, exactly one LAUNCH_PROGRESS event
+        must be emitted with the spinner's status text."""
+        _, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch,
+            autoscaler_type='gke',
+            autoscale_detected=True,
+        )
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # The autoscaler branch latches once — exactly one LAUNCH_PROGRESS emit.
+        launch_progress_calls = [
+            call for call in add_event.call_args_list
+            if call.kwargs.get('event_type')
+            is instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(launch_progress_calls) == 1
+        kwargs = launch_progress_calls[0].kwargs
+        assert kwargs['reason'].startswith('Launching (')
+        assert kwargs['nop_if_duplicate'] is True
+
 
 # ---------------------------------------------------------------------------
 # Helpers and tests for _condensed_pod_reason()
