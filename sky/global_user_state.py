@@ -1072,6 +1072,11 @@ async def cluster_event_retention_daemon():
                              f'{debug_retention_hours} hours.')
                 cleanup_cluster_events_with_retention(debug_retention_hours,
                                                       ClusterEventType.DEBUG)
+                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
+                # observability info, no business-record value once the launch
+                # is over.
+                cleanup_cluster_events_with_retention(
+                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
             if terminal_retention_hours >= 0:
                 logger.debug(
                     'Cleaning up terminal cluster events with retention '

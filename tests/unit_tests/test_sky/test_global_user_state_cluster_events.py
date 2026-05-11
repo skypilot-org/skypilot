@@ -66,3 +66,38 @@ def test_launch_progress_excluded_from_last_event_helper(
     # The helper must skip the LAUNCH_PROGRESS row and return the
     # STATUS_CHANGE reason.
     assert result == {cluster_hash: 'status-change-reason'}
+
+
+def test_launch_progress_retention_cleans_old_rows(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('c2')
+
+    # Insert one ancient event and one recent one.
+    now = int(time.time())
+    global_user_state.add_cluster_event(
+        'c2',
+        new_status=None,
+        reason='old-launch-step',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=now - 24 * 3600,  # 24h ago
+    )
+    global_user_state.add_cluster_event(
+        'c2',
+        new_status=None,
+        reason='recent-launch-step',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=now,
+    )
+
+    # Retention = 1h → old row should be deleted, recent row should remain.
+    global_user_state.cleanup_cluster_events_with_retention(
+        retention_hours=1,
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+
+    cluster_hash = global_user_state._get_hash_for_existing_cluster('c2')
+    remaining = global_user_state.get_last_cluster_event(
+        cluster_hash,
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    )
+    assert remaining == 'recent-launch-step'
