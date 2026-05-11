@@ -1587,8 +1587,8 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         # The autoscaler branch latches once — exactly one LAUNCH_PROGRESS emit.
         launch_progress_calls = [
             call for call in add_event.call_args_list
-            if call.kwargs.get('event_type')
-            is instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            if call.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
         assert len(launch_progress_calls) == 1
         kwargs = launch_progress_calls[0].kwargs
@@ -2025,9 +2025,8 @@ class TestWaitForPodsToRunLaunchProgressEmit:
         )
 
         lp_calls = [
-            c for c in add_event.call_args_list
-            if c.kwargs.get('event_type')
-            is instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
         assert len(lp_calls) == 1
         assert lp_calls[0].kwargs['reason'] == (
@@ -2051,8 +2050,7 @@ class TestWaitForPodsToRunLaunchProgressEmit:
         )
 
         lp_calls = [
-            c for c in add_event.call_args_list
-            if c.kwargs.get('event_type')
-            is instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
         assert lp_calls == []

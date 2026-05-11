@@ -651,8 +651,8 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                     cluster_name,
                     new_status=None,
                     reason=f'Launching ({msg})',
-                    event_type=global_user_state.ClusterEventType
-                    .LAUNCH_PROGRESS,
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
         if not is_autoscaling:
@@ -851,8 +851,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     cluster_name,
                     new_status=None,
                     reason=status_text,
-                    event_type=global_user_state.ClusterEventType
-                    .LAUNCH_PROGRESS,
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
             last_status_msg = new_status_msg

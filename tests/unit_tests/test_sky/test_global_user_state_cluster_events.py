@@ -42,8 +42,7 @@ def _add_cluster(name: str) -> str:
     return global_user_state._get_hash_for_existing_cluster(name)
 
 
-def test_launch_progress_excluded_from_last_event_helper(
-        tmp_path, monkeypatch):
+def test_launch_progress_excluded_from_last_event_helper(tmp_path, monkeypatch):
     """Adding a LAUNCH_PROGRESS event must not change the value returned by
     _get_last_or_terminal_cluster_event_multiple, which feeds the existing
     last_event field."""
@@ -174,8 +173,7 @@ def test_get_clusters_populates_launch_status_reason_for_init(
             'Launching (1 pod(s) pending due to Pulling)')
 
 
-def test_get_clusters_no_launch_status_reason_for_up(
-        tmp_path, monkeypatch):
+def test_get_clusters_no_launch_status_reason_for_up(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     _add_cluster('up-cluster')
     # Bring the cluster to UP.
