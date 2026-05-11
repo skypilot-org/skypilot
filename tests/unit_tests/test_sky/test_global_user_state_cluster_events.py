@@ -3,6 +3,7 @@ import time
 
 from sky import global_user_state
 from sky.skylet import constants
+from sky.utils import status_lib
 from sky.utils.db import db_utils
 
 
@@ -22,6 +23,11 @@ def _fresh_db(tmp_path, monkeypatch):
     )
 
 
+class _MinimalHandle:
+    """Minimal handle that satisfies get_clusters' attribute access."""
+    launched_resources = None
+
+
 def _add_cluster(name: str) -> str:
     """Create a minimal cluster row so add_cluster_event can find a hash.
 
@@ -29,7 +35,7 @@ def _add_cluster(name: str) -> str:
     """
     global_user_state.add_or_update_cluster(
         cluster_name=name,
-        cluster_handle=None,
+        cluster_handle=_MinimalHandle(),
         requested_resources=set(),
         ready=False,
     )
@@ -143,3 +149,53 @@ def test_get_last_event_of_type_multiple(tmp_path, monkeypatch):
         event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     )
     assert result == {h1: 'a-new', h2: 'b-only'}
+
+
+def test_get_clusters_populates_launch_status_reason_for_init(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('init-cluster')
+    # add_or_update_cluster default leaves the row in INIT.
+    global_user_state.add_cluster_event(
+        'init-cluster',
+        new_status=None,
+        reason='Launching (1 pod(s) pending due to Pulling)',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=int(time.time()),
+    )
+
+    # Both summary and full responses must carry the field.
+    for summary in (True, False):
+        records = global_user_state.get_clusters(summary_response=summary)
+        match = [r for r in records if r['name'] == 'init-cluster']
+        assert len(match) == 1
+        assert match[0]['status'] is status_lib.ClusterStatus.INIT
+        assert match[0]['launch_status_reason'] == (
+            'Launching (1 pod(s) pending due to Pulling)')
+
+
+def test_get_clusters_no_launch_status_reason_for_up(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('up-cluster')
+    # Bring the cluster to UP.
+    global_user_state.add_or_update_cluster(
+        cluster_name='up-cluster',
+        cluster_handle=_MinimalHandle(),
+        requested_resources=set(),
+        ready=True,
+    )
+    # Even with a LAUNCH_PROGRESS event present, an UP cluster's field
+    # must be None.
+    global_user_state.add_cluster_event(
+        'up-cluster',
+        new_status=None,
+        reason='stale-launch-step',
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+        transitioned_at=int(time.time()),
+    )
+    records = global_user_state.get_clusters(summary_response=False)
+    match = [r for r in records if r['name'] == 'up-cluster']
+    assert len(match) == 1
+    assert match[0]['status'] is status_lib.ClusterStatus.UP
+    assert match[0].get('launch_status_reason') is None

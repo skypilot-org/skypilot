@@ -1948,9 +1948,18 @@ def get_clusters(
         current_user_name = (current_user.name
                              if current_user is not None else None)
 
+    # Hoisted: needed by both the new launch-progress fill (any response)
+    # and the existing last_event fill (summary_response=False only).
+    cluster_hashes = {row.cluster_hash for row in rows}
+
+    # Always populate launch_status_reason for INIT clusters — needed by
+    # both the cluster list page (summary_response=True) and the detail
+    # page (summary_response=False).
+    launch_progress_dict = _get_last_cluster_event_of_type_multiple(
+        cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+
     # get last cluster event for each row
     if not summary_response:
-        cluster_hashes = {row.cluster_hash for row in rows}
         last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
             cluster_hashes)
 
@@ -1982,6 +1991,14 @@ def get_clusters(
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
+        # launch_status_reason is populated outside the summary_response
+        # gate so both the list page (summary_response=True) and detail
+        # page (summary_response=False) get the badge tooltip data.
+        if record['status'] is status_lib.ClusterStatus.INIT:
+            record['launch_status_reason'] = launch_progress_dict.get(
+                row.cluster_hash)
+        else:
+            record['launch_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
