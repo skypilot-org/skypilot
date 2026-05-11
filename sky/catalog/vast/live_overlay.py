@@ -127,6 +127,25 @@ def _search_offers_safely() -> Optional[List[Dict[str, Any]]]:
 # ---------------------------------------------------------------------------
 # Disk cache I/O.
 # ---------------------------------------------------------------------------
+def _write_meta_atomically(meta: Dict[str, Any]) -> None:
+    _ensure_cache_dir()
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     dir=_CACHE_DIR,
+                                     delete=False,
+                                     encoding='utf-8') as tmp:
+        json.dump(meta, tmp)
+        tmp_path = tmp.name
+    os.rename(tmp_path, _META_PATH)
+
+
+def _read_meta() -> Optional[Dict[str, Any]]:
+    try:
+        with open(_META_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _write_cache_atomically(df: 'pd.DataFrame', offer_count: int) -> None:
     _ensure_cache_dir()
     with tempfile.NamedTemporaryFile(mode='w',
@@ -137,14 +156,12 @@ def _write_cache_atomically(df: 'pd.DataFrame', offer_count: int) -> None:
         df.to_csv(tmp, index=False)
         tmp_path = tmp.name
     os.rename(tmp_path, _CACHE_PATH)
-    meta = {
+    _write_meta_atomically({
         'ts': time.time(),
         'status': 'ok',
         'offer_count': offer_count,
         'row_count': int(df.shape[0]),
-    }
-    with open(_META_PATH, 'w', encoding='utf-8') as f:
-        json.dump(meta, f)
+    })
 
 
 def _read_cached_df() -> Optional['pd.DataFrame']:
@@ -177,14 +194,22 @@ def _refresh_locked() -> None:
     if age is not None and age < _TTL_SEC:
         # Another process won the race.
         return
+    # Back off if a recent fetch failed — otherwise a Vast outage causes
+    # every catalog read to re-fire the SDK once the inflight watchdog
+    # window elapses.
+    meta = _read_meta()
+    if (meta is not None and meta.get('status') == 'fetch_failed' and
+            time.time() - meta.get('ts', 0) < _TTL_SEC):
+        return
     offers = _search_offers_safely()
     if offers is None:
-        # Touch the meta file so we don't hammer the SDK after a transient
-        # failure; the existing CSV is left untouched.
-        _ensure_cache_dir()
+        # Mark the failure so subsequent refreshes back off; the existing
+        # CSV is left untouched.
         try:
-            with open(_META_PATH, 'w', encoding='utf-8') as f:
-                json.dump({'ts': time.time(), 'status': 'fetch_failed'}, f)
+            _write_meta_atomically({
+                'ts': time.time(),
+                'status': 'fetch_failed',
+            })
         except OSError:
             pass
         return
@@ -314,11 +339,14 @@ def merge_with_base(base_df: 'pd.DataFrame',
 
     # both: take min over real (>0) prices.
     if both.any():
-        # vectorize via apply for clarity; size is small.
-        merged.loc[both, 'Price'] = merged.loc[both].apply(
-            lambda r: _min_or_other(r['Price'], r['_live_price']), axis=1)
-        merged.loc[both, 'SpotPrice'] = merged.loc[both].apply(
-            lambda r: _min_or_other(r['SpotPrice'], r['_live_spot']), axis=1)
+        for col, live_col in (('Price', '_live_price'), ('SpotPrice',
+                                                         '_live_spot')):
+            p_csv = pd.to_numeric(merged.loc[both, col],
+                                  errors='coerce').replace(0, float('nan'))
+            p_live = pd.to_numeric(merged.loc[both, live_col],
+                                   errors='coerce').replace(0, float('nan'))
+            merged.loc[both, col] = pd.concat([p_csv, p_live],
+                                              axis=1).min(axis=1).fillna(0.0)
 
     # csv-only: nothing to do; CSV columns are already present.
     del csv_only  # kept for readability
