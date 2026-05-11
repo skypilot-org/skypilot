@@ -1952,11 +1952,19 @@ def get_clusters(
     # and the existing last_event fill (summary_response=False only).
     cluster_hashes = {row.cluster_hash for row in rows}
 
-    # Always populate launch_status_reason for INIT clusters — needed by
-    # both the cluster list page (summary_response=True) and the detail
-    # page (summary_response=False).
+    # Only fetch launch-progress events for clusters actually in INIT.
+    # Keeps the zero-overhead promise for non-INIT callers (e.g. SSH
+    # WebSocket validation uses summary_response=True specifically to
+    # avoid cluster-event queries on the hot path; see comment near
+    # `_get_cluster_and_validate` in server.py). The helper
+    # short-circuits on an empty set, so this is a no-op when no INIT
+    # clusters are in the result.
+    init_cluster_hashes = {
+        row.cluster_hash for row in rows if status_lib.ClusterStatus[row.status]
+        is status_lib.ClusterStatus.INIT
+    }
     launch_progress_dict = _get_last_cluster_event_of_type_multiple(
-        cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+        init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
 
     # get last cluster event for each row
     if not summary_response:

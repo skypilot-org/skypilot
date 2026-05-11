@@ -645,6 +645,9 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 rich_utils.force_update_status(
                     ux_utils.spinner_message(f'Launching ({msg})',
                                              cluster_name=cluster_name))
+                # The cluster row is written by add_or_update_cluster
+                # earlier in the launch flow, so the hash lookup inside
+                # add_cluster_event is guaranteed to succeed here.
                 # TODO(kev): mirror this emit on AWS / GCP / Slurm autoscaler
                 # paths.
                 global_user_state.add_cluster_event(
