@@ -152,6 +152,15 @@ class LazyDataFrame:
                     raise e
         return self._df
 
+    def get_dataframe(self) -> 'pd.DataFrame':
+        """Force-load (refreshing if stale) and return the underlying df."""
+        return self._load_df()
+
+    @property
+    def filename(self) -> str:
+        """Path to the on-disk CSV that backs this lazy df."""
+        return self._filename
+
     def __getattr__(self, name: str):
         return getattr(self._load_df(), name)
 
