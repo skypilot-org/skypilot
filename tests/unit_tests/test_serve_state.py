@@ -26,6 +26,20 @@ def _read_row(engine, name):
     return None if result is None else dict(result._mapping)  # pylint: disable=protected-access
 
 
+@pytest.fixture
+def _mock_serve_db(tmp_path, monkeypatch):
+    """Point serve_state at a fresh sqlite DB for the duration of one test."""
+    db_path = tmp_path / 'serve_state_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+
+    monkeypatch.setattr(serve_state._db_manager, '_engine', engine)
+    # `metadata.create_all` only creates tables that don't already exist; this
+    # is enough since we're starting from a brand-new DB and the alembic
+    # upgrade step in `create_table` would otherwise need a full env.
+    serve_state.Base.metadata.create_all(engine)
+    yield engine
+
+
 def _add_minimal_service(name: str, controller_ip=None):
     """Add a service row with all-required-args defaults so individual tests
     only need to specify what they care about."""
