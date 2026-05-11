@@ -5160,7 +5160,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
-                prev_cluster_status, _ = (
+                prev_cluster_status, refreshed_handle = (
                     backend_utils.refresh_cluster_status_handle(
                         handle.cluster_name,
                         # There is a case where
@@ -5176,6 +5176,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
                         cluster_lock_already_held=True,
                         retry_if_missing=False))
+                if refreshed_handle is not None:
+                    # Use the latest handle from status refresh to avoid acting
+                    # on stale runtime metadata persisted earlier in launch.
+                    handle = refreshed_handle
                 cluster_status_fetched = True
             except exceptions.ClusterStatusFetchingError:
                 logger.warning(
