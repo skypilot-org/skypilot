@@ -38,7 +38,7 @@ SPOT_JOBS_VERSION = '019'  # add file_mounts_blob_id column to job_info
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
-SERVE_VERSION = '002'  # add yaml_content column to version_specs
+SERVE_VERSION = '003'  # add controller_ip column to services
 SERVE_LOCK_PATH = f'~/.sky/locks/.{SERVE_DB_NAME}.lock'
 
 SKYPILOT_CONFIG_DB_NAME = 'sky_config_db'

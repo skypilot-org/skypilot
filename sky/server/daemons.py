@@ -197,6 +197,8 @@ def refresh_volume_status_event():
 
 
 _managed_job_consolidation_mode_lock = None
+_pool_consolidation_mode_lock = None
+_serve_consolidation_mode_lock = None
 
 
 # Attempt to gracefully release the lock when the process exits.
@@ -208,7 +210,18 @@ def _release_managed_job_consolidation_mode_lock() -> None:
         _managed_job_consolidation_mode_lock = None
 
 
+def _release_serve_consolidation_mode_locks() -> None:
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if _pool_consolidation_mode_lock is not None:
+        _pool_consolidation_mode_lock.release()
+        _pool_consolidation_mode_lock = None
+    if _serve_consolidation_mode_lock is not None:
+        _serve_consolidation_mode_lock.release()
+        _serve_consolidation_mode_lock = None
+
+
 atexit.register(_release_managed_job_consolidation_mode_lock)
+atexit.register(_release_serve_consolidation_mode_locks)
 
 
 def managed_job_status_refresh_event():
@@ -278,7 +291,29 @@ def should_skip_managed_job_status_refresh():
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.serve import constants as serve_constants
     from sky.serve import serve_utils
+
+    # Acquire an advisory lock so that only one pod runs the recovery /
+    # controller-startup path at a time.
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if pool:
+        if _pool_consolidation_mode_lock is None:
+            _pool_consolidation_mode_lock = locks.get_lock(
+                serve_constants.POOL_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _pool_consolidation_mode_lock
+        lock_label = 'pool consolidation mode lock'
+    else:
+        if _serve_consolidation_mode_lock is None:
+            _serve_consolidation_mode_lock = locks.get_lock(
+                serve_constants.SERVE_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _serve_consolidation_mode_lock
+        lock_label = 'serve consolidation mode lock'
+
+    if not lock.is_locked():
+        logger.info(f'Acquiring the {lock_label}: {lock}')
+        lock.acquire()
+        logger.info(f'{lock_label} acquired')
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.

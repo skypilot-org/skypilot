@@ -1,4 +1,5 @@
 """Implementation of the SkyServe core APIs."""
+import os
 import pathlib
 import re
 import shlex
@@ -319,6 +320,9 @@ def up(
             run_script = '\n'.join(env_cmds + [run_script])
             # Dump script for high availability recovery.
             serve_state.set_ha_recovery_script(service_name, run_script)
+            self_pod_ip_dbg = os.environ.get('POD_IP', '<unset>')
+            logger.debug(f'Serve up() run_on_head: spawning controller '
+                         f'subprocess locally on {self_pod_ip_dbg}')
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
@@ -703,6 +707,25 @@ def apply(
             service_record = _get_service_record(service_name, pool, handle,
                                                  backend)
             if service_record is not None:
+                # Refuse update for terminal-state rows (CONTROLLER_FAILED /
+                # FAILED_CLEANUP / SHUTTING_DOWN). The controller HTTP
+                # listener may already be gone, so update would just hit
+                # ECONNREFUSED with a confusing error. Also, SHUTTING_DOWN
+                # zombies (interrupted cleanup) are recoverable only via
+                # --purge; ask the user to do that explicitly.
+                svc_status = service_record['status']
+                if svc_status in (
+                        serve_state.ServiceStatus.terminal_statuses()):
+                    noun = 'pool' if pool else 'service'
+                    purge_cmd = (f'sky jobs pool down {service_name} --purge'
+                                 if pool else
+                                 f'sky serve down {service_name} --purge')
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            f'{noun.capitalize()} {service_name!r} is in '
+                            f'{svc_status.value} state and cannot be '
+                            f'updated. Run `{purge_cmd}` to clean it up '
+                            f'and retry.')
                 return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
