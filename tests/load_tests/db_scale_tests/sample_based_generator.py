@@ -335,6 +335,25 @@ class SampleBasedGenerator:
             # Update controller_pid to be unique
             job_info['controller_pid'] = -(random.randint(1000, 99999))
 
+            # Mark cloned rows as scheduler-inactive so the managed-job
+            # scheduler ignores them. The injected jobs are synthetic DB rows
+            # used for sky status / sky jobs queue scale tests; they have no
+            # real cluster behind them. Without this, the scheduler treats the
+            # cloned schedule_state from the live sample (e.g. ALIVE) as a
+            # live job, and consolidation-mode reconciliation tries to launch
+            # a worker pod per row — starving the kind cluster's CPU.
+            job_info['schedule_state'] = 'INACTIVE'
+            # Clear cluster-identifying fields for the same reason: a cloned
+            # current_cluster_name would either collide across rows or trip
+            # cluster-recovery paths. Sky status doesn't need them for the
+            # in-progress count.
+            if 'current_cluster_name' in job_info:
+                job_info['current_cluster_name'] = None
+            # full_resources triggers pool-aware capacity accounting in the
+            # controller. Leave it null for synthetic rows.
+            if 'full_resources' in spot_job:
+                spot_job['full_resources'] = None
+
             # Update file paths to be unique
             home_dir = os.path.expanduser('~')
             job_hash = f'{i+1:04d}'
