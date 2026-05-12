@@ -38,8 +38,18 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
 
 # Signal file indicating the API server has been restarted after enabling
-# consolidation mode. Created by setup_consolidation_mode_on_startup() in
-# sky/jobs/utils.py.
+# consolidation mode. Written by setup_consolidation_mode_on_startup() in
+# sky/jobs/utils.py. It is the single source of truth for jobs-controller
+# consolidation state and is read via the helpers in
+# sky/utils/controller_utils.py:
+#   - is_jobs_consolidation_mode() — user-facing reader. Shared by both
+#     sky/jobs/utils.py::is_consolidation_mode() (managed jobs) and
+#     sky/serve/serve_utils.py::is_consolidation_mode(pool=True) (pools),
+#     which are thin wrappers. Pool and managed-jobs readers route through
+#     the same helper so they cannot diverge.
+#   - _is_consolidation_mode(pool=True) — sizing-only helper.
+# Reading config directly instead diverges under deploy-mode auto-enable
+# (config stays null while this file is written).
 JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
@@ -77,4 +87,16 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 16  # new fields for job graceful cancel
+MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
+
+# Prefix used for service-account tokens issued to managed jobs that opt in
+# to api_server_access. The expired-token-cleanup daemon uses this prefix to
+# identify managed-job tokens that should be swept once their TTL passes.
+# Keep this in sync with the token name format in
+# sky/jobs/server/core.py::_create_job_api_token.
+MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
+
+# TTL for service-account tokens issued to managed jobs with
+# api_server_access. Kept short so any tokens that leak past the controller
+# cleanup are reaped quickly by the expired-token-cleanup daemon.
+MANAGED_JOB_TOKEN_TTL_DAYS = 3

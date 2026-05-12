@@ -1,5 +1,15 @@
+# syntax=docker/dockerfile:1
+
 # Stage 1: Install Google Cloud SDK using APT
 FROM python:3.10.19-slim AS gcloud-apt-install
+
+# Keep in sync with _GCLOUD_VERSION in sky/clouds/gcp.py. Pinned so the apt
+# install layer doesn't bake in a stale version via buildx registry caching
+# (the RUN command's hash is the cache key, so without a version specifier
+# the layer is reused indefinitely from whatever apt resolved at first build).
+# 567.0.0 ships gsutil 5.37, which replaced OpenSSL.crypto.sign with the
+# cryptography library — required after pyopenssl 24.3 dropped that API (#8070).
+ARG GCLOUD_VERSION=567.0.0-0
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -7,8 +17,8 @@ RUN apt-get update && \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
-        google-cloud-cli \
-        google-cloud-cli-gke-gcloud-auth-plugin && \
+        google-cloud-cli=${GCLOUD_VERSION} \
+        google-cloud-cli-gke-gcloud-auth-plugin=${GCLOUD_VERSION} && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 
@@ -19,6 +29,7 @@ FROM python:3.10.19-slim AS process-source
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
 ARG NEXT_BASE_PATH=/dashboard
+WORKDIR /skypilot
 
 # Run NPM and node install in a separate step for caching.
 RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
@@ -27,23 +38,35 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         apt-get install --no-install-recommends -y git curl ca-certificates gnupg && \
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
         apt-get install -y nodejs && \
-        npm install -g npm@latest; \
+        apt-get clean && rm -rf /var/lib/apt/lists/*; \
 fi
+
+COPY sky/dashboard/package.json sky/dashboard/package-lock.json \
+    /skypilot/sky/dashboard/
+
+RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Installing dashboard dependencies in Stage 2" && \
+        npm --prefix sky/dashboard ci --no-audit --fund=false; \
+    fi
+
+COPY sky/dashboard /skypilot/sky/dashboard
+
+RUN --mount=type=cache,id=dashboard-next-cache,target=/skypilot/sky/dashboard/.next/cache \
+    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Building dashboard in Stage 2" && \
+        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
+        echo "Cleaning up dashboard build-time dependencies" && \
+        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm; \
+    fi
 
 COPY . /skypilot
 
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \
-        # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
+        # Retain an /skypilot/dist dir to keep compatibility in stage 3.
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
-        echo "Building dashboard in Stage 2" && \
-        npm --prefix sky/dashboard install && \
-        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
-        echo "Cleaning up dashboard build-time dependencies" && \
-        rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* && \
         echo "Keeping source code and record commit sha (editable installation)" && \
         python -c "import setup; setup.replace_commit_hash()" && \
         # Remove .git dir to reduce the final image size

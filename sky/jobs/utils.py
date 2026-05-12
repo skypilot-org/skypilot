@@ -6,8 +6,11 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
+import concurrent.futures
+import contextlib
 from datetime import datetime
 import enum
+import json
 import os
 import pathlib
 import re
@@ -20,8 +23,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (Any, Dict, Iterable, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import filelock
@@ -37,6 +40,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
@@ -48,6 +52,7 @@ from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -194,41 +199,6 @@ def terminate_cluster(
             time.sleep(backoff.current_backoff())
 
 
-def _validate_consolidation_mode_config(
-        current_is_consolidation_mode: bool) -> None:
-    """Validate the consolidation mode config."""
-    # Check whether the consolidation mode config is changed.
-    if current_is_consolidation_mode:
-        controller_cn = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.cluster_with_name_exists(controller_cn):
-            logger.warning(
-                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
-                f'but the controller cluster {controller_cn} is still running. '
-                'Please terminate the controller cluster first.'
-                f'{colorama.Style.RESET_ALL}')
-    else:
-        total_jobs = managed_job_state.get_managed_jobs_total()
-        if total_jobs > 0:
-            nonterminal_jobs = (
-                managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, None, all_users=True))
-            if nonterminal_jobs:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are still {len(nonterminal_jobs)} managed jobs '
-                    'running. Please terminate those jobs first.'
-                    f'{colorama.Style.RESET_ALL}')
-            else:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {total_jobs} jobs from previous '
-                    'consolidation mode. Reset the `jobs.controller.'
-                    'consolidation_mode` to `true` and run `sky jobs queue` '
-                    'to see those jobs. Switching to normal mode will '
-                    f'lose the job history.{colorama.Style.RESET_ALL}')
-
-
 def setup_consolidation_mode_on_startup(deploy: bool) -> None:
     """Set up consolidation mode signal file on API server startup.
 
@@ -270,7 +240,7 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
             # Local API server: don't auto-enable
             enabled = False
 
-    _validate_consolidation_mode_config(enabled)
+    controller_utils.warn_jobs_consolidation_mode_intent(enabled)
 
     if enabled:
         signal_file.touch()
@@ -282,42 +252,67 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# The signal file is the source of truth, managed by
-# setup_consolidation_mode_on_startup() at server start. Config changes
-# (enabling or disabling) require a server restart to take effect.
+# Thin wrapper around controller_utils.is_jobs_consolidation_mode — the helper
+# owns the signal-file read, the config-vs-signal restart warning, and the
+# jobs validator call. See controller_utils for the full contract.
+# INVARIANT: serve_utils.is_consolidation_mode(pool=True) routes through the
+# same helper, so pool and managed-jobs readers cannot diverge.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
+    return controller_utils.is_jobs_consolidation_mode()
 
-    signal_file = pathlib.Path(
-        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
-    ).expanduser()
-    effective = signal_file.exists()
 
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        # Warn if explicit config disagrees with actual state — the admin
-        # needs to restart the server for the config change to take effect.
-        config_value = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=None)
-        if config_value is not None and config_value != effective:
-            expected = 'enabled' if config_value else 'disabled'
+_MANAGED_JOB_TOKEN_NAME_RE = re.compile(
+    f'^{re.escape(managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX)}'
+    r'.+-[0-9a-f]{8}$')
+
+
+def cleanup_expired_api_access_tokens() -> int:
+    """Delete expired managed-job API access tokens.
+
+    Scans the service_account_tokens table for any token whose name starts
+    with the managed-job prefix and whose expires_at is in the past, then
+    requires the name to also end with the 8-hex-char dag_uuid suffix
+    produced by _create_job_api_token. Matching tokens are deleted.
+
+    Driving the sweep off the name shape means tokens that leaked due to
+    a controller crash mid-cleanup, or that were issued by older code
+    paths, are still reaped once their TTL passes.
+
+    Limitation: a user could in principle create a custom service-account
+    token whose name happens to match `managed-job-<anything>-<8 hex>` and
+    let it expire. The daemon would treat such a token as a leaked
+    managed-job token and remove it once expired. The prefix + 8-hex-char
+    suffix combination makes accidental collisions unlikely in practice,
+    but custom token names should avoid this shape if expired tokens are
+    meant to be retained for audit.
+
+    Returns the number of tokens removed.
+    """
+    now = int(time.time())
+    prefix = managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX
+    expired = (
+        global_user_state.get_expired_service_account_tokens_by_name_prefix(
+            prefix, now))
+    removed = 0
+    for token in expired:
+        token_name = token.get('token_name') or ''
+        if not _MANAGED_JOB_TOKEN_NAME_RE.match(token_name):
+            # Prefix matched but the suffix does not look like a managed-job
+            # dag_uuid; leave it alone to avoid touching user-created tokens
+            # that happen to share the prefix.
+            continue
+        token_id = token['token_id']
+        try:
+            global_user_state.delete_service_account_token(token_id)
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning(
-                f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
-                f'is {expected} in the server config, but the API server has '
-                'not been restarted yet. Please restart the API server to '
-                f'apply the change.{colorama.Style.RESET_ALL}')
-        # Validation may print a warning. Run validation against the intended
-        # (config) value to print warnings that should be addressed before the
-        # server is restarted.
-        if config_value is not None:
-            assert isinstance(config_value, bool), config_value
-            _validate_consolidation_mode_config(config_value)
-
-    return effective
+                f'Failed to delete expired managed-job token {token_id}: {e}')
+            continue
+        removed += 1
+        logger.info(f'Cleaned up expired managed-job API access token '
+                    f'{token_id} ({token_name})')
+    return removed
 
 
 def ha_recovery_for_consolidation_mode() -> None:
@@ -411,6 +406,24 @@ async def get_job_status(
     # TODO(luca) make this async
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
+
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+
+    logger.info('=== Checking the job status... ===')
+
+    if managed_job_runtime.is_registered():
+        result = await asyncio.to_thread(managed_job_runtime.get_job_status,
+                                         handle, cluster_name)
+        if result is not None:
+            status, _ = result
+            _log_job_status(status)
+            return result
+
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
@@ -419,7 +432,6 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
@@ -427,11 +439,7 @@ async def get_job_status(
                               stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+        _log_job_status(status)
         return status, None
     except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
             ValueError, TypeError, asyncio.TimeoutError) as e:
@@ -777,6 +785,12 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
+    if managed_job_runtime.is_registered():
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        runtime_ended_at = managed_job_runtime.get_job_ended_at(
+            handle, cluster_name)
+        if runtime_ended_at is not None:
+            return runtime_ended_at
     try:
         return get_job_timestamp(backend,
                                  cluster_name,
@@ -848,6 +862,208 @@ def event_callback_func(
 
 
 # ======== user functions ========
+
+
+def _full_traceback() -> str:
+    """Capture the full traceback, bypassing any tracebacklimit."""
+    with ux_utils.enable_traceback():
+        return traceback.format_exc()
+
+
+@contextlib.contextmanager
+def _catch_to_errors(errors: List[Dict[str, str]], component: str,
+                     resource: str):
+    """Catch exceptions and append to errors list with traceback."""
+    try:
+        yield
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': component,
+            'resource': resource,
+            'error': str(e),
+            'traceback': _full_traceback(),
+        })
+
+
+def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
+    """Collect a debug dump manifest from the controller.
+
+    This function runs ON the controller via CodeGen/SSH. It gathers small
+    DB-derived data inline (as JSON strings) and returns remote file paths
+    for large log files (to be rsynced by the caller).
+
+    Returns:
+        Dict with:
+          'inline_data': list of {'relative_path': str, 'content': str}
+          'file_paths': list of {'remote_path': str, 'relative_path': str}
+          'errors': list of {'component': str, 'resource': str, 'error': str}
+    """
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
+
+    # Collect per-job data in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(_collect_job_debug_manifest, job_ids))
+
+    # Merge results and collect cluster info for unique clusters
+    seen_cluster_names: Set[str] = set()
+    for job_id, (job_inline, job_files, job_errors,
+                 cluster_name) in zip(job_ids, results):
+        inline_data.extend(job_inline)
+        file_paths.extend(job_files)
+        errors.extend(job_errors)
+        if cluster_name and cluster_name not in seen_cluster_names:
+            seen_cluster_names.add(cluster_name)
+            job_prefix = f'managed_jobs/{job_id}'
+            _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                            inline_data, errors)
+
+    # Collect controller system log paths (shared, not per-job)
+    _collect_controller_system_log_paths(file_paths, errors)
+
+    return {
+        'inline_data': inline_data,
+        'file_paths': file_paths,
+        'errors': errors,
+    }
+
+
+def _collect_job_debug_manifest(
+    job_id: int,
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
+           Optional[str]]:
+    """Collect debug manifest entries for a single managed job.
+
+    Returns:
+        (inline_data, file_paths, errors, cluster_name) for this job.
+    """
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
+    job_prefix = f'managed_jobs/{job_id}'
+
+    # 1. Controller log for this job (FILE — needs rsync)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        log_file = controller_logs_dir / f'{job_id}.log'
+        if log_file.is_file():
+            file_paths.append({
+                'remote_path': str(log_file),
+                'relative_path': f'{job_prefix}/{job_id}.log',
+            })
+
+    # 2. Job info from DB (inline — small data)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/job_info'):
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
+        if tasks:
+            for t in tasks:
+                user_yaml = t.get('user_yaml')
+                if isinstance(user_yaml, str):
+                    t['user_yaml'] = debug_dump_helpers.redact_task_yaml(
+                        user_yaml)
+            inline_data.append({
+                'relative_path': f'{job_prefix}/job_info.json',
+                'content': json.dumps(tasks, indent=2, default=str),
+            })
+
+    # 3. Job events from DB (inline — small data)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/events'):
+        events = managed_job_state.get_job_events(job_id, limit=1000)
+        if events:
+            serializable_events = []
+            for e in events:
+                serializable_events.append({
+                    'spot_job_id': e.get('spot_job_id'),
+                    'task_id': e.get('task_id'),
+                    'new_status': str(e.get('new_status')),
+                    'code': e.get('code'),
+                    'reason': e.get('reason'),
+                    'timestamp': str(e.get('timestamp')),
+                })
+            inline_data.append({
+                'relative_path': f'{job_prefix}/job_events.json',
+                'content': json.dumps(serializable_events,
+                                      indent=2,
+                                      default=str),
+            })
+
+    # 4. Job run logs (FILE — needs rsync)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/run_logs'):
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for task_idx, (_, _, _, local_log_file, _) in enumerate(task_info):
+            if local_log_file and os.path.exists(local_log_file):
+                suffix = f'_task{task_idx}' if len(task_info) > 1 else ''
+                file_paths.append({
+                    'remote_path': str(pathlib.Path(local_log_file)),
+                    'relative_path': f'{job_prefix}/run{suffix}.log',
+                })
+
+    # 5. Resolve cluster name (cluster info collected in caller for dedup)
+    cluster_name = None
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
+        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if cluster_name is None:
+            # Fall back to generated name
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+                job_id)
+            if task_info:
+                _, task_name, _, _, _ = task_info[0]
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
+
+    return inline_data, file_paths, errors, cluster_name
+
+
+def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
+                                    inline_data: List[Dict[str, str]],
+                                    errors: List[Dict[str, str]]) -> None:
+    """Collect cluster info and events for a managed job's cluster."""
+    cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
+
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/cluster_info'):
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is None:
+            return
+        cluster_info = debug_dump_helpers.serialize_cluster_record(
+            cluster_record)
+        inline_data.append({
+            'relative_path': f'{cluster_prefix}/cluster_info.json',
+            'content': json.dumps(cluster_info, indent=2, default=str),
+        })
+
+        cluster_hash = cluster_record.get('cluster_hash')
+        if not cluster_hash:
+            return
+        for event_data in debug_dump_helpers.get_cluster_events_data(
+                cluster_hash):
+            inline_data.append({
+                'relative_path': f'{cluster_prefix}/'
+                                 f'events_{event_data["event_type"]}.json',
+                'content': json.dumps(event_data['events'],
+                                      indent=2,
+                                      default=str),
+            })
+
+
+def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]]) -> None:
+    """Collect controller system log file paths (controller_*.log files)."""
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        if not controller_logs_dir.exists():
+            return
+        for log_file in controller_logs_dir.glob('controller_*.log'):
+            if log_file.is_file():
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
 
 
 def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
@@ -994,6 +1210,56 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def cancel_managed_jobs(
+    *,
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    pool: Optional[str] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+    current_workspace: Optional[str] = None,
+    user_hash: Optional[str] = None,
+) -> str:
+    """Dispatch to the correct cancel variant based on selector args.
+
+    One of ``job_ids``/``name``/``pool``/``all``/``all_users`` should be set.
+    Precedence:
+
+      - ``all_users`` or ``all`` or ``job_ids`` -> ``cancel_jobs_by_id``
+      - ``name`` -> ``cancel_job_by_name``
+      - ``pool`` -> ``cancel_jobs_by_pool``
+
+    Single source of truth for the dispatch precedence. Direct callers
+    (including plugins registering a custom ``ManagedJobRunner``) invoke
+    this function; the codegen path
+    (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
+    name on controllers running ``MANAGED_JOBS_VERSION >= 19``.
+    """
+    if all_users or all or job_ids:
+        return cancel_jobs_by_id(
+            job_ids,
+            all_users=all_users,
+            current_workspace=current_workspace,
+            user_hash=user_hash,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    if name is not None:
+        return cancel_job_by_name(
+            name,
+            current_workspace=current_workspace,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    assert pool is not None, (job_ids, name, pool, all)
+    return cancel_jobs_by_pool(
+        pool,
+        current_workspace=current_workspace,
+    )
+
+
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -1006,6 +1272,7 @@ def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
         tail: Optional[int] = None,
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
@@ -1013,6 +1280,9 @@ def stream_logs_by_id(
         job_id: The job ID to stream logs for.
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
+        tail_offset: Skip the last ``tail_offset`` lines before applying
+            ``tail``. Used by the dashboard live-tail UI to fetch a window
+            of older history without re-reading the whole file.
         task: Task identifier to view logs for a specific task in a JobGroup.
             If an int, it is treated as a task ID. If a str, it is treated as
             a task name. If None, logs for all tasks are shown.
@@ -1189,29 +1459,43 @@ def stream_logs_by_id(
                     # Show task header when multiple tasks OR when filtering
                     if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
-                    with open(os.path.expanduser(log_file),
-                              'r',
-                              encoding='utf-8') as f:
-                        # Stream the logs to the console without reading the
-                        # whole file into memory.
-                        start_streaming = False
-                        read_from: Union[TextIO, Deque[str]] = f
-                        if tail is not None:
-                            assert tail > 0
-                            # Read only the last 'tail' lines using deque
-                            read_from = collections.deque(f, maxlen=tail)
-                            # We set start_streaming to True here in case
-                            # truncating the log file removes the line that
-                            # contains LOG_FILE_START_STREAMING_AT. This does
-                            # not cause issues for log files shorter than tail
-                            # because tail_logs in sky/skylet/log_lib.py also
-                            # handles LOG_FILE_START_STREAMING_AT.
-                            start_streaming = True
-                        for line in read_from:
+                    log_path = os.path.expanduser(log_file)
+                    if tail is not None:
+                        assert tail > 0
+                        # Backward-seek tail: O(tail × line) instead of
+                        # scanning the whole file. The previous
+                        # `collections.deque(f, maxlen=tail)` scanned every
+                        # byte of the cached log, making dashboard log
+                        # loading 10+ s for multi-GB cancelled jobs.
+                        offset = max(tail_offset or 0, 0)
+                        lines, _ = log_lib.tail_lines_from_end(
+                            log_path, tail, offset)
+                        # Apply the same start-stream-marker filter that
+                        # log_lib.tail_logs_iter uses: when the marker
+                        # appears in both the head of the file and the
+                        # tail window (small log fully covered), filter
+                        # so pre-marker boilerplate (Ray INFO lines etc.)
+                        # is hidden.
+                        with open(log_path, 'r', encoding='utf-8') as peek_f:
+                            head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
+                        start_streaming = (
+                            log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
+                                head_lines, lines,
+                                log_lib.LOG_FILE_START_STREAMING_AT))
+                        for line in lines:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
+                    else:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            start_streaming = False
+                            for line in f:
+                                if (log_lib.LOG_FILE_START_STREAMING_AT
+                                        in line):
+                                    start_streaming = True
+                                if start_streaming:
+                                    print(line, end='', flush=True)
                     # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
@@ -1236,6 +1520,17 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+        # Batch coordinator jobs run inline on the controller — no
+        # separate cluster is provisioned. Stream controller logs instead
+        # of trying to find a worker cluster handle.
+        if managed_job_state.is_batch_job(job_id):
+            return stream_logs(job_id,
+                               job_name=None,
+                               controller=True,
+                               follow=follow,
+                               tail=tail,
+                               tail_offset=tail_offset)
+
         backend = backends.CloudVmRayBackend()
         latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -1302,20 +1597,49 @@ def stream_logs_by_id(
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-            tail_param = tail if tail is not None else 0
-            returncode = backend.tail_logs(handle,
-                                           job_id=job_id_to_tail,
-                                           managed_job_id=job_id,
-                                           follow=follow,
-                                           tail=tail_param)
+            returncode = None
+            if managed_job_runtime.is_registered():
+                returncode = managed_job_runtime.tail_logs(
+                    handle,
+                    backend=backend,
+                    job_id=job_id,
+                    task_id=task_id,
+                    job_id_on_cluster=job_id_to_tail,
+                    follow=follow,
+                    tail=tail,
+                    tail_offset=tail_offset)
+            if returncode is None:
+                # OSS default: stream via backend.tail_logs (skylet/SSH/gRPC).
+                # require_outputs defaults to False, so the return is int
+                # (not Tuple[int, str, str]).
+                tail_param = tail if tail is not None else 0
+                returncode = typing.cast(
+                    int,
+                    backend.tail_logs(handle,
+                                      job_id=job_id_to_tail,
+                                      managed_job_id=job_id,
+                                      follow=follow,
+                                      tail=tail_param,
+                                      tail_offset=tail_offset))
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
                 # succeeded (even though the real job can be SUCCEEDED or
                 # FAILED). We use the status in job queue to show the
                 # information, as the ManagedJobStatus is not updated yet.
-                job_statuses = backend.get_job_status(handle, stream_logs=False)
-                job_status = list(job_statuses.values())[0]
+                job_status: Optional[job_lib.JobStatus] = None
+                # handle being non-None implies cluster_name was set.
+                assert cluster_name is not None, (job_id, task_id)
+                if managed_job_runtime.is_registered():
+                    runtime_result = managed_job_runtime.get_job_status(
+                        handle, cluster_name, returncode=returncode)
+                    if runtime_result is not None:
+                        job_status, _ = runtime_result
+                if job_status is None:
+                    # OSS default: query skylet via backend.
+                    job_statuses = backend.get_job_status(handle,
+                                                          stream_logs=False)
+                    job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 
@@ -1454,6 +1778,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None,
+                tail_offset: Optional[int] = None,
                 task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
@@ -1531,20 +1856,35 @@ def stream_logs(job_id: Optional[int],
         # This code is based on log_lib.tail_logs. We can't use that code
         # exactly because state works differently between managed jobs and
         # normal jobs.
-        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
-            # Note: we do not need to care about start_stream_at here, since
-            # that should be in the job log printed above.
-            read_from: Union[TextIO, Deque[str]] = f
-            if tail is not None:
-                assert tail > 0
-                # Read only the last 'tail' lines efficiently using deque
-                read_from = collections.deque(f, maxlen=tail)
-            for line in read_from:
+        offset_arg = (tail_offset
+                      if tail_offset is not None and tail_offset > 0 else 0)
+        # Phase 1: emit the historical window. For tail!=None we use a
+        # backward-seek read so cost is O(tail) instead of O(file_size);
+        # otherwise stream the whole file (this is the legacy `tail=None`
+        # behavior used by `sky jobs logs --controller`).
+        end_pos = 0
+        if tail is not None:
+            assert tail > 0
+            tail_lines, end_pos = log_lib.tail_lines_from_end(
+                controller_log_path, tail, offset_arg)
+            for line in tail_lines:
                 print(line, end='')
-            # Flush.
             print(end='', flush=True)
+        else:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                for line in f:
+                    print(line, end='')
+                end_pos = f.tell()
+                print(end='', flush=True)
 
-            if follow:
+        # Phase 2: optionally follow new bytes from where the tail read
+        # stopped. Reopen so the prior file handle (which may have been
+        # binary in the seek branch) doesn't leak.
+        if follow:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                f.seek(end_pos)
                 while True:
                     # Print all new lines, if there are any.
                     line = f.readline()
@@ -1570,8 +1910,8 @@ def stream_logs(job_id: Optional[int],
                 # Wait for final logs to be written.
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
-            # Print any remaining logs including incomplete line.
-            print(f.read(), end='', flush=True)
+                # Print any remaining logs including incomplete line.
+                print(f.read(), end='', flush=True)
 
         if follow:
             return ux_utils.finishing_message(
@@ -1591,7 +1931,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow, tail, task)
+    return stream_logs_by_id(job_id, follow, tail, tail_offset, task)
 
 
 def dump_managed_job_queue(
@@ -2141,6 +2481,10 @@ def format_job_table(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
+        Jobs that appear on multiple workers (e.g. batch coordinators
+        that orchestrate across the whole pool) are excluded — they
+        should not display a single ``(worker=N)`` annotation.
+
         Args:
             pool_status: List of pool status dictionaries with replica_info.
 
@@ -2148,6 +2492,7 @@ def format_job_table(
             Dictionary mapping job_id to replica_id (worker ID).
         """
         job_to_worker: Dict[int, int] = {}
+        multi_worker_jobs: Set[int] = set()
         if pool_status is None:
             return job_to_worker
         for pool in pool_status:
@@ -2156,7 +2501,11 @@ def format_job_table(
                 used_by = replica.get('used_by')
                 if used_by is not None:
                     for job_id in used_by:
+                        if job_id in job_to_worker:
+                            multi_worker_jobs.add(job_id)
                         job_to_worker[job_id] = replica.get('replica_id')
+        for job_id in multi_worker_jobs:
+            del job_to_worker[job_id]
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
@@ -2180,6 +2529,23 @@ def format_job_table(
         if show_all:
             user_cols.append('USER_ID')
 
+    def _fmt_batch_progress(task_or_tasks) -> str:
+        """Format batch progress as 'completed/total' or '-' if not a batch."""
+        if isinstance(task_or_tasks, list):
+            t = task_or_tasks[0]
+        else:
+            t = task_or_tasks
+        total = t.get('batch_total_batches')
+        if not total:
+            return '-'
+        status = t.get('status')
+        if (isinstance(status, managed_job_state.ManagedJobStatus) and
+                status == managed_job_state.ManagedJobStatus.WINDING_DOWN):
+            return 'Winding down'
+        completed = t.get('batch_completed_batches') or 0
+        pct = int(completed * 100 / total)
+        return f'{pct}% {completed}/{total}'
+
     columns = [
         'ID',
         'TASK',
@@ -2192,6 +2558,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'PROGRESS',
         'POOL',
     ]
     if show_all:
@@ -2323,6 +2690,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                _fmt_batch_progress(job_tasks),
                 pool,
             ]
             if show_all:
@@ -2386,6 +2754,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                _fmt_batch_progress(task),
                 pool,
             ]
             if show_all:
@@ -2559,9 +2928,20 @@ class ManagedJobCodeGen:
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
 
         # Plugins are only loaded for managed jobs version 13 and above.
-        if managed_job_version >= 13:
+        # Context-aware loading (PluginContext) was introduced in version 20.
+        if managed_job_version >= 20:
+            from sky import sky_logging as _sky_logging
             from sky.server import plugins
-            plugins.load_plugins(plugins.ExtensionContext())
+            # Suppress logging during plugin loading to prevent installation
+            # logs from leaking into codegen output.
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext(
+                    context=plugins.PluginContext.CONTROLLER))
+        elif managed_job_version >= 13:
+            from sky import sky_logging as _sky_logging
+            from sky.server import plugins
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod
@@ -2586,6 +2966,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out batch fields for older controllers (< 18)
+        _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
+        if managed_job_version < 18 and _fields is not None:
+            _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -2647,70 +3031,104 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls,
-                          job_ids: Optional[List[int]],
-                          all_users: bool = False,
-                          graceful: bool = False,
-                          graceful_timeout: Optional[int] = None) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
-                            current_workspace={active_workspace!r})
-        else:
-            msg = utils.cancel_jobs_by_id(
-                {job_ids},
-                all_users={all_users},
-                current_workspace={active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
+    def cancel_managed_jobs(
+        cls,
+        *,
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        pool: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+    ) -> str:
+        """Unified cancel codegen.
 
-    @classmethod
-    def cancel_job_by_name(cls,
-                           job_name: str,
-                           graceful: bool = False,
-                           graceful_timeout: Optional[int] = None) -> str:
+        On controllers running ``MANAGED_JOBS_VERSION >= 19``, emits a
+        single call to ``utils.cancel_managed_jobs`` — the one dispatch
+        function that direct callers also use. On older controllers
+        (``< 19``) that don't have the dispatcher, falls back to a
+        targeted call to the underlying ``utils.cancel_jobs_by_id`` /
+        ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
+        client-side based on the selector args.
+        """
         active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
-            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        else:
-            msg = utils.cancel_job_by_name(
-                {job_name!r},
-                {active_workspace!r},
-                graceful={graceful},
-                graceful_timeout={graceful_timeout},
-            )
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
 
-    @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
-        """)
+        # ``user_hash`` is intentionally omitted below — the controller runs
+        # the generated code under ``_build()``, which exports
+        # ``USER_ID_ENV_VAR`` to the caller's hash. The dispatcher defaults
+        # ``user_hash=None``, and ``state.get_nonterminal_job_ids_by_name``
+        # falls back to ``common_utils.get_user_hash()`` (reading the env
+        # var) when ``user_hash`` is None — matching the old per-variant
+        # codegens, which also never passed it.
+
+        # Client-side pick of which legacy variant to emit for controllers
+        # running ``managed_job_version < 19``. Each variant preserves the
+        # per-version gating that its dedicated codegen method used before
+        # we consolidated everything into ``cancel_managed_jobs``: older
+        # controllers predate args like ``current_workspace``/``graceful``
+        # and must not receive them. Lines are at column 0 here; the final
+        # assembly indents them by 4 spaces so they nest under
+        # ``if managed_job_version < 19:`` in the generated code.
+        if all_users or all or job_ids:
+            legacy_call_lines = [
+                'if managed_job_version < 2:',
+                # #4787: all_users not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r})',
+                'elif managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        elif name is not None:
+            legacy_call_lines = [
+                'if managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_job_by_name({name!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            # cancel_jobs_by_pool had no historical version gating.
+            legacy_call_lines = [
+                f'msg = utils.cancel_jobs_by_pool({pool!r}, '
+                f'{active_workspace!r})',
+            ]
+
+        legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        code = (f'if managed_job_version < 19:\n'
+                f'{legacy_block}\n'
+                f'else:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'        name={name!r},\n'
+                f'        job_ids={job_ids!r},\n'
+                f'        pool={pool!r},\n'
+                f'        all={all!r},\n'
+                f'        all_users={all_users!r},\n'
+                f'        graceful={graceful!r},\n'
+                f'        graceful_timeout={graceful_timeout!r},\n'
+                f'        current_workspace={active_workspace!r},\n'
+                f'    )\n'
+                f'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod
@@ -2751,12 +3169,29 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_debug_dump_manifest(cls, job_ids: List[int]) -> str:
+        code = textwrap.dedent(f"""\
+        from sky.utils import message_utils
+        if managed_job_version >= 17:
+            result = utils.collect_debug_dump_manifest({job_ids!r})
+            print(message_utils.encode_payload(result), end="", flush=True)
+        else:
+            print(message_utils.encode_payload({{
+                'inline_data': [], 'file_paths': [], 'errors': [
+                {{'component': 'managed_jobs', 'resource': 'debug_dump',
+                  'error': 'Controller version too old (requires >= 17)'}}
+            ]}}), end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def stream_logs(cls,
                     job_name: Optional[str],
                     job_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None,
+                    tail_offset: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
@@ -2767,10 +3202,15 @@ class ManagedJobCodeGen:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
-        else:
+        elif managed_job_version < 21:
+            # Versions before 21 did not support tail_offset parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r},
+                                    tail_offset={tail_offset!r}, task={task!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

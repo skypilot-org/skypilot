@@ -56,7 +56,8 @@ file_mounts:
   #   c
   /tmp/workdir: ~/tmp-workdir
 
-  # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
+  # Relative paths are under ~/sky_workdir/ — the remote workdir
+  # (after sync, ~/sky_workdir/relative_dir/ exists).
   relative_dir: ~/tmp-workdir
   ./dotslash_relative_dir: ~/tmp-workdir
 

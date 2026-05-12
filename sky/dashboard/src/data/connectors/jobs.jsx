@@ -4,10 +4,12 @@ import {
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
+  ENDPOINT,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
+import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 // ============ Pagination Plugin Integration ============
@@ -61,6 +63,9 @@ const DEFAULT_FIELDS = [
   'execution',
   'is_primary_in_job_group',
   'links',
+  'is_batch',
+  'batch_total_batches',
+  'batch_completed_batches',
   'node_names',
   'priority_class',
 ];
@@ -295,6 +300,7 @@ export async function getManagedJobs(options = {}) {
         links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
+        schedule_state: job.schedule_state,
         current_cluster_name: job.current_cluster_name,
         cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
@@ -305,6 +311,9 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         execution: job.execution,
         is_primary_in_job_group: job.is_primary_in_job_group,
+        // Batch progress
+        batch_total_batches: job.batch_total_batches,
+        batch_completed_batches: job.batch_completed_batches,
       };
     });
 
@@ -817,30 +826,104 @@ export async function handleJobAction(action, jobId, cluster) {
 /**
  * Downloads managed job logs as a zip via the API server.
  * Flow:
- * 1) POST /jobs/download_logs to fetch logs from the remote cluster to API server
- * 2) POST /download to stream a zip back to the browser and trigger download
+ * 1) POST /jobs/download_logs - copy logs from cluster to API server tmp dir
+ * 2) POST /download - server zips and streams it back as a binary response
+ * 3) Save the response blob via `<a download>` (createObjectURL).
  */
+// Long-poll /jobs/download_logs by hand instead of using apiClient.fetch.
+// For multi-GB running jobs sync_down can take 5+ minutes — well past
+// the ~100s edge timeouts (Cloudflare 524 etc.) of a single GET.
+// Retry the polling GET when we hit a 5xx so the user-visible request
+// resumes waiting on the SAME server-side request_id until it
+// completes. (sync_down already passes follow=False, so the underlying
+// stream_logs reads to EOF and exits — it just takes a while.)
+async function downloadLogsWithRetry(body, maxAttempts = 30) {
+  // Step 1: dispatch the request and grab its server-side ID.
+  const baseUrl = window.location.origin;
+  const userInfo = await (async () => {
+    // Mirror what apiClient.fetch does — the env_vars path matters.
+    const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
+      () => null
+    );
+    if (r && r.ok) return r.json();
+    return { id: 'local', name: 'local' };
+  })();
+  const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/download_logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...body,
+      env_vars: {
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: userInfo.id,
+        SKYPILOT_USER: userInfo.name,
+      },
+    }),
+  });
+  if (!dispatch.ok) {
+    throw new Error(`download_logs dispatch failed: ${dispatch.status}`);
+  }
+  const requestId = dispatch.headers.get('X-Skypilot-Request-ID');
+  if (!requestId) {
+    throw new Error('download_logs dispatch missing X-Skypilot-Request-ID');
+  }
+
+  // Step 2: long-poll /api/get, retrying on edge-timeout responses.
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const r = await fetch(
+      `${baseUrl}${ENDPOINT}/api/get?request_id=${requestId}`
+    );
+    // 524 Cloudflare timeout / 502/503/504 transient — retry against
+    // the same request_id; the server's long-poll resumes waiting.
+    if (
+      r.status === 524 ||
+      r.status === 502 ||
+      r.status === 503 ||
+      r.status === 504
+    ) {
+      // Linear backoff capped at 5s. Cloudflare 524 self-paces at
+      // ~100s so most attempts gain nothing, but a server-side 502/503
+      // hiccup would otherwise hammer the API server back-to-back.
+      const backoffMs = Math.min(1000 * (attempt + 1), 5000);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      continue;
+    }
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`/api/get ${r.status}: ${text}`);
+    }
+    const data = await r.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  }
+  throw new Error('download_logs timed out after retries');
+}
+
+// Prepare a zip via sync_down + /download, read the response as a
+// blob, and save via createObjectURL. The wait scales with rsync time
+// on the worker, so multi-GB running logs can take a few minutes —
+// downloadLogsWithRetry tolerates Cloudflare 524 during that window.
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
   controller = false,
 }) {
   try {
-    // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
-    const mapping = await apiClient.fetch('/jobs/download_logs', {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
+    const logType = controller ? 'controller-logs' : 'logs';
+    const filename = `managed-${namePart}-${logType}-${ts}.zip`;
+
+    const mapping = await downloadLogsWithRetry({
       job_id: jobId,
       name: name,
       controller: controller,
       refresh: false,
     });
-
     const folderPaths = Object.values(mapping || {});
     if (!folderPaths.length) {
       showToast('No logs found to download.', 'warning');
       return;
     }
-
-    // Step 2: request the zip and trigger browser download
     const resp = await apiClient.fetchImmediate('/download?relative=items', {
       folder_paths: folderPaths,
     });
@@ -851,15 +934,13 @@ export async function downloadManagedJobLogs({
     const blob = await resp.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
-    const logType = controller ? 'controller-logs' : 'logs';
     a.href = url;
-    a.download = `managed-${namePart}-${logType}-${ts}.zip`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+    trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');

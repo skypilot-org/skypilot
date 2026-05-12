@@ -694,5 +694,5 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
                         pathlib.Path(tmp_path))
 
     from sky.server import common as server_common
-    with pytest.raises(FileNotFoundError, match='garbage collected'):
+    with pytest.raises(FileNotFoundError, match='Blob not found'):
         server_common.resolve_blob_dir(blob_id, 'testuser')

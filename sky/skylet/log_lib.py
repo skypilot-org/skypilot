@@ -2,7 +2,6 @@
 
 This is a remote utility module that provides logging functionality.
 """
-import collections
 import copy
 import functools
 import io
@@ -16,8 +15,8 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
-                    Tuple, Union)
+from typing import (Dict, Iterable, Iterator, List, Optional, TextIO, Tuple,
+                    Union)
 
 import colorama
 
@@ -492,6 +491,67 @@ def _follow_job_logs(file,
             status = job_lib.get_status_no_lock(job_id)
 
 
+# Block size for the backward-seek tail reader. ~64 KB is large enough
+# to fit the tail of typical log files in a single read while keeping
+# memory bounded for very long lines.
+_TAIL_BLOCK_SIZE = 64 * 1024
+
+
+def tail_lines_from_end(path: str,
+                        tail: int,
+                        offset: int = 0) -> Tuple[List[str], int]:
+    """Return the last ``tail`` lines from ``path``, skipping ``offset``.
+
+    Reads backwards in fixed-size blocks from EOF so cost is O(tail *
+    line-length) rather than O(file-size). For multi-GB log files this
+    is the difference between ~10 s and ~1 ms per call.
+
+    Args:
+        path: File path to read.
+        tail: Number of lines to return (must be > 0).
+        offset: Number of lines from EOF to skip before taking ``tail``.
+
+    Returns:
+        ``(lines, end_pos)`` — lines (each with trailing newline if
+        present in source) and the byte position at file EOF when the
+        scan started. Callers that follow the file should seek to
+        ``end_pos`` to avoid re-emitting bytes that were already
+        returned. If ``offset`` is at or past the start of the file,
+        returns ``([], end_pos)``.
+    """
+    assert tail > 0
+    needed = tail + max(offset, 0)
+    chunks: List[bytes] = []
+    line_count = 0
+    pos = 0
+    end_pos = 0
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        end_pos = f.tell()
+        pos = end_pos
+        while pos > 0 and line_count <= needed:
+            read_size = min(_TAIL_BLOCK_SIZE, pos)
+            pos -= read_size
+            f.seek(pos)
+            chunk = f.read(read_size)
+            chunks.append(chunk)
+            line_count += chunk.count(b'\n')
+    data = b''.join(reversed(chunks))
+    text = data.decode('utf-8', errors='replace')
+    lines = text.splitlines(keepends=True)
+    # If we stopped before reaching offset 0, the first decoded line is
+    # almost certainly partial (we landed mid-line). Drop it so callers
+    # see only complete lines.
+    if pos > 0 and lines:
+        lines = lines[1:]
+    if offset > 0:
+        if offset >= len(lines):
+            return [], end_pos
+        # pylint: disable=invalid-unary-operand-type
+        lines = lines[:-offset]
+    return lines[-tail:], end_pos
+
+
 def _peek_head_lines(log_file: TextIO) -> List[str]:
     """Peek the head of the file."""
     lines = [
@@ -503,7 +563,7 @@ def _peek_head_lines(log_file: TextIO) -> List[str]:
 
 
 def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
-                                        tail_lines: Deque[str],
+                                        tail_lines: Iterable[str],
                                         start_stream_at: str) -> bool:
     """Check if the entire tail lines should be streamed."""
     # See comment:
@@ -530,7 +590,8 @@ def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              tail_offset: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -581,8 +642,6 @@ def tail_logs(job_id: Optional[int],
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = LOG_FILE_START_STREAMING_AT
-    # Explicitly declare the type to avoid mypy warning.
-    lines: Iterable[str] = []
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,
@@ -590,24 +649,23 @@ def tail_logs(job_id: Optional[int],
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
+        start_streaming = False
+        end_pos = 0
+        if tail > 0:
+            with open(log_path, 'r', newline='', encoding='utf-8') as peek:
+                head_lines_of_log_file = _peek_head_lines(peek)
+            tail_lines, end_pos = tail_lines_from_end(log_path, tail,
+                                                      tail_offset)
+            start_streaming = _should_stream_the_whole_tail_lines(
+                head_lines_of_log_file, tail_lines, start_stream_at)
+            for line in tail_lines:
+                if start_stream_at in line:
+                    start_streaming = True
+                if start_streaming:
+                    print(line, end='')
+            print(end='', flush=True)
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
-            # Using `_follow` instead of `tail -f` to streaming the whole
-            # log and creating a new process for tail.
-            start_streaming = False
-            if tail > 0:
-                head_lines_of_log_file = _peek_head_lines(log_file)
-                lines = collections.deque(log_file, maxlen=tail)
-                start_streaming = _should_stream_the_whole_tail_lines(
-                    head_lines_of_log_file, lines, start_stream_at)
-                for line in lines:
-                    if start_stream_at in line:
-                        start_streaming = True
-                    if start_streaming:
-                        print(line, end='')
-                # Flush the last n lines
-                print(end='', flush=True)
-            # Now, the cursor is at the end of the last lines
-            # if tail > 0
+            log_file.seek(end_pos)
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming=start_streaming,
@@ -616,27 +674,30 @@ def tail_logs(job_id: Optional[int],
     else:
         try:
             start_streaming = False
-            with open(log_path, 'r', encoding='utf-8') as log_file:
-                if tail > 0:
-                    # If tail > 0, we need to read the last n lines.
-                    # We use double ended queue to rotate the last n lines.
-                    head_lines_of_log_file = _peek_head_lines(log_file)
-                    lines = collections.deque(log_file, maxlen=tail)
-                    start_streaming = _should_stream_the_whole_tail_lines(
-                        head_lines_of_log_file, lines, start_stream_at)
-                else:
-                    lines = log_file
-                for line in lines:
+            if tail > 0:
+                with open(log_path, 'r', encoding='utf-8') as peek:
+                    head_lines_of_log_file = _peek_head_lines(peek)
+                tail_lines, _ = tail_lines_from_end(log_path, tail, tail_offset)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, tail_lines, start_stream_at)
+                for line in tail_lines:
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
                         print(line, end='', flush=True)
-                status_str = status.value if status is not None else 'None'
-                # Only show "Job finished" for actually terminal states
-                if status is not None and status.is_terminal():
-                    print(ux_utils.finishing_message(
-                        f'Job finished (status: {status_str}).'),
-                          flush=True)
+            else:
+                with open(log_path, 'r', encoding='utf-8') as log_file:
+                    for line in log_file:
+                        if start_stream_at in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
+            status_str = status.value if status is not None else 'None'
+            # Only show "Job finished" for actually terminal states
+            if status is not None and status.is_terminal():
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).'),
+                      flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
@@ -646,7 +707,8 @@ def tail_logs_iter(job_id: Optional[int],
                    log_dir: Optional[str],
                    managed_job_id: Optional[int] = None,
                    follow: bool = True,
-                   tail: int = 0) -> Iterator[str]:
+                   tail: int = 0,
+                   tail_offset: int = 0) -> Iterator[str]:
     """Tail the logs of a job. This is mostly the same as tail_logs, but
     returns an iterator instead of printing to stdout/stderr."""
     if job_id is None:
@@ -690,8 +752,6 @@ def tail_logs_iter(job_id: Optional[int],
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = LOG_FILE_START_STREAMING_AT
-    # Explicitly declare the type to avoid mypy warning.
-    lines: Iterable[str] = []
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,
@@ -699,22 +759,22 @@ def tail_logs_iter(job_id: Optional[int],
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
+        start_streaming = False
+        end_pos = 0
+        if tail > 0:
+            with open(log_path, 'r', newline='', encoding='utf-8') as peek:
+                head_lines_of_log_file = _peek_head_lines(peek)
+            tail_lines, end_pos = tail_lines_from_end(log_path, tail,
+                                                      tail_offset)
+            start_streaming = _should_stream_the_whole_tail_lines(
+                head_lines_of_log_file, tail_lines, start_stream_at)
+            for line in tail_lines:
+                if start_stream_at in line:
+                    start_streaming = True
+                if start_streaming:
+                    yield line
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
-            # Using `_follow` instead of `tail -f` to streaming the whole
-            # log and creating a new process for tail.
-            start_streaming = False
-            if tail > 0:
-                head_lines_of_log_file = _peek_head_lines(log_file)
-                lines = collections.deque(log_file, maxlen=tail)
-                start_streaming = _should_stream_the_whole_tail_lines(
-                    head_lines_of_log_file, lines, start_stream_at)
-                for line in lines:
-                    if start_stream_at in line:
-                        start_streaming = True
-                    if start_streaming:
-                        yield line
-            # Now, the cursor is at the end of the last lines
-            # if tail > 0
+            log_file.seek(end_pos)
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming=start_streaming,
@@ -723,27 +783,30 @@ def tail_logs_iter(job_id: Optional[int],
     else:
         try:
             start_streaming = False
-            with open(log_path, 'r', encoding='utf-8') as log_file:
-                if tail > 0:
-                    # If tail > 0, we need to read the last n lines.
-                    # We use double ended queue to rotate the last n lines.
-                    head_lines_of_log_file = _peek_head_lines(log_file)
-                    lines = collections.deque(log_file, maxlen=tail)
-                    start_streaming = _should_stream_the_whole_tail_lines(
-                        head_lines_of_log_file, lines, start_stream_at)
-                else:
-                    lines = log_file
-                for line in lines:
+            if tail > 0:
+                with open(log_path, 'r', encoding='utf-8') as peek:
+                    head_lines_of_log_file = _peek_head_lines(peek)
+                tail_lines, _ = tail_lines_from_end(log_path, tail, tail_offset)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, tail_lines, start_stream_at)
+                for line in tail_lines:
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
                         yield line
-                status_str = status.value if status is not None else 'None'
-                # Only show "Job finished" for actually terminal states
-                if status is not None and status.is_terminal():
-                    finish = ux_utils.finishing_message(
-                        f'Job finished (status: {status_str}).')
-                    yield finish + '\n'
+            else:
+                with open(log_path, 'r', encoding='utf-8') as log_file:
+                    for line in log_file:
+                        if start_stream_at in line:
+                            start_streaming = True
+                        if start_streaming:
+                            yield line
+            status_str = status.value if status is not None else 'None'
+            # Only show "Job finished" for actually terminal states
+            if status is not None and status.is_terminal():
+                finish = ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).')
+                yield finish + '\n'
             return
         except FileNotFoundError:
             err = (

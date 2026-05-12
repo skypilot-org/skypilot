@@ -2,11 +2,14 @@
 
 See `Stage` for a Task's life cycle.
 """
+import asyncio
 import enum
 import logging
+import os
+import tempfile
 import time
 import typing
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -17,6 +20,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
@@ -24,6 +28,7 @@ from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -104,6 +109,52 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     return task
 
 
+def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
+    """Resolve managed secret references for all tasks in the DAG."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import plugins
+
+    for task in dag.tasks:
+        if not task.managed_secret_refs:
+            continue
+
+        ext_ctx = plugins.get_extension_context()
+        if ext_ctx is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no plugin system '
+                'is available.')
+        provider = ext_ctx.managed_secrets_provider
+        if provider is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no managed secrets '
+                'provider is configured. Install a secrets management '
+                'plugin.')
+
+        # The provider.resolve() is async; run it from this sync context.
+        resolved = asyncio.run(
+            provider.resolve(
+                task.managed_secret_refs,
+                user_hash=common_utils.get_user_hash(),
+                workspace=skypilot_config.get_active_workspace(),
+            ))
+
+        # Merge resolved env vars into the task.
+        if resolved.env_vars:
+            task.update_envs(resolved.env_vars)
+
+        # Write resolved file mounts to temp files and add to task.
+        # Uses tempstore so files are cleaned up when the request ends.
+        if resolved.file_mounts:
+            secret_dir = tempstore.mkdtemp(prefix='skypilot-secrets-')
+            for fm in resolved.file_mounts:
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix='secret-',
+                                                    dir=secret_dir)
+                with os.fdopen(tmp_fd, 'wb') as f:
+                    f.write(fm.content)
+                os.chmod(tmp_path, 0o600)
+                task.update_file_mounts({fm.mount_path: tmp_path})
+
+
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
@@ -127,6 +178,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -185,6 +237,8 @@ def _execute(
         elif _is_launched_by_sky_serve_controller:
             _request_name = (
                 request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
+    if _extra_launch_context is None:
+        _extra_launch_context = {}
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         for resource in task.resources:
@@ -217,6 +271,7 @@ def _execute(
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
                     storage.construct()
+        _resolve_managed_secrets(dag)
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -235,6 +290,7 @@ def _execute(
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
             _is_launched_by_sky_serve_controller,
+            _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
 
 
@@ -256,6 +312,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    _extra_launch_context: Dict[str, Any],
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
@@ -443,7 +500,9 @@ def _execute_dag(
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
         is_managed=is_managed,
-        planner=planner)
+        planner=planner,
+        extra_launch_context=_extra_launch_context,
+        is_launched_by_jobs_controller=_is_launched_by_jobs_controller)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -567,8 +626,10 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
+    _include_credentials: bool = False,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -741,6 +802,15 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
+    # ``_include_credentials`` is accepted unconditionally so the
+    # request payload's ``LaunchBody.to_kwargs`` mapping always type-
+    # checks against this signature. The in-tree implementation does
+    # not bundle credentials with the response; a downstream extension
+    # may override this function and re-register the ``launch``
+    # response encoder to return a 3-tuple when the flag is set.
+    # Without such an override, the client decodes the legacy 2-key
+    # response shape and falls back to the ``/status`` SSH-config path.
+    del _include_credentials
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -761,6 +831,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
         job_logger=job_logger)
 
@@ -834,6 +905,16 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
+    # File-mount secret refs are not supported with exec because exec skips
+    # the SYNC_FILE_MOUNTS stage.
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
+    for t in tasks:
+        for ref in t.managed_secret_refs:
+            if ref.mount_path is not None:
+                raise ValueError(
+                    f'File-mount secret {ref.name!r} is not supported '
+                    'with `sky exec`. Use `sky launch` instead.')
 
     # Check if cluster is autostopping - reject exec on autostopping clusters
     if not dryrun:

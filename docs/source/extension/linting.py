@@ -28,6 +28,7 @@ ALLOWED_TERMS = {
     'HF_TOKEN',
     'Ingress',
     'Helm',
+    'Dataset',
     'Docker',
     'VSCode',
     'CLI',
@@ -43,6 +44,7 @@ ALLOWED_TERMS = {
     'Sky',
     'Llama',
     'Llama2',
+    'Autopilot',
     'Pods',
     'Samsung',
     'Google',
@@ -73,6 +75,7 @@ MULTI_WORD_TERMS = {
     'Google Cloud',
     'LoadBalancer Service',
     'Dynamic Workload Scheduler',
+    'Sky Batch',
     'Sky Computing',
     'VS Code',
     'Cudo Compute',
@@ -198,4 +201,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
 def setup(app: Sphinx):
     """Extension setup"""
     app.connect('source-read', check_sentence_case)
-    return {'version': '0.1'}
+    return {
+        'version': '0.1',
+        'parallel_read_safe': True,
+        'parallel_write_safe': True,
+    }

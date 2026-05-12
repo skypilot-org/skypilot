@@ -43,20 +43,18 @@ logger = sky_logging.init_logger(__name__)
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
                                  'false').lower() == 'true'
 
+# Latency buckets shared by histograms that observe seconds. Kept compact to
+# bound time-series cardinality (each labeled series multiplies by len(buckets))
+# while preserving the 1000s upper bound for slow-call precision.
+_LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
+                    60, 120, 300, 600, 1000, float('inf'))
+
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
     'Time spent processing code',
     ['name', 'group'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
-             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
-             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
-             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
-             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
-             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
-             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
-             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
-             960.0, 980.0, 1000.0, float('inf')),
+    buckets=_LATENCY_BUCKETS,
 )
 
 # Total number of API server requests, grouped by path, method, and status.
@@ -83,30 +81,26 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
-             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
-             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
-             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
-             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
-             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
-             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
-             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
-             960.0, 980.0, 1000.0, float('inf')),
+    buckets=_LATENCY_BUCKETS,
 )
 
+# Aggregated across all worker processes — the prometheus_client multiprocess
+# collector sums per-process histograms automatically. For per-process
+# visibility, see SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS below.
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     'sky_apiserver_event_loop_lag_seconds',
     'Scheduling delay of the server event loop',
+    buckets=_LATENCY_BUCKETS,
+)
+
+# Per-process peak event loop lag observed in the most recent 30s tumbling
+# window. Kept as a low-cardinality companion to the (pid-less) lag histogram
+# so operators can still attribute spikes to a specific worker.
+SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS = prom.Gauge(
+    'sky_apiserver_event_loop_lag_max_seconds',
+    'Peak event loop lag in the last 30 seconds for each process',
     ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
-             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
-             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
-             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
-             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
-             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
-             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
-             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
-             960.0, 980.0, 1000.0, float('inf')),
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -160,16 +154,7 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
      'to the client. This does not include: latency to reach the pod, '
      'overhead from sending through the k8s port-forward tunnel, or '
      'ssh server lag on the destination pod.'),
-    ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
-             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
-             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
-             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
-             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
-             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
-             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
-             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
-             960.0, 980.0, 1000.0, float('inf')),
+    buckets=_LATENCY_BUCKETS,
 )
 
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
@@ -180,6 +165,15 @@ SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+)
+
+# Time a request spends waiting in the task queue (from creation to dequeue).
+SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
+    'sky_apiserver_queue_wait_seconds',
+    'Time a request spent waiting in the task queue before execution',
+    ['schedule_type'],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
+             120.0, 300.0, 600.0, float('inf')),
 )
 
 # --- Managed Jobs Metrics ---
@@ -494,12 +488,24 @@ async def get_metrics_for_context(context: str) -> str:
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    # Query both DCGM metrics and kube_pod_labels metrics
-    # This ensures the dashboard can perform joins to filter by skypilot cluster
+    # Query DCGM, host CPU/memory, kube_pod_labels, and cAdvisor container
+    # metrics. The container_* metrics enable per-pod CPU/Memory in the
+    # Telemetry section by joining on (pod, namespace) with kube_pod_labels —
+    # same join shape the GPU panels use to filter by SkyPilot cluster name.
     match_patterns = [
         '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
         'kube_pod_labels',
-        'node_cpu_seconds_total{mode="idle"}'
+        'node_cpu_seconds_total{mode="idle"}',
+        'container_cpu_usage_seconds_total{container!="",container!="POD"}',
+        'container_memory_working_set_bytes{container!="",container!="POD"}',
+        # GPU allocation metrics — pod requests + node capacity for nvidia/amd
+        # GPUs. Enables cluster-wide % allocated computations.
+        # NOTE: kube-state-metrics sanitizes resource names by replacing
+        # `.` and `/` with `_`, so the label value is `nvidia_com_gpu` (not
+        # `nvidia.com/gpu`). Getting this wrong causes the match to return 0
+        # series while the scrape still succeeds.
+        'kube_pod_container_resource_requests{resource=~"nvidia_com_gpu|amd_com_gpu"}',  # pylint: disable=line-too-long
+        'kube_node_status_allocatable{resource=~"nvidia_com_gpu|amd_com_gpu"}',
     ]
 
     # TODO(rohan): don't hardcode the namespace and service name

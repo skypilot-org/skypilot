@@ -133,7 +133,8 @@ _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
 _DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
     'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
     'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group'
+    'pool', 'is_primary_in_job_group', 'batch_total_batches',
+    'batch_completed_batches'
 ]
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
@@ -152,6 +153,100 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               'single task only.')
 
 T = TypeVar('T')
+
+
+def _get_ws_proxy_command() -> str:
+    """Returns the ws-proxy command string.
+
+    Defaults to the Python websocket_proxy.py script. Plugins can
+    replace this function to prefer a native binary.
+    """
+    escaped_executable_path = shlex.quote(sys.executable)
+    escaped_websocket_proxy_path = shlex.quote(
+        f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+    return f'{escaped_executable_path} {escaped_websocket_proxy_path}'
+
+
+def _write_ssh_config_for_cluster(handle: Any, credentials: Dict[str, Any],
+                                  ws_proxy_cmd: str) -> None:
+    """Write a single cluster's entry into ``~/.ssh/config``.
+
+    Extracted from ``_get_cluster_records_and_set_ssh_config`` so the
+    launch path can reuse it without going through the records-loop:
+    when the server bundles credentials with the launch response, we
+    have everything we need (handle + credentials) without an extra
+    ``/status`` round-trip.
+    """
+    ips = handle.cached_external_ips
+    if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+        # Replace the proxy command to proxy through the SkyPilot API
+        # server with websocket.
+        escaped_key_path = shlex.quote(
+            (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                handle.cluster_name, credentials)))
+        # Instead of directly use websocket_proxy.py, we add an
+        # additional proxy, so that ssh can use the head pod in the
+        # cluster to jump to worker pods.
+        proxy_command = (
+            f'ssh -tt -i {escaped_key_path} '
+            '-o StrictHostKeyChecking=no '
+            '-o UserKnownHostsFile=/dev/null '
+            '-o IdentitiesOnly=yes '
+            '-W \'[%h]:%p\' '
+            f'{handle.ssh_user}@127.0.0.1 '
+            '-o ProxyCommand='
+            # TODO(zhwu): write the template to a temp file, don't use
+            # the one in skypilot repo, to avoid changing the file when
+            # updating skypilot.
+            f'\"{ws_proxy_cmd} '
+            f'{server_common.get_server_url()} '
+            f'{handle.cluster_name} '
+            f'kubernetes-pod-ssh-proxy\"')
+        credentials['ssh_proxy_command'] = proxy_command
+    elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
+        # Replace the proxy command to proxy through the SkyPilot API
+        # server with websocket.
+        # %w is a placeholder for the node index, substituted per-node
+        # in cluster_utils.SSHConfigHelper.add_cluster().
+        proxy_command = (f'{ws_proxy_cmd} '
+                         f'{server_common.get_server_url()} '
+                         f'{handle.cluster_name} '
+                         f'slurm-job-ssh-proxy %w')
+        credentials['ssh_proxy_command'] = proxy_command
+
+    cluster_utils.SSHConfigHelper.add_cluster(
+        handle.cluster_name,
+        handle.cluster_name_on_cloud,
+        ips,
+        credentials,
+        handle.cached_external_ssh_ports,
+        handle.docker_user,
+        handle.ssh_user,
+    )
+
+
+def _set_ssh_config_from_launch_response(handle: Any,
+                                         credentials: Dict[str, Any]) -> None:
+    """Write SSH config for a single just-launched cluster.
+
+    Used when the server bundled credentials with the launch response
+    (``MIN_LAUNCH_CREDENTIALS_API_VERSION``). Skips the ``/status``
+    round-trip that ``_get_cluster_records_and_set_ssh_config`` does
+    only to fetch credentials. The cluster is known to be UP and its
+    handle is already populated, so we don't need the records-list
+    machinery (existence check, multi-cluster cleanup, etc.) — the
+    cleanup path only matters when querying status across multiple
+    clusters.
+    """
+    if not handle.cached_external_ips or not handle.cached_external_ssh_ports:
+        # Defensive: should not happen for a successful launch, but if
+        # ips/ports aren't cached, ``add_cluster`` would fail. Fall back
+        # to the status-based path so the SSH config still gets written
+        # (and any stale entry cleaned up) instead of asserting.
+        _get_cluster_records_and_set_ssh_config(clusters=[handle.cluster_name])
+        return
+    ws_proxy_cmd = _get_ws_proxy_command()
+    _write_ssh_config_for_cluster(handle, credentials, ws_proxy_cmd)
 
 
 def _get_cluster_records_and_set_ssh_config(
@@ -179,6 +274,8 @@ def _get_cluster_records_and_set_ssh_config(
                             _include_credentials=True,
                             _summary_response=not verbose)
     cluster_records = sdk.stream_and_get(request_id)
+    # Cache the ws-proxy command (constant across clusters).
+    ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -198,61 +295,8 @@ def _get_cluster_records_and_set_ssh_config(
         # During the failover, even though a cluster does not exist, the handle
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
-        credentials = record['credentials']
-        ips = handle.cached_external_ips
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            # Replace the proxy command to proxy through the SkyPilot API
-            # server with websocket.
-            escaped_key_path = shlex.quote(
-                (cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials)))
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
-            # Instead of directly use websocket_proxy.py, we add an
-            # additional proxy, so that ssh can use the head pod in the
-            # cluster to jump to worker pods.
-            proxy_command = (
-                f'ssh -tt -i {escaped_key_path} '
-                '-o StrictHostKeyChecking=no '
-                '-o UserKnownHostsFile=/dev/null '
-                '-o IdentitiesOnly=yes '
-                '-W \'[%h]:%p\' '
-                f'{handle.ssh_user}@127.0.0.1 '
-                '-o ProxyCommand='
-                # TODO(zhwu): write the template to a temp file, don't use
-                # the one in skypilot repo, to avoid changing the file when
-                # updating skypilot.
-                f'\"{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
-                f'{server_common.get_server_url()} '
-                f'{handle.cluster_name} '
-                f'kubernetes-pod-ssh-proxy\"')
-            credentials['ssh_proxy_command'] = proxy_command
-        elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # Replace the proxy command to proxy through the SkyPilot API
-            # server with websocket.
-            escaped_executable_path = shlex.quote(sys.executable)
-            escaped_websocket_proxy_path = shlex.quote(
-                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
-            # %w is a placeholder for the node index, substituted per-node
-            # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (f'{escaped_executable_path} '
-                             f'{escaped_websocket_proxy_path} '
-                             f'{server_common.get_server_url()} '
-                             f'{handle.cluster_name} '
-                             f'slurm-job-ssh-proxy %w')
-            credentials['ssh_proxy_command'] = proxy_command
-
-        cluster_utils.SSHConfigHelper.add_cluster(
-            handle.cluster_name,
-            handle.cluster_name_on_cloud,
-            ips,
-            credentials,
-            handle.cached_external_ssh_ports,
-            handle.docker_user,
-            handle.ssh_user,
-        )
+        _write_ssh_config_for_cluster(handle, record['credentials'],
+                                      ws_proxy_cmd)
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -430,6 +474,43 @@ def _get_shell_complete_args(complete_fn):
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
+
+_DEFAULT_TAIL_LINES = 1000
+
+_TAIL_OPTION = click.option(
+    '--tail',
+    default=-1,
+    type=int,
+    help=(f'Number of lines to display from the end of the log file. '
+          f'Default is the last {_DEFAULT_TAIL_LINES} lines — sensible for '
+          f'multi-GB logs where downloading the full file is slow. Pass '
+          f'--tail 0 to print the entire log.'))
+
+
+def _apply_default_tail(tail: int, follow: bool = True) -> int:
+    """Resolve a raw --tail value from the Click option above.
+
+    -1 sentinel (user didn't pass --tail) → apply the implicit default
+    and print a one-line stderr hint so users know the output was
+    truncated. Otherwise pass through (0 / negatives = "no limit",
+    positive ints = that count).
+
+    The implicit default differs by mode: live-tail (``--follow``,
+    default) uses ``_DEFAULT_TAIL_LINES`` so opening a multi-GB log
+    doesn't dump the whole thing upfront; snapshot mode
+    (``--no-follow``) returns 0 so scripts that grep
+    ``sky jobs logs --no-follow | grep <marker>`` for markers near the
+    start of the log keep working.
+    """
+    if tail == -1:
+        if not follow:
+            return 0
+        click.echo(
+            f'Showing the last {_DEFAULT_TAIL_LINES} lines (default). '
+            f'Pass --tail 0 to print the entire log.',
+            err=True)
+        return _DEFAULT_TAIL_LINES
+    return max(tail, 0)
 
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
@@ -698,6 +779,13 @@ def _check_yaml_only(
                                       'Please check syntax.\n'
                                       f'{detailed_error}')
                 is_yaml = False
+            except UnicodeDecodeError as e:
+                if yaml_file_provided:
+                    logger.debug(e)
+                    invalid_reason = (
+                        'is not a valid UTF-8 text file and cannot be '
+                        'parsed as YAML.')
+                is_yaml = False
 
     except OSError:
         if yaml_file_provided:
@@ -726,7 +814,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
+                f'{colorama.Fore.YELLOW}{entrypoint!r} looks like a yaml '
+                f'path but {invalid_reason}'
+                f'{colorama.Style.RESET_ALL}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml, result
@@ -920,6 +1010,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored '
                     'for JobGroup YAML.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
 
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
@@ -934,6 +1027,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            for task in dag.tasks:
+                task.update_workdir(workdir, git_url, git_ref)
+                task.update_envs_and_secrets_from_workdir()
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -1023,6 +1119,21 @@ class _DocumentedCodeCommand(click.Command):
 @annotations.client_api
 def cli():
     pass
+
+
+def _warn_if_name_looks_like_file_path(name: Optional[str], yes: bool,
+                                       name_label: str,
+                                       command_hint: str) -> None:
+    """Warns or prompts if a name looks like a file path."""
+    if not common_utils.cluster_name_looks_like_file_path(name):
+        return
+    warning = (f'{colorama.Fore.YELLOW}{name_label} {name!r} looks like a '
+               f'file path. Did you mean: {command_hint}'
+               f'{colorama.Style.RESET_ALL}')
+    if yes:
+        logger.warning(warning)
+    else:
+        click.confirm(f'{warning}\nProceed anyway?', abort=True)
 
 
 def _handle_infra_cloud_region_zone_options(infra: Optional[str],
@@ -1218,6 +1329,8 @@ def launch(
     # server, if the jobs are long running.
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
+    _warn_if_name_looks_like_file_path(
+        cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1296,16 +1409,35 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
+        # Ask the server to bundle SSH credentials with the launch
+        # response so we can write the SSH config without a separate
+        # ``/status`` round-trip. Old servers ignore this and we fall
+        # back to the legacy 2-tuple/status path below.
+        _include_credentials=True,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
-        job_id, handle = job_id_handle
+        # New servers (>= MIN_LAUNCH_CREDENTIALS_API_VERSION) return a
+        # 3-tuple. Old servers return the legacy 2-tuple — detect via
+        # length so we stay compatible against any server version.
+        launch_credentials: Optional[Dict[str, Any]] = None
+        if isinstance(job_id_handle, tuple) and len(job_id_handle) == 3:
+            job_id, handle, launch_credentials = job_id_handle
+        else:
+            job_id, handle = job_id_handle
         if not handle:
             assert dryrun, 'handle should only be None when dryrun is true'
             return
-        # Add ssh config for the cluster
-        _get_cluster_records_and_set_ssh_config(
-            clusters=[handle.get_cluster_name()])
+        # Add ssh config for the cluster. When the server bundled
+        # credentials with the launch response, write the config
+        # directly (saves a full ``/status`` RTT, ~200-500ms). When
+        # not bundled — old server, credential load failure, etc. —
+        # fall back to the status-based path.
+        if launch_credentials is not None:
+            _set_ssh_config_from_launch_response(handle, launch_credentials)
+        else:
+            _get_cluster_records_and_set_ssh_config(
+                clusters=[handle.get_cluster_name()])
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         returncode = 0
@@ -1315,14 +1447,9 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'cluster',
-                'operator': ':',
-                'value': handle.get_cluster_name(),
-            })
             cluster_dashboard_url = server_common.get_dashboard_url(
                 server_common.get_server_url(),
-                starting_page=f'clusters?{query}')
+                starting_page=f'clusters/{handle.get_cluster_name()}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -2467,12 +2594,7 @@ def queue(clusters: List[str],
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
-@click.option(
-    '--tail',
-    default=0,
-    type=int,
-    help=('The number of lines to display from the end of the log file. '
-          'Default is 0, which means print all lines.'))
+@_TAIL_OPTION
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2552,19 +2674,20 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if provision:
-        # Stream provision logs
+        # provision.log is a small fixed file; the 1000-line default
+        # for job logs doesn't apply, so an unset --tail means "all".
         sys.exit(
             sdk.tail_provision_logs(cluster_name=cluster,
                                     worker=worker,
                                     follow=follow,
-                                    tail=tail))
+                                    tail=tail or 0))
 
     if autostop:
-        # Stream autostop hook logs
+        # Same as provision — autostop hook output is small.
         sys.exit(
             sdk.tail_autostop_logs(cluster_name=cluster,
                                    follow=follow,
-                                   tail=tail))
+                                   tail=tail or 0))
 
     if sync_down:
         with rich_utils.client_status(
@@ -2622,8 +2745,13 @@ def logs(
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
 
-    # Stream logs from the server.
-    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
+    # tail=0 (from --tail 0 / --tail all) means "no limit"; the cluster
+    # SDK already uses 0 to mean unbounded.
+    sys.exit(
+        sdk.tail_logs(cluster,
+                      job_id,
+                      follow,
+                      tail=_apply_default_tail(tail, follow=follow)))
 
 
 @cli.command()
@@ -5505,6 +5633,9 @@ def jobs_launch(
     """
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify --num-jobs without --pool.')
+    if num_jobs is not None and num_jobs < 1:
+        raise click.UsageError(
+            f'--num-jobs must be a positive integer. Got: {num_jobs}.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -5557,6 +5688,8 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     common_utils.check_cluster_name_is_valid(name)
+    _warn_if_name_looks_like_file_path(name, yes, 'Job name',
+                                       f'sky jobs launch -n <job-name> {name}')
 
     if pool is not None:
         num_job_int = num_jobs if num_jobs is not None else 1
@@ -5600,28 +5733,22 @@ def jobs_launch(
 
     if len(job_ids) == 1:
         job_id = job_ids[0]
+        returncode = None
         if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
+        job_dashboard_url = None
+        if not server_common.is_api_server_local():
+            job_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
+                                           job_id=str(job_id),
+                                           dashboard_url=job_dashboard_url))
+        if returncode is not None:
             sys.exit(returncode)
-        else:
-            job_dashboard_url = None
-            if not server_common.is_api_server_local():
-                query = urllib.parse.urlencode({
-                    'property': 'id',
-                    'operator': '=',
-                    'value': job_id,
-                })
-                job_dashboard_url = server_common.get_dashboard_url(
-                    server_common.get_server_url(),
-                    starting_page=f'jobs?{query}')
-            click.secho(
-                ux_utils.command_hint_messages(
-                    ux_utils.CommandHintType.MANAGED_JOB,
-                    job_id=str(job_id),
-                    dashboard_url=job_dashboard_url))
     else:
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
@@ -5938,11 +6065,12 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
+@_TAIL_OPTION
 @click.argument('job_id', required=False, type=int)
 @click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool,
+              controller: bool, refresh: bool, sync_down: bool, tail: int,
               task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
@@ -5964,15 +6092,62 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     # View logs for job named 'my-job', task 'eval'
     sky jobs logs -n my-job eval
     """
+    # tail == -1: user didn't pass --tail. With --sync-down that
+    # means "fetch the whole file" (preserves pre-default-flip
+    # behavior). Otherwise apply the implicit default and print a
+    # hint.
+    # tail == 0: explicit --tail 0 → "no limit" at the SDK.
+    # tail > 0: user-specified count.
+    if sync_down:
+        if tail > 0:
+            raise click.UsageError(
+                '--tail is not supported with --sync-down. Use '
+                '`sky jobs logs --no-follow --tail N <id>` to view the tail, '
+                'or redirect stdout to save it to a file.')
+        tail_lines: Optional[int] = None
+    else:
+        n = _apply_default_tail(tail, follow=follow)
+        tail_lines = n if n > 0 else None
     try:
         if sync_down:
-            with rich_utils.client_status(
-                    ux_utils.spinner_message('Downloading jobs logs')):
-                log_local_path_dict = managed_jobs.download_logs(
-                    name=name,
-                    job_id=job_id,
-                    controller=controller,
-                    refresh=refresh)
+            # Try streaming + gzip first — for RUNNING jobs this is
+            # typically minutes faster than the rsync path because
+            # bytes start flowing as the underlying tail_logs reads
+            # them and gzip cuts a multi-GB log to a few hundred MB
+            # on the wire (decompressed on the client). The streaming
+            # path saves a directory shape matching legacy
+            # download_logs (<dir>/controller.log or <dir>/run.log) so
+            # callers that walk the path with [ -d ] keep working.
+            # Falls back to legacy download_logs when the streaming
+            # download returns zero bytes (terminal job whose worker
+            # cluster is already torn down — tail_logs has no source).
+            log_local_path_dict: Optional[Dict[int, str]] = None
+            try:
+                with rich_utils.client_status(
+                        ux_utils.spinner_message(
+                            'Downloading jobs logs (streaming)')):
+                    log_local_path_dict = managed_jobs.download_logs_streaming(
+                        name=name,
+                        job_id=job_id,
+                        controller=controller,
+                        refresh=refresh)
+                if log_local_path_dict is None:
+                    logger.info('Streaming returned empty (likely a terminal '
+                                'job with worker torn down); falling back to '
+                                'sync-down.')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.info(
+                    f'Streaming download failed '
+                    f'({common_utils.format_exception(e)}); falling back to '
+                    f'sync-down.')
+            if log_local_path_dict is None:
+                with rich_utils.client_status(
+                        ux_utils.spinner_message('Downloading jobs logs')):
+                    log_local_path_dict = managed_jobs.download_logs(
+                        name=name,
+                        job_id=job_id,
+                        controller=controller,
+                        refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
@@ -5990,6 +6165,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh,
+                                                tail=tail_lines,
                                                 task=parsed_task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
@@ -7726,6 +7902,104 @@ def ssh_down(infra, async_call):
         print(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
+
+
+@cli.command('debug-dump', cls=_DocumentedCodeCommand)
+@click.option('--request-ids',
+              '-r',
+              multiple=True,
+              help='Request IDs or prefixes to include in the dump.')
+@click.option('--cluster-names',
+              '-c',
+              multiple=True,
+              help='Cluster names to include in the dump.')
+@click.option('--job-ids',
+              '-j',
+              multiple=True,
+              type=int,
+              help='Managed job IDs to include in the dump.')
+@click.option('--recent-minutes',
+              type=float,
+              default=None,
+              help='Include resources active within the last N minutes.')
+@click.option('--output', default=None, help='Output path for the dump file.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+@usage_lib.entrypoint
+def debug_dump(
+    request_ids: Tuple[str, ...],
+    cluster_names: Tuple[str, ...],
+    job_ids: Tuple[int, ...],
+    recent_minutes: Optional[float],
+    output: Optional[str],
+    async_call: bool,
+):
+    """Create a debug dump for troubleshooting. Creates a zip file containing
+    logs, state, and configuration for the specified requests, clusters, and/or
+    managed jobs. At least one of the filter options (--request-ids,
+    --cluster-names, --job-ids, or --recent-minutes) must be provided.
+
+    Example usage:
+
+    \b
+    # Dump info for a specific cluster
+    $ sky debug-dump -c my-cluster
+
+    \b
+    # Dump info for a managed job
+    $ sky debug-dump -j 123
+
+    \b
+    # Dump info for a specific request
+    $ sky debug-dump -r abc123-def456
+
+    \b
+    # Dump resources from the last 60 minutes
+    $ sky debug-dump --recent-minutes 60
+
+    \b
+    # Combine multiple resources
+    $ sky debug-dump -c cluster1 -j 123 -r request-id
+
+    \b
+    # Save to a specific file
+    $ sky debug-dump -c my-cluster --output my-dump.zip
+    """
+    if (not request_ids and not cluster_names and not job_ids and
+            recent_minutes is None):
+        raise click.UsageError(
+            'At least one of --request-ids, --cluster-names, --job-ids, '
+            'or --recent-minutes must be provided.')
+    if recent_minutes is not None and recent_minutes <= 0:
+        raise click.UsageError('--recent-minutes must be a positive number.')
+
+    # Create the dump on the server
+    request_id = sdk.create_debug_dump(
+        request_ids=list(request_ids) if request_ids else None,
+        cluster_names=list(cluster_names) if cluster_names else None,
+        managed_job_ids=list(job_ids) if job_ids else None,
+        recent_minutes=recent_minutes,
+    )
+
+    if async_call:
+        click.echo(f'Request submitted with ID: {request_id}')
+        return
+
+    # Wait for the dump to be created
+    with rich_utils.client_status(
+            ux_utils.spinner_message('Creating debug dump')):
+        result = sdk.stream_and_get(request_id)
+
+    # Download the dump
+    dump_filename = pathlib.Path(result).name
+    local_path = output or dump_filename
+
+    click.echo(f'Downloading debug dump to {local_path}...')
+    sdk.download_debug_dump(dump_filename, local_path)
+    click.echo(f'Debug dump saved to: {local_path}')
 
 
 def main():

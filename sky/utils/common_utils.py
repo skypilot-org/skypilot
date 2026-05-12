@@ -18,6 +18,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -30,8 +31,6 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
-from sky.utils import annotations
 from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -78,20 +77,6 @@ class ProcessStatus(enum.Enum):
 
     # The process failed
     FAILED = 'FAILED'
-
-
-@annotations.lru_cache(scope='request')
-def get_usage_run_id() -> str:
-    """Returns a unique run id for each 'run'.
-
-    A run is defined as the lifetime of a process that has imported `sky`
-    and has called its CLI or programmatic APIs. For example, two successive
-    `sky launch` are two runs.
-    """
-    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
-    if usage_run_id is not None:
-        return usage_run_id
-    return str(uuid.uuid4())
 
 
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -193,6 +178,20 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 'ensure it is fully matched by regex (e.g., '
                 'only contains letters, numbers and dash): '
                 f'{valid_regex}')
+
+
+def cluster_name_looks_like_file_path(cluster_name: Optional[str]) -> bool:
+    """Returns True if the cluster name looks like a file path.
+
+    This detects a common user mistake: typing 'sky launch -c job.yaml'
+    instead of 'sky launch -c mycluster job.yaml'.
+    """
+    if cluster_name is None:
+        return False
+
+    file_extensions = ('.yaml', '.yml', '.json')
+    return (cluster_name.lower().endswith(file_extensions) or
+            os.path.isfile(os.path.expanduser(cluster_name)))
 
 
 def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
@@ -899,23 +898,34 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                 known_fields = set(e.schema.get('properties', {}).keys())
                 assert isinstance(e.instance,
                                   dict), 'Instance must be a dictionary'
+                sub_msgs = []
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'Instead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
+                            sub_msgs.append(
+                                f'Instead of {field!r}, did you mean '
+                                f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'Found unsupported field {field!r}.'
+                            sub_msgs.append(
+                                f'Found unsupported field {field!r}.')
+                err_msg += ' '.join(sub_msgs)
         else:
-            message = e.message
+            # When the error came from an anyOf/oneOf branch, jsonschema's
+            # default message is the unhelpful "X is not valid under any of
+            # the given schemas" with json_path truncated at the branch
+            # boundary. best_match recurses into the sub-error context for
+            # anyOf/oneOf nodes specifically (see its docstring) and
+            # surfaces the deepest, most-specific sub-error.
+            best = jsonschema.exceptions.best_match([e])
+            message = best.message
             # Object in jsonschema is represented as dict in Python. Replace
             # 'object' with 'dict' for better readability.
             message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + message +
-                       f'. Check problematic field(s): {e.json_path}')
+                       f'. Check problematic field(s): {best.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
@@ -951,14 +961,23 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict[str, Any],
+def fill_template(template_ref: str, variables: Dict[str, Any],
                   output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    root_dir = os.path.dirname(os.path.dirname(__file__))
-    template_path = os.path.join(root_dir, 'templates', template_name)
+    """Create a file from a Jinja template.
+
+    ``template_ref`` is either a bare filename (resolved against
+    ``sky/templates/``) or an absolute path. Plugins ship their own
+    templates inside their package and pass an absolute path so they
+    don't have to write into SkyPilot's tree.
+    """
+    assert template_ref.endswith('.j2'), template_ref
+    if os.path.isabs(template_ref):
+        template_path = template_ref
+    else:
+        root_dir = os.path.dirname(os.path.dirname(__file__))
+        template_path = os.path.join(root_dir, 'templates', template_ref)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+        raise FileNotFoundError(f'Template "{template_ref}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
@@ -1342,3 +1361,48 @@ def get_display_node_names(node_names_json: Optional[str]) -> Optional[str]:
     except (json.JSONDecodeError, TypeError):
         # Backward compat: return as-is if not valid JSON
         return node_names_json
+
+
+def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
+    """Write text to ``path`` atomically using tmp + rename.
+
+    On shared filesystems (NFS / EFS / k8s PVC) ``open(path, 'w')`` (which
+    uses ``O_TRUNC``) creates a window where readers on other nodes can
+    observe a zero-byte or partially-written file.  ``rename()`` is atomic
+    across the common shared FS implementations, so writers stage the
+    content to a sibling tmp file under the same directory and then rename
+    it into place; readers always see either the old inode or the new
+    inode, never a torn write.
+
+    The tmp file's basename is prefixed with a dot so that glob patterns
+    like ``Include ~/.sky/generated/ssh/*`` (which by default skip
+    dotfiles) do not pick up an in-progress tmp file.
+
+    On any failure -- including SIGINT / SystemExit during the write --
+    the tmp file is removed via ``try/finally`` so we do not leak dotfile
+    fragments into the destination directory.  The original exception is
+    propagated unchanged.
+
+    Args:
+        path: The destination file path.  The parent directory must
+            already exist.
+        content: The text content to write.  Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file.  Defaults to 0o644.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    success = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        os.rename(tmp_path, path)
+        success = True
+    finally:
+        if not success:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass

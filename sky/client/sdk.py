@@ -14,6 +14,7 @@ from http import cookiejar
 import json
 import logging
 import os
+import platform
 import subprocess
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
@@ -53,6 +54,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -177,9 +179,10 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
     if request_id is not None and os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
         timeline.set_request_id(str(request_id))
 
-    retry_context: Optional[rest.RetryContext] = None
-    if resumable:
-        retry_context = rest.get_retry_context()
+    # Always fetch the retry context (if any) so we can report progress to
+    # the retry decorator across all stream types. `resumable` only controls
+    # whether already-printed lines are skipped on retry.
+    retry_context = rest.get_retry_context()
     try:
         line_count = 0
 
@@ -192,11 +195,23 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     # Line was consumed by interactive auth handler
                     continue
 
-                if retry_context is None:
-                    print(line, flush=True, end='', file=output_stream)
-                elif line_count > retry_context.line_processed:
-                    print(line, flush=True, end='', file=output_stream)
-                    retry_context.line_processed = line_count
+                if (resumable and retry_context is not None and
+                        line_count <= retry_context.line_processed):
+                    # Already printed on a previous attempt; skip.
+                    continue
+
+                print(line, flush=True, end='', file=output_stream)
+
+                if retry_context is not None:
+                    if resumable:
+                        # Reaching here implies line_count > line_processed
+                        # (otherwise the resumable skip above would have
+                        # `continue`'d). Advance the high-water mark.
+                        retry_context.line_processed = line_count
+                    # Report forward progress to the retry decorator so it
+                    # can reset the consecutive-failure counter even for
+                    # non-resumable streams.
+                    retry_context.progress_count += 1
         if request_id is not None and get_result:
             result = get(request_id)
             # Fetch server-side timeline events so the local trace file
@@ -502,6 +517,7 @@ def validate(
     omit_file_mount_type = _omit(40)
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
+    omit_mount_config = _omit(48)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -526,6 +542,11 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
+        if omit_mount_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_config = None
+            logger.debug('`mount_config` is ignored because the server '
+                         'does not support it yet.')
         if omit_priority_class:
             for resource in task.resources:
                 if resource.priority_class:
@@ -585,6 +606,9 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -749,6 +773,9 @@ def launch(
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
+            _file_mounts_blob_id,
+            _extra_launch_context,
+            _include_credentials,
         )
 
 
@@ -771,6 +798,9 @@ def _launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -836,9 +866,28 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
+    file_mounts_blob_id: Optional[str] = None
+    if _file_mounts_blob_id is not None:
+        # Caller (e.g. job controller) has a blob for this dag's file mounts,
+        # skip the re-upload.
+        file_mounts_blob_id = _file_mounts_blob_id
+    else:
+        dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+            dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
+
+    # Only request credential bundling when the remote server advertises
+    # support for it. Old servers ignore the field via Pydantic
+    # ``extra='ignore'`` so this is also safe to send unconditionally,
+    # but checking up-front lets us skip the work on servers that would
+    # discard it anyway and makes the gating intent explicit.
+    include_credentials = _include_credentials
+    if include_credentials:
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is None or remote_api_version <
+                server_constants.MIN_LAUNCH_CREDENTIALS_API_VERSION):
+            include_credentials = False
 
     body = payloads.LaunchBody(
         task=dag_str,
@@ -857,6 +906,8 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        extra_launch_context=_extra_launch_context or {},
+        include_credentials=include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -2888,6 +2939,10 @@ def api_login(endpoint: Optional[str] = None,
     # design as a user may expect this is only effective for the current
     # session. We should consider using env var for specifying endpoint.
 
+    # Save endpoint and clear any residual service account token before the
+    # first health check, so it uses cookie-based auth and the server can
+    # correctly return NEEDS_AUTH when SSO is required.
+    _save_config_updates(endpoint=endpoint)
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
@@ -2998,8 +3053,6 @@ def api_login(endpoint: Optional[str] = None,
         if api_server_info.user is not None:
             _set_user_hash(api_server_info.user.get('id'))
 
-    # Set the endpoint in the config file
-    _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
     # see https://github.com/python/mypy/issues/5107 on why
@@ -3009,6 +3062,13 @@ def api_login(endpoint: Optional[str] = None,
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(
         endpoint)
+    # Sync local user hash from the authenticated health check response.
+    # This is the final source of truth for the user's identity on this
+    # server, ensuring the local hash matches regardless of which auth
+    # method was used earlier in the flow.
+    if (final_api_server_info.user is not None and
+            final_api_server_info.user.get('id') is not None):
+        _set_user_hash(final_api_server_info.user.get('id'))
     _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
                             server_status)
 
@@ -3098,3 +3158,126 @@ def slurm_node_info(
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
+
+
+# =====================
+# = Debug Dump =
+# =====================
+
+
+def _build_client_info() -> Dict[str, Any]:
+    """Build client-side info for debug dumps."""
+    import sky  # pylint: disable=import-outside-toplevel
+
+    # Get configs
+    user_config: Dict[str, Any] = {}
+    merged_config: Dict[str, Any] = {}
+    try:
+        user_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.get_user_config()))
+        merged_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.to_dict()))
+    except Exception:  # pylint: disable=broad-except
+        pass  # Config may not be available
+
+    return {
+        'skypilot_version': sky.__version__,
+        'skypilot_commit': sky.__commit__,
+        'api_version': server_constants.API_VERSION,
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'user_hash': common_utils.get_user_hash(),
+        'environment': {
+            k: v
+            for k, v in sorted(os.environ.items())
+            if k.startswith(('SKYPILOT_', 'SKY_'))
+        },
+        'user_config': user_config,
+        'merged_config': merged_config,
+    }
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(46)
+@annotations.client_api
+def create_debug_dump(
+    request_ids: Optional[List[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    recent_minutes: Optional[float] = None,
+) -> server_common.RequestId[str]:
+    """Create a debug dump for troubleshooting.
+
+    At least one of ``request_ids``, ``cluster_names``, ``managed_job_ids``,
+    or ``recent_minutes`` must be provided.
+
+    Args:
+        request_ids: List of request IDs or prefixes to include in the
+            dump. Prefixes are resolved to all matching request IDs on
+            the server.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
+
+    Returns:
+        The request ID of the debug dump creation request.
+
+    Request Returns:
+        Path to the created zip file on the server.
+    """
+    body = payloads.CreateDebugDumpBody(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_minutes=recent_minutes,
+        client_info=_build_client_info(),
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/debug/dump_create',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(46)
+@annotations.client_api
+def download_debug_dump(dump_filename: str,
+                        local_path: Optional[str] = None) -> str:
+    """Download a debug dump from the server.
+
+    Args:
+        dump_filename: The filename of the dump to download.
+        local_path: Local path to save the dump. If None, saves to
+            current directory with the original filename.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/debug/dump_download/{dump_filename}',
+        stream=True,
+    )
+
+    with response:
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail', 'Unknown error')
+            except (json.JSONDecodeError, ValueError):
+                detail = response.text or f'HTTP {response.status_code}'
+            raise exceptions.ClientError(
+                f'Failed to download debug dump: {detail}')
+
+        if local_path is None:
+            local_path = dump_filename
+
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+    return local_path

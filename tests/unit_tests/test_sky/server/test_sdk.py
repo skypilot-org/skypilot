@@ -16,6 +16,7 @@ import requests
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
+from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
 from sky.utils import common as common_utils
 
@@ -474,6 +475,110 @@ def test_api_login_user_hash_server_healthy(monkeypatch: pytest.MonkeyPatch,
         assert user_hash_path.read_text() == user_hash
 
 
+def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
+                                            tmp_path: Path):
+    """After login with sa token, a subsequent login without token should clear
+    the residual sa token from config before the first health check, so the
+    server can return NEEDS_AUTH and trigger the SSO flow."""
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    sa_user_hash = 'sa11fb39'
+    sso_user_hash = '0f6adbca'
+
+    test_endpoint = "http://test.skypilot.co"
+
+    # Step 1: Login with service account token. This writes the sa token
+    # into config and sets local user hash to the sa user.
+    sa_user = {'id': sa_user_hash, 'name': 'hailong'}
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False,
+                user=sa_user))
+        client_sdk.api_login(test_endpoint,
+                             service_account_token="sky_test_token")
+
+    # Verify sa token is in config and local hash is sa user.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert user_hash_path.read_text() == sa_user_hash
+
+    # Step 2: Login again without token. The residual sa token should be
+    # cleared before the first health check. With the sa token gone, the
+    # server returns NEEDS_AUTH, triggering the SSO flow.
+    sa_token_at_health_check = []
+
+    def _capture_check_server_healthy(endpoint):
+        # Capture whether sa token is still in config at the time of
+        # the health check.
+        token = skypilot_config.get_nested(
+            ('api_server', 'service_account_token'), default_value=None)
+        sa_token_at_health_check.append(token)
+        raise StopIteration  # Abort to inspect captured state
+
+    with mock.patch('sky.server.common.check_server_healthy',
+                    side_effect=_capture_check_server_healthy):
+        with pytest.raises(StopIteration):
+            client_sdk.api_login(test_endpoint)
+
+    # The sa token must have been cleared from config BEFORE the first
+    # health check was made.
+    assert sa_token_at_health_check[0] is None
+    config = skypilot_config.get_user_config()
+    assert 'service_account_token' not in config.get('api_server', {})
+
+
+def test_api_login_syncs_hash_from_final_health_check(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The 2nd health check is the final source of truth for user identity.
+    The local user hash must be updated to match it, even if the 1st health
+    check or the auth flow set a different hash."""
+    config_path = tmp_path / "config.yaml"
+    user_hash_path = tmp_path / "user_hash"
+    monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
+                        str(user_hash_path))
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    first_user_hash = 'aaaaaaaa'
+    final_user_hash = 'bbbbbbbb'
+
+    test_endpoint = "http://test.skypilot.co"
+
+    first_user = {'id': first_user_hash, 'name': 'user_a'}
+    final_user = {'id': final_user_hash, 'name': 'user_b'}
+
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        # 1st health check: HEALTHY with user_a (e.g. from cookie/sa).
+        first_return_value = (server_common.ApiServerStatus.HEALTHY,
+                              server_common.ApiServerInfo(
+                                  status=server_common.ApiServerStatus.HEALTHY,
+                                  basic_auth_enabled=False,
+                                  user=first_user))
+
+        # 2nd health check: HEALTHY with user_b (e.g. actual SSO identity
+        # after sa token was cleared from config).
+        second_return_value = (server_common.ApiServerStatus.HEALTHY,
+                               server_common.ApiServerInfo(
+                                   status=server_common.ApiServerStatus.HEALTHY,
+                                   basic_auth_enabled=False,
+                                   user=final_user))
+
+        mock_check.side_effect = [first_return_value, second_return_value]
+        client_sdk.api_login(test_endpoint)
+
+    # The local hash must match the 2nd health check's user, not the 1st.
+    assert user_hash_path.exists()
+    assert user_hash_path.read_text() == final_user_hash
+
+
 def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
                                   tmp_path: Path):
     # Test that we don't set the user hash if we fail to login.
@@ -506,8 +611,9 @@ def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
 
-    def __init__(self, line_processed: int = 0):
+    def __init__(self, line_processed: int = 0, progress_count: int = 0):
         self.line_processed = line_processed
+        self.progress_count = progress_count
 
 
 def test_stream_response_non_resumable():
@@ -682,6 +788,110 @@ def test_stream_response_resumable_with_none_lines():
                 mock_get.assert_called_once_with("test_request_id")
                 # Verify the result from get is returned
                 assert result == "test_result"
+
+
+def test_stream_response_non_resumable_reports_progress():
+    """Non-resumable streams should still bump retry_context.progress_count
+    so retry_transient_errors can detect forward progress and reset its
+    consecutive-failure counter. Regression test for the
+    test_cli_auto_retry failure on `sky jobs logs --controller --tail 1000`,
+    where retries exhausted because the decorator was inspecting
+    line_processed (only updated by resumable streams) instead of
+    progress_count.
+    """
+    test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+    mock_response = mock.MagicMock()
+    output_stream = io.StringIO()
+    retry_context = MockRetryContext(line_processed=0, progress_count=0)
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
+        mock_decode.return_value = test_lines
+        with mock.patch('sky.server.rest.get_retry_context') as mock_get_ctx:
+            mock_get_ctx.return_value = retry_context
+            with mock.patch('sky.client.sdk.get') as mock_get:
+                mock_get.return_value = "test_result"
+
+                client_sdk.stream_response(request_id="test_request_id",
+                                           response=mock_response,
+                                           output_stream=output_stream,
+                                           resumable=False)
+
+                # All lines should have been printed, since this is a
+                # non-resumable stream (no skipping based on line_processed).
+                assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
+                # progress_count should have been incremented per line so
+                # the retry decorator sees forward progress.
+                assert retry_context.progress_count == 3
+                # line_processed must remain 0 for non-resumable streams;
+                # it is reserved for resume bookkeeping.
+                assert retry_context.line_processed == 0
+
+
+def test_stream_response_resumable_retry_skips_replayed_lines():
+    """Integration test: ``retry_transient_errors`` + resumable
+    ``stream_response`` together must (1) not double-print lines that the
+    server replays after a mid-stream disconnect, and (2) advance both
+    ``progress_count`` and ``line_processed`` correctly across attempts.
+
+    Scenario: first attempt prints lines 1-2 then the connection breaks
+    with ``ChunkedEncodingError``. The decorator retries; on the second
+    attempt the server replays lines 1-5 from the start. Lines 1-2 must be
+    skipped via ``line_processed``, lines 3-5 must be printed exactly once.
+    """
+    output_stream = io.StringIO()
+    decode_call_count = 0
+
+    def decode_side_effect(_response):
+        nonlocal decode_call_count
+        decode_call_count += 1
+        if decode_call_count == 1:
+            # First attempt: emit 2 lines, then disconnect.
+            yield 'Line 1\n'
+            yield 'Line 2\n'
+            raise requests.exceptions.ChunkedEncodingError('disconnected')
+        # Retry attempt: server replays from line 1, emits all 5 lines.
+        yield 'Line 1\n'
+        yield 'Line 2\n'
+        yield 'Line 3\n'
+        yield 'Line 4\n'
+        yield 'Line 5\n'
+
+    @server_rest.retry_transient_errors(max_retries=3, initial_backoff=0.01)
+    def streaming_call():
+        mock_response = mock.MagicMock()
+        return client_sdk.stream_response(request_id='test_request_id',
+                                          response=mock_response,
+                                          output_stream=output_stream,
+                                          resumable=True)
+
+    captured_context = {}
+
+    def get_ctx_passthrough():
+        ctx = server_rest._RETRY_CONTEXT.get()
+        if ctx is not None:
+            captured_context['ctx'] = ctx
+        return ctx
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status',
+                    side_effect=decode_side_effect):
+        with mock.patch('sky.client.sdk.get') as mock_get:
+            mock_get.return_value = 'final_result'
+            with mock.patch('sky.client.sdk.rest.get_retry_context',
+                            side_effect=get_ctx_passthrough):
+                with mock.patch('time.sleep'):
+                    result = streaming_call()
+
+    # Each line printed exactly once despite the replay.
+    assert output_stream.getvalue() == (
+        'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n')
+    # Two attempts total: one failure + one success.
+    assert decode_call_count == 2
+    # Final result is forwarded from get(request_id).
+    assert result == 'final_result'
+    # Both progress fields advanced exactly to the number of distinct lines.
+    ctx = captured_context['ctx']
+    assert ctx.line_processed == 5
+    assert ctx.progress_count == 5
 
 
 def test_stream_response_no_request_id():

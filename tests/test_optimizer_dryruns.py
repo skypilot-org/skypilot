@@ -201,6 +201,47 @@ def test_instance_type_mismatches_memory(enable_all_clouds):
         assert 'does not have the requested memory' in str(e.value)
 
 
+def test_invalid_disk_size(enable_all_clouds):
+    # disk_size must be a positive integer; 0 and negative values were
+    # previously accepted silently and surfaced only at provision time.
+    for bad_size in [0, -1, -100]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(sky.AWS(), disk_size=bad_size)
+        assert 'disk_size' in str(e.value)
+        assert 'positive' in str(e.value)
+
+
+def test_invalid_accelerator_count(enable_all_clouds):
+    # Accelerator counts must be positive. Zero or negative counts were
+    # previously accepted and produced either a misleading "catalog does
+    # not contain" error or (on Kubernetes) a silently-launched pod with
+    # zero GPUs. Test both AWS and Kubernetes paths since the original
+    # bug report was specifically about the Kubernetes zero-GPU pod.
+    for cloud in [sky.AWS(), sky.Kubernetes()]:
+        for bad_accel in ['V100:0', 'V100:-1', {'V100': 0}, {'V100': -2}]:
+            with pytest.raises(ValueError) as e:
+                _test_resources(cloud, accelerators=bad_accel)
+            assert 'positive' in str(e.value).lower()
+
+
+def test_ports_comma_separated(enable_all_clouds):
+    # A string like '8000,9000' was previously passed through as a single
+    # "port", producing an unhelpful range-format error. Split on commas
+    # before validating so the common CLI form works.
+    r = _make_resources(sky.AWS(), ports='8000,9000')
+    assert sorted(r.ports) == ['8000', '9000']
+
+
+def test_ports_comma_separated_with_bad_entry(enable_all_clouds):
+    # '8000,9000,abc' should still error, but name the offending entry
+    # rather than printing the whole string as one bad port.
+    with pytest.raises(ValueError) as e:
+        _make_resources(sky.AWS(), ports='8000,9000,abc')
+    # The error should reference the actual bad token, not the full string.
+    assert 'abc' in str(e.value)
+    assert '8000,9000,abc' not in str(e.value)
+
+
 def test_instance_type_matches_cpus(enable_all_clouds):
     _test_resources_launch(sky.AWS(), instance_type='c6i.8xlarge', cpus=32)
     _test_resources_launch(sky.Azure(),
@@ -243,7 +284,7 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
     assert 'n4-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
-    assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
+    assert 'gpu_1x_a6000' in stdout  # Lambda, 14 vCPUs, 100 GB memory
 
     _test_resources_launch(cpus='4+', memory='4+')
     stdout, _ = capfd.readouterr()
@@ -613,7 +654,8 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Typo, fuzzy hint.
     with pytest.raises(ValueError) as e:
         _test_resources_launch(zone='us-west-2-a', cloud=sky.AWS())
-    assert ('Did you mean one of these: \'us-west-2a\'?' in str(e.value))
+    err = str(e.value)
+    assert 'Did you mean one of these:' in err and 'us-west-2a' in err
 
     # Detailed hints.
     # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
@@ -642,6 +684,51 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     assert (
         'Invalid (region \'us-east1\', zone \'us-west2-a\') for any cloud among'
         in str(e.value))
+
+
+def test_invalid_region_suggests_close_match(enable_all_clouds):
+    """Close-typo regions like 'us-east' should suggest 'us-east-1'.
+
+    Previously the fuzzy-match cutoff was 0.9, which required near-identical
+    strings and missed common typos where the user omitted the numeric suffix.
+    """
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(region='us-east', cloud=sky.AWS())
+    msg = str(e.value)
+    assert "Invalid region 'us-east'" in msg
+    assert 'Did you mean one of these' in msg
+    assert 'us-east-1' in msg
+
+
+def test_invalid_zone_returns_multiple_close_matches(enable_all_clouds):
+    """At the widened cutoff, close typos should surface several candidates.
+
+    'us-west-2-a' (extra hyphen) is roughly equidistant from the whole
+    us-west-2 zone family, so the user should see more than just the
+    nearest match. This locks in the wider candidate set made possible
+    by lowering the difflib cutoff.
+    """
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(zone='us-west-2-a', cloud=sky.AWS())
+    msg = str(e.value)
+    assert 'Did you mean one of these' in msg
+    # Multiple sibling zones should be offered, not only the closest.
+    for zone in ('us-west-2a', 'us-west-2b', 'us-west-2c'):
+        assert zone in msg, f'Expected {zone!r} in suggestion, got: {msg!r}'
+
+
+def test_invalid_cloud_name_suggests_close_match():
+    """Typo'd cloud names like 'gpc' should suggest 'gcp'.
+
+    Previously the cloud registry only dumped the full list of valid clouds
+    with no close-match hint.
+    """
+    with pytest.raises(ValueError) as e:
+        registry.CLOUD_REGISTRY.from_str('gpc')
+    msg = str(e.value)
+    assert "'gpc'" in msg
+    assert 'Did you mean' in msg
+    assert "'gcp'" in msg
 
 
 def test_ordered_resources(enable_all_clouds):

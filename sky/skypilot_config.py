@@ -362,12 +362,13 @@ def get_effective_workspace_region_config(
                                        override_configs)
 
 
-def get_effective_region_config(
-        cloud: str,
-        keys: Tuple[str, ...],
-        region: Optional[str] = None,
-        default_value: Optional[Any] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+def get_effective_region_config(cloud: str,
+                                keys: Tuple[str, ...],
+                                region: Optional[str] = None,
+                                default_value: Optional[Any] = None,
+                                override_configs: Optional[Dict[str,
+                                                                Any]] = None,
+                                merge_dicts: bool = False) -> Any:
     """Returns the nested key value by reading from config
     Order to get the property_name value:
     1. if region is specified,
@@ -377,9 +378,8 @@ def get_effective_region_config(
     3. if not found at cloud level,
        return either default_value if specified or None
 
-    Note: This function currently only supports getting region-specific
-    config from "kubernetes" cloud. For other clouds, this function behaves
-    identically to get_nested().
+    If merge_dicts is True and both levels return dicts, the region-level
+    dict is shallow-merged into the cloud-level dict (region keys override).
     """
     return config_utils.get_cloud_config_value_from_dict(
         dict_config=_get_loaded_config(),
@@ -387,7 +387,8 @@ def get_effective_region_config(
         keys=keys,
         region=region,
         default_value=default_value,
-        override_configs=override_configs)
+        override_configs=override_configs,
+        merge_dicts=merge_dicts)
 
 
 def get_workspace_cloud(cloud: str,
@@ -822,29 +823,97 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
+_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
+    # Order matters: `get_effective_queue_name` returns the first hit at a
+    # given scope, so `quota.queue` wins over `kueue.local_queue_name` when
+    # both are set.
+    ('quota', 'queue'),
+    ('kueue', 'local_queue_name'),
+]
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    if workspace is None:
+        workspace = get_active_workspace()
+
+    # `override_configs` are cloud-level; looking up relative to a scope
+    # (rather than prefixing the scope into `keys`) ensures they apply at
+    # the correct depth even when the scope is a workspace subtree.
+    scope_configs: List[config_utils.Config] = []
+    if workspace is not None:
+        ws_config = get_nested(keys=('workspaces', workspace),
+                               default_value=None)
+        if ws_config is not None:
+            scope_configs.append(config_utils.Config(ws_config))
+    scope_configs.append(config_utils.Config(_get_loaded_config()))
+
+    for scope_config in scope_configs:
+        if override_configs is not None:
+            # Merge overrides once per scope so the per-key lookups below
+            # don't re-run `_recursive_update` for every spelling.
+            scope_config = config_utils.Config(
+                scope_config.get_nested(keys=(),
+                                        default_value={},
+                                        override_configs=override_configs))
+        if region is not None:
+            for queue_keys in _QUEUE_NAME_KEYS:
+                value = scope_config.get_nested(
+                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    default_value=None)
+                if value is not None:
+                    return value
+        for queue_keys in _QUEUE_NAME_KEYS:
+            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+                                            default_value=None)
+            if value is not None:
+                return value
+    return None
+
+
+def register_queue_name_key(key: Tuple[str, ...]) -> None:
+    """Register a new queue name key to be removed from the config.
+
+    This is called during plugin loading at server startup, which is
+    single-threaded, so no lock is needed.
+    """
+    if key not in _QUEUE_NAME_KEYS:
+        _QUEUE_NAME_KEYS.append(key)
+
+
 @contextlib.contextmanager
 def remove_queue_name_from_config() -> Iterator[None]:
     """Removes the local_queue_name from the config."""
     config = to_dict()
 
     def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
-        if config.get_nested(keys, None) is not None:
-            logger.debug(f'removing local queue name: setting {keys} to None')
-            config.set_nested(keys, None)
+        for queue_key in _QUEUE_NAME_KEYS:
+            if config.get_nested(keys + queue_key, None) is not None:
+                logger.debug(f'removing local queue name: setting '
+                             f'{keys + queue_key} to None')
+                config.set_nested(keys + queue_key, None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
                                                  {}).items():
-            update_to_none_if_set((*keys, 'context_configs', context_name,
-                                   'kueue', 'local_queue_name'))
+            update_to_none_if_set((*keys, 'context_configs', context_name))
 
     # remove from global config
-    update_to_none_if_set(('kubernetes', 'kueue', 'local_queue_name'))
+    update_to_none_if_set(('kubernetes',))
     remove_from_context_configs(('kubernetes',))
     # remove from all workspaces configs
     for workspace_name, _ in config.get_nested(('workspaces',), {}).items():
-        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes',
-                               'kueue', 'local_queue_name'))
+        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes'))
         remove_from_context_configs(
             ('workspaces', workspace_name, 'kubernetes'))
     logger.debug(

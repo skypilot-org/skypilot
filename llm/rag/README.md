@@ -20,7 +20,7 @@ SkyPilot streamlines the development and deployment of RAG systems in any cloud 
 
 In this example, we use legal documents by [pile of law](https://huggingface.co/datasets/pile-of-law/pile-of-law) as example data to demonstrate RAG capabilities. The system processes a collection of legal texts, including case law, statutes, and legal discussions, to enable semantic search and intelligent question answering. This approach can help legal professionals quickly find relevant precedents, analyze complex legal scenarios, and extract insights from large document collections. 
 
-We use [Alibaba-NLP/gte-Qwen2-7B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct) for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)) for generating final anwsers. 
+We use [Alibaba-NLP/gte-Qwen2-7B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct) for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)) for generating final answers. 
 
 **Why SkyPilot**: SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
 

@@ -260,11 +260,63 @@ class TestGetEngine:
 
             mock_create.assert_called_once()
             call_args = mock_create.call_args
-            # Connection string should be modified for asyncpg
-            assert call_args[0][
-                0] == 'postgresql+asyncpg://user:pass@localhost/db'
+            # URL is just the dialect placeholder; all connection params
+            # are supplied via async_creator (see _make_asyncpg_creator).
+            assert call_args[0][0] == 'postgresql+asyncpg://'
             assert call_args[1]['poolclass'] == sqlalchemy.NullPool
+            assert callable(call_args[1].get('async_creator'))
             assert engine == mock_engine
+
+    @pytest.mark.asyncio
+    async def test_postgres_async_engine_does_not_leak_libpq_kwargs_to_asyncpg(
+            self, monkeypatch):
+        """End-to-end check: with a sslmode-bearing URI, real SQLAlchemy
+        must not forward libpq query params as kwargs to asyncpg.connect.
+
+        Without the fix in ``get_engine``, SQLAlchemy's asyncpg dialect
+        parses the URL into kwargs and calls
+        ``asyncpg.connect(host=..., port=..., ..., sslmode='require')``,
+        which asyncpg rejects with
+        ``unexpected keyword argument 'sslmode'``. We exercise the real
+        SQLAlchemy stack with ``asyncpg.connect`` mocked at the boundary
+        and inspect how it was actually called.
+
+        See https://github.com/sqlalchemy/sqlalchemy/issues/6275.
+        """
+        libpq_uri = 'postgresql://user:pass@localhost/db?sslmode=require'
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI', libpq_uri)
+
+        # Mock asyncpg.connect at the integration boundary. Returning an
+        # AsyncMock connection lets SQLAlchemy's adapter wrap it without
+        # immediately exploding; downstream operations on the mock may
+        # fail, but we only care about how asyncpg.connect itself was
+        # invoked (the failure point of the bug).
+        with mock.patch('asyncpg.connect',
+                        new_callable=mock.AsyncMock) as mock_connect:
+            mock_connect.return_value = mock.AsyncMock()
+
+            engine = db_utils.get_engine(db_name='ignored', async_engine=True)
+
+            try:
+                async with engine.connect():
+                    pass
+            except Exception:  # pylint: disable=broad-except
+                # SQLAlchemy will likely fail to use the mocked connection
+                # past the connect() call. That's fine — asyncpg.connect
+                # has already been invoked and the call args captured.
+                pass
+
+        mock_connect.assert_called()
+        _, call_kwargs = mock_connect.call_args_list[0]
+        forbidden_libpq_kwargs = {
+            'sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'sslcrl'
+        }
+        leaked = forbidden_libpq_kwargs & set(call_kwargs)
+        assert not leaked, (
+            f'libpq query params leaked as kwargs to asyncpg.connect: '
+            f'{sorted(leaked)}. asyncpg only accepts these inside a DSN '
+            f'string. Full call kwargs: {call_kwargs!r}')
 
     def test_postgres_engine_caching(self, monkeypatch):
         """Test Postgres sync engines are cached and reused."""

@@ -62,39 +62,108 @@ Use high-performance networking
     .. tab-item:: AWS EFA
         :sync: aws-efa-tab
 
-        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia Infiniband that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
+        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia InfiniBand that enables high levels of inter-node communication at scale on AWS.
 
-        Example configuration:
+        Use ``resources.network_tier: best`` to automatically enable EFA for your clusters and jobs.
 
-        .. code-block:: yaml
-
-          config:
-            kubernetes:
-              pod_config:
-                spec:
-                  containers:
-                    - resources:
-                      limits:
-                        vpc.amazonaws.com/efa: 4
-                      requests:
-                        vpc.amazonaws.com/efa: 4
-
-        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
-
-    .. tab-item:: GCP GPUDirect-TCPX
-        :sync: gcp-gpu-direct-tcpx-tab
-
-        `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` VMs. You can enable it with the following additional setting in your SkyPilot YAML.
-
-        Example configuration:
+        On AWS EKS/HyperPod Kubernetes clusters:
 
         .. code-block:: yaml
+          :emphasize-lines: 4
 
-          config:
-            gcp:
-              enable_gpu_direct: true
+          resources:
+            infra: k8s
+            accelerators: A100:8
+            network_tier: best
 
-        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+          num_nodes: 2
+
+        On AWS VMs:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: aws
+            accelerators: A100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On AWS HyperPod Slurm clusters, EFA is available by default on EFA-enabled instances (p4d, p5, etc.). No ``network_tier`` setting is needed.
+
+        See `AWS EFA examples <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
+
+    .. tab-item:: GCP GPUDirect
+        :sync: gcp-gpu-direct-tab
+
+        `GPUDirect <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces. SkyPilot supports GPUDirect-TCPX (A3 High, A3 Edge), TCPXO (A3 Mega), and RDMA (A3 Ultra, A4) variants.
+
+        Use ``resources.network_tier: best`` to automatically enable GPUDirect for your clusters and jobs.
+
+        On GCP VMs:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: gcp
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On GKE Kubernetes clusters:
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `GPUDirect examples <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+
+    .. tab-item:: CoreWeave InfiniBand
+        :sync: coreweave-infiniband-tab
+
+        CoreWeave CKS clusters support InfiniBand for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable InfiniBand on CoreWeave managed Kubernetes clusters.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H200:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `CoreWeave with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/coreweave_infiniband.html>`_ for more details.
+
+    .. tab-item:: Together AI InfiniBand
+        :sync: together-infiniband-tab
+
+        Together AI Kubernetes clusters support InfiniBand for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable InfiniBand on Together AI Kubernetes clusters.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        See `Together AI with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/together_infiniband.html>`_ for more details.
 
 
 Using Ray with SkyPilot
@@ -142,7 +211,7 @@ High performance instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Choose high performance instances for optimal training performance. SkyPilot allows you to specify instance types with powerful GPUs and high-bandwidth networking:
 
-- Use the latest GPU accelerators (A100, H100, etc.) for faster training
+- Use the latest GPU accelerators (H100, H200, B200, etc.) for faster training
 - Consider instances with higher memory bandwidth and higher device memory for large models
 
 Example configuration:
@@ -151,19 +220,19 @@ Example configuration:
 
   resources:
     accelerators:
-      A100:1
-      A100-80GB:1
-      H100:1
+      H100:8
+      H200:8
+      B200:8
 
-Robust checkpointing for spot instances
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Robust checkpointing for hardware failures and preemption
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using spot instances, robust checkpointing is crucial for recovering from preemptions. Your job should follow two key principles:
+Robust checkpointing is crucial for recovering from hardware failures (GPU errors, node crashes, etc.) and spot preemptions. Your job should follow two key principles:
 
 1. **Write checkpoints periodically** during training to save your progress
-2. **Always attempt to load checkpoints on startup**, regardless of whether it's the first run or a restart after preemption
+2. **Always attempt to load checkpoints on startup**, regardless of whether it's the first run or a restart after a failure or preemption
 
-This approach ensures your job can seamlessly resume from where it left off after preemption. On the first run, no checkpoints will exist, but on subsequent restarts, your job will automatically recover its state.
+This approach ensures your job can seamlessly resume from where it left off after a failure or preemption. On the first run, no checkpoints will exist, but on subsequent restarts, your job will automatically recover its state.
 
 Basic checkpointing
 ^^^^^^^^^^^^^^^^^^^^
@@ -465,33 +534,29 @@ Loading checkpoints:
 Examples
 --------
 
-.. _bert:
+.. _qwen:
 
-BERT end-to-end
-~~~~~~~~~~~~~~~
+End-to-end post-training
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
+We can take the SkyPilot YAML for Qwen fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
 
-.. note::
-
-  You can find all the code for this example `in the documentation <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`_
-
-In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
+In this example, we fine-tune a Qwen model with HuggingFace.
 
 This example:
 
-- has SkyPilot find a V100 instance on any cloud,
+- has SkyPilot find a B200:8 instance on any cloud,
 - uses spot instances to save cost, and
 - uses checkpointing to recover preempted jobs quickly.
 
 .. code-block:: yaml
   :emphasize-lines: 9-12
 
-  # bert_qa.yaml
-  name: bert-qa
+  # qwen_finetune.yaml
+  name: qwen-finetune
 
   resources:
-    accelerators: V100:1
+    accelerators: B200:8
     use_spot: true  # Use spot instances to save cost.
     disk_tier: best # using highest performance disk tier
 
@@ -511,24 +576,25 @@ This example:
 
   setup: |
     pip install -e .
-    cd examples/pytorch/question-answering/
-    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    cd examples/pytorch/language-modeling/
+    pip install -r requirements.txt
     pip install wandb
 
   run: |
-    cd examples/pytorch/question-answering/
-    python run_qa.py \
-      --model_name_or_path bert-base-uncased \
-      --dataset_name squad \
+    cd examples/pytorch/language-modeling/
+    torchrun --nproc_per_node=8 run_clm.py \
+      --model_name_or_path Qwen/Qwen3-8B \
+      --dataset_name wikitext \
+      --dataset_config_name wikitext-2-raw-v1 \
       --do_train \
       --do_eval \
-      --per_device_train_batch_size 12 \
-      --learning_rate 3e-5 \
-      --num_train_epochs 50 \
-      --max_seq_length 384 \
-      --doc_stride 128 \
+      --per_device_train_batch_size 1 \
+      --gradient_accumulation_steps 8 \
+      --learning_rate 2e-5 \
+      --num_train_epochs 3 \
+      --bf16 \
       --report_to wandb \
-      --output_dir /checkpoint/bert_qa/ \
+      --output_dir /checkpoint/qwen_finetune/ \
       --run_name $SKYPILOT_TASK_ID \
       --save_total_limit 10 \
       --save_steps 1000
@@ -542,7 +608,7 @@ We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_bert-qa_8-0") can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_qwen-finetune_8-0") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
@@ -553,7 +619,7 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 .. code-block:: console
 
-  $ sky jobs launch -n bert-qa bert_qa.yaml
+  $ sky jobs launch -n qwen-finetune qwen_finetune.yaml
 
 
 Real-world examples
@@ -561,6 +627,6 @@ Real-world examples
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
 * `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
-* BERT (shown above): `YAML <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`__
+* `Qwen <https://docs.skypilot.co/en/latest/examples/models/qwen.html>`__
 * PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__

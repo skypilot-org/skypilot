@@ -587,6 +587,20 @@ def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
     return network_interface['network'].split('/')[-1]
 
 
+def _get_subnets_with_names(
+    subnets: List['google.cloud.compute_v1.types.compute.Subnetwork'],
+    subnet_names: List[str],
+) -> List['google.cloud.compute_v1.types.compute.Subnetwork']:
+    """Returns matching subnets in user-specified order."""
+    ordered_names = list(dict.fromkeys(subnet_names))
+    subnets_by_name = {subnet['name']: subnet for subnet in subnets}
+    return [
+        subnets_by_name[name]
+        for name in ordered_names
+        if name in subnets_by_name
+    ]
+
+
 def get_usable_vpc_and_subnet(
     cluster_name: str,
     region: str,
@@ -595,10 +609,11 @@ def get_usable_vpc_and_subnet(
 ) -> Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']:
     """Return a usable VPC and the subnet in it.
 
-    If config.provider_config['vpc_name'] is set, return the VPC with the name
-    (errors out if not found). When this field is set, no firewall rules
-    checking or overrides will take place; it is the user's responsibility to
-    properly set up the VPC.
+    If config.provider_config['vpc_name'] or
+    config.provider_config['subnet_names'] is set, use the user-specified
+    network configuration (errors out if not found). When these fields are
+    set, no firewall rules checking or overrides will take place; it is the
+    user's responsibility to properly set up the VPC.
 
     If not found, create a new one with sufficient firewall rules.
 
@@ -622,6 +637,9 @@ def get_usable_vpc_and_subnet(
     # for every launch just for this rare case.
 
     specific_vpc_to_use = config.provider_config.get('vpc_name', None)
+    subnet_names = config.provider_config.get('subnet_names', None)
+    if isinstance(subnet_names, str):
+        subnet_names = [subnet_names]
     if specific_vpc_to_use is not None:
         if '/' in specific_vpc_to_use:
             # VPC can also be specified in the format PROJECT_ID/VPC_NAME.
@@ -654,6 +672,18 @@ def get_usable_vpc_and_subnet(
                                 region,
                                 compute,
                                 network=specific_vpc_to_use)
+        if subnet_names:
+            subnets = _get_subnets_with_names(subnets, subnet_names)
+            if not subnets:
+                _skypilot_log_error_and_exit_for_failover(
+                    'SUBNET_NOT_FOUND_FOR_VPC',
+                    f'No subnet with name(s) {subnet_names!r} found in '
+                    f'region {region} for specified VPC '
+                    f'{specific_vpc_to_use!r}.')
+            logger.info(f'Using user-specified subnet {subnets[0]["name"]!r} '
+                        f'in VPC {specific_vpc_to_use!r}.')
+            return specific_vpc_to_use, subnets[0]
+
         if not subnets:
             _skypilot_log_error_and_exit_for_failover(
                 'SUBNET_NOT_FOUND_FOR_VPC',
@@ -662,6 +692,29 @@ def get_usable_vpc_and_subnet(
                 f'Check the subnets of VPC {specific_vpc_to_use!r} at '
                 'https://console.cloud.google.com/networking/networks')
         return specific_vpc_to_use, subnets[0]
+
+    if subnet_names:
+        subnets = _get_subnets_with_names(
+            _list_subnets(project_id, region, compute), subnet_names)
+        if not subnets:
+            _skypilot_log_error_and_exit_for_failover(
+                'SUBNET_NOT_FOUND',
+                f'No subnet with name(s) {subnet_names!r} found in region '
+                f'{region}. To fix: specify a correct subnet name, or set '
+                'gcp.vpc_name to narrow the search.')
+        vpc_names = {
+            _network_interface_to_vpc_name(subnet) for subnet in subnets
+        }
+        if len(vpc_names) > 1:
+            _skypilot_log_error_and_exit_for_failover(
+                'SUBNETS_SPAN_MULTIPLE_VPCS',
+                f'Subnet(s) {subnet_names!r} found in region {region} belong '
+                f'to multiple VPCs {sorted(vpc_names)!r}. To fix: specify '
+                'subnet_names from a single VPC, or also set gcp.vpc_name.')
+        vpc_name = next(iter(vpc_names))
+        logger.info(f'Using user-specified subnet {subnets[0]["name"]!r} '
+                    f'in VPC {vpc_name!r}.')
+        return vpc_name, subnets[0]
 
     subnets_all = _list_subnets(project_id, region, compute)
 

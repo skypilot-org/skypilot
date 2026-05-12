@@ -1,5 +1,6 @@
 """Registry for classes to be discovered"""
 
+import difflib
 import typing
 from typing import Callable, Dict, List, Optional, Set, Type, Union
 
@@ -7,6 +8,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend
+    from sky.batch import io_formats
     from sky.clouds import cloud
     from sky.jobs import recovery_strategy
 
@@ -42,11 +44,18 @@ class _Registry(dict, typing.Generic[T]):
         if search_name in self._aliases:
             return self[self._aliases[search_name]]
 
+        known_names = [*self.keys(), *self._aliases.keys()]
+        suggestion = difflib.get_close_matches(search_name,
+                                               known_names,
+                                               n=1,
+                                               cutoff=0.6)
+        suggestion_msg = (f' Did you mean {suggestion[0]!r}?'
+                          if suggestion else '')
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{self._registry_name.capitalize()} {name!r} is not a '
                 f'valid {self._registry_name} among '
-                f'{[*self.keys(), *self._aliases.keys()]}')
+                f'{known_names}.{suggestion_msg}')
 
     def type_register(self,
                       name: str,
@@ -125,5 +134,11 @@ JOBS_RECOVERY_STRATEGY_REGISTRY: _Registry = (
         registry_name='jobs recovery strategy',
         exclude=None,
         type_register=True))
+
+INPUT_READER_REGISTRY: _Registry = _Registry['io_formats.InputReader'](
+    registry_name='input reader', exclude=None, type_register=True)
+
+OUTPUT_WRITER_REGISTRY: _Registry = _Registry['io_formats.OutputWriter'](
+    registry_name='output writer', exclude=None, type_register=True)
 
 # TODO(tian): Add a registry for spot placer.

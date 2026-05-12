@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import {
   useClusterDetails,
   getClusterHistory,
+  streamClusterProvisionLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import {
@@ -24,6 +25,8 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatAutostop,
+  LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
@@ -36,28 +39,17 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    autostopStr = autostop + 'm';
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
+import { TelemetrySection } from '@/components/TelemetrySection';
+import { hasAccelerator } from '@/utils/gpuUtils';
+import { trackClusterAction } from '@/lib/analytics';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 function ClusterDetails() {
   const router = useRouter();
@@ -70,9 +62,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // Counter incremented on refresh to force telemetry iframes to reload.
   // When this value changes, the iframe key changes, causing React to remount the iframe.
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const {
     clusterData,
@@ -84,7 +76,7 @@ function ClusterDetails() {
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
 
   // Check Grafana availability on mount
@@ -110,12 +102,24 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
+        // The URL parameter may be either a cluster hash (when navigated
+        // from the historical clusters list) or a cluster name (when the
+        // user opened the active cluster page and the cluster was later
+        // torn down via `sky down`). Send both filters; the server returns
+        // rows matching either, which resolves the cluster in a single
+        // round trip without fetching the entire history (which can
+        // contain tens of thousands of rows).
         const historyData = await dashboardCache.get(getClusterHistory, [
           cluster,
+          30,
+          cluster,
         ]);
-        const foundHistoryCluster = historyData.find(
-          (c) => c.cluster_hash === cluster || c.cluster === cluster
-        );
+        // Prefer an exact hash match; otherwise fall back to a name match.
+        // A reused cluster name can produce multiple history rows, in which
+        // case the most recent (server-ordered by launched_at desc) wins.
+        const foundHistoryCluster =
+          historyData.find((c) => c.cluster_hash === cluster) ||
+          historyData.find((c) => c.cluster === cluster);
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);
@@ -136,16 +140,18 @@ function ClusterDetails() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await refreshData();
-    // Increment GPU metrics refresh trigger to force iframe reload
-    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+    // Increment telemetry refresh trigger to force iframe reload
+    setTelemetryRefreshTrigger((prev) => prev + 1);
     setIsRefreshing(false);
   };
 
   const handleConnectClick = () => {
+    trackClusterAction('connect');
     setIsSSHModalOpen(true);
   };
 
   const handleVSCodeClick = () => {
+    trackClusterAction('vscode');
     setIsVSCodeModalOpen(true);
   };
 
@@ -228,7 +234,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={isVSCodeModalOpen}
             setIsVSCodeModalOpen={setIsVSCodeModalOpen}
             isGrafanaAvailable={isGrafanaAvailable}
-            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+            telemetryRefreshTrigger={telemetryRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -240,7 +246,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
             isGrafanaAvailable={false}
-            gpuMetricsRefreshTrigger={0}
+            telemetryRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -277,7 +283,7 @@ function ActiveTab({
   isVSCodeModalOpen,
   setIsVSCodeModalOpen,
   isGrafanaAvailable,
-  gpuMetricsRefreshTrigger,
+  telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -384,7 +390,12 @@ function ActiveTab({
                   <PluginSlot
                     name="clusters.detail.status.badge"
                     context={clusterData}
-                    fallback={<StatusBadge status={clusterData.status} />}
+                    fallback={
+                      <StatusBadge
+                        status={clusterData.status}
+                        statusTooltip={clusterData.statusTooltip}
+                      />
+                    }
                   />
                 </div>
               </div>
@@ -642,6 +653,23 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Telemetry Section (GPU + CPU/Memory) - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
+      {clusterData &&
+        clusterData.full_infra &&
+        clusterData.full_infra.toLowerCase().includes('kubernetes') &&
+        !clusterData.full_infra.toLowerCase().includes('ssh') &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <TelemetrySection
+              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              displayName={clusterData?.cluster}
+              refreshTrigger={telemetryRefreshTrigger}
+              storageKey="skypilot-clusters-telemetry-expanded"
+              hasGpu={hasAccelerator(clusterData?.gpus)}
+            />
+          </div>
+        )}
+
       {/* Plugin Slot: Cluster Infra Nodes */}
       <PluginSlot
         name="clusters.detail.nodes"
@@ -670,23 +698,6 @@ function ActiveTab({
         </div>
       )}
 
-      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
-      {clusterData &&
-        clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
-          <div className="mb-6">
-            <GPUMetricsSection
-              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
-              displayName={clusterData?.cluster}
-              refreshTrigger={gpuMetricsRefreshTrigger}
-              storageKey="skypilot-gpu-metrics-expanded"
-            />
-          </div>
-        )}
-
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot
         name="clusters.detail.events"
@@ -695,7 +706,147 @@ function ActiveTab({
         }}
         wrapperClassName="mb-8"
       />
+
+      {/* Provision Logs - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ProvisionLogs
+            clusterName={clusterData.cluster}
+            numNodes={clusterData.num_nodes}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+function ProvisionLogs({ clusterName, numNodes }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+
+  const streamArgs = useMemo(
+    () => ({
+      clusterName,
+      worker: selectedWorker,
+    }),
+    [clusterName, selectedWorker]
+  );
+
+  const handleStreamError = useCallback((error) => {
+    console.error('Error streaming provision logs:', error);
+  }, []);
+
+  const { lines: displayLines, isLoading } = useLogStreamer({
+    streamFn: streamClusterProvisionLogs,
+    streamArgs,
+    enabled: isExpanded && Boolean(clusterName),
+    refreshTrigger: logsRefreshToken,
+    onError: handleStreamError,
+  });
+
+  const handleRefreshLogs = () => {
+    setLogsRefreshToken((t) => t + 1);
+  };
+
+  const handleWorkerChange = (val) => {
+    setSelectedWorker(val === 'head' ? null : Number(val));
+  };
+
+  // Build worker options: Head, Worker1 .. WorkerN-1
+  const workerOptions = useMemo(() => {
+    const opts = [{ label: 'Head', value: 'head' }];
+    if (numNodes > 1) {
+      for (let i = 1; i < numNodes; i++) {
+        opts.push({ label: `Worker${i}`, value: String(i) });
+      }
+    }
+    return opts;
+  }, [numNodes]);
+
+  return (
+    <Card>
+      <div
+        className={`flex items-center justify-between px-4 pt-4 ${!isExpanded ? 'pb-4' : ''}`}
+      >
+        <div className="flex items-center">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
+            ) : (
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
+            )}
+            <h2 className="text-lg font-semibold">Provision Logs</h2>
+          </button>
+          {isExpanded && (
+            <>
+              {numNodes > 1 && (
+                <Select
+                  value={
+                    selectedWorker === null ? 'head' : String(selectedWorker)
+                  }
+                  onValueChange={handleWorkerChange}
+                >
+                  <SelectTrigger
+                    aria-label="Node"
+                    className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[120px] text-sm ml-3"
+                  >
+                    <SelectValue placeholder="Head" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workerOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <span className="ml-2 text-xs text-gray-500">
+                (Logs are not streaming; click refresh to fetch the latest
+                logs.)
+              </span>
+            </>
+          )}
+        </div>
+        {isExpanded && (
+          <div className="flex items-center space-x-3">
+            <Tooltip content="Refresh logs" className="text-muted-foreground">
+              <button
+                onClick={handleRefreshLogs}
+                disabled={isLoading}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              >
+                <RotateCwIcon
+                  className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
+                />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+      {isExpanded && (
+        <div className="p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <CircularProgress size={20} className="mr-2" />
+              <span>Loading...</span>
+            </div>
+          ) : displayLines.length === 0 ? (
+            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+              <span>No provision logs available.</span>
+            </div>
+          ) : (
+            <div className="max-h-[50vh] min-h-[200px] overflow-y-auto">
+              <LogFilter logs={displayLines} />
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

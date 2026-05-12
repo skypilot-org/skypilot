@@ -6,7 +6,7 @@ import shutil
 import sys
 import time
 import typing
-from typing import Callable
+from typing import Callable, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -61,10 +61,19 @@ def _rotate_daemon_log(log_path: str) -> None:
         pass
 
 
-# Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
-# Each executor process imports this module during executor_initializer(),
-# so this captures the user's original env setting.
-_user_disabled_usage_collection = env_options.Options.DISABLE_LOGGING.get()
+# Populated lazily on the first run_event() call per process.
+#
+# Why not snapshot at import time: importing this module can happen before
+# the process has finished its startup initialization, so an import-time
+# read of env_options.Options.DISABLE_LOGGING may not reflect the final
+# intended value.
+#
+# Why not read inside the event: run_event() overrides DISABLE_LOGGING to
+# silence per-daemon usage messages, so a read at gate time would always
+# see the override rather than the user's original setting.
+#
+# Initializing inside run_event, before the override, threads the needle.
+_user_disabled_usage_collection: Optional[bool] = None
 
 
 def _default_should_skip():
@@ -109,6 +118,12 @@ class InternalRequestDaemon:
 
     def run_event(self):
         """Run the event."""
+        global _user_disabled_usage_collection
+        # Capture the original DISABLE_LOGGING value once per process,
+        # before we override it below.
+        if _user_disabled_usage_collection is None:
+            _user_disabled_usage_collection = (
+                env_options.Options.DISABLE_LOGGING.get())
 
         # Disable logging for periodic refresh to avoid the usage message being
         # sent multiple times.
@@ -309,6 +324,23 @@ def should_skip_server_heartbeat():
     return False
 
 
+def expired_token_cleanup_event():
+    """Periodically remove expired managed-job API access tokens."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    logger.info('=== Cleaning up expired managed-job API access tokens ===')
+    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    # Read the interval from config on every iteration so operators can
+    # lower it (e.g., for testing) without restarting the API server.
+    interval = skypilot_config.get_nested(
+        ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
+        server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    logger.info(f'Expired token cleanup removed {removed} token(s). '
+                f'Sleeping {interval} seconds for the next sweep...\n')
+    time.sleep(interval)
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -372,6 +404,10 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
         event_fn=server_heartbeat_event,
         should_skip=should_skip_server_heartbeat),
+    InternalRequestDaemon(
+        id='expired-token-cleanup-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
+        event_fn=expired_token_cleanup_event),
 ]
 
 HIDDEN_REQUEST_NAMES = [

@@ -105,9 +105,9 @@ export default function PluginRoutePage() {
           );
         }
       }
-      if (container) {
-        container.innerHTML = '';
-      }
+      // Don't manually clear container.innerHTML — see comment in
+      // pages/[...path].js for the same fix. Manual wipe races with
+      // React's own unmount and aborts in-flight navigations.
     };
   }, [route, pathname]);
 

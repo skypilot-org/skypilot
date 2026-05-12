@@ -1279,3 +1279,283 @@ def test_kubernetes_kueue_configs(monkeypatch, tmp_path) -> None:
     assert len(contexts) == 2
     assert contexts[0] == 'contextA'
     assert contexts[1] == 'contextB'
+
+
+def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
+    """`quota.queue` is accepted as an alias of `kueue.local_queue_name`."""
+    with open(tmp_path / 'quota_queue.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            quota:
+                queue: default-queue-via-quota
+            context_configs:
+                contextA:
+                    quota:
+                        queue: contextA-queue-via-quota
+                contextB:
+                    kueue:
+                        local_queue_name: contextB-queue-via-kueue
+                contextC:
+                    # Both set: quota.queue wins at the same scope.
+                    quota:
+                        queue: contextC-queue-via-quota
+                    kueue:
+                        local_queue_name: contextC-queue-via-kueue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    quota:
+                        queue: workspaceA-queue-via-quota
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'quota_queue.yaml')
+    skypilot_config.reload_config()
+
+    # Cloud-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='default') == 'default-queue-via-quota'
+    # Context-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextA',
+        workspace='default') == 'contextA-queue-via-quota'
+    # Context-level `kueue.local_queue_name` still works.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextB',
+        workspace='default') == 'contextB-queue-via-kueue'
+    # When both are set at the same scope, `quota.queue` wins.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', region='contextC',
+        workspace='default') == 'contextC-queue-via-quota'
+    # Workspace-level `quota.queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA') == 'workspaceA-queue-via-quota'
+
+
+def test_get_effective_queue_name_workspace_override(monkeypatch,
+                                                     tmp_path) -> None:
+    """Cloud-level `override_configs` must apply inside workspace scope.
+
+    Regression test for a bug where `get_effective_queue_name` prefixed
+    the workspace path onto the lookup keys, so `override_configs` (which
+    mirror the cloud-level config schema and do not carry a `workspaces`
+    section) never took effect when the active workspace had its own
+    queue setting.
+    """
+    with open(tmp_path / 'ws_override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            kueue:
+                local_queue_name: global-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kueue:
+                        local_queue_name: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceA-contextA-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'ws_override.yaml')
+    skypilot_config.reload_config()
+
+    cloud_level_override = {
+        'kubernetes': {
+            'kueue': {
+                'local_queue_name': 'override-queue'
+            }
+        }
+    }
+
+    # Baseline: without override, the workspace's cloud-level value wins.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='workspaceA') == 'workspaceA-queue'
+
+    # Bug scenario: cloud-level override (no `workspaces` section) should
+    # replace the workspace's cloud-level value. Previously the override
+    # was merged at config-root depth and silently ignored.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA',
+        override_configs=cloud_level_override) == 'override-queue'
+
+    # Alias spelling in the override still overrides the legacy spelling
+    # at workspace scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='workspaceA',
+        override_configs={
+            'kubernetes': {
+                'quota': {
+                    'queue': 'override-quota-q'
+                }
+            }
+        }) == 'override-quota-q'
+
+    # Context-level value at the workspace scope still wins over a
+    # cloud-level override, because per-context is a more specific scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_level_override) == 'workspaceA-contextA-queue'
+
+    # Override still applies when falling back to the global scope
+    # (workspace does not override the key).
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        workspace='nonexistent-ws',
+        override_configs=cloud_level_override) == 'override-queue'
+
+
+def _make_config(d: dict) -> config_utils.Config:
+    """Helper to build a Config from a plain dict."""
+    cfg = config_utils.Config()
+    cfg.update(d)
+    return cfg
+
+
+class TestRemoveQueueNameFromConfig:
+    """Tests for remove_queue_name_from_config."""
+
+    def test_removes_queue_names(self):
+        """Queue names are removed from all locations."""
+        cfg = _make_config({
+            'kubernetes': {
+                'kueue': {
+                    'local_queue_name': 'root-q'
+                },
+                'quota': {
+                    'queue': 'root-quota-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx1-q'
+                        },
+                        'quota': {
+                            'queue': 'ctx1-quota-q'
+                        }
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kueue': {
+                            'local_queue_name': 'ws1-q'
+                        },
+                        'quota': {
+                            'queue': 'ws1-quota-q'
+                        },
+                        'context_configs': {
+                            'ctx2': {
+                                'kueue': {
+                                    'local_queue_name': 'ws1-ctx2-q'
+                                },
+                                'quota': {
+                                    'queue': 'ws1-ctx2-quota-q'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                for keys in [
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    ('kubernetes', 'quota', 'queue'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kueue',
+                     'local_queue_name'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'quota', 'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kueue',
+                     'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'quota', 'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'kueue', 'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'quota', 'queue'),
+                ]:
+                    assert current.get_nested(
+                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+
+    def test_noop_when_no_queue_name_set(self):
+        """No error when queue name keys are absent."""
+        cfg = _make_config({'kubernetes': {'allowed_contexts': ['ctx1']}})
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # The config should be unchanged (no crash, no new keys).
+                assert current.get_nested(
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    'NOT_SET') == 'NOT_SET'
+
+    def test_patched_queue_name_keys(self):
+        """Additional keys in _QUEUE_NAME_KEYS are also removed."""
+        extra_key = ('custom', 'queue')
+        cfg = _make_config({
+            'kubernetes': {
+                'kueue': {
+                    'local_queue_name': 'orig-q'
+                },
+                'custom': {
+                    'queue': 'custom-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx-orig-q'
+                        },
+                        'custom': {
+                            'queue': 'ctx-custom-q'
+                        }
+                    }
+                }
+            },
+            'workspaces': {
+                'ws1': {
+                    'kubernetes': {
+                        'kueue': {
+                            'local_queue_name': 'ws-orig-q'
+                        },
+                        'custom': {
+                            'queue': 'ws-custom-q'
+                        },
+                        'context_configs': {
+                            'ctx2': {
+                                'custom': {
+                                    'queue': 'ws-ctx-custom-q'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        patched_keys = [('kueue', 'local_queue_name'), extra_key]
+        with mock.patch.object(skypilot_config, '_QUEUE_NAME_KEYS',
+                               patched_keys), \
+             mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # Both the original and extra key should be None everywhere.
+                for keys in [
+                    ('kubernetes', 'kueue', 'local_queue_name'),
+                    ('kubernetes', 'custom', 'queue'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'kueue',
+                     'local_queue_name'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'custom',
+                     'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'kueue',
+                     'local_queue_name'),
+                    ('workspaces', 'ws1', 'kubernetes', 'custom', 'queue'),
+                    ('workspaces', 'ws1', 'kubernetes', 'context_configs',
+                     'ctx2', 'custom', 'queue'),
+                ]:
+                    assert current.get_nested(
+                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')

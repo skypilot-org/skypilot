@@ -14,6 +14,12 @@ def get_base_url():
     if os.getenv('SPHINX_BUILD_PRODUCTION') == 'true':
         return "https://docs.skypilot.co/en/latest"
 
+    # ReadTheDocs sets READTHEDOCS and READTHEDOCS_CANONICAL_URL.
+    # See: https://docs.readthedocs.io/en/stable/reference/environment-variables.html
+    canonical_url = os.getenv('READTHEDOCS_CANONICAL_URL')
+    if canonical_url:
+        return canonical_url.rstrip('/')
+
     port = os.getenv('SPHINX_PORT', os.getenv('PORT', '8000'))
     return f"http://127.0.0.1:{port}"
 
@@ -35,8 +41,14 @@ def generate_llms_txt(app: Sphinx, exception: Exception) -> None:
     output_path = Path(app.outdir) / "llms.txt"
     output_path.write_text(llms_content)
 
-    # Update source copy
+    # Update source copy — skip if unchanged so the next incremental build
+    # does not see llms.txt as a new source modification.
     source_path = Path(app.srcdir) / "llms.txt"
+    try:
+        if source_path.read_text() == llms_content:
+            return
+    except (FileNotFoundError, UnicodeDecodeError):
+        pass
     source_path.write_text(llms_content)
 
 

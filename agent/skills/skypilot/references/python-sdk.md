@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
@@ -1214,6 +1214,48 @@ sky.workspaces() -> server_common.RequestId[Dict[str, Any]]
 Gets the workspaces.
 
 ## Other Functions
+
+### `sky.create_debug_dump`
+
+```python
+sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Optional[List[str]] = None, managed_job_ids: Optional[List[int]] = None, recent_minutes: Optional[float] = None) -> server_common.RequestId[str]
+```
+
+Create a debug dump for troubleshooting.
+
+At least one of ``request_ids``, ``cluster_names``, ``managed_job_ids``,
+or ``recent_minutes`` must be provided.
+
+**Args:**
+    request_ids: List of request IDs or prefixes to include in the
+        dump. Prefixes are resolved to all matching request IDs on
+        the server.
+    cluster_names: List of cluster names to include in the dump.
+    managed_job_ids: List of managed job IDs to include in the dump.
+    recent_minutes: If specified, include all resources active within
+        this many minutes.
+
+**Returns:**
+    The request ID of the debug dump creation request.
+
+**Request Returns:**
+    Path to the created zip file on the server.
+
+### `sky.download_debug_dump`
+
+```python
+sky.download_debug_dump(dump_filename: str, local_path: Optional[str] = None) -> str
+```
+
+Download a debug dump from the server.
+
+**Args:**
+    dump_filename: The filename of the dump to download.
+    local_path: Local path to save the dump. If None, saves to
+        current directory with the original filename.
+
+**Returns:**
+    Path to the downloaded file.
 
 ### `sky.kubernetes_label_gpus`
 

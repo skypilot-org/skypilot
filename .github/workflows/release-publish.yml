@@ -111,6 +111,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          ref: ${{ github.base_ref }}
           fetch-depth: 0
           token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
@@ -121,6 +122,23 @@ jobs:
           git config --global user.email "action@github.com"
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
+
+      - name: Wait for tag to be available via GitHub API
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          echo "Waiting for tag v${VERSION} to be visible via GitHub API..."
+          for i in $(seq 1 30); do
+            if gh api "repos/${{ github.repository }}/git/refs/tags/v${VERSION}" &>/dev/null; then
+              echo "✅ Tag v${VERSION} is visible via GitHub API (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Tag v${VERSION} not yet visible, retrying in 2s... (attempt $i/30)"
+            sleep 2
+          done
+          echo "❌ Tag v${VERSION} not visible after 60 seconds"
+          exit 1
 
       - name: Find previous release from git tags
         id: find_previous_release
@@ -179,10 +197,21 @@ jobs:
           EOF
 
           echo "Creating release from $PREVIOUS_TAG to v$VERSION"
+          TAG_COMMIT=$(git rev-parse "v${VERSION}^{commit}")
+          echo "Tag v${VERSION} points to commit ${TAG_COMMIT}"
           gh release create "v$VERSION" \
+            --target "$TAG_COMMIT" \
             --title "Release v$VERSION" \
             --notes-file final_release_notes.md \
             --draft
+
+          # Verify the release was created with the correct tag
+          RELEASE_TAG=$(gh release view "v$VERSION" --json tagName -q .tagName 2>/dev/null || echo "")
+          if [ "$RELEASE_TAG" != "v$VERSION" ]; then
+            echo "❌ Release verification failed: expected tag 'v$VERSION', got '${RELEASE_TAG}'"
+            exit 1
+          fi
+          echo "✅ Release created and verified with tag v$VERSION"
 
   cleanup-branches:
     needs: extract-version

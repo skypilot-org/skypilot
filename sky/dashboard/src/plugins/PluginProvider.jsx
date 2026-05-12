@@ -15,6 +15,11 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
+import {
+  trackEvent,
+  trackPluginPageView,
+  registerAnalyticsProvider,
+} from '@/lib/analytics';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -516,7 +521,13 @@ function interceptHistoryApi() {
       normalizedUrl = normalizeUrlForHistory(url);
     }
     try {
-      return originalPushState.call(this, state, title, normalizedUrl);
+      const result = originalPushState.call(this, state, title, normalizedUrl);
+      window.dispatchEvent(
+        new CustomEvent('skydashboard:url-changed', {
+          detail: { url: normalizedUrl || url },
+        })
+      );
+      return result;
     } catch (error) {
       // If pushState still fails (e.g., due to origin mismatch), try with a relative URL
       if (
@@ -527,7 +538,18 @@ function interceptHistoryApi() {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
-          return originalPushState.call(this, state, title, relativeUrl);
+          const result = originalPushState.call(
+            this,
+            state,
+            title,
+            relativeUrl
+          );
+          window.dispatchEvent(
+            new CustomEvent('skydashboard:url-changed', {
+              detail: { url: relativeUrl },
+            })
+          );
+          return result;
         } catch {
           // If that also fails, rethrow the original error
           throw error;
@@ -544,7 +566,18 @@ function interceptHistoryApi() {
       normalizedUrl = normalizeUrlForHistory(url);
     }
     try {
-      return originalReplaceState.call(this, state, title, normalizedUrl);
+      const result = originalReplaceState.call(
+        this,
+        state,
+        title,
+        normalizedUrl
+      );
+      window.dispatchEvent(
+        new CustomEvent('skydashboard:url-changed', {
+          detail: { url: normalizedUrl || url },
+        })
+      );
+      return result;
     } catch (error) {
       // If replaceState still fails (e.g., due to origin mismatch), try with a relative URL
       if (
@@ -555,7 +588,18 @@ function interceptHistoryApi() {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
-          return originalReplaceState.call(this, state, title, relativeUrl);
+          const result = originalReplaceState.call(
+            this,
+            state,
+            title,
+            relativeUrl
+          );
+          window.dispatchEvent(
+            new CustomEvent('skydashboard:url-changed', {
+              detail: { url: relativeUrl },
+            })
+          );
+          return result;
         } catch {
           // If that also fails, rethrow the original error
           throw error;
@@ -708,6 +752,15 @@ function createPluginApi(dispatch) {
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
     },
+    trackEvent(eventName, properties = {}) {
+      trackEvent(eventName, properties);
+    },
+    trackPluginPageView(pluginName, pagePath) {
+      trackPluginPageView(pluginName, pagePath);
+    },
+    registerAnalyticsProvider(provider) {
+      registerAnalyticsProvider(provider);
+    },
     registerRecipeType(config) {
       if (!config || !config.id || !config.label) {
         console.warn(
@@ -854,6 +907,12 @@ export function PluginProvider({ children }) {
         // Signal that all plugin scripts have finished loading.
         // layout.jsx listens for this to avoid showing the fallback top bar
         // before the sidebar plugin has had a chance to register.
+        // Also set a synchronously-readable global flag so pages that
+        // mount AFTER this event has fired can detect that state without
+        // waiting on a 2-second safety-net timeout. Without this, every
+        // navigation to a plugin-aware page paid an unconditional 2s
+        // gate before rendering anything.
+        window.__skyDashboardPluginsLoaded = true;
         window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
       }
     };
@@ -1008,6 +1067,20 @@ export function useTableColumns(tableName, context = {}) {
 export function useDataProvider(id) {
   const { dataProviders } = usePluginState();
   return dataProviders[id] || null;
+}
+
+/**
+ * Hook to access all registered data providers as an array.
+ *
+ * Used by host pages that want to discover plugins exposing a particular
+ * hook by name (e.g., looking for any provider with a `useExtraInfraRows`
+ * hook) without knowing any specific plugin id.
+ *
+ * @returns {Array} All registered data provider configs
+ */
+export function useAllDataProviders() {
+  const { dataProviders } = usePluginState();
+  return Object.values(dataProviders);
 }
 
 /**

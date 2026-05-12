@@ -1,9 +1,12 @@
 """SDK functions for managed jobs."""
 import json
 import os
+import pathlib
+import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+import zlib
 
 import click
 
@@ -268,11 +271,17 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    # Filter out fields not supported by older servers
-    remote_api_version = versions.get_remote_api_version()
-    if fields is not None and (remote_api_version is None or
-                               remote_api_version < 31):
-        fields = [f for f in fields if f != 'is_primary_in_job_group']
+    # Filter out fields not supported by older servers.
+    # Maps minimum API version -> fields introduced in that version.
+    version_to_fields = {
+        31: {'is_primary_in_job_group'},
+        49: {'batch_total_batches', 'batch_completed_batches'},
+    }
+    if fields is not None:
+        remote_api_version = versions.get_remote_api_version()
+        for min_version, new_fields in version_to_fields.items():
+            if remote_api_version is None or remote_api_version < min_version:
+                fields = [f for f in fields if f not in new_fields]
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
@@ -454,6 +463,7 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
+              tail_offset: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None,
               task: Optional[Union[str, int]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
@@ -485,6 +495,12 @@ def tail_logs(name: Optional[str] = None,
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    if tail is not None and tail <= 0:
+        raise ValueError(
+            f'tail must be None or a positive integer, got {tail}.')
+    if tail_offset is not None and tail_offset < 0:
+        raise ValueError(f'tail_offset must be None or a non-negative integer, '
+                         f'got {tail_offset}.')
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -492,6 +508,7 @@ def tail_logs(name: Optional[str] = None,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        tail_offset=tail_offset,
         task=task,
     )
     response = server_common.make_authenticated_request(
@@ -502,12 +519,12 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is 0, thus can resume previous
-    # streaming point on retry.
+    # Log request is idempotent when tail is None or 0 (both stream from
+    # the beginning), thus can resume previous streaming point on retry.
     result = sdk.stream_response(request_id=request_id,
                                  response=response,
                                  output_stream=output_stream,
-                                 resumable=(tail == 0),
+                                 resumable=(tail is None or tail == 0),
                                  get_result=follow)
     # When the user followed logs to completion, the controller is done
     # processing this job and its timeline file is final — merge it.
@@ -571,6 +588,131 @@ def wait(
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def download_logs_streaming(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Optional[Dict[int, str]]:
+    """Download a managed job's log via the streaming /api/stream path.
+
+    Returns None when the server stream is empty (e.g. terminal job
+    whose worker cluster is gone) — the caller should fall back to
+    ``download_logs``.
+
+    This dispatches the same /jobs/logs (tail=None, follow=False) path
+    that the live-tail UI uses, then attaches to /api/stream with
+    compress=gz so gzip framing saves bandwidth on the wire. The
+    response is decompressed on the client and saved as a plain log
+    file inside a per-job directory; the directory shape matches the
+    legacy ``download_logs`` output (``<dir>/controller.log`` for
+    ``--controller``, ``<dir>/run.log`` otherwise) so callers that
+    walk the returned path with ``[ -d ]`` / ``cat <dir>/foo.log``
+    keep working.
+
+    Returns:
+        ``{job_id: local_directory}``. The directory contains
+        ``controller.log`` (controller mode) or ``run.log``
+        (non-controller).
+    """
+    body = payloads.JobsLogsBody(
+        name=name,
+        job_id=job_id,
+        follow=False,
+        controller=controller,
+        refresh=refresh,
+        tail=None,
+    )
+    dispatch = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/logs',
+        json=json.loads(body.model_dump_json()),
+        stream=True,
+        timeout=(5, None))
+    if not dispatch.ok:
+        raise RuntimeError(
+            f'Failed to dispatch /jobs/logs: HTTP {dispatch.status_code}')
+    request_id = dispatch.headers.get(server_constants.STREAM_REQUEST_HEADER) \
+        or dispatch.headers.get('X-SkyPilot-Request-ID')
+    if not request_id:
+        raise RuntimeError(
+            '/jobs/logs response missing X-SkyPilot-Request-ID header')
+
+    # Drain the dispatch body in a background thread. Cancelling/closing
+    # would tell the API server the client disconnected and the running
+    # tail_logs task would be cancelled, leaving /api/stream with only
+    # a partial log. Reading and discarding keeps the request alive.
+    def _drain() -> None:
+        try:
+            for _ in dispatch.iter_content(chunk_size=64 * 1024):
+                pass
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    threading.Thread(target=_drain, daemon=True).start()
+
+    stream_url = (f'/api/stream?request_id={request_id}'
+                  '&format=plain&compress=gz')
+    stream_resp = server_common.make_authenticated_request('GET',
+                                                           stream_url,
+                                                           stream=True,
+                                                           timeout=(5, None))
+    if not stream_resp.ok:
+        raise RuntimeError(
+            f'Failed to attach to /api/stream: HTTP {stream_resp.status_code}')
+
+    # Save into a per-job directory matching the legacy download_logs
+    # shape (<dir>/controller.log or <dir>/run.log) so existing scripts
+    # that grep <path>/controller.log keep working. Decompress on the
+    # client when the server gzipped the stream — older API servers
+    # without compress=gz support silently ignore the query param and
+    # return text/plain, so sniff Content-Type and skip decompression
+    # in that case.
+    content_type = (stream_resp.headers.get('Content-Type') or '').lower()
+    is_gzipped = content_type.startswith('application/gzip')
+    decompressor = (zlib.decompressobj(16 +
+                                       zlib.MAX_WBITS) if is_gzipped else None)
+    log_type = 'controller' if controller else 'job'
+    log_filename = 'controller.log' if controller else 'run.log'
+    job_label = job_id if job_id is not None else (name or 'latest')
+    job_dir = (pathlib.Path(local_dir).expanduser() / 'managed_jobs' /
+               f'managed-{log_type}-{job_label}')
+    job_dir.mkdir(parents=True, exist_ok=True)
+    local_path = job_dir / log_filename
+
+    bytes_written = 0
+    with open(local_path, 'wb') as f:
+        for chunk in stream_resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            out = decompressor.decompress(chunk) if decompressor else chunk
+            if out:
+                f.write(out)
+                bytes_written += len(out)
+        if decompressor is not None:
+            tail_bytes = decompressor.flush()
+            if tail_bytes:
+                f.write(tail_bytes)
+                bytes_written += len(tail_bytes)
+
+    if bytes_written == 0:
+        # Server sent nothing (e.g., terminal job, worker cluster gone) —
+        # the underlying tail_logs has no source. Remove the empty file
+        # + dir and return None so the caller falls back to sync-down.
+        try:
+            local_path.unlink()
+            job_dir.rmdir()
+        except OSError:
+            pass
+        return None
+
+    key = int(job_id) if job_id is not None else 0
+    return {key: str(job_dir)}
 
 
 @usage_lib.entrypoint

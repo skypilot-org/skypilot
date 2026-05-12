@@ -1223,7 +1223,8 @@ class JobLibCodeGen:
                                     metadata_jsons: List[str],
                                     is_primary_in_job_groups: List[bool],
                                     execution: str,
-                                    num_jobs: int = 1) -> str:
+                                    num_jobs: int = 1,
+                                    is_batch: bool = False) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
         pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
         user_hash_str = f'{user_hash!r}' if user_hash is not None else 'None'
@@ -1236,6 +1237,36 @@ class JobLibCodeGen:
                               ']')
         is_primary_in_job_groups_str = ('[' + ','.join(
             str(is_primary) for is_primary in is_primary_in_job_groups) + ']')
+        # Build the set_job_info_without_job_id call, gating the is_batch
+        # parameter behind a SKYLET_VERSION check so that old controllers
+        # (< 35) that don't have the parameter still work for non-batch
+        # jobs, and batch jobs get a clear error instead of silently
+        # succeeding as an empty task.
+        base_kwargs = (f'name={name!r},'
+                       f'workspace={workspace!r},'
+                       f'entrypoint={entrypoint!r},'
+                       f'pool={pool_str},'
+                       f'pool_hash={pool_hash_str},'
+                       f'user_hash={user_hash_str},'
+                       f'execution={execution!r}')
+        if is_batch:
+            set_job_info_code = (
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
+                '\n    raise RuntimeError('
+                '"The jobs controller does not support batch jobs. '
+                'Please update it with: sky jobs controller up --yes")'
+                '\n  job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs},'
+                f'is_batch={is_batch!r})')
+        else:
+            set_job_info_code = (
+                '\n  if int(constants.SKYLET_VERSION) < 36:'
+                '\n    job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs})'
+                '\n  else:'
+                '\n    job_id = managed_job_state.set_job_info_without_job_id('
+                f'{base_kwargs},'
+                f'is_batch={is_batch!r})')
         code = [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',
@@ -1245,15 +1276,7 @@ class JobLibCodeGen:
             f'\nmetadata_jsons = {metadata_jsons_str}',
             f'\nis_primary_in_job_groups = {is_primary_in_job_groups_str}',
             '\njob_ids = []',
-            '\nfor _ in range(num_jobs):'
-            '\n  job_id = managed_job_state.set_job_info_without_job_id('
-            f'name={name!r},'
-            f'workspace={workspace!r},'
-            f'entrypoint={entrypoint!r},'
-            f'pool={pool_str},'
-            f'pool_hash={pool_hash_str},'
-            f'user_hash={user_hash_str},'
-            f'execution={execution!r})',
+            '\nfor _ in range(num_jobs):' + set_job_info_code,
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
             '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
@@ -1331,9 +1354,23 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  tail: int = 0) -> str:
+                  tail: int = 0,
+                  tail_offset: Optional[int] = None) -> str:
         # pylint: disable=line-too-long
 
+        # tail_offset is gated on SKYLET_VERSION 37+ — older skylets reject
+        # the kwarg. We omit it entirely on the old branch so the codegen
+        # signature stays identical to what those skylets expect.
+        tail_logs_call = (
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})'
+        )
+        if tail_offset is not None:
+            tail_logs_call = (
+                f'if int(constants.SKYLET_VERSION) < 37:'
+                f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})'
+                f'\nelse:'
+                f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
+            )
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
@@ -1348,9 +1385,14 @@ class JobLibCodeGen:
              f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
             ),
             # Add a newline to leave the if indent block above.
-            f'\nlog_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})',
-            # After tailing, check the job status and exit with appropriate code
-            'job_status = job_lib.get_status(job_id)',
+            '\n' + tail_logs_call,
+            # After tailing, check the job status and exit with appropriate
+            # code. The leading '\n' resets indentation back to column 0;
+            # without it, ';'.join() in _build below would paste these onto
+            # the last line of the if/else above and the statements would be
+            # absorbed into the `else:` suite (so the if-branch falls through
+            # without sys.exit-ing).
+            '\njob_status = job_lib.get_status(job_id)',
             'exit_code = exceptions.JobExitCode.from_job_status(job_status)',
             # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
             # exit with success (0) since fetching current logs is a successful operation.

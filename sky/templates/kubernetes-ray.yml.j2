@@ -22,9 +22,7 @@ provider:
     namespace: {{k8s_namespace}}
 
     # The kubecontext used to connect to the Kubernetes cluster.
-    {% if k8s_context is not none %}
     context: {{k8s_context}}
-    {% endif %}
 
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
@@ -473,7 +471,9 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% set seen_volumes = [] %}
         {% for volume_mount in volume_mounts %}
+        {% if volume_mount.name not in seen_volumes %}
         {% if volume_mount.volume_type == 'k8s-hostpath' %}
         - name: {{volume_mount.name}}
           hostPath:
@@ -483,6 +483,8 @@ available_node_types:
         - name: {{volume_mount.name}}
           persistentVolumeClaim:
             claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endif %}
+        {% if seen_volumes.append(volume_mount.name) %}{% endif %}
         {% endif %}
         {% endfor %}
         {% if k8s_enable_gpudirect_tcpx %}
@@ -700,13 +702,11 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
-              {% for vm in volume_mounts %}
-              {% if vm.volume_type == 'k8s-hostpath' %}
-              # Fix permissions for hostPath volume {{vm.name}}.
-              # hostPath directories are created as root:root by Kubernetes,
-              # but the container may run as a non-root user.
-              $(prefix_cmd) chown -R :$(id -g) {{vm.path}} && $(prefix_cmd) chmod -R g+rwx {{vm.path}};
-              {% endif %}
+              {% for path in volume_mount_rw_paths %}
+              # Fix write permissions for volume mount if needed.
+              # Directories may be created as root:root by kubelet (hostPath,
+              # subPath) or may not respect fsGroup (NFS-backed volumes).
+              test -w "{{path}}" || ($(prefix_cmd) chown :$(id -g) "{{path}}" && $(prefix_cmd) chmod g+rwx "{{path}}") || true;
               {% endfor %}
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
@@ -714,6 +714,14 @@ available_node_types:
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
+                # Timeout (seconds) for each individual apt-get invocation.
+                # The default Acquire::http::Timeout is 120s which is too slow
+                # when mirrors are degraded but not fully down.
+                APT_ACQUIRE_TIMEOUT=30
+                APT_CMD_TIMEOUT=60
+                APT_INSTALL_CMD_TIMEOUT=90
+                APT_OPTS="-o Acquire::http::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::https::Timeout=${APT_ACQUIRE_TIMEOUT} -o Acquire::Retries=0"
+
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -726,13 +734,16 @@ available_node_types:
                     # apt-get update returns 0 even when sources fail to fetch,
                     # so we also check output for failure indicators.
                     local output
-                    output=$(DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update 2>&1)
+                    output=$(timeout $APT_CMD_TIMEOUT $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive apt-get update $APT_OPTS 2>&1)
                     local rc=$?
                     echo "$output" >> "$log"
-                    if [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
+                    if [ $rc -eq 124 ]; then
+                      echo "apt-get update timed out after ${APT_CMD_TIMEOUT}s (attempt $i/$tries)" >> "$log"
+                    elif [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
                       set -e; return 0
+                    else
+                      echo "apt-get update attempt $i/$tries failed (rc=$rc)" >> "$log"
                     fi
-                    echo "apt-get update attempt $i/$tries failed" >> "$log"
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
                   set -e
@@ -747,8 +758,19 @@ available_node_types:
                   local delay=1
                   local i
                   for i in $(seq 1 $tries); do
-                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages && { set -e; return 0; }
-                    echo "apt-get install failed for: $packages (attempt $i/$tries). Running -f install and retrying..." >> "$log"
+                    timeout $APT_INSTALL_CMD_TIMEOUT \
+                      $(prefix_cmd) env DEBIAN_FRONTEND=noninteractive \
+                      apt-get install $APT_OPTS -y \
+                      -o Dpkg::Options::="--force-confdef" \
+                      -o Dpkg::Options::="--force-confold" $packages
+                    local rc=$?
+                    if [ $rc -eq 0 ]; then
+                      set -e; return 0
+                    elif [ $rc -eq 124 ]; then
+                      echo "apt-get install timed out after ${APT_INSTALL_CMD_TIMEOUT}s for: $packages (attempt $i/$tries)" >> "$log"
+                    else
+                      echo "apt-get install failed for: $packages (attempt $i/$tries, rc=$rc). Running -f install and retrying..." >> "$log"
+                    fi
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
                     [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
@@ -781,7 +803,24 @@ available_node_types:
                 update_apt_sources() {
                   local host=$1
                   local apt_file=$2
-                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                  # || true: a sed failure on one sources file (read-only fs,
+                  # immutable bit, full tmpfs) shouldn't kill the whole step;
+                  # restore_source will undo any partial edits on the next
+                  # iteration of the candidate-mirror loop.
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$apt_file" || true
+                }
+                # Surface /tmp/apt-update.log to the pod's stderr on failure.
+                # Without this, users only see the terse summary line — the
+                # actual apt error stays inside the (often torn-down) pod.
+                dump_apt_log() {
+                  local log=/tmp/apt-update.log
+                  if [ -f "$log" ]; then
+                    echo "=== /tmp/apt-update.log (last 200 lines) ===" >&2
+                    tail -n 200 "$log" >&2 || true
+                    echo "=== end /tmp/apt-update.log ===" >&2
+                  else
+                    echo "/tmp/apt-update.log not found" >&2
+                  fi
                 }
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
@@ -832,10 +871,14 @@ available_node_types:
                 # so we only add mirror candidates for ubuntu here.
                 # Selected from https://launchpad.net/ubuntu/+archivemirrors
                 # and results from apt-select
+                {% if k8s_apt_mirrors is not none %}
+                MIRROR_CANDIDATES="{{ k8s_apt_mirrors | join(' ') }}"
+                {% else %}
                 MIRROR_CANDIDATES=""
                 if [ "$APT_OS" = "ubuntu" ]; then
                   MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
                 fi
+                {% endif %}
 
                 INSTALL_SUCCESS=false
                 backup_source
@@ -854,6 +897,7 @@ available_node_types:
                     fi
                     if [ "$found_sources" = "false" ]; then
                       echo "Error: no apt sources file found" >> /tmp/apt-update.log
+                      dump_apt_log
                       break
                     fi
                   fi
@@ -891,6 +935,7 @@ available_node_types:
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  dump_apt_log
                   exit 1
                 fi;
 
@@ -908,7 +953,11 @@ available_node_types:
                   https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
                   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
                   | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
-                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1 || {
+                  echo "Error: failed to install Docker CLI / buildx plugin." >> /tmp/apt-update.log
+                  dump_apt_log
+                  exit 1
+                }
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}
@@ -996,7 +1045,10 @@ available_node_types:
               (
                 (
                 set -e
-                mkdir -p ~/.sky
+                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # writes python_path there before ray_installation_commands (which
+                # contains SETUP_SKY_DIRS_COMMANDS) creates it.
+                mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
@@ -1009,16 +1061,16 @@ available_node_types:
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # ~/.sky/python_path is seeded by conda_installation_commands
-                VIRTUAL_ENV=~/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                # python_path is seeded by conda_installation_commands
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1178,28 +1230,35 @@ available_node_types:
                 echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
 
                 touch {{k8s_high_availability_restarting_signal_file}}
-                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
-                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
-                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
-                # will delete the service from the database after it is terminated so everything in the database is running.
+                # Get in-progress managed job IDs. For SkyServe this is None
+                # and every service will be recovered (SkyServe deletes
+                # terminated services so everything in the DB is running).
                 ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
-                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
-                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
-                  JOB_ID=$(basename $file | sed 's/sky_job_//')
-                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  # After set_job_info_without_job_id (#7891), the cluster job
+                  # ID in the script filename no longer equals managed job ID.
+                  # Extract managed job IDs from the script content instead
+                  # (job_ids_array set in jobs-controller.yaml.j2).
                   if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
-                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
+                    MANAGED_IDS=$(sed -n 's/.*job_ids_array=(\([^)]*\)).*/\1/p' "$file" | head -1)
+                    FOUND_IN_PROGRESS=false
+                    if [ -n "$MANAGED_IDS" ]; then
+                      for MID in $MANAGED_IDS; do
+                        if [[ " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${MID} " ]]; then
+                          FOUND_IN_PROGRESS=true
+                          break
+                        fi
+                      done
+                    fi
+                    if [ "$FOUND_IN_PROGRESS" == "false" ]; then
                       continue
                     fi
                   fi
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
-                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
-                  # We should do more tests and make sure it will scale well.
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
                 done
@@ -1226,6 +1285,7 @@ available_node_types:
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
+          - containerPort: 46590  # Used by Skylet gRPC
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to

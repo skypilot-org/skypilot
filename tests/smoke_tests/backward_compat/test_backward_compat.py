@@ -157,6 +157,29 @@ class TestBackwardCompatibility:
             'uv pip install uvicorn==0.35.0 && '
             f'{pip_install_cmd}')
 
+        # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
+        # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
+        # in _get_availability_zones(), causing ThreadPool crashes when
+        # me-south-1 is unreachable. Remove once the minimum compatible
+        # version includes commit 6e5d73633.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-03 (which includes commit 6e5d73633).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_me_south_1.py"}')
+
+        # Hot-patch old env with click<8.3.0 pin (PR #9459).
+        # Old SkyPilot versions don't pin click<8.3.0 in RAY_INSTALLATION_COMMANDS
+        # or the cloud-deps install. typer 0.25.x transitively pulls click>=8.2.1
+        # with no upper bound, so uv resolves click to 8.3.x on the controller.
+        # ray 2.9.3 then crashes on import via copy.deepcopy on Click Sentinels,
+        # surfacing as 'Failed to start ray on the head node'.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-28 (which includes commit a1a1f0bef).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
+
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
@@ -490,8 +513,18 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
             ]
 
+        # Test sync-down with a job that succeeded in the old version.
+        # managed_job_name-old-1 ran 'echo hi' and SUCCEEDED before the
+        # version switch, so sync-down should work with new server + new client.
+        sync_down_commands = [
+            f's=$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down '
+            f'-n {managed_job_name}-old-1 2>&1) && echo "$s" && '
+            f'echo "$s" | grep -E "Job .* logs: "',
+        ]
+
         # Combine all commands
-        current_commands = common_initial_commands + version_specific_commands
+        current_commands = (common_initial_commands + sync_down_commands +
+                            version_specific_commands)
 
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278

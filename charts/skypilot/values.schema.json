@@ -89,6 +89,31 @@
                         "null"
                     ]
                 },
+                "livenessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "httpGet": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "periodSeconds": {
+                            "type": "integer"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer"
+                        }
+                    }
+                },
                 "logs": {
                     "type": "object",
                     "properties": {
@@ -121,6 +146,37 @@
                 },
                 "preDeployHook": {
                     "type": "string"
+                },
+                "readinessProbe": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "failureThreshold": {
+                            "type": "integer"
+                        },
+                        "httpGet": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "integer"
+                                }
+                            }
+                        },
+                        "initialDelaySeconds": {
+                            "type": "integer"
+                        },
+                        "periodSeconds": {
+                            "type": "integer"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer"
+                        }
+                    }
                 },
                 "replicas": {
                     "type": "integer"
@@ -163,6 +219,12 @@
                 },
                 "tolerations": {
                     "type": "array"
+                },
+                "topologySpreadTopologyKey": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 },
                 "upgradeStrategy": {
                     "type": "string"
@@ -486,6 +548,9 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "sessionAffinity": {
+                    "type": "boolean"
                 },
                 "tls": {
                     "type": "object",
