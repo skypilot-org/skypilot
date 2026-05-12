@@ -113,6 +113,7 @@ jobs:
       package_name: skypilot
       expected_version: ${{ needs.build-package.outputs.version }}
       repository_type: 'test-pypi'
+      release_environment: 'staging'
     secrets: inherit
 
   docker-staging:
