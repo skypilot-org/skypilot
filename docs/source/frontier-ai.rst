@@ -7,7 +7,7 @@ SkyPilot for Frontier AI
 
 SkyPilot is used by AI teams of all sizes, from individual researchers to organizations running thousands of GPUs across Kubernetes, Slurm, and 20+ clouds.
 
-For **AI infra and platform teams supporting frontier AI work**, **SkyPilot Platform** extends SkyPilot OSS with capabilities tuned for production at scale:
+For AI infra and platform teams supporting frontier AI work, **SkyPilot Platform** extends SkyPilot OSS with capabilities tuned for production at scale:
 
 - **Researcher productivity** — persistent dev environments for engineers and AI agents; fast launches across the AI lifecycle: large-scale pre-training, SFT and RL post-training, batch inference, RL rollouts, and parallel evals.
 - **Higher GPU utilization** — multi-team quotas with borrowing and preemption, fleet-wide observability, idle reclamation.
