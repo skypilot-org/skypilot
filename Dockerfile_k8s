@@ -75,7 +75,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         'ray[default]==2.9.3' 'pycryptodome==3.12.0' \
         'setuptools<70' 'click<8.3.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    curl -LO "https://dl.k8s.io/release/v1.33.7/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.33.11/bin/linux/$ARCH/kubectl" && \
     chmod +x kubectl && \
     mkdir -p $HOME/.local/bin && \
     mv kubectl $HOME/.local/bin/ && \
