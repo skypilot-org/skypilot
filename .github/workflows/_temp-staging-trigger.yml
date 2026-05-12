@@ -1,0 +1,18 @@
+# TEMPORARY — delete before merging PR #9582.
+# Auto-fires the staging test pipeline on every push to ci/test-release-pipeline
+# so we can iterate on the release workflow without using the GitHub UI.
+name: TEMP - Auto-trigger staging on push
+
+on:
+  push:
+    branches:
+      - ci/test-release-pipeline
+
+jobs:
+  run-staging:
+    uses: ./.github/workflows/test-release-pipeline.yml
+    with:
+      # Fork lacks TEST_PYPI_API_TOKEN; skip the publish-test-pypi job.
+      # Set to false if running on a repo that has that secret.
+      skip_test_pypi: true
+    secrets: inherit

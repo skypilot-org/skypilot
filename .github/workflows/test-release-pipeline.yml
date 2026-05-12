@@ -2,7 +2,7 @@ name: Test Release Pipeline (Staging)
 
 # End-to-end test of the release pipeline using staging destinations.
 # Publishes to test-pypi (PyPI), berkeleyskypilot/skypilot with a
-# 99.99.99.dev<timestamp> tag (Docker, no :latest), and the `test` branch
+# 0.0.0.dev<timestamp> tag (Docker, no :latest), and the `test` branch
 # of skypilot-org/skypilot-helm (Helm, force-pushed each run).
 # Safe to run from any branch without affecting production.
 
@@ -13,12 +13,30 @@ on:
         description: 'Test version (e.g. 0.0.0.dev20260511). Auto-generated if empty. Must sort below real releases on PEP440.'
         type: string
         required: false
+      skip_test_pypi:
+        description: 'Skip test-pypi publish (use when TEST_PYPI_API_TOKEN is unavailable)'
+        type: boolean
+        default: false
       skip_docker:
         description: 'Skip Docker build/push'
         type: boolean
         default: false
       skip_helm:
         description: 'Skip Helm chart publish'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+      skip_test_pypi:
+        type: boolean
+        default: false
+      skip_docker:
+        type: boolean
+        default: false
+      skip_helm:
         type: boolean
         default: false
 
@@ -89,6 +107,7 @@ jobs:
 
   publish-test-pypi:
     needs: build-package
+    if: ${{ !inputs.skip_test_pypi }}
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot
