@@ -19,7 +19,7 @@ RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse unzip socat netcat-openbsd curl autossh jq \
+        pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq \
         rdma-core ibverbs-providers libibverbs1 libibverbs-dev \
         librdmacm1 ibverbs-utils infiniband-diags \
         numactl iputils-ping && \

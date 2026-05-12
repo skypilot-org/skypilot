@@ -19,7 +19,7 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse unzip socat netcat-openbsd curl autossh jq && \
+        pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq && \
     apt-get install -y --no-install-recommends fuse3 && \
     rm -rf /var/lib/apt/lists/*
 
