@@ -9,6 +9,10 @@ Sky Batch
 
 Sky Batch lets you distribute data processing across cloud GPUs and on-prem clusters at scale. Given a dataset and a processing function, Sky Batch splits the data into batches, distributes them across a pool of workers, and collects the results, all in a few lines of Python.
 
+.. seealso::
+
+   Sky Batch is built on top of SkyPilot **worker pools**. For the underlying primitive — manually managing a pool of workers and submitting jobs to it — see :ref:`Using a Pool of Workers <pool>`.
+
 .. contents:: Contents
    :local:
    :backlinks: none
