@@ -1,15 +1,27 @@
 # We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
-FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 # Detect architecture using ARG with default value
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install ssh and other local dependencies
-# We remove cuda lists to avoid conflicts with the cuda version installed by ray
+# Install ssh, InfiniBand userspace, and other local dependencies.
+# We remove cuda lists to avoid conflicts with the cuda version installed by ray.
+# FUSE setup mirrors sky/templates/kubernetes-ray.yml.j2:825-832 — install
+# fuse (FUSE 2) in the main batch, then fuse3 in a separate apt-get call.
+# fuse and fuse3 cannot be installed together (fuse3 Breaks: fuse — both ship
+# /usr/bin/fusermount), but in two steps apt resolves the conflict by removing
+# the `fuse` package while leaving `libfuse2`. Final state: libfuse.so.2 +
+# libfuse3.so.3 both in ldconfig (covers hf-mount + legacy FUSE 2 clients).
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
-    apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq -y && \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        git gcc rsync sudo patch openssh-server \
+        pciutils nano fuse unzip socat netcat-openbsd curl autossh jq \
+        rdma-core ibverbs-providers libibverbs1 libibverbs-dev \
+        librdmacm1 ibverbs-utils infiniband-diags \
+        numactl iputils-ping && \
+    apt-get install -y --no-install-recommends fuse3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
@@ -19,11 +31,12 @@ RUN sudo mkdir -p /var/run/sshd && \
     cd /etc/ssh/ && \
     sudo ssh-keygen -A
 
-# Setup new user named sky and add to sudoers. \
-# Also add /opt/conda/bin to sudo path and give sky user permission to run sudo without password
+# Setup new user named sky and add to sudoers. secure_path is hardcoded
+# (sudoers cannot expand $HOME) with /home/sky/miniconda3/bin so that
+# `sudo conda ...` resolves — conda lives in $HOME/miniconda3 in this image.
 RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
-    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
+    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/home/sky/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
 
 # Switch to sky user
 USER sky
@@ -45,9 +58,9 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         *) echo "$(uname -m)" ;; \
     esac)} && \
     if [ "$ARCH" = "arm64" ]; then \
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
     else \
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
     fi && \
     bash miniconda.sh -b -p $HOME/miniconda3 && \
     rm miniconda.sh && \
@@ -58,7 +71,15 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
-    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    # Pre-install setuptools<70 and click<8.3.0 here so that the per-launch
+    # pins in RAY_INSTALLATION_COMMANDS hit "already satisfied" and skip the
+    # network round-trip. setuptools<70 avoids pkg_resources packaging import
+    # break; click<8.3.0 avoids Ray CLI deepcopy break (ray-project/ray#56747).
+    # uv pip uninstall skypilot-nightly leaves all transitive deps in place,
+    # so subsequent `sky launch` only installs the matching skypilot wheel.
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
+        'ray[default]==2.9.3' 'pycryptodome==3.12.0' \
+        'setuptools<70' 'click<8.3.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
     curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     # Install kubectl to user's local bin instead of system path to avoid
