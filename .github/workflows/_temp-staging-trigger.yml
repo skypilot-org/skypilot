@@ -14,7 +14,7 @@ jobs:
     with:
       # Upstream has TEST_PYPI_API_TOKEN; let publish-test-pypi run end-to-end.
       skip_test_pypi: false
-      # Helm `test` branch must exist on skypilot-org/skypilot-helm before
-      # this can run. Re-enable once the branch is created.
-      skip_helm: true
+      # publish-helm.yml self-bootstraps the test branch via force-push, so
+      # no manual setup needed on skypilot-org/skypilot-helm.
+      skip_helm: false
     secrets: inherit
