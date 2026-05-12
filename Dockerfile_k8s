@@ -15,6 +15,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # the `fuse` package while leaving `libfuse2`. Final state: libfuse.so.2 +
 # libfuse3.so.3 both in ldconfig (covers hf-mount + legacy FUSE 2 clients).
 RUN apt-get update -y && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git gcc rsync sudo patch openssh-server \

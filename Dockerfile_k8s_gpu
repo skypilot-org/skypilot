@@ -15,6 +15,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # libfuse3.so.3 both in ldconfig (covers hf-mount + legacy FUSE 2 clients).
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt-get update -y && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git gcc rsync sudo patch openssh-server \
