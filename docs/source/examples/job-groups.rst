@@ -1,7 +1,7 @@
 .. _job-groups:
 
-Job Groups
-==========
+Job Groups for RL
+=================
 
 .. warning::
 
