@@ -12,10 +12,9 @@ jobs:
   run-staging:
     uses: ./.github/workflows/test-release-pipeline.yml
     with:
-      # Fork lacks TEST_PYPI_API_TOKEN; skip the publish-test-pypi job.
-      skip_test_pypi: true
-      # Fork's HELM_DEPLOY_KEY value is malformed (libcrypto parse error)
-      # and would lack write access to skypilot-org/skypilot-helm anyway.
-      # Helm publishing is validated separately on upstream.
+      # Upstream has TEST_PYPI_API_TOKEN; let publish-test-pypi run end-to-end.
+      skip_test_pypi: false
+      # Helm `test` branch must exist on skypilot-org/skypilot-helm before
+      # this can run. Re-enable once the branch is created.
       skip_helm: true
     secrets: inherit
