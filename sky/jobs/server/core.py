@@ -627,7 +627,7 @@ def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
         creator_user_id=creator_user_id,
         service_account_user_id=creator_user_id,
         token_name=token_name,
-        expires_in_days=3)
+        expires_in_days=managed_job_constants.MANAGED_JOB_TOKEN_TTL_DAYS)
 
     global_user_state.add_service_account_token(
         token_id=token_data['token_id'],

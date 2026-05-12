@@ -80,3 +80,8 @@ MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
 # Keep this in sync with the token name format in
 # sky/jobs/server/core.py::_create_job_api_token.
 MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
+
+# TTL for service-account tokens issued to managed jobs with
+# api_server_access. Kept short so any tokens that leak past the controller
+# cleanup are reaped quickly by the expired-token-cleanup daemon.
+MANAGED_JOB_TOKEN_TTL_DAYS = 3
