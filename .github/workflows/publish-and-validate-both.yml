@@ -37,6 +37,7 @@ jobs:
       package_name: ${{ inputs.package_name }}
       expected_version: ${{ inputs.expected_version }}
       repository_type: 'test-pypi'
+      release_environment: ${{ inputs.release_environment }}
     secrets: inherit
 
   publish-and-validate-pypi:
@@ -47,4 +48,5 @@ jobs:
       package_name: ${{ inputs.package_name }}
       expected_version: ${{ inputs.expected_version }}
       repository_type: 'pypi'
+      release_environment: ${{ inputs.release_environment }}
     secrets: inherit
