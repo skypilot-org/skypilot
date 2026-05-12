@@ -302,7 +302,8 @@ Follow updates:
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
-   Batch Inference and Worker Pools <../examples/batch/index>
+   Using a Pool of Workers <../examples/pools>
+   Batch Inference <../examples/batch/index>
    Job Groups for RL <../examples/job-groups>
 
 .. toctree::

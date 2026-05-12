@@ -1,15 +1,9 @@
-:orphan:
-
 .. _pool:
 
 Using a Pool of Workers
 =======================
 
 SkyPilot supports spawning a **pool** that launches a set of **workers** with identical environments. Jobs can be scheduled on this pool and will be assigned to workers as they become available.
-
-.. seealso::
-
-   For batch data processing and batch inference on top of worker pools (with a simple Python API), see :ref:`Sky Batch <batch-processing>`.
 
 .. image:: ../images/pools-architecture.jpg
   :width: 70%
