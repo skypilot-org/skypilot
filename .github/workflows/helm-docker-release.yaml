@@ -72,7 +72,9 @@ jobs:
       commit_message: 'Update Helm charts for ${{ needs.set-package.outputs.package_name }} version ${{ needs.docker-build.outputs.version }}'
       package_name: ${{ needs.set-package.outputs.package_name }}
       release_environment: ${{ inputs.release_environment }}
-      docker_image: ${{ needs.docker-build.outputs.effective_docker_image }}
+      # docker_image intentionally not passed: publish-helm.yml falls back
+      # to DOCKER_USERNAME/package_name. Passing via a job output fails
+      # because GitHub strips outputs whose value contains a secret.
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}

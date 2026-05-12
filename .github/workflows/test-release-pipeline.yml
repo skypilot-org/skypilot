@@ -133,6 +133,8 @@ jobs:
       version: ${{ needs.build-package.outputs.version }}
       package_name: skypilot
       release_environment: 'staging'
-      docker_image: ${{ needs.docker-staging.outputs.effective_docker_image }}
+      # docker_image left empty; publish-helm.yml falls back to
+      # DOCKER_USERNAME/package_name. We do NOT pass it via a job output
+      # because GitHub strips outputs that contain a secret value.
       commit_message: 'Staging test: skypilot ${{ needs.build-package.outputs.version }}'
     secrets: inherit

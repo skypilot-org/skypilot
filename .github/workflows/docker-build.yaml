@@ -50,9 +50,6 @@ on:
       version:
         description: "The version used for the Docker build"
         value: ${{ jobs.prepare.outputs.version }}
-      effective_docker_image:
-        description: "The Docker image used for the build"
-        value: ${{ jobs.prepare.outputs.effective_docker_image }}
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -66,7 +63,6 @@ jobs:
       version: ${{ steps.version.outputs.latest_version }}
       trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
       install_from_source: ${{ steps.install_method.outputs.install_from_source }}
-      effective_docker_image: ${{ steps.docker_image.outputs.effective_docker_image }}
     steps:
       # Always checkout repository (Docker build always needs Dockerfile)
       - name: Checkout repository
@@ -143,16 +139,6 @@ jobs:
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           version: "latest"
-
-      - name: Compute effective Docker image
-        id: docker_image
-        run: |
-          # Staging and production share the same Docker Hub repo. Staging is
-          # distinguished by version (99.99.99.dev*) and never updates :latest,
-          # so it can't be confused with a real release.
-          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
-          echo "effective_docker_image=$IMAGE" >> $GITHUB_OUTPUT
-          echo "Using Docker image: $IMAGE"
 
       - name: Find and verify version
         id: version
@@ -251,7 +237,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          tags: "${{ needs.prepare.outputs.effective_docker_image }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
+          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
           build-args: |
             INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
           cache-from: |
@@ -276,7 +262,11 @@ jobs:
         run: |
           # Create multi-platform manifest from temporary tags
           VERSION="${{ needs.prepare.outputs.version }}"
-          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+          # IMAGE is recomputed inline rather than passed as a job output:
+          # GitHub Actions filters job outputs whose value contains a secret,
+          # so any output derived from DOCKER_USERNAME would arrive empty
+          # in downstream jobs.
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
 
           # Determine if :latest tag should be applied
           # Skip :latest for pre-release versions or staging environment
@@ -303,8 +293,8 @@ jobs:
             -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' \
             https://hub.docker.com/v2/users/login/ | jq -r .token)
 
-          # Extract repo path from effective_docker_image for API call
-          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+          # Inline (not from job output) — see note in manifest step.
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
 
           # Delete temporary tags
           for tag in "${{ needs.prepare.outputs.version }}-linux-amd64" "${{ needs.prepare.outputs.version }}-linux-arm64"; do
@@ -317,7 +307,7 @@ jobs:
       - name: Summary of final tags
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          IMAGE="${{ needs.prepare.outputs.effective_docker_image }}"
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
           echo "Multi-platform tags created:"
           echo "   - $IMAGE:$VERSION"
 
