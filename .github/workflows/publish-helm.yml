@@ -111,19 +111,21 @@ jobs:
           path: 'dest'
           repository: 'skypilot-org/skypilot-helm'
           ssh-key: ${{ secrets.HELM_DEPLOY_KEY }}
-          ref: ${{ steps.helm_target.outputs.branch }}
+          # Always check out main: production commits on top of main; staging
+          # force-pushes the same commit (built fresh from main) to the test
+          # branch. Force-push creates the branch on first run if it does not
+          # already exist — no one-time manual `git push origin main:test`
+          # needed on skypilot-helm.
+          ref: main
           fetch-depth: 0
 
-      - name: Reset test branch to current main (staging only)
+      - name: Clean existing charts for staging
         if: inputs.release_environment == 'staging'
         working-directory: dest
         run: |
-          # Staging publishes always start from a clean copy of main, so the
-          # test branch ends up as exactly "main + one staging chart". This
-          # avoids accumulating cruft across runs and avoids the staging
-          # index.yaml inheriting old production .tgz files.
-          git fetch origin main
-          git reset --hard origin/main
+          # Staging publishes produce "main + one staging chart" — drop the
+          # production .tgz files and let `helm repo index` regenerate
+          # index.yaml from whatever is left after packaging.
           rm -f *.tgz index.yaml
 
       - name: Install Helm
@@ -211,9 +213,10 @@ jobs:
           git status
           git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
           if [ "$RELEASE_ENV" = "staging" ]; then
-            # Test branch was reset to main earlier, so force-push is required
-            # and intentional — it keeps the branch at "main + one staging chart".
-            git push --force origin "$TARGET_BRANCH"
+            # Force-push HEAD (built from main + one staging chart) to the
+            # test branch. Force is required because each run starts fresh
+            # from main; it also creates the branch on first run.
+            git push --force origin "HEAD:refs/heads/$TARGET_BRANCH"
           else
-            git push origin "$TARGET_BRANCH"
+            git push origin "HEAD:refs/heads/$TARGET_BRANCH"
           fi
