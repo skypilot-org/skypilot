@@ -13,6 +13,9 @@ jobs:
     uses: ./.github/workflows/test-release-pipeline.yml
     with:
       # Fork lacks TEST_PYPI_API_TOKEN; skip the publish-test-pypi job.
-      # Set to false if running on a repo that has that secret.
       skip_test_pypi: true
+      # Fork's HELM_DEPLOY_KEY value is malformed (libcrypto parse error)
+      # and would lack write access to skypilot-org/skypilot-helm anyway.
+      # Helm publishing is validated separately on upstream.
+      skip_helm: true
     secrets: inherit
