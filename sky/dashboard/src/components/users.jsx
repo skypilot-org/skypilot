@@ -2459,7 +2459,7 @@ function ServiceAccountTokensView({
   // exposes window.__skyServiceAccountTokensPaginationFetch).
   const serverPaginated = isServiceAccountTokensPaginationAvailable();
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [hasNext, setHasNext] = useState(false);
@@ -3057,7 +3057,7 @@ function ServiceAccountTokensView({
                   className="h-7 px-2 border border-gray-300 rounded text-sm"
                   disabled={loading}
                 >
-                  {[25, 50, 100, 200].map((opt) => (
+                  {[10, 20, 50, 100, 200].map((opt) => (
                     <option key={opt} value={opt}>
                       {opt} / page
                     </option>
