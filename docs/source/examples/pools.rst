@@ -1,3 +1,5 @@
+:orphan:
+
 .. _pool:
 
 Using a Pool of Workers

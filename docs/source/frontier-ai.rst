@@ -20,8 +20,8 @@ With **10× faster cluster launches**, already running at deployments of **200+ 
 
    Interested? The SkyPilot team would love to talk to you. `Sign up here <https://forms.gle/HGGMjzvRz8Mqn9pn7>`_; takes 20 seconds.
 
-What's in SkyPilot Platform
----------------------------
+Capabilities
+------------
 
 For researchers and AI agents
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
