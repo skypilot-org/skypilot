@@ -2456,8 +2456,13 @@ function ServiceAccountTokensView({
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
   // Server-side pagination state (used only when the pagination plugin
-  // exposes window.__skyServiceAccountTokensPaginationFetch).
-  const serverPaginated = isServiceAccountTokensPaginationAvailable();
+  // exposes window.__skyServiceAccountTokensPaginationFetch). Defer the
+  // window check to a mount effect so that the statically-exported
+  // initial render and the post-hydration render agree.
+  const [serverPaginated, setServerPaginated] = useState(false);
+  useEffect(() => {
+    setServerPaginated(isServiceAccountTokensPaginationAvailable());
+  }, []);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [total, setTotal] = useState(0);
@@ -2478,124 +2483,135 @@ function ServiceAccountTokensView({
   }, [debouncedSearch, serverPaginated]);
 
   // Fetch tokens and related data
-  const fetchTokensAndCounts = async (forceRefresh = false) => {
-    try {
-      setLoading(true);
+  const fetchTokensAndCounts = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        setLoading(true);
 
-      if (serverPaginated) {
-        // Server-paginated path: skip client-side cluster/job count fan-out.
-        // Counts are deliberately omitted here because computing them
-        // requires loading all clusters + jobs across all SAs, which is the
-        // bottleneck this pagination flow exists to avoid. Counts will be
-        // surfaced per-row via dedicated drill-ins later.
-        const resp = await getServiceAccountTokensPaginated({
-          page,
-          limit,
-          search: debouncedSearch,
-          sortBy: 'created_at',
-          sortOrder: 'desc',
-        });
-        const items = resp.items || [];
-        setTokens(items);
-        setTotal(resp.total ?? items.length);
-        setTotalPages(resp.total_pages ?? resp.totalPages ?? 1);
-        setHasNext(resp.has_next ?? resp.hasNext ?? false);
-        setHasPrev(resp.has_prev ?? resp.hasPrev ?? false);
-        const enhanced = items.map((token) => ({
-          ...token,
-          clusterCount: undefined,
-          jobCount: undefined,
-          gpuCount: undefined,
-          primaryRole:
-            token.service_account_roles &&
-            token.service_account_roles.length > 0
-              ? token.service_account_roles[0]
-              : 'user',
-        }));
-        setTokensWithCounts(enhanced);
-        return;
-      }
+        if (serverPaginated) {
+          // Server-paginated path: skip client-side cluster/job count
+          // fan-out. Counts are deliberately omitted here because
+          // computing them requires loading all clusters + jobs across
+          // all SAs, which is the bottleneck this pagination flow
+          // exists to avoid. Counts will be surfaced per-row via
+          // dedicated drill-ins later.
+          if (forceRefresh) {
+            dashboardCache.invalidate(getServiceAccountTokensPaginated);
+          }
+          const resp = await dashboardCache.get(
+            getServiceAccountTokensPaginated,
+            [
+              {
+                page,
+                limit,
+                search: debouncedSearch,
+                sortBy: 'created_at',
+                sortOrder: 'desc',
+              },
+            ]
+          );
+          const items = resp.items || [];
+          setTokens(items);
+          setTotal(resp.total ?? items.length);
+          setTotalPages(resp.total_pages ?? resp.totalPages ?? 1);
+          setHasNext(resp.has_next ?? resp.hasNext ?? false);
+          setHasPrev(resp.has_prev ?? resp.hasPrev ?? false);
+          const enhanced = items.map((token) => ({
+            ...token,
+            clusterCount: undefined,
+            jobCount: undefined,
+            gpuCount: undefined,
+            primaryRole:
+              token.service_account_roles &&
+              token.service_account_roles.length > 0
+                ? token.service_account_roles[0]
+                : 'user',
+          }));
+          setTokensWithCounts(enhanced);
+          return;
+        }
 
-      // Invalidate cache if force refresh requested (after mutations)
-      if (forceRefresh) {
-        dashboardCache.invalidate(getServiceAccountTokens);
-      }
+        // Invalidate cache if force refresh requested (after mutations)
+        if (forceRefresh) {
+          dashboardCache.invalidate(getServiceAccountTokens);
+        }
 
-      // Step 1: Fetch service account tokens (using cache)
-      const tokensData = await dashboardCache.get(getServiceAccountTokens);
-      setTokens(tokensData || []);
+        // Step 1: Fetch service account tokens (using cache)
+        const tokensData = await dashboardCache.get(getServiceAccountTokens);
+        setTokens(tokensData || []);
 
-      // Step 2: Fetch clusters and jobs data in parallel
-      const { clustersData, jobsResponse } = await fetchClustersAndJobs();
-      const jobsData = jobsResponse?.jobs || [];
+        // Step 2: Fetch clusters and jobs data in parallel
+        const { clustersData, jobsResponse } = await fetchClustersAndJobs();
+        const jobsData = jobsResponse?.jobs || [];
 
-      // Step 3: Calculate counts for each service account
-      const enhancedTokens = (tokensData || []).map((token) => {
-        const serviceAccountId = token.service_account_user_id;
-        let clusterCount = 0;
-        let clusterGPUCount = 0;
-        let jobCount = 0;
-        let jobGPUCount = 0;
+        // Step 3: Calculate counts for each service account
+        const enhancedTokens = (tokensData || []).map((token) => {
+          const serviceAccountId = token.service_account_user_id;
+          let clusterCount = 0;
+          let clusterGPUCount = 0;
+          let jobCount = 0;
+          let jobGPUCount = 0;
 
-        // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
-        for (const cluster of clustersData) {
-          if (cluster.user_hash === serviceAccountId) {
-            clusterCount++;
-            // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+          // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+          for (const cluster of clustersData) {
+            if (cluster.user_hash === serviceAccountId) {
+              clusterCount++;
+              // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+              if (
+                cluster.status !== 'STOPPED' &&
+                cluster.status !== 'TERMINATED'
+              ) {
+                clusterGPUCount += getGPUCount(
+                  cluster.gpus,
+                  `Cluster ${cluster.cluster}`
+                );
+              }
+            }
+          }
+
+          // Count active jobs and sum GPUs in one pass
+          for (const job of jobsData) {
             if (
-              cluster.status !== 'STOPPED' &&
-              cluster.status !== 'TERMINATED'
+              job.user_hash === serviceAccountId &&
+              ACTIVE_JOB_STATUSES.has(job.status)
             ) {
-              clusterGPUCount += getGPUCount(
-                cluster.gpus,
-                `Cluster ${cluster.cluster}`
+              jobCount++;
+              jobGPUCount += getGPUCount(
+                job.accelerators,
+                `Job ${job.job_name || job.job_id}`
               );
             }
           }
-        }
 
-        // Count active jobs and sum GPUs in one pass
-        for (const job of jobsData) {
-          if (
-            job.user_hash === serviceAccountId &&
-            ACTIVE_JOB_STATUSES.has(job.status)
-          ) {
-            jobCount++;
-            jobGPUCount += getGPUCount(
-              job.accelerators,
-              `Job ${job.job_name || job.job_id}`
-            );
-          }
-        }
+          return {
+            ...token,
+            clusterCount,
+            jobCount,
+            gpuCount: clusterGPUCount + jobGPUCount,
+            // Extract primary role
+            primaryRole:
+              token.service_account_roles &&
+              token.service_account_roles.length > 0
+                ? token.service_account_roles[0]
+                : 'user',
+          };
+        });
 
-        return {
-          ...token,
-          clusterCount,
-          jobCount,
-          gpuCount: clusterGPUCount + jobGPUCount,
-          // Extract primary role
-          primaryRole:
-            token.service_account_roles &&
-            token.service_account_roles.length > 0
-              ? token.service_account_roles[0]
-              : 'user',
-        };
-      });
-
-      setTokensWithCounts(enhancedTokens);
-    } catch (error) {
-      console.error('Error fetching tokens and counts:', error);
-      setTokens([]);
-      setTokensWithCounts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setTokensWithCounts(enhancedTokens);
+      } catch (error) {
+        console.error('Error fetching tokens and counts:', error);
+        setTokens([]);
+        setTokensWithCounts([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [page, limit, debouncedSearch, serverPaginated]
+  );
 
   useEffect(() => {
     fetchTokensAndCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, limit, debouncedSearch, serverPaginated]);
+  }, [fetchTokensAndCounts]);
 
   // Role editing functions
   const handleEditClick = async (tokenId, currentRole) => {
