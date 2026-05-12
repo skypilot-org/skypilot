@@ -1,8 +1,9 @@
 name: Test Release Pipeline (Staging)
 
 # End-to-end test of the release pipeline using staging destinations.
-# Publishes to test-pypi, berkeleyskypilot/skypilot-staging (Docker),
-# and skypilot-org/skypilot-helm-staging (Helm).
+# Publishes to test-pypi (PyPI), berkeleyskypilot/skypilot with a
+# 99.99.99.dev<timestamp> tag (Docker, no :latest), and the `test` branch
+# of skypilot-org/skypilot-helm (Helm, force-pushed each run).
 # Safe to run from any branch without affecting production.
 
 on:

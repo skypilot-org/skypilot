@@ -147,11 +147,10 @@ jobs:
       - name: Compute effective Docker image
         id: docker_image
         run: |
-          if [ "${{ inputs.release_environment }}" == "staging" ]; then
-            IMAGE="berkeleyskypilot/skypilot-staging"
-          else
-            IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
-          fi
+          # Staging and production share the same Docker Hub repo. Staging is
+          # distinguished by version (99.99.99.dev*) and never updates :latest,
+          # so it can't be confused with a real release.
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}"
           echo "effective_docker_image=$IMAGE" >> $GITHUB_OUTPUT
           echo "Using Docker image: $IMAGE"
 

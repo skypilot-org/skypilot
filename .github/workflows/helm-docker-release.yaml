@@ -20,8 +20,6 @@ on:
         required: true
       HELM_DEPLOY_KEY:
         required: true
-      STAGING_HELM_DEPLOY_KEY:
-        required: false
   workflow_dispatch:
     inputs:
       package_name:
@@ -78,7 +76,6 @@ jobs:
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}
-      STAGING_HELM_DEPLOY_KEY: ${{ secrets.STAGING_HELM_DEPLOY_KEY }}
 
   smoke-tests-gke:
     needs: [set-package, docker-build, publish-helm]

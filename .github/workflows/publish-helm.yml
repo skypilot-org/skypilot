@@ -40,8 +40,6 @@ on:
         required: true
       HELM_DEPLOY_KEY:
         required: true
-      STAGING_HELM_DEPLOY_KEY:
-        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -72,8 +70,6 @@ on:
         required: true
       HELM_DEPLOY_KEY:
         required: true
-      STAGING_HELM_DEPLOY_KEY:
-        required: false
 
 jobs:
   publish-helm:
@@ -87,14 +83,21 @@ jobs:
           path: 'src'
           fetch-depth: 0
 
+      - name: Resolve helm target (single source of truth for release_environment)
+        id: helm_target
+        run: |
+          if [ "${{ inputs.release_environment }}" == "staging" ]; then
+            echo "branch=test" >> $GITHUB_OUTPUT
+            echo "url=https://raw.githubusercontent.com/skypilot-org/skypilot-helm/test" >> $GITHUB_OUTPUT
+          else
+            echo "branch=main" >> $GITHUB_OUTPUT
+            echo "url=${{ env.HELM_REPO_URL }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          if [ "${{ inputs.release_environment }}" == "staging" ]; then
-            echo "${{ secrets.STAGING_HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
-          else
-            echo "${{ secrets.HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
-          fi
+          echo "${{ secrets.HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           cat >> ~/.ssh/config << EOF
           Host github.com
@@ -106,10 +109,22 @@ jobs:
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           path: 'dest'
-          repository: ${{ inputs.release_environment == 'staging' && 'skypilot-org/skypilot-helm-staging' || 'skypilot-org/skypilot-helm' }}
-          ssh-key: ${{ inputs.release_environment == 'staging' && secrets.STAGING_HELM_DEPLOY_KEY || secrets.HELM_DEPLOY_KEY }}
-          ref: main
+          repository: 'skypilot-org/skypilot-helm'
+          ssh-key: ${{ secrets.HELM_DEPLOY_KEY }}
+          ref: ${{ steps.helm_target.outputs.branch }}
           fetch-depth: 0
+
+      - name: Reset test branch to current main (staging only)
+        if: inputs.release_environment == 'staging'
+        working-directory: dest
+        run: |
+          # Staging publishes always start from a clean copy of main, so the
+          # test branch ends up as exactly "main + one staging chart". This
+          # avoids accumulating cruft across runs and avoids the staging
+          # index.yaml inheriting old production .tgz files.
+          git fetch origin main
+          git reset --hard origin/main
+          rm -f *.tgz index.yaml
 
       - name: Install Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -168,13 +183,24 @@ jobs:
       - name: Push New Files
         shell: bash
         working-directory: dest
+        env:
+          TARGET_BRANCH: ${{ steps.helm_target.outputs.branch }}
+          TARGET_URL: ${{ steps.helm_target.outputs.url }}
+          RELEASE_ENV: ${{ inputs.release_environment }}
         run: |
-          if [ "${{ inputs.release_environment }}" == "staging" ]; then
-            HELM_URL="https://raw.githubusercontent.com/skypilot-org/skypilot-helm-staging/main"
-          else
-            HELM_URL="${{ env.HELM_REPO_URL }}"
+          # Safety guard: production releases must push to main; staging must push
+          # to test. A mismatch means a conditional somewhere drifted — fail loud
+          # rather than risk overwriting helm.skypilot.co with staging content.
+          if [ "$RELEASE_ENV" = "staging" ] && [ "$TARGET_BRANCH" != "test" ]; then
+            echo "Refusing to push: staging release resolved to branch '$TARGET_BRANCH'"
+            exit 1
           fi
-          helm repo index . --url $HELM_URL
+          if [ "$RELEASE_ENV" != "staging" ] && [ "$TARGET_BRANCH" != "main" ]; then
+            echo "Refusing to push: production release resolved to branch '$TARGET_BRANCH'"
+            exit 1
+          fi
+
+          helm repo index . --url "$TARGET_URL"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Add both untracked files and .tgz files explicitly
@@ -184,4 +210,10 @@ jobs:
           # Show what's being committed for debugging
           git status
           git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-          git push origin main
+          if [ "$RELEASE_ENV" = "staging" ]; then
+            # Test branch was reset to main earlier, so force-push is required
+            # and intentional — it keeps the branch at "main + one staging chart".
+            git push --force origin "$TARGET_BRANCH"
+          else
+            git push origin "$TARGET_BRANCH"
+          fi
