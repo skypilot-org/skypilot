@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Test version (e.g. 99.99.99.dev20260511). Auto-generated if empty.'
+        description: 'Test version (e.g. 0.0.0.dev20260511). Auto-generated if empty. Must sort below real releases on PEP440.'
         type: string
         required: false
       skip_docker:
@@ -66,7 +66,13 @@ jobs:
             VERSION="${{ inputs.version }}"
           else
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            VERSION="99.99.99.dev${TIMESTAMP}"
+            # 0.0.0.dev* sorts BELOW any future real release on PEP440
+            # (0.0.0.devN < 0.0.0 < 0.X.Y for X >= 1). This matters because
+            # production releases publish to test-pypi too and validate with
+            # an unpinned `pip install --pre`, which picks the highest
+            # available version. A higher staging version would poison that
+            # validation step. Do NOT change this to a placeholder like 99.x.
+            VERSION="0.0.0.dev${TIMESTAMP}"
           fi
           sed -i "s/__version__ = '.*'/__version__ = '${VERSION}'/g" sky/__init__.py
           echo "version=$VERSION" >> $GITHUB_OUTPUT
