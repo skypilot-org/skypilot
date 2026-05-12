@@ -238,11 +238,12 @@ def _set_ssh_config_from_launch_response(handle: Any,
     cleanup path only matters when querying status across multiple
     clusters.
     """
-    if handle.cached_external_ips is None:
+    if not handle.cached_external_ips or not handle.cached_external_ssh_ports:
         # Defensive: should not happen for a successful launch, but if
-        # ips aren't cached, the SSH config write would fail. Fall back
-        # to remove + nothing rather than asserting.
-        cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+        # ips/ports aren't cached, ``add_cluster`` would fail. Fall back
+        # to the status-based path so the SSH config still gets written
+        # (and any stale entry cleaned up) instead of asserting.
+        _get_cluster_records_and_set_ssh_config(clusters=[handle.cluster_name])
         return
     ws_proxy_cmd = _get_ws_proxy_command()
     _write_ssh_config_for_cluster(handle, credentials, ws_proxy_cmd)
