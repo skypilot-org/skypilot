@@ -552,9 +552,9 @@ def get_engine(
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        # Cache key distinguishes sync vs async: the async engine is built via
-        # async_creator and never uses conn_string for connection params, so
-        # we don't rewrite the scheme — we just key the cache differently.
+        # We use the same cache for both sync and async engines
+        # because we prefix the cache key in the async case,
+        # so they would not overlap.
         cache_key = f'async:{conn_string}' if async_engine else conn_string
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
