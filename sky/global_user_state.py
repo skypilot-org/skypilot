@@ -3021,6 +3021,40 @@ def remove_cluster_yaml(cluster_name: str):
 
 
 @metrics_lib.time_me
+def get_expired_service_account_tokens_by_name_prefix(
+        name_prefix: str, now: int) -> List[Dict[str, Any]]:
+    """Return service-account tokens that have expired and match a name prefix.
+
+    Tokens with no expiration are excluded. The LIKE pattern is built with
+    SQLAlchemy parameterization so the prefix cannot inject SQL.
+    """
+    engine = _db_manager.get_engine()
+    # Escape the LIKE metacharacters in the prefix so callers can pass an
+    # arbitrary string without it being treated as a pattern.
+    escaped_prefix = name_prefix.replace('\\', '\\\\').replace('%',
+                                                               '\\%').replace(
+                                                                   '_', '\\_')
+    like_pattern = f'{escaped_prefix}%'
+    with orm.Session(engine) as session:
+        rows = session.query(service_account_token_table).filter(
+            service_account_token_table.c.token_name.like(like_pattern,
+                                                          escape='\\'),
+            service_account_token_table.c.expires_at.isnot(None),
+            service_account_token_table.c.expires_at < now,
+        ).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
+
+
+@metrics_lib.time_me
 def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     """Get all service account tokens across all users (for admin access)."""
     engine = _db_manager.get_engine()

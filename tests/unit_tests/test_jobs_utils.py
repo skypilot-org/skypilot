@@ -791,3 +791,61 @@ class TestCollectDebugDumpManifestParallel:
             if p['relative_path'].endswith('/job_info.json')
         ]
         assert len(job_info_items) == len(ok_jobs)
+
+
+class TestCleanupExpiredApiAccessTokens:
+    """Unit tests for the expired managed-job token sweep."""
+
+    @staticmethod
+    def _token(token_id: str, name: str, expires_at):
+        return {
+            'token_id': token_id,
+            'token_name': name,
+            'expires_at': expires_at,
+        }
+
+    @mock.patch('sky.global_user_state.delete_service_account_token')
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_deletes_only_managed_job_shaped_names(self, mock_get_expired,
+                                                   mock_delete_token):
+        now = int(time.time())
+        mock_get_expired.return_value = [
+            # Looks like a real managed-job token: prefix + 8 hex suffix.
+            self._token('tok-a', 'managed-job-myjob-abcdef01', now - 60),
+            # Multi-segment job name, still ends in 8 hex chars.
+            self._token('tok-b', 'managed-job-bench-burst-0028-fea61234',
+                        now - 60),
+            # Prefix matches but the suffix isn't 8 hex chars: skip.
+            self._token('tok-c', 'managed-job-user-named-something', now - 60),
+            # Suffix is 8 chars but contains non-hex letters: skip.
+            self._token('tok-d', 'managed-job-foo-zzzzzzzz', now - 60),
+        ]
+
+        removed = utils.cleanup_expired_api_access_tokens()
+
+        assert removed == 2
+        deleted_tokens = sorted(
+            c.args[0] for c in mock_delete_token.call_args_list)
+        assert deleted_tokens == ['tok-a', 'tok-b']
+
+    @mock.patch('sky.global_user_state.delete_service_account_token')
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_token_delete_failure_is_skipped(self, mock_get_expired,
+                                             mock_delete_token):
+        now = int(time.time())
+        mock_get_expired.return_value = [
+            self._token('tok-a', 'managed-job-myjob-abcdef01', now - 60),
+        ]
+        mock_delete_token.side_effect = RuntimeError('db down')
+
+        # Token revocation failed: report zero so the next sweep can retry.
+        removed = utils.cleanup_expired_api_access_tokens()
+        assert removed == 0
+
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_no_expired_tokens_is_noop(self, mock_get_expired):
+        mock_get_expired.return_value = []
+        assert utils.cleanup_expired_api_access_tokens() == 0

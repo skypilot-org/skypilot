@@ -130,3 +130,10 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
+
+# Interval for the daemon that sweeps expired managed-job API access tokens
+# from the service_account_tokens table. These tokens are normally revoked
+# by the jobs controller on completion, but the daemon ensures any tokens
+# that leak (e.g., due to controller crash mid-cleanup) are eventually
+# removed once their TTL has passed.
+EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour

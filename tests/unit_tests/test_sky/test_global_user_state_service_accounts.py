@@ -6,6 +6,8 @@ from unittest import mock
 import pytest
 
 from sky import global_user_state
+from sky.skylet import constants
+from sky.utils.db import db_utils
 
 
 class TestServiceAccountDatabaseOperations:
@@ -265,3 +267,97 @@ class TestServiceAccountDatabaseOperations:
             assert hasattr(
                 func,
                 '__module__'), f"Function {func} has no __module__ attribute"
+
+
+def _fresh_db(tmp_path, monkeypatch):
+    """Spin up a fresh sqlite-backed global state DB for integration tests."""
+    monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY, str(tmp_path))
+    monkeypatch.setattr(
+        global_user_state,
+        '_db_manager',
+        db_utils.DatabaseManager(
+            'state',
+            global_user_state.create_table,
+            post_init_fn=lambda _: global_user_state._sqlite_supports_returning(
+            ),
+        ),
+    )
+
+
+class TestGetExpiredServiceAccountTokensByNamePrefix:
+    """Real-DB tests for the prefix+expiry query used by the cleanup daemon."""
+
+    def test_filters_by_prefix_and_expiry(self, tmp_path, monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        now = int(time.time())
+        # Two managed-job tokens (one expired, one fresh) + one unrelated
+        # token + one without expiry. Only the expired managed-job token
+        # should be returned.
+        global_user_state.add_service_account_token(
+            token_id='expired-mj',
+            token_name='managed-job-foo-abcdef01',
+            token_hash='h1',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=now - 60)
+        global_user_state.add_service_account_token(
+            token_id='fresh-mj',
+            token_name='managed-job-bar-12345678',
+            token_hash='h2',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=now + 3600)
+        global_user_state.add_service_account_token(
+            token_id='other',
+            token_name='user-token-baz',
+            token_hash='h3',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=now - 60)
+        global_user_state.add_service_account_token(
+            token_id='no-expiry-mj',
+            token_name='managed-job-eternal-deadbeef',
+            token_hash='h4',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=None)
+
+        results = (
+            global_user_state.get_expired_service_account_tokens_by_name_prefix(
+                'managed-job-', now))
+
+        assert {r['token_id'] for r in results} == {'expired-mj'}
+
+    def test_empty_when_no_matches(self, tmp_path, monkeypatch):
+        _fresh_db(tmp_path, monkeypatch)
+        assert (
+            global_user_state.get_expired_service_account_tokens_by_name_prefix(
+                'managed-job-', int(time.time())) == [])
+
+    def test_like_metacharacters_in_prefix_are_escaped(self, tmp_path,
+                                                       monkeypatch):
+        # A prefix containing % or _ should be treated as literal text. We
+        # add tokens that would match a naive LIKE pattern but should NOT
+        # match the escaped one.
+        _fresh_db(tmp_path, monkeypatch)
+        now = int(time.time())
+        global_user_state.add_service_account_token(
+            token_id='naive-match',
+            token_name='prefix-anything-abcdef01',
+            token_hash='h1',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=now - 60)
+        global_user_state.add_service_account_token(
+            token_id='literal-match',
+            token_name='prefix%foo',
+            token_hash='h2',
+            creator_user_hash='u1',
+            service_account_user_id='u1',
+            expires_at=now - 60)
+
+        results = (
+            global_user_state.get_expired_service_account_tokens_by_name_prefix(
+                'prefix%', now))
+
+        assert {r['token_id'] for r in results} == {'literal-match'}

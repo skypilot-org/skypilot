@@ -262,6 +262,59 @@ def is_consolidation_mode() -> bool:
     return controller_utils.is_jobs_consolidation_mode()
 
 
+_MANAGED_JOB_TOKEN_NAME_RE = re.compile(
+    f'^{re.escape(managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX)}'
+    r'.+-[0-9a-f]{8}$')
+
+
+def cleanup_expired_api_access_tokens() -> int:
+    """Delete expired managed-job API access tokens.
+
+    Scans the service_account_tokens table for any token whose name starts
+    with the managed-job prefix and whose expires_at is in the past, then
+    requires the name to also end with the 8-hex-char dag_uuid suffix
+    produced by _create_job_api_token. Matching tokens are deleted.
+
+    Driving the sweep off the name shape means tokens that leaked due to
+    a controller crash mid-cleanup, or that were issued by older code
+    paths, are still reaped once their TTL passes.
+
+    Limitation: a user could in principle create a custom service-account
+    token whose name happens to match `managed-job-<anything>-<8 hex>` and
+    let it expire. The daemon would treat such a token as a leaked
+    managed-job token and remove it once expired. The prefix + 8-hex-char
+    suffix combination makes accidental collisions unlikely in practice,
+    but custom token names should avoid this shape if expired tokens are
+    meant to be retained for audit.
+
+    Returns the number of tokens removed.
+    """
+    now = int(time.time())
+    prefix = managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX
+    expired = (
+        global_user_state.get_expired_service_account_tokens_by_name_prefix(
+            prefix, now))
+    removed = 0
+    for token in expired:
+        token_name = token.get('token_name') or ''
+        if not _MANAGED_JOB_TOKEN_NAME_RE.match(token_name):
+            # Prefix matched but the suffix does not look like a managed-job
+            # dag_uuid; leave it alone to avoid touching user-created tokens
+            # that happen to share the prefix.
+            continue
+        token_id = token['token_id']
+        try:
+            global_user_state.delete_service_account_token(token_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to delete expired managed-job token {token_id}: {e}')
+            continue
+        removed += 1
+        logger.info(f'Cleaned up expired managed-job API access token '
+                    f'{token_id} ({token_name})')
+    return removed
+
+
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
 

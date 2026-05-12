@@ -324,6 +324,20 @@ def should_skip_server_heartbeat():
     return False
 
 
+def expired_token_cleanup_event():
+    """Periodically remove expired managed-job API access tokens."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    logger.info('=== Cleaning up expired managed-job API access tokens ===')
+    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    logger.info(
+        f'Expired token cleanup removed {removed} token(s). Sleeping '
+        f'{server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS} '
+        'seconds for the next sweep...\n')
+    time.sleep(server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -387,6 +401,10 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
         event_fn=server_heartbeat_event,
         should_skip=should_skip_server_heartbeat),
+    InternalRequestDaemon(
+        id='expired-token-cleanup-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
+        event_fn=expired_token_cleanup_event),
 ]
 
 HIDDEN_REQUEST_NAMES = [
