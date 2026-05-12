@@ -14,7 +14,7 @@ For AI infra and platform teams supporting frontier AI work, **SkyPilot Platform
 - **Less firefighting** — instant GPU failure detection and recovery across XID, NVML, NCCL, and dmesg signals, with Slack alerts.
 - **Production deployments** — multi-cluster model serving (SkyServe v2), HA managed API server, encrypted secrets, SSO.
 
-With **10× faster cluster launches**, already running at deployments of **200+ users** and **10,000+ GPUs**.
+With **10× faster cluster launches**, already running at deployments of **200+ users** and **20K+ GPUs**.
 
 .. tip::
 
