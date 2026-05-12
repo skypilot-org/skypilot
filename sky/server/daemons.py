@@ -331,11 +331,14 @@ def expired_token_cleanup_event():
 
     logger.info('=== Cleaning up expired managed-job API access tokens ===')
     removed = managed_job_utils.cleanup_expired_api_access_tokens()
-    logger.info(
-        f'Expired token cleanup removed {removed} token(s). Sleeping '
-        f'{server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS} '
-        'seconds for the next sweep...\n')
-    time.sleep(server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    # Read the interval from config on every iteration so operators can
+    # lower it (e.g., for testing) without restarting the API server.
+    interval = skypilot_config.get_nested(
+        ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
+        server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    logger.info(f'Expired token cleanup removed {removed} token(s). '
+                f'Sleeping {interval} seconds for the next sweep...\n')
+    time.sleep(interval)
 
 
 def server_heartbeat_event():

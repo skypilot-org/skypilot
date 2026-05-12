@@ -2174,6 +2174,12 @@ def get_config_schema():
                 'type': 'string',
                 'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
             },
+            # Only honored by daemons that opt in to reading this; see the
+            # per-daemon event functions in sky/server/daemons.py for support.
+            'interval_seconds': {
+                'type': 'integer',
+                'minimum': 1,
+            },
         }
     }
 
