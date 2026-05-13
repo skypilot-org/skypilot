@@ -312,10 +312,6 @@ class JobController:
         if cluster_name is None:
             return
         if self._pool is None:
-            tmp_handle = await asyncio.to_thread(
-                global_user_state.get_handle_from_cluster_name, cluster_name)
-            if tmp_handle is not None and managed_job_runtime.is_registered():
-                await asyncio.to_thread(managed_job_runtime.cleanup, tmp_handle)
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 

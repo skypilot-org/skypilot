@@ -80,13 +80,6 @@ class ManagedJobRuntime(Protocol):
         """Download logs to a local file. Returns the path or None."""
         ...
 
-    def cleanup(
-        self,
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    ) -> Optional[bool]:
-        """Clean up runtime-specific resources. Returns True / None."""
-        ...
-
     def tail_logs(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
@@ -203,13 +196,6 @@ def download_logs(
     if _current is None:
         return None
     return _current.download_logs(handle, job_id, task_id)
-
-
-def cleanup(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',) -> Optional[bool]:
-    if _current is None:
-        return None
-    return _current.cleanup(handle)
 
 
 def tail_logs(
