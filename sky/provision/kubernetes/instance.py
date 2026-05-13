@@ -2485,9 +2485,27 @@ def query_instances(
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
 
+    # Try the registered ``PodInfoSource`` first — a plugin can serve this
+    # from a local cache and avoid the direct ``list_namespaced_pod`` call
+    # below, which dominates this function's wall time at scale. We pass
+    # the same namespace+label scope so the cache returns the exact same
+    # pod set the direct query would.
+    pods = None
+    if plugin_extensions.PodInfoSource.is_registered() and context is not None:
+        pods = plugin_extensions.PodInfoSource.get(
+            context,
+            namespace=namespace,
+            labels={constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud},
+        )
+        if pods is not None:
+            logger.debug(
+                f'Got pod info for {cluster_name_on_cloud} from external '
+                f'provider ({len(pods)} pods)')
+
     attempts = 0
-    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                               is_ssh, identity, label_selector)
+    if pods is None:
+        pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                                   is_ssh, identity, label_selector)
     # When we see no pods returned from the k8s api, we assume the pods have
     # been terminated by the user directly and mark the cluster as terminated
     # in the global user state.

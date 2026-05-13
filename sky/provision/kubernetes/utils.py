@@ -4187,10 +4187,19 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    # Try external pod info source first (e.g., node-info-service cache).
+    # Try the registered ``PodInfoSource`` first — a plugin can serve this
+    # from a local cache and avoid the direct ``list_pod_for_all_namespaces``
+    # round-trip below.
     if plugin_extensions.PodInfoSource.is_registered():
         if context is not None:
-            result = plugin_extensions.PodInfoSource.get(context)
+            # Match the direct-K8s ``label_selector`` semantics below —
+            # all skypilot pods cluster-wide, identified by the presence
+            # of ``TAG_SKYPILOT_CLUSTER_NAME``.
+            result = plugin_extensions.PodInfoSource.get(
+                context,
+                namespace=None,
+                labels={provision_constants.TAG_SKYPILOT_CLUSTER_NAME: None},
+            )
             if result is not None:
                 logger.debug(f'Got pod info from external provider for '
                              f'{context}')
