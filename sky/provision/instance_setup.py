@@ -97,12 +97,26 @@ def _host_network_probe_cmd(mode: str) -> str:
             'fi; ')
 
 
+# Python expression to read the chosen Ray port from ~/.sky/ray_port.json.
+# Stdlib only — deliberately does not import `sky`, so this survives a
+# half-baked sky package install. The K8s bootstrap re-runs `uv pip install
+# skypilot[kubernetes,remote]` right after the local dev wheel, which (without
+# --prerelease=allow) downgrades to the latest stable on PyPI; the resulting
+# install can leave `sky/__init__.py` in a state where `from sky.X import Y`
+# raises ImportError mid-import. The previous reader used `from sky.skylet
+# import job_lib` and silently fell back to `echo 6379` on error, sending the
+# health-check poll to the wrong port and forcing a 90s timeout. Falling back
+# to SKY_REMOTE_RAY_PORT (SkyPilot's default 6380) instead of legacy 6379 is
+# strictly more correct — any cluster launched after #1790 is on 6380.
+_READ_RAY_PORT_PY = (
+    'import json, os; '
+    'd = os.path.expanduser(os.environ.get('
+    f'\'{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}\', \'~\')); '
+    'print(json.load(open(os.path.join(d, '
+    f'\'{constants.SKY_REMOTE_RAY_PORT_FILE}\')))[\'ray_port\'])')
 _RAY_PORT_COMMAND = (
-    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky import sky_logging\n'
-    'with sky_logging.silent(): '
-    'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
-    '2> /dev/null || echo 6379);'
+    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c "{_READ_RAY_PORT_PY}" '
+    f'2> /dev/null || echo {constants.SKY_REMOTE_RAY_PORT});'
     f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
     'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
