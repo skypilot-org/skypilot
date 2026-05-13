@@ -28,12 +28,12 @@ For researchers and AI agents
 
 💻 **SkyPilot Devspaces** — Researchers spin up GPU-backed VSCode workspaces in seconds, in the browser. Run fleets of AI coding agents in parallel; dynamic CPU ↔ GPU switching with environment and code persisted; no SSH config.
 
-.. image:: images/devspaces.png
+.. figure:: images/devspaces.png
    :alt: SkyPilot Devspaces: in-browser VSCode with CPU/GPU switching
    :align: center
    :width: 90%
 
-----
+   Devspaces: VSCode in the browser with a persistent environment and on-demand CPU ↔ GPU switching.
 
 🚀 **Large-scale training launches** — Run training across 1,000s of GPUs for **pre-training**, **SFT post-training**, and **RL post-training**. Launch **5K-node training jobs** in under a minute, with gang scheduling, topology/rack-aware scheduling, and high-bandwidth networking pre-wired.
 
@@ -43,8 +43,6 @@ For researchers and AI agents
      accelerators: B200:8
    num_nodes: 5000
 
-----
-
 ⚡ **Fast parallel jobs and sandboxes** — Launch thousands of parallel jobs and sandboxes in seconds, for RL rollouts, parallel evals, and agent sandboxes. Tight integration with SkyPilot job groups.
 
 For infra teams
@@ -52,36 +50,34 @@ For infra teams
 
 🛟 **Production Readiness and High Availability** — Fully managed, high-availability SkyPilot API server operated by the maintainers, with up to 10× faster cluster launches, SSH, CLI, and dashboard.
 
-----
-
 📊 **SkyPilot GPU Manager** — Proactive and reactive health checks across the fleet, with instant GPU failure detection and auto-remediation. Catches XID errors, NVML failures, NCCL timeouts, dmesg errors, and more; taints bad nodes, recovers jobs, notifies the team.
 
-.. image:: images/gpu-manager.png
+.. figure:: images/gpu-manager.png
    :alt: SkyPilot GPU Manager: fleet-wide health, allocation, and utilization
    :align: center
    :width: 90%
 
-----
+   GPU Manager: fleet-wide GPU health, allocation, and utilization in a single pane.
 
 📡 **Production-ready model serving** — High-performance, multi-cluster model serving with cache-aware routing, PD disaggregation, autoscaling, rolling updates, and TLS / API-key auth. Share GPU capacity dynamically between training and serving on the same fleet.
 
-.. image:: images/skyserve.png
+.. figure:: images/skyserve.png
    :alt: Production-ready model serving: endpoint metrics and multi-cluster serving
    :align: center
    :width: 90%
 
-----
+   Production-ready model serving: per-endpoint latency, throughput, and queue-depth metrics.
 
 🎯 **SkyPilot Quotas** — Per-team and per-user GPU quotas with priority, preemption, dynamic borrowing, fairness, and reclamation across the fleet.
 
 📦 **Volumes and Auto Mounts** — Persistent storage on Kubernetes (NFS, VAST, Weka, EFS, Alluxio, host volumes). Auto Mounts attach a volume to every workload on a cluster, with no task YAML changes required.
 
-.. image:: images/volumes.png
+.. figure:: images/volumes.png
    :alt: SkyPilot Volumes: persistent uv/HF/pip caches auto-mounted across workloads
    :align: center
    :width: 90%
 
-----
+   Volumes and Auto Mounts: persistent uv / HuggingFace / pip caches auto-mounted to every workload on the cluster.
 
 🔔 **Notifications** — Slack alerts for GPU failures, job lifecycle events, preemptions, and cluster events. Configurable per channel, with event-type and workspace filters.
 
