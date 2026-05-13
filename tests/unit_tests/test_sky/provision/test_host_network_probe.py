@@ -237,13 +237,13 @@ class TestSshdPortPropagation:
         # being set (the probe just sourced the env file). Non-host-
         # Network bootstraps leave it unset and skip the rewrite.
         assert 'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]' in cmd
-        # We delete-then-append rather than substituting in place, so
-        # sshd_config files without an explicit Port directive still
-        # end up with one.
-        assert ('sed -i -E "/^[[:space:]]*#?[[:space:]]*Port'
-                '[[:space:]]+/d"') in cmd
-        assert 'echo "Port ${SKYPILOT_SSHD_PORT}"' in cmd
-        assert 'sudo service ssh restart' in cmd
+        # Delete-then-append, all under one sudo, so the redirect
+        # happens as root and we don't pay three sudo costs in a row.
+        assert 'sudo sh -c "' in cmd
+        assert ("sed -i -E '/^[[:space:]]*#?[[:space:]]*Port"
+                "[[:space:]]+/d'") in cmd
+        assert 'echo Port ${SKYPILOT_SSHD_PORT} >> /etc/ssh/sshd_config' in cmd
+        assert 'service ssh restart' in cmd
 
 
 class TestWaitHeadGcsTcp:

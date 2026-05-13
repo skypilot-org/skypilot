@@ -18,6 +18,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1745,62 +1746,60 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
-_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 180
+# The probe runs as soon as ray-installation finishes in step 2 of the
+# pod bootstrap, typically within tens of seconds of the pod going
+# Running. 60s gives the common case plenty of slack without pinning
+# every status refresh during a pod restart to a multi-minute hang.
+_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
 _HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
 
 
-def _read_host_network_sshd_ports(
-        cluster_name_on_cloud: str,
-        namespace: str,
-        context: Optional[str],
-        expected_pods: Optional[List[str]] = None) -> Dict[str, int]:
+def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
+                                  context: Optional[str],
+                                  expected_pods: List[str]) -> Dict[str, int]:
     """Read each pod's probed sshd port from the hostNetwork ConfigMap.
 
-    Returns ``{podname: port}`` for every ``sshd_<podname>`` entry the
-    pods published. Returns ``{}`` when the ConfigMap doesn't exist
-    (cluster isn't running under hostNetwork).
-
-    When ``expected_pods`` is given, polls the ConfigMap until every
-    listed pod has an entry (or the timeout elapses). The probe runs
-    inside each pod's bootstrap and may not have populated the
-    ConfigMap by the time the post-provision flow reaches us;
-    surfacing partial state would freeze every subsequent SSH at
-    port 22 until the next refresh.
+    Polls until every entry in ``expected_pods`` is present (or the
+    timeout elapses); returning partial state would freeze every
+    subsequent SSH at port 22 until the next refresh.
     """
+    if not expected_pods:
+        return {}
     name = f'{cluster_name_on_cloud}-ray-ports'
-    prefix = 'sshd_'
-    expected = set(expected_pods or [])
-    deadline = time.monotonic() + (_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
-                                   if expected else 0)
+    expected = set(expected_pods)
+    deadline = time.monotonic() + _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
     while True:
         out: Dict[str, int] = {}
         try:
             cm = kubernetes.core_api(context).read_namespaced_config_map(
                 name=name, namespace=namespace)
         except kubernetes.api_exception() as e:
-            if getattr(e, 'status', None) != 404:
+            if e.status != 404:
                 raise
             cm = None
         data = (cm.data or {}) if cm is not None else {}
         for key, value in data.items():
-            if not key.startswith(prefix):
+            if not key.startswith(host_network_probe.SSHD_KEY_PREFIX):
                 continue
+            podname = common_utils.removeprefix(
+                key, host_network_probe.SSHD_KEY_PREFIX)
             try:
-                out[key[len(prefix):]] = int(value)
+                out[podname] = int(value)
             except ValueError:
                 logger.warning(
                     f'ConfigMap {namespace}/{name} has non-integer value '
-                    f'for {key!r}: {value!r}. Falling back to default '
-                    f'SSH port.')
-        if not expected or expected.issubset(out.keys()):
+                    f'for {key!r}: {value!r}. SSH to {podname!r} will '
+                    f'fall back to port 22 and hit the K8s node\'s sshd.')
+        if expected.issubset(out.keys()):
             return out
         if time.monotonic() >= deadline:
             missing = sorted(expected - out.keys())
             logger.warning(
-                f'hostNetwork sshd ports for {missing} did not appear in '
-                f'ConfigMap {namespace}/{name} within '
-                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s; falling back to '
-                f'default SSH port for those pods.')
+                f'hostNetwork sshd ports for {missing} did not appear '
+                f'in ConfigMap {namespace}/{name} within '
+                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s — `ssh <cluster>` '
+                f'to those pods will fail until the next '
+                f'`sky status -r`.')
             return out
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
@@ -1826,20 +1825,16 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
-    # Per-pod sshd ports under hostNetwork. host:22 belongs to the K8s
-    # node's own sshd, so each pod's sshd binds a probed port instead;
-    # the SSH config writer needs that port per-pod. Wait for entries
-    # from the hostNetwork pods so the cached SSH config doesn't lock
-    # in 22 (= node's sshd, not the pod's).
+    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
+    # K8s node's own sshd). The SSH config writer needs that port per
+    # pod, so wait for every hostNetwork pod's entry to land in the
+    # ConfigMap before caching the result.
     host_network_pods = [
-        name for name, pod in running_pods.items()
-        if getattr(pod.spec, 'host_network', False)
+        name for name, pod in running_pods.items() if pod.spec.host_network
     ]
-    pod_sshd_ports = _read_host_network_sshd_ports(
-        cluster_name_on_cloud,
-        namespace,
-        context,
-        expected_pods=host_network_pods)
+    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
+                                                   namespace, context,
+                                                   host_network_pods)
 
     head_pod_name = None
     cpu_request = None

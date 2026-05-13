@@ -98,15 +98,15 @@ def _host_network_probe_cmd(mode: str) -> str:
         '--configmap-namespace '
         '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
         f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
+        # Delete-then-append rather than sed-in-place: sshd_config files
+        # without an existing Port directive would otherwise keep the
+        # default 22 (where the K8s node's own sshd already listens).
         'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]; then '
-        # Delete any existing Port directive (commented or not) then
-        # append ours. Replace-in-place fails closed if sshd_config
-        # lacks any Port line, so this delete+append is more robust.
-        'sudo sed -i -E "/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d" '
-        '/etc/ssh/sshd_config; '
-        'echo "Port ${SKYPILOT_SSHD_PORT}" | '
-        'sudo tee -a /etc/ssh/sshd_config > /dev/null; '
-        'sudo service ssh restart; '
+        'sudo sh -c "'
+        'sed -i -E \'/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d\' '
+        '/etc/ssh/sshd_config && '
+        'echo Port ${SKYPILOT_SSHD_PORT} >> /etc/ssh/sshd_config && '
+        'service ssh restart"; '
         'fi; '
         'fi; ')
 

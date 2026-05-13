@@ -48,10 +48,9 @@ _WORKER_PORT_NAMES: List[str] = [
     'sshd',
 ]
 
-# ConfigMap key prefix for per-pod sshd ports. Each pod publishes
-# ``{_SSHD_KEY_PREFIX}{podname}: <port>`` so the SkyPilot client can
-# discover the right port when generating the SSH config.
-_SSHD_KEY_PREFIX = 'sshd_'
+# Public so the SkyPilot client (sky/provision/kubernetes/instance.py)
+# can read the same key when assembling InstanceInfo.ssh_port.
+SSHD_KEY_PREFIX = 'sshd_'
 
 _SA_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token'
 _SA_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
@@ -63,6 +62,10 @@ _CONFIGMAP_POLL_INTERVAL_S = 2
 # ray binds) and ray actually accepting connections.
 _HEAD_GCS_TCP_WAIT_TIMEOUT_S = 600
 _HEAD_GCS_TCP_WAIT_INTERVAL_S = 1
+
+# Bound on retries when a worker's ConfigMap merge races another worker
+# (409 Conflict from stale resourceVersion).
+_MERGE_RETRY_LIMIT = 5
 
 
 def _bind_ephemeral_port() -> Tuple[socket.socket, int]:
@@ -133,7 +136,7 @@ def _configmap_data_for_ports(podname: str, ports: Dict[str,
     """
     out: Dict[str, str] = {}
     for name, port in ports.items():
-        key = f'{_SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
+        key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
         out[key] = str(port)
     return out
 
@@ -168,6 +171,23 @@ def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
     }
 
 
+def _format_api_error(action: str, name: str, namespace: str, status: int,
+                      resp: bytes) -> str:
+    body = resp.decode('utf-8', 'replace')
+    return (f'Failed to {action} ConfigMap {namespace}/{name}: '
+            f'status={status} body={body}')
+
+
+def _get_configmap(name: str, namespace: str) -> Dict[str, Any]:
+    """GET a ConfigMap, returning its parsed body. Raises on non-200."""
+    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
+    status, resp = _k8s_api_request('GET', base)
+    if status >= 300:
+        raise RuntimeError(
+            _format_api_error('GET', name, namespace, status, resp))
+    return json.loads(resp)
+
+
 def _publish_configmap(name: str, namespace: str, ports: Dict[str,
                                                               int]) -> None:
     """Create or update a ConfigMap with the head's chosen ports.
@@ -185,23 +205,13 @@ def _publish_configmap(name: str, namespace: str, ports: Dict[str,
     base = f'/api/v1/namespaces/{namespace}/configmaps'
     status, resp = _k8s_api_request('POST', base, body)
     if status == 409:
-        # Already exists; fetch resourceVersion and PUT to update.
-        status, resp = _k8s_api_request('GET', f'{base}/{name}')
-        if status >= 300:
-            raise RuntimeError(
-                f'Failed to GET ConfigMap {namespace}/{name} for update: '
-                f'status={status} body={resp.decode("utf-8", "replace")}')
-        existing = json.loads(resp)
+        existing = _get_configmap(name, namespace)
         body['metadata']['resourceVersion'] = (
             existing['metadata']['resourceVersion'])
         status, resp = _k8s_api_request('PUT', f'{base}/{name}', body)
     if status >= 300:
         raise RuntimeError(
-            f'Failed to publish ConfigMap {namespace}/{name}: '
-            f'status={status} body={resp.decode("utf-8", "replace")}')
-
-
-_MERGE_RETRY_LIMIT = 5
+            _format_api_error('publish', name, namespace, status, resp))
 
 
 def _merge_sshd_port(name: str, namespace: str, podname: str,
@@ -210,27 +220,21 @@ def _merge_sshd_port(name: str, namespace: str, podname: str,
 
     Workers call this after the head has published the ConfigMap so the
     SkyPilot client can read every pod's sshd port from one place.
-    Retries on 409 (lost optimistic-concurrency race against another
-    worker) up to a small bound.
+    Retries on 409 (resourceVersion went stale — typically another
+    worker won the merge race) up to a small bound.
     """
     base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
-    key = f'{_SSHD_KEY_PREFIX}{podname}'
+    key = f'{SSHD_KEY_PREFIX}{podname}'
     last_err: Optional[str] = None
     for _ in range(_MERGE_RETRY_LIMIT):
-        status, resp = _k8s_api_request('GET', base)
-        if status >= 300:
-            raise RuntimeError(
-                f'Failed to GET ConfigMap {namespace}/{name} for merge: '
-                f'status={status} body={resp.decode("utf-8", "replace")}')
-        existing = json.loads(resp)
+        existing = _get_configmap(name, namespace)
         data = dict(existing.get('data') or {})
         data[key] = str(port)
         existing['data'] = data
         status, resp = _k8s_api_request('PUT', base, existing)
         if status < 300:
             return
-        # 409: resourceVersion went stale — re-GET and try again.
-        last_err = f'status={status} body={resp.decode("utf-8", "replace")}'
+        last_err = _format_api_error('PUT', name, namespace, status, resp)
         if status != 409:
             break
     raise RuntimeError(
@@ -296,10 +300,8 @@ def _run_worker(env_file: str, configmap_name: str,
             f'ConfigMap {configmap_namespace}/{configmap_name} is missing '
             f'the "gcs" key. Data: {head_data}')
     held, ports = _probe_ports(_WORKER_PORT_NAMES)
-    # Publish this worker's sshd port back into the ConfigMap so the
-    # SkyPilot client can write the right Port directive for it. Done
-    # before releasing the held sockets so a failed publish aborts the
-    # bootstrap before sshd binds to a port nothing can discover.
+    # Publish before releasing the held sockets so a failed merge
+    # aborts the bootstrap before sshd binds a port nothing can find.
     podname = os.environ['SKYPILOT_POD_NAME']
     _merge_sshd_port(configmap_name, configmap_namespace, podname,
                      ports['sshd'])
