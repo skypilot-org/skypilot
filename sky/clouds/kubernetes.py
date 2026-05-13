@@ -78,7 +78,8 @@ def _compute_preemption_hook_timeout(
     so the daemon would be SIGKILLed mid-hook anyway. We log a stderr
     warning when the raw sum exceeds the cap so users can shrink their
     timeouts (or the operator can raise ``--max-graceful-termination-sec``
-    on their cluster).
+    on their cluster). See:
+    https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#does-ca-respect-gracefultermination-in-scale-down
     """
     timeouts = [
         entry.get('timeout', constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
