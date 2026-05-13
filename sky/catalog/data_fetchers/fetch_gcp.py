@@ -182,10 +182,9 @@ TPU_V4_HOST_DF = pd.read_csv(
 SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
-    # NOTE: GCP does not provide separate CPU/RAM pricing for A4 or G4
-    # instances. The GPU SKU (B200 / RTX PRO 6000) includes the full VM
-    # cost. See special handling in get_vm_price() which sets A4 / G4 VM
-    # price to 0.
+    # NOTE: GCP does not provide separate CPU/RAM pricing for A4
+    # instances. The B200 GPU SKU includes the full VM cost. See special
+    # handling in get_vm_price() which sets A4 VM price to 0.
     'a4': 'A4 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
@@ -405,13 +404,12 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         if series in ['f1', 'g1']:
             memory_price = 0.0
 
-        # Special case for A4 and G4 instances.
-        # GCP does not provide separate CPU/RAM pricing for A4 or G4
-        # instances in the SKUs API. The GPU pricing (B200 for A4, RTX PRO
-        # 6000 for G4) includes the full VM cost. We set the VM price to 0
-        # so the entry is not dropped, and the GPU pricing will provide the
-        # total cost.
-        if series in ('a4', 'g4'):
+        # Special case for A4 instances.
+        # GCP does not provide separate CPU/RAM pricing for A4 instances in
+        # the SKUs API. The B200 GPU SKU includes the full VM cost. We set
+        # the VM price to 0 so the entry is not dropped, and the GPU
+        # pricing will provide the total cost.
+        if series == 'a4':
             cpu_price = 0.0
             memory_price = 0.0
 
