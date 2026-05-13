@@ -800,3 +800,38 @@ def test_relaunch_no_warning_on_non_k8s_cloud():
     prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
     new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 300}]
     assert _maybe_warn_preemption_grace_change(AWS(), prior, new) is None
+
+
+def test_hooks_from_protobuf_defaults_empty_events_to_all():
+    """Receive-side default for empty `events` repeated field.
+
+    proto3 ``repeated`` has no presence — an empty ``events`` list on
+    the wire is indistinguishable from "field omitted". Send-side
+    defaulting (``_normalize_hook_entry``) covers the Python client,
+    but the skylet must also re-apply the default on receive, in case
+    a non-Python or future client sends ``events=[]``. Otherwise a
+    hook with empty events silently matches no event and never fires.
+    """
+    from sky.schemas.generated import autostopv1_pb2  # type: ignore
+    from sky.skylet import autostop_lib
+
+    msg = autostopv1_pb2.Hook(run='echo hi', timeout=60)
+    # events repeated field intentionally left empty.
+
+    out = autostop_lib.hooks_from_protobuf([msg])
+    assert len(out) == 1
+    assert sorted(out[0]['events']) == sorted(ALL_EVENTS), (
+        f"Empty events should default to all three on receive; got "
+        f"{out[0]['events']!r}. Without the receive-side default, an "
+        f"empty repeated events field is a silent no-op hook.")
+
+
+def test_hooks_from_protobuf_preserves_nonempty_events():
+    """Sanity: receive-side default kicks in only for *empty* events."""
+    from sky.schemas.generated import autostopv1_pb2  # type: ignore
+    from sky.skylet import autostop_lib
+
+    msg = autostopv1_pb2.Hook(run='echo hi', timeout=60)
+    msg.events.append(autostopv1_pb2.AUTOSTOP)
+    out = autostop_lib.hooks_from_protobuf([msg])
+    assert out[0]['events'] == ['autostop']

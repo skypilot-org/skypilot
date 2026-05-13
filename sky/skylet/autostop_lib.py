@@ -283,11 +283,20 @@ def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
 
 
 def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
-    """Convert protobuf ``Hook`` messages back into hook dicts."""
+    """Convert protobuf ``Hook`` messages back into hook dicts.
+
+    Re-applies the ``events`` default on receive: proto3 ``repeated``
+    has no presence, so an empty ``events`` list is wire-equivalent to
+    "field omitted". Without the default, an empty list would silently
+    match no event and the hook would never fire.
+    """
     _ensure_event_maps()
     out: List[Dict[str, Any]] = []
     for h in proto_hooks:
         events = [_PROTO_TO_EVENT[e] for e in h.events if e in _PROTO_TO_EVENT]
+        if not events:
+            # Match Resources._normalize_hook_entry on the send side.
+            events = ['autostop', 'preemption', 'down']
         out.append({
             'run': h.run,
             'events': events,
