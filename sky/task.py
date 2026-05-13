@@ -1947,6 +1947,21 @@ class Task:
 
         add_if_not_none('resources', tmp_resource_config)
 
+        # Lifecycle hooks are stored on each Resources instance (the
+        # internal API replicates them across all resources), but their
+        # canonical YAML placement is the task-level ``config.hooks:``.
+        # Lift the list off any Resources that carries one and emit
+        # under ``config.hooks`` so round-trips through to_yaml/from_yaml
+        # don't trip the rejection that catches a misplaced
+        # ``resources.hooks`` in user YAML.
+        task_hooks: Optional[List[Dict[str, Any]]] = None
+        for r in self.resources:
+            if r.hooks:
+                task_hooks = [dict(h) for h in r.hooks]
+                break
+        if task_hooks:
+            config.setdefault('config', {})['hooks'] = task_hooks
+
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 

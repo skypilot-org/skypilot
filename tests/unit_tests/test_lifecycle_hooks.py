@@ -140,6 +140,15 @@ def test_resources_default_fills_events_when_omitted():
 
 
 def test_resources_round_trip_preserves_hooks():
+    """Hooks round-trip through Task.to_yaml_config / from_yaml_config.
+
+    Hooks are stored on each Resources internally but serialized under
+    the task-level ``config.hooks:`` key (their canonical YAML
+    placement) — emitting them under ``resources.hooks`` would trip
+    Task.from_yaml_config's rejection on a server-side round-trip.
+    """
+    from sky.task import Task
+
     hooks = [
         {
             'run': 'a',
@@ -151,15 +160,34 @@ def test_resources_round_trip_preserves_hooks():
             'events': ['autostop', 'down']
         },
     ]
-    (r,) = list(Resources.from_yaml_config({'hooks': hooks}))
-    out = r.to_yaml_config()
-    assert out.get('hooks'), out
-    # Each original entry is present; default-fill for 'events' may apply
-    # when the user omitted it (not applicable in this test's inputs).
-    assert len(out['hooks']) == 2
-    assert out['hooks'][0]['run'] == 'a'
-    assert sorted(out['hooks'][0]['events']) == ['autostop']
-    assert out['hooks'][0]['timeout'] == 60
+    task = Task.from_yaml_config({
+        'name': 't',
+        'config': {
+            'hooks': hooks,
+        },
+        'resources': {
+            'cpus': 1,
+        },
+    })
+    out = task.to_yaml_config()
+
+    # Hooks emit at the task level under `config.hooks`, NOT under resources.
+    assert 'hooks' not in (out.get('resources') or {}), (
+        f'Hooks should not be emitted under resources; got: '
+        f"{out.get('resources')!r}")
+    cfg_hooks = (out.get('config') or {}).get('hooks')
+    assert cfg_hooks, f'Expected config.hooks; got: {out!r}'
+    assert len(cfg_hooks) == 2
+    assert cfg_hooks[0]['run'] == 'a'
+    assert sorted(cfg_hooks[0]['events']) == ['autostop']
+    assert cfg_hooks[0]['timeout'] == 60
+
+    # Now feed the dumped YAML back through the loader — should not
+    # trigger the `resources.hooks` rejection.
+    task2 = Task.from_yaml_config(out)
+    (r2,) = list(task2.resources)
+    assert r2.hooks and len(r2.hooks) == 2
+    assert r2.hooks[0]['run'] == 'a'
 
 
 def test_resources_copy_preserves_hooks():

@@ -2658,8 +2658,12 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-        if self._hooks:
-            config['hooks'] = [dict(h) for h in (self._hooks or [])]
+        # Note: ``_hooks`` is intentionally NOT emitted here. Lifecycle
+        # hooks live under the task-level ``config.hooks:`` key (their
+        # canonical placement); Task._to_yaml_config lifts ``_hooks``
+        # off the Resources and emits them there. Emitting under
+        # resources.hooks would trip the explicit rejection in
+        # Task.from_yaml_config on round-trip.
 
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
