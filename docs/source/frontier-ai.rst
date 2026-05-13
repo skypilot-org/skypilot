@@ -33,7 +33,7 @@ For researchers and AI agents
    :align: center
    :width: 90%
 
-   Devspaces: VSCode in the browser with a persistent environment and on-demand CPU ↔ GPU switching.
+   Devspaces: VSCode in the browser with a persistent environment and CPU ↔ GPU switching.
 
 🚀 **Large-scale training launches** — Run training across 1,000s of GPUs for **pre-training**, **SFT post-training**, and **RL post-training**. Launch **5K-node training jobs** in under a minute, with gang scheduling, topology/rack-aware scheduling, and high-bandwidth networking pre-wired.
 
