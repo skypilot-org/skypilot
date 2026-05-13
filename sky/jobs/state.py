@@ -102,6 +102,19 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('is_primary_in_job_group',
                       sqlalchemy.Boolean,
                       server_default=None),
+    # Tracks the most recent time at which (running + succeeded) dropped
+    # below the lower bound of an elastic job. NULL when at/above the
+    # lower bound. Set via COALESCE so the first drop's timestamp survives
+    # subsequent updates while still below.
+    sqlalchemy.Column('below_min_since',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # Set once via atomic UPDATE ... WHERE all_ready_at IS NULL when the
+    # job's running pod count first reaches the launched node count.
+    # NULL means never reached.
+    sqlalchemy.Column('all_ready_at',
+                      sqlalchemy.Float,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -2670,6 +2683,85 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
             raise exceptions.ManagedJobStatusError(message)
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
+
+
+async def set_below_min_since_async(job_id: int,
+                                    task_id: int,
+                                    *,
+                                    ts: float) -> None:
+    """Set spot.below_min_since via COALESCE.
+
+    Updates the column to :ts only if currently NULL; otherwise preserves
+    the existing value. Idempotent — repeated calls are no-ops once a
+    timestamp is set.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                )).values({
+                    spot_table.c.below_min_since: sqlalchemy.func.coalesce(
+                        spot_table.c.below_min_since, ts),
+                }))
+        await session.commit()
+
+
+async def clear_below_min_since_async(job_id: int, task_id: int) -> None:
+    """Set spot.below_min_since to NULL. Idempotent."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                )).values({spot_table.c.below_min_since: None}))
+        await session.commit()
+
+
+async def mark_all_ready_once_async(job_id: int,
+                                    task_id: int,
+                                    *,
+                                    ts: float) -> bool:
+    """Atomically set spot.all_ready_at iff currently NULL.
+
+    Returns True only on the call that actually updated a row; subsequent
+    calls return False. The WHERE all_ready_at IS NULL guard provides
+    SQL-level once-only semantics.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.all_ready_at.is_(None),
+                )).values({spot_table.c.all_ready_at: ts}))
+        await session.commit()
+        return result.rowcount == 1
+
+
+async def get_below_min_and_all_ready_async(
+        job_id: int,
+        task_id: int) -> Tuple[Optional[float], Optional[float]]:
+    """Read the (below_min_since, all_ready_at) timestamps for a job/task row."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.below_min_since,
+                              spot_table.c.all_ready_at).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                )))
+        row = result.one_or_none()
+        if row is None:
+            return None, None
+        return row.below_min_since, row.all_ready_at
 
 
 def set_winding_down(job_id: int, task_id: int) -> None:
