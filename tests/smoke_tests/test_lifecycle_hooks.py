@@ -296,6 +296,78 @@ def test_hook_clear_via_relaunch(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
+# Re-launch preserves prior autostop config when only hooks change.
+#
+# Previously, sky.execution._execute's `elif hooks_payload is not None:` branch
+# called backend.set_autostop(..., idle_minutes_to_autostop=-1, ...), which
+# silently unset autostop on any re-launch that touched only hooks. The fix
+# (_compute_set_autostop_args_for_hooks_only_relaunch) reads the prior
+# autostop + to_down from local DB and passes them through. This smoke pins
+# the contract end-to-end against the actual cluster.
+# ---------------------------------------------------------------------------
+@_no_autostop
+@pytest.mark.no_kubernetes
+def test_hook_relaunch_preserves_autostop(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # First launch: autostop=10 idle minutes + autodown, plus a down-event
+    # hook. The autostop is intentionally well above any reasonable test
+    # window so we never observe an actual autostop — we're only checking
+    # whether the *configured* value survives the re-launch.
+    initial_yaml = _write_yaml({
+        'autostop': {
+            'idle_minutes': 10,
+            'down': True,
+        },
+        'hooks': [{
+            'run': 'echo initial-hook',
+            'events': ['down'],
+        }],
+    })
+    # Re-launch: change only the hook list. Autostop block intentionally
+    # omitted from the YAML — the test pins that the prior autostop value
+    # is not wiped by the hooks-only re-launch path.
+    updated_yaml = _write_yaml({
+        'hooks': [{
+            'run': 'echo updated-hook',
+            'events': ['down'],
+        }],
+    })
+    test = smoke_tests_utils.Test(
+        'test_hook_relaunch_preserves_autostop',
+        [
+            # (1) Initial launch with autostop=10 + autodown.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {initial_yaml}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # (2) Verify the cluster's autostop is set + autodown enabled.
+            # `sky status` formats AUTOSTOP as "10 min(down)" when both
+            # idle_minutes and down are set.
+            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?min\\(down\\)"',
+            # (3) Re-launch with hooks-only change — autostop block omitted.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
+            f'{updated_yaml}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # (4) Critical assertion: autostop is STILL "10 min(down)".
+            # Pre-fix this would have been "-" (unset).
+            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?min\\(down\\)" || '
+            f'(echo "REGRESSION: autostop was wiped by hooks-only re-launch. '
+            f'sky status output:" && echo "$out" && false)',
+            # (5) Sanity: the new hook actually replaced the old one in the
+            # stored hooks list (so we're sure the re-launch path actually
+            # ran, not just no-oped).
+            f'inspect=\'sqlite3 ~/.sky/skylet_config.db '
+            f'"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"\' && '
+            f'out=$(sky exec {name} "$inspect") && '
+            f'echo "$out" | grep updated-hook && '
+            f'! echo "$out" | grep initial-hook',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
 # K8s preemption: `kubectl delete pod` (no --force) → kubelet runs preStop
 # → SIGTERM forwarded to skylet → preemption hook runs during the grace
 # window. Verified via `kubectl exec` into the still-Terminating pod.
@@ -374,6 +446,72 @@ def test_hook_grace_capped_at_autoscaler_limit():
             f'val=$(kubectl get --context kind-skypilot "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
             f'[ "$val" = "600" ]',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# K8s re-launch: terminationGracePeriodSeconds is set at pod creation and
+# cannot be updated in place. Re-launching the same cluster with a *larger*
+# preemption-hook timeout must warn the user that the existing pod's grace
+# wasn't updated (kubelet will SIGKILL past the original grace).
+# ---------------------------------------------------------------------------
+@pytest.mark.kubernetes
+def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
+    name = smoke_tests_utils.get_cluster_name()
+    # Initial launch: 60s preemption-hook timeout → pod grace = 60s.
+    small_yaml = _write_yaml({
+        'hooks': [{
+            'run': 'true',
+            'events': ['preemption'],
+            'timeout': 60,
+        }],
+    })
+    # Re-launch the same cluster with a much larger preemption-hook
+    # timeout. The new grace requirement (300s) exceeds the existing
+    # pod's (60s); pod spec is immutable, so we should warn the user
+    # to `sky down` + `sky launch` to apply.
+    large_yaml = _write_yaml({
+        'hooks': [{
+            'run': 'true',
+            'events': ['preemption'],
+            'timeout': 300,
+        }],
+    })
+    test = smoke_tests_utils.Test(
+        'test_hook_k8s_relaunch_warns_when_preemption_grace_increases',
+        [
+            # (1) Initial launch — no warning expected.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra kubernetes --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {small_yaml} 2>&1) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT} && '
+            f'! (echo "$s" | grep -i "preemption-hook grace requirement")',
+            # (2) Confirm pod's grace is 60.
+            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'2>/dev/null | grep {name} | head -n1) && '
+            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'[ "$val" = "60" ]',
+            # (3) Re-launch with larger timeout. Warning expected on
+            # stderr — message comes from
+            # _maybe_warn_preemption_grace_change in cloud_vm_ray_backend.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra kubernetes --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {large_yaml} 2>&1) && '
+            f'echo "$s" | grep -E "preemption-hook grace requirement|terminationGracePeriodSeconds.*fixed at pod creation" && '
+            f'echo "$s" | grep -i "sky down"',
+            # (4) Confirm the existing pod's grace is STILL 60 — re-launch
+            # cannot mutate the pod spec; warning is the only thing the
+            # user can act on.
+            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'2>/dev/null | grep {name} | head -n1) && '
+            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
+            f'[ "$val" = "60" ]',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
