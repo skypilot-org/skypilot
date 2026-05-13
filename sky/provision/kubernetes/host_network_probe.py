@@ -154,18 +154,6 @@ def _k8s_api_request(
         return e.code, e.read()
 
 
-def _get_pod_uid(pod_name: str, namespace: str) -> str:
-    """Look up the head pod's UID for the ConfigMap's ownerReference."""
-    status, resp = _k8s_api_request(
-        'GET', f'/api/v1/namespaces/{namespace}/pods/{pod_name}')
-    if status >= 300:
-        raise RuntimeError(
-            f'Failed to GET pod {namespace}/{pod_name} to derive the '
-            f'ConfigMap ownerReference: status={status} '
-            f'body={resp.decode("utf-8", "replace")}')
-    return json.loads(resp)['metadata']['uid']
-
-
 def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
                           owner_pod_name: str,
                           owner_pod_uid: str) -> Dict[str, Any]:
@@ -209,10 +197,12 @@ def _publish_configmap(name: str, namespace: str, ports: Dict[str,
     fired yet), we refresh its ownerReference to the current head pod so
     cleanup catches it.
     """
-    # K8s exports the pod name as HOSTNAME by default. Required because
-    # this script runs inside the pod the OwnerReference will point at.
-    owner_pod_name = os.environ['HOSTNAME']
-    owner_pod_uid = _get_pod_uid(owner_pod_name, namespace)
+    # SKYPILOT_POD_NAME / SKYPILOT_POD_UID are injected by the K8s
+    # downward API in kubernetes-ray.yml.j2. We can't use $HOSTNAME here
+    # because under hostNetwork: true the container inherits the host
+    # node's hostname (e.g. gke-*-pool-*), not the pod's name.
+    owner_pod_name = os.environ['SKYPILOT_POD_NAME']
+    owner_pod_uid = os.environ['SKYPILOT_POD_UID']
     body = _build_configmap_body(name, namespace, ports, owner_pod_name,
                                  owner_pod_uid)
     base = f'/api/v1/namespaces/{namespace}/configmaps'

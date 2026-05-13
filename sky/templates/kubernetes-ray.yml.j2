@@ -539,6 +539,19 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            # metadata.name / metadata.uid via downward API rather than
+            # $HOSTNAME — under hostNetwork: true the container inherits
+            # the host node's hostname, so HOSTNAME points at the wrong
+            # thing for any pod self-identification (see
+            # sky.provision.kubernetes.host_network_probe).
+            - name: SKYPILOT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SKYPILOT_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
