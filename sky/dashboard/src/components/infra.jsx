@@ -99,6 +99,13 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
+// Module-level cache for plugin-contributed infra results.
+// This persists across component unmount/remount so status dots don't
+// flash gray when navigating away from /infra and back.
+// The cache is keyed by provider id and stores the last result from
+// each provider's useExtraInfraRows hook.
+const pluginInfraResultsCache = new Map();
+
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
   gpu,
@@ -1953,8 +1960,19 @@ export function GPUs() {
     () => allDataProviders.filter((p) => p.hooks?.useExtraInfraRows),
     [allDataProviders]
   );
-  const [extraInfraResultsById, setExtraInfraResultsById] = useState({});
+  // Initialize from module-level cache so status dots don't flash gray
+  // when navigating away from /infra and back. The cache stores the last
+  // result from each provider's useExtraInfraRows hook.
+  const [extraInfraResultsById, setExtraInfraResultsById] = useState(() => {
+    const cached = {};
+    for (const [id, result] of pluginInfraResultsCache) {
+      cached[id] = result;
+    }
+    return cached;
+  });
   const recordExtraInfraResult = React.useCallback((id, result) => {
+    // Update module-level cache so it persists across unmount/remount
+    pluginInfraResultsCache.set(id, result);
     setExtraInfraResultsById((prev) => {
       if (prev[id] === result) return prev;
       return { ...prev, [id]: result };
