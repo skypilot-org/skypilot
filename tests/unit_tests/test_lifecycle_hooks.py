@@ -591,46 +591,32 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
     assert r.hooks[0]['timeout'] == 30
 
 
-def test_task_yaml_resources_hooks_routes_with_warning(tmp_path, capsys):
-    """Deprecated form: `resources.hooks:` still works + stderr warns."""
+def test_task_yaml_resources_hooks_form_now_rejected(tmp_path):
+    """`resources.hooks:` is no longer accepted.
+
+    The shim was kept temporarily during PR1 development to ease the
+    rename from the original ``resources.hooks:`` placement to the
+    final ``config.hooks:``. Since the legacy placement never landed
+    in master, drop the shim — users on master see only ``config.hooks``.
+    Schema's ``additionalProperties: False`` on the resources block now
+    rejects ``hooks:`` cleanly.
+    """
     from sky.task import Task
     yaml_str = ('name: test\n'
                 'resources:\n'
                 '  cpus: 2\n'
                 '  hooks:\n'
-                '    - run: echo from-resources-hooks\n'
+                '    - run: echo legacy\n'
                 '      events: [down]\n')
     p = tmp_path / 'task.yaml'
     p.write_text(yaml_str)
-    task = Task.from_yaml(str(p))
-    (r,) = list(task.resources)
-    assert r.hooks and r.hooks[0]['run'] == 'echo from-resources-hooks'
-    err = capsys.readouterr().err
-    assert 'resources.hooks is deprecated' in err
-    assert 'config.hooks' in err
-
-
-def test_task_yaml_both_forms_prefers_config_hooks(tmp_path, capsys):
-    """If both forms specified, config.hooks wins; resources.hooks
-    ignored with a warning."""
-    from sky.task import Task
-    yaml_str = ('name: test\n'
-                'config:\n'
-                '  hooks:\n'
-                '    - run: echo new\n'
-                '      events: [autostop]\n'
-                'resources:\n'
-                '  cpus: 2\n'
-                '  hooks:\n'
-                '    - run: echo old\n'
-                '      events: [autostop]\n')
-    p = tmp_path / 'task.yaml'
-    p.write_text(yaml_str)
-    task = Task.from_yaml(str(p))
-    (r,) = list(task.resources)
-    assert r.hooks and r.hooks[0]['run'] == 'echo new'
-    err = capsys.readouterr().err
-    assert 'resources.hooks ignored' in err
+    with pytest.raises(Exception) as excinfo:
+        Task.from_yaml(str(p))
+    # Error should mention both the rejected placement and the canonical
+    # one so users know what to do.
+    msg = str(excinfo.value).lower()
+    assert 'resources.hooks' in msg, f'Expected mention of bad placement; got: {msg}'
+    assert 'config.hooks' in msg, f'Expected mention of correct placement; got: {msg}'
 
 
 def test_task_yaml_config_hooks_schema_rejects_unknown_event(tmp_path):

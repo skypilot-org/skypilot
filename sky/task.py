@@ -23,7 +23,6 @@ from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import git
-from sky.utils import hooks_deprecation
 from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -916,23 +915,21 @@ class Task:
         cluster_config_override = config_override or None
 
         # Parse resources field. Coerce `resources: null` / `resources:`
-        # (empty value) to {} so the hook-routing pop() below doesn't
-        # AttributeError.
+        # (empty value) to {} so the assignment below doesn't fail.
         resources_config = config.pop('resources', None) or {}
-        # Backward-compat: `resources.hooks:` (PR1 form) still parses,
-        # with a stderr deprecation warning that points users at
-        # `config.hooks:`.
-        legacy_resources_hooks = resources_config.pop('hooks', None)
-        if legacy_resources_hooks is not None:
-            sys.stderr.write(hooks_deprecation.RESOURCES_HOOKS_FORM)
-            if config_hooks is None:
-                config_hooks = legacy_resources_hooks
-            else:
-                # Both new and old forms specified — prefer the new
-                # form; just warn that the old one was ignored.
-                sys.stderr.write(
-                    'WARNING: both config.hooks and resources.hooks were '
-                    'specified; resources.hooks ignored.\n')
+        # `resources.hooks:` was an in-flight rename during PR1 review;
+        # it never landed in master. Reject the form explicitly so users
+        # write `config.hooks:` (the canonical placement) instead of
+        # discovering the rename via Resources-internal silent acceptance.
+        if 'hooks' in resources_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Lifecycle hooks live under top-level `config.hooks:`, '
+                    'not `resources.hooks:`. Move the list to '
+                    '`config.hooks` at the top level of the task YAML.')
+        # Forward task.config.hooks into the resources block so the
+        # Resources constructor can pick it up via the same key the
+        # internal API uses.
         if config_hooks is not None:
             resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
