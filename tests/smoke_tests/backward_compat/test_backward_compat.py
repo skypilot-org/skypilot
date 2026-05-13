@@ -655,6 +655,14 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            # sync-down: new client, old server, against the cluster CLI.
+            # Goes straight to /download_logs (no streaming wrapper), so
+            # the server's download_tmp_dir() path-generation contract is
+            # exercised directly — this is the path #9294 broke and #9310
+            # fixed; tracks #9315.
+            f'{self.ACTIVATE_CURRENT} && '
+            f's="$(SKYPILOT_DEBUG=0 sky logs {cluster_name} 1 --sync-down 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job 1 logs: "',
             f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
@@ -746,6 +754,14 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            # sync-down: old client, new server, against the cluster CLI.
+            # Goes straight to /download_logs (no streaming wrapper), so
+            # the server's download_tmp_dir() path-generation contract is
+            # exercised directly — this is the path #9294 broke and #9310
+            # fixed; tracks #9315.
+            f'{self.ACTIVATE_BASE} && '
+            f's="$(SKYPILOT_DEBUG=0 sky logs {cluster_name} 1 --sync-down 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job 1 logs: "',
             f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
