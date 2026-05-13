@@ -559,7 +559,10 @@ available_node_types:
               value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
-              value: {{ value }}
+              # tojson quotes the value so YAML parses it as a string —
+              # K8s rejects pods whose env.value is anything but a string
+              # (e.g. when value is "1", a bare emit yields YAML int 1).
+              value: {{ value | tojson }}
             {% endfor %}
             {% if k8s_enable_docker_all %}
             - name: DOCKER_HOST
