@@ -100,8 +100,14 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
+# constants.RAY_STATUS pins RAY_ADDRESS to the SkyPilot default port. The
+# hostNetwork probe binds Ray to a dynamic free port, so use SKYPILOT_RAY_PORT
+# (exported by the probe just above this loop) when present, falling back to
+# the constant so non-hostNetwork bootstraps behave the same as before.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    f'while `{constants.RAY_STATUS} | grep -q "No cluster status."`; do '
+    'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'{constants.SKY_REMOTE_RAY_PORT}}} '
+    f'{constants.SKY_RAY_CMD} status | grep -q "No cluster status."`; do '
     'sleep 0.5; '
     'echo "Waiting ray cluster to be initialized"; '
     'done;')
