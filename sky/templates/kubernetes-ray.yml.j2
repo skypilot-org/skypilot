@@ -395,6 +395,11 @@ available_node_types:
         # lookups to CoreDNS so inter-node Ray comms work.
         # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
+        {% endif %}
+        {% if k8s_enable_oci_roce or k8s_host_network %}
+        # Under hostNetwork the default dnsPolicy silently falls back to
+        # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
+        # won't resolve, and the worker probe gets stuck dialing the head.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
         {% if volume_mounts %}
@@ -554,6 +559,20 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% if k8s_host_network %}
+            # Downward API rather than $HOSTNAME — hostNetwork pods
+            # inherit the host node's hostname. Used by
+            # host_network_probe to key per-pod ConfigMap entries and
+            # set ownerReferences for GC.
+            - name: SKYPILOT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SKYPILOT_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            {% endif %}
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
@@ -574,7 +593,8 @@ available_node_types:
               value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
-              value: {{ value }}
+              # tojson forces a quoted string; K8s rejects non-string env values.
+              value: {{ value | tojson }}
             {% endfor %}
             {% if k8s_enable_docker_all %}
             - name: DOCKER_HOST
@@ -1136,6 +1156,10 @@ available_node_types:
                   # Start ray worker on the worker pod.
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+{% if k8s_host_network %}
+                  # SKYPILOT_RAY_PORT and the head-up wait are handled
+                  # by the worker probe inside ray_worker_start_command.
+{% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
                   until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
@@ -1145,6 +1169,7 @@ available_node_types:
                   until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
                     sleep 0.1
                   done
+{% endif %}
 
                   set +e
                   {{ ray_worker_start_command }}
@@ -1330,12 +1355,17 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if not k8s_host_network %}
+          # Omitted under hostNetwork: the scheduler's NodePorts predicate
+          # treats containerPort as hostPort and blocks sibling pods even
+          # though the probe assigns Ray's ports dynamically.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
           - containerPort: 46590  # Used by Skylet gRPC
+          {% endif %}
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to

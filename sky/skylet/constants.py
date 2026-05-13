@@ -38,9 +38,17 @@ SKY_REMOTE_RAY_PORT = 6380
 SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
 # Note we can not use json.dumps which will add a space between ":" and its
 # value which causes the yaml parser to fail.
+# Reads SKYPILOT_RAY_PORT / SKYPILOT_RAY_DASHBOARD_PORT from the env (set by
+# sky.provision.kubernetes.host_network_probe in the hostNetwork: true K8s
+# path), falling back to the SkyPilot defaults so non-hostNetwork clusters
+# write the same ports to ~/.sky/ray_port.json as before.
 SKY_REMOTE_RAY_PORT_DICT_STR = (
-    f'{{"ray_port":{SKY_REMOTE_RAY_PORT}, '
-    f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
+    '{'
+    f'"ray_port":int(os.environ.get("SKYPILOT_RAY_PORT",'
+    f'{SKY_REMOTE_RAY_PORT})), '
+    f'"ray_dashboard_port":int(os.environ.get('
+    f'"SKYPILOT_RAY_DASHBOARD_PORT",{SKY_REMOTE_RAY_DASHBOARD_PORT}))'
+    '}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'

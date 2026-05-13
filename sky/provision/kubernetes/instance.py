@@ -18,6 +18,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1798,6 +1799,64 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
+# The probe runs as soon as ray-installation finishes in step 2 of the
+# pod bootstrap, typically within tens of seconds of the pod going
+# Running. 60s gives the common case plenty of slack without pinning
+# every status refresh during a pod restart to a multi-minute hang.
+_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
+_HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
+
+
+def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
+                                  context: Optional[str],
+                                  expected_pods: List[str]) -> Dict[str, int]:
+    """Read each pod's probed sshd port from the hostNetwork ConfigMap.
+
+    Polls until every entry in ``expected_pods`` is present (or the
+    timeout elapses); returning partial state would freeze every
+    subsequent SSH at port 22 until the next refresh.
+    """
+    if not expected_pods:
+        return {}
+    name = f'{cluster_name_on_cloud}-ray-ports'
+    expected = set(expected_pods)
+    deadline = time.monotonic() + _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
+    while True:
+        out: Dict[str, int] = {}
+        try:
+            cm = kubernetes.core_api(context).read_namespaced_config_map(
+                name=name, namespace=namespace)
+        except kubernetes.api_exception() as e:
+            if e.status != 404:
+                raise
+            cm = None
+        data = (cm.data or {}) if cm is not None else {}
+        for key, value in data.items():
+            if not key.startswith(host_network_probe.SSHD_KEY_PREFIX):
+                continue
+            podname = common_utils.removeprefix(
+                key, host_network_probe.SSHD_KEY_PREFIX)
+            try:
+                out[podname] = int(value)
+            except ValueError:
+                logger.warning(
+                    f'ConfigMap {namespace}/{name} has non-integer value '
+                    f'for {key!r}: {value!r}. SSH to {podname!r} will '
+                    f'fall back to port 22 and hit the K8s node\'s sshd.')
+        if expected.issubset(out.keys()):
+            return out
+        if time.monotonic() >= deadline:
+            missing = sorted(expected - out.keys())
+            logger.warning(
+                f'hostNetwork sshd ports for {missing} did not appear '
+                f'in ConfigMap {namespace}/{name} within '
+                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s — `ssh <cluster>` '
+                f'to those pods will fail until the next '
+                f'`sky status -r`.')
+            return out
+        time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -1819,10 +1878,31 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
+    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
+    # K8s node's own sshd). The SSH config writer needs that port per
+    # pod, so wait for every hostNetwork pod's entry to land in the
+    # ConfigMap before caching the result.
+    host_network_pods = [
+        name for name, pod in running_pods.items() if pod.spec.host_network
+    ]
+    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
+                                                   namespace, context,
+                                                   host_network_pods)
+
     head_pod_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
-        internal_ip = pod.status.pod_ip
+        # Under hostNetwork the pod's network namespace is the host's, so
+        # every pod on a given K8s node shares one pod_ip (the host IP).
+        # That collapses cluster_ips_to_node_id in task_codegen and makes
+        # Ray's get_node_ip_address() (which returns the raylet's
+        # --node-ip-address, our per-pod loopback) disagree with the
+        # SkyPilot-side IP list. Use the same loopback derivation here so
+        # both views line up. Same mapping as in host_network_probe.
+        if pod.spec.host_network:
+            internal_ip = host_network_probe.loopback_ip_for_pod(pod_name)
+        else:
+            internal_ip = pod.status.pod_ip
         # Get the k8s node name the pod is running on (for dashboard display)
         k8s_node_name = getattr(pod.spec, 'node_name', None)
         pods[pod_name] = [
@@ -1830,7 +1910,7 @@ def get_cluster_info(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
                 external_ip=None,
-                ssh_port=port,
+                ssh_port=pod_sshd_ports.get(pod_name, port),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
