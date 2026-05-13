@@ -7,13 +7,14 @@ resources:
 
 # The setup command.  Will be run under the working directory.
 setup: |
+  pip3 install torch==2.5.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+
   git clone https://github.com/huggingface/transformers/
   cd transformers
   git checkout v4.46.3
   pip3 install .
   cd examples/pytorch/text-classification
-  # Pin cu121 PyTorch wheels for broad host driver compatibility.
-  pip3 install -r requirements.txt tensorboard torch --extra-index-url https://download.pytorch.org/whl/cu121
+  pip3 install -r requirements.txt tensorboard
 
 # The command to run.  Will be run under the working directory.
 run: |
