@@ -259,9 +259,9 @@ def _ensure_event_maps() -> None:
     if _EVENT_TO_PROTO:
         return
     _EVENT_TO_PROTO.update({
-        'autostop': autostopv1_pb2.AUTOSTOP,
-        'preemption': autostopv1_pb2.PREEMPTION,
-        'down': autostopv1_pb2.DOWN,
+        'autostop': autostopv1_pb2.EVENT_AUTOSTOP,
+        'preemption': autostopv1_pb2.EVENT_PREEMPTION,
+        'down': autostopv1_pb2.EVENT_DOWN,
     })
     _PROTO_TO_EVENT.update({v: k for k, v in _EVENT_TO_PROTO.items()})
 

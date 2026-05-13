@@ -16,17 +16,17 @@ class AutostopWaitFor(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
 class Event(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     EVENT_UNSPECIFIED: _ClassVar[Event]
-    AUTOSTOP: _ClassVar[Event]
-    PREEMPTION: _ClassVar[Event]
-    DOWN: _ClassVar[Event]
+    EVENT_AUTOSTOP: _ClassVar[Event]
+    EVENT_PREEMPTION: _ClassVar[Event]
+    EVENT_DOWN: _ClassVar[Event]
 AUTOSTOP_WAIT_FOR_UNSPECIFIED: AutostopWaitFor
 AUTOSTOP_WAIT_FOR_JOBS_AND_SSH: AutostopWaitFor
 AUTOSTOP_WAIT_FOR_JOBS: AutostopWaitFor
 AUTOSTOP_WAIT_FOR_NONE: AutostopWaitFor
 EVENT_UNSPECIFIED: Event
-AUTOSTOP: Event
-PREEMPTION: Event
-DOWN: Event
+EVENT_AUTOSTOP: Event
+EVENT_PREEMPTION: Event
+EVENT_DOWN: Event
 
 class Hook(_message.Message):
     __slots__ = ("run", "events", "timeout")

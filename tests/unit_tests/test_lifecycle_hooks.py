@@ -888,7 +888,7 @@ def test_hooks_from_protobuf_preserves_nonempty_events():
     from sky.skylet import autostop_lib
 
     msg = autostopv1_pb2.Hook(run='echo hi', timeout=60)
-    msg.events.append(autostopv1_pb2.AUTOSTOP)
+    msg.events.append(autostopv1_pb2.EVENT_AUTOSTOP)
     out = autostop_lib.hooks_from_protobuf([msg])
     assert out[0]['events'] == ['autostop']
 

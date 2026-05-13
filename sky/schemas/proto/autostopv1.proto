@@ -20,9 +20,9 @@ enum AutostopWaitFor {
 // on any given node via the file-lock CAS.
 enum Event {
   EVENT_UNSPECIFIED = 0;
-  AUTOSTOP = 1;
-  PREEMPTION = 2;
-  DOWN = 3;
+  EVENT_AUTOSTOP = 1;
+  EVENT_PREEMPTION = 2;
+  EVENT_DOWN = 3;
 }
 
 // One lifecycle-hook entry (resources.hooks[*]).

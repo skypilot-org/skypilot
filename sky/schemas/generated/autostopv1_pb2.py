@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&sky/schemas/generated/autostopv1.proto\x12\x0b\x61utostop.v1\"H\n\x04Hook\x12\x0b\n\x03run\x18\x01 \x01(\t\x12\"\n\x06\x65vents\x18\x02 \x03(\x0e\x32\x12.autostop.v1.Event\x12\x0f\n\x07timeout\x18\x03 \x01(\x05\"\xf8\x01\n\x12SetAutostopRequest\x12\x14\n\x0cidle_minutes\x18\x01 \x01(\x05\x12\x0f\n\x07\x62\x61\x63kend\x18\x02 \x01(\t\x12.\n\x08wait_for\x18\x03 \x01(\x0e\x32\x1c.autostop.v1.AutostopWaitFor\x12\x0c\n\x04\x64own\x18\x04 \x01(\x08\x12\x11\n\x04hook\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0chook_timeout\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12 \n\x05hooks\x18\x07 \x03(\x0b\x32\x11.autostop.v1.Hook\x12\x13\n\x0b\x63lear_hooks\x18\x08 \x01(\x08\x42\x07\n\x05_hookB\x0f\n\r_hook_timeout\"\x15\n\x13SetAutostopResponse\"\x17\n\x15IsAutostoppingRequest\"1\n\x16IsAutostoppingResponse\x12\x17\n\x0fis_autostopping\x18\x01 \x01(\x08*\x90\x01\n\x0f\x41utostopWaitFor\x12!\n\x1d\x41UTOSTOP_WAIT_FOR_UNSPECIFIED\x10\x00\x12\"\n\x1e\x41UTOSTOP_WAIT_FOR_JOBS_AND_SSH\x10\x01\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_JOBS\x10\x02\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_NONE\x10\x03*F\n\x05\x45vent\x12\x15\n\x11\x45VENT_UNSPECIFIED\x10\x00\x12\x0c\n\x08\x41UTOSTOP\x10\x01\x12\x0e\n\nPREEMPTION\x10\x02\x12\x08\n\x04\x44OWN\x10\x03\x32\xbe\x01\n\x0f\x41utostopService\x12P\n\x0bSetAutostop\x12\x1f.autostop.v1.SetAutostopRequest\x1a .autostop.v1.SetAutostopResponse\x12Y\n\x0eIsAutostopping\x12\".autostop.v1.IsAutostoppingRequest\x1a#.autostop.v1.IsAutostoppingResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&sky/schemas/generated/autostopv1.proto\x12\x0b\x61utostop.v1\"H\n\x04Hook\x12\x0b\n\x03run\x18\x01 \x01(\t\x12\"\n\x06\x65vents\x18\x02 \x03(\x0e\x32\x12.autostop.v1.Event\x12\x0f\n\x07timeout\x18\x03 \x01(\x05\"\xf8\x01\n\x12SetAutostopRequest\x12\x14\n\x0cidle_minutes\x18\x01 \x01(\x05\x12\x0f\n\x07\x62\x61\x63kend\x18\x02 \x01(\t\x12.\n\x08wait_for\x18\x03 \x01(\x0e\x32\x1c.autostop.v1.AutostopWaitFor\x12\x0c\n\x04\x64own\x18\x04 \x01(\x08\x12\x11\n\x04hook\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0chook_timeout\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12 \n\x05hooks\x18\x07 \x03(\x0b\x32\x11.autostop.v1.Hook\x12\x13\n\x0b\x63lear_hooks\x18\x08 \x01(\x08\x42\x07\n\x05_hookB\x0f\n\r_hook_timeout\"\x15\n\x13SetAutostopResponse\"\x17\n\x15IsAutostoppingRequest\"1\n\x16IsAutostoppingResponse\x12\x17\n\x0fis_autostopping\x18\x01 \x01(\x08*\x90\x01\n\x0f\x41utostopWaitFor\x12!\n\x1d\x41UTOSTOP_WAIT_FOR_UNSPECIFIED\x10\x00\x12\"\n\x1e\x41UTOSTOP_WAIT_FOR_JOBS_AND_SSH\x10\x01\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_JOBS\x10\x02\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_NONE\x10\x03*X\n\x05\x45vent\x12\x15\n\x11\x45VENT_UNSPECIFIED\x10\x00\x12\x12\n\x0e\x45VENT_AUTOSTOP\x10\x01\x12\x14\n\x10\x45VENT_PREEMPTION\x10\x02\x12\x0e\n\nEVENT_DOWN\x10\x03\x32\xbe\x01\n\x0f\x41utostopService\x12P\n\x0bSetAutostop\x12\x1f.autostop.v1.SetAutostopRequest\x1a .autostop.v1.SetAutostopResponse\x12Y\n\x0eIsAutostopping\x12\".autostop.v1.IsAutostoppingRequest\x1a#.autostop.v1.IsAutostoppingResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -24,7 +24,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_AUTOSTOPWAITFOR']._serialized_start=480
   _globals['_AUTOSTOPWAITFOR']._serialized_end=624
   _globals['_EVENT']._serialized_start=626
-  _globals['_EVENT']._serialized_end=696
+  _globals['_EVENT']._serialized_end=714
   _globals['_HOOK']._serialized_start=55
   _globals['_HOOK']._serialized_end=127
   _globals['_SETAUTOSTOPREQUEST']._serialized_start=130
@@ -35,6 +35,6 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ISAUTOSTOPPINGREQUEST']._serialized_end=426
   _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_start=428
   _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_end=477
-  _globals['_AUTOSTOPSERVICE']._serialized_start=699
-  _globals['_AUTOSTOPSERVICE']._serialized_end=889
+  _globals['_AUTOSTOPSERVICE']._serialized_start=717
+  _globals['_AUTOSTOPSERVICE']._serialized_end=907
 # @@protoc_insertion_point(module_scope)
