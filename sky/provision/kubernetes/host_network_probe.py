@@ -31,18 +31,27 @@ _ENV_VAR_FOR_PORT: Dict[str, str] = {
     'dashboard_agent_listen': 'SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT',
     'runtime_env_agent': 'SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT',
     'metrics_export': 'SKYPILOT_RAY_METRICS_EXPORT_PORT',
+    # Pod sshd port. host:22 is owned by the K8s node's own sshd under
+    # hostNetwork, so the pod must bind sshd to a probed port instead.
+    'sshd': 'SKYPILOT_SSHD_PORT',
 }
 
 _HEAD_PORT_NAMES: List[str] = list(_ENV_VAR_FOR_PORT)
 
-# Workers don't run GCS/dashboard/ray-client-server.
+# Workers don't run GCS/dashboard/ray-client-server, but they DO run sshd.
 _WORKER_PORT_NAMES: List[str] = [
     'node_manager',
     'object_manager',
     'dashboard_agent_listen',
     'runtime_env_agent',
     'metrics_export',
+    'sshd',
 ]
+
+# ConfigMap key prefix for per-pod sshd ports. Each pod publishes
+# ``{_SSHD_KEY_PREFIX}{podname}: <port>`` so the SkyPilot client can
+# discover the right port when generating the SSH config.
+_SSHD_KEY_PREFIX = 'sshd_'
 
 _SA_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token'
 _SA_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
@@ -113,6 +122,22 @@ def _k8s_api_request(
         return e.code, e.read()
 
 
+def _configmap_data_for_ports(podname: str, ports: Dict[str,
+                                                        int]) -> Dict[str, str]:
+    """Translate probe port names into ConfigMap data keys.
+
+    The 'sshd' port is rewritten to ``sshd_<podname>`` because every pod
+    (head + each worker) publishes its own sshd port into the same
+    ConfigMap. Other keys are head-owned Ray ports and stay flat so the
+    worker probe can look up the head's GCS by the bare key 'gcs'.
+    """
+    out: Dict[str, str] = {}
+    for name, port in ports.items():
+        key = f'{_SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
+        out[key] = str(port)
+    return out
+
+
 def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
                           owner_pod_name: str,
                           owner_pod_uid: str) -> Dict[str, Any]:
@@ -139,7 +164,7 @@ def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
                 'blockOwnerDeletion': False,
             }],
         },
-        'data': {k: str(v) for k, v in ports.items()},
+        'data': _configmap_data_for_ports(owner_pod_name, ports),
     }
 
 
@@ -174,6 +199,43 @@ def _publish_configmap(name: str, namespace: str, ports: Dict[str,
         raise RuntimeError(
             f'Failed to publish ConfigMap {namespace}/{name}: '
             f'status={status} body={resp.decode("utf-8", "replace")}')
+
+
+_MERGE_RETRY_LIMIT = 5
+
+
+def _merge_sshd_port(name: str, namespace: str, podname: str,
+                     port: int) -> None:
+    """Merge ``sshd_<podname>: <port>`` into an existing ConfigMap.
+
+    Workers call this after the head has published the ConfigMap so the
+    SkyPilot client can read every pod's sshd port from one place.
+    Retries on 409 (lost optimistic-concurrency race against another
+    worker) up to a small bound.
+    """
+    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
+    key = f'{_SSHD_KEY_PREFIX}{podname}'
+    last_err: Optional[str] = None
+    for _ in range(_MERGE_RETRY_LIMIT):
+        status, resp = _k8s_api_request('GET', base)
+        if status >= 300:
+            raise RuntimeError(
+                f'Failed to GET ConfigMap {namespace}/{name} for merge: '
+                f'status={status} body={resp.decode("utf-8", "replace")}')
+        existing = json.loads(resp)
+        data = dict(existing.get('data') or {})
+        data[key] = str(port)
+        existing['data'] = data
+        status, resp = _k8s_api_request('PUT', base, existing)
+        if status < 300:
+            return
+        # 409: resourceVersion went stale — re-GET and try again.
+        last_err = f'status={status} body={resp.decode("utf-8", "replace")}'
+        if status != 409:
+            break
+    raise RuntimeError(
+        f'Failed to merge {key} into ConfigMap {namespace}/{name} after '
+        f'{_MERGE_RETRY_LIMIT} attempts: {last_err}')
 
 
 def _read_configmap_with_retry(name: str, namespace: str) -> Dict[str, str]:
@@ -234,6 +296,13 @@ def _run_worker(env_file: str, configmap_name: str,
             f'ConfigMap {configmap_namespace}/{configmap_name} is missing '
             f'the "gcs" key. Data: {head_data}')
     held, ports = _probe_ports(_WORKER_PORT_NAMES)
+    # Publish this worker's sshd port back into the ConfigMap so the
+    # SkyPilot client can write the right Port directive for it. Done
+    # before releasing the held sockets so a failed publish aborts the
+    # bootstrap before sshd binds to a port nothing can discover.
+    podname = os.environ['SKYPILOT_POD_NAME']
+    _merge_sshd_port(configmap_name, configmap_namespace, podname,
+                     ports['sshd'])
     ports['gcs'] = int(head_gcs)
     _write_env_file(ports, env_file)
     del held

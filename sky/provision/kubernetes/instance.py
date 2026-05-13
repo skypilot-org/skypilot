@@ -1745,6 +1745,66 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
+_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 180
+_HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
+
+
+def _read_host_network_sshd_ports(
+        cluster_name_on_cloud: str,
+        namespace: str,
+        context: Optional[str],
+        expected_pods: Optional[List[str]] = None) -> Dict[str, int]:
+    """Read each pod's probed sshd port from the hostNetwork ConfigMap.
+
+    Returns ``{podname: port}`` for every ``sshd_<podname>`` entry the
+    pods published. Returns ``{}`` when the ConfigMap doesn't exist
+    (cluster isn't running under hostNetwork).
+
+    When ``expected_pods`` is given, polls the ConfigMap until every
+    listed pod has an entry (or the timeout elapses). The probe runs
+    inside each pod's bootstrap and may not have populated the
+    ConfigMap by the time the post-provision flow reaches us;
+    surfacing partial state would freeze every subsequent SSH at
+    port 22 until the next refresh.
+    """
+    name = f'{cluster_name_on_cloud}-ray-ports'
+    prefix = 'sshd_'
+    expected = set(expected_pods or [])
+    deadline = time.monotonic() + (_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
+                                   if expected else 0)
+    while True:
+        out: Dict[str, int] = {}
+        try:
+            cm = kubernetes.core_api(context).read_namespaced_config_map(
+                name=name, namespace=namespace)
+        except kubernetes.api_exception() as e:
+            if getattr(e, 'status', None) != 404:
+                raise
+            cm = None
+        data = (cm.data or {}) if cm is not None else {}
+        for key, value in data.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                out[key[len(prefix):]] = int(value)
+            except ValueError:
+                logger.warning(
+                    f'ConfigMap {namespace}/{name} has non-integer value '
+                    f'for {key!r}: {value!r}. Falling back to default '
+                    f'SSH port.')
+        if not expected or expected.issubset(out.keys()):
+            return out
+        if time.monotonic() >= deadline:
+            missing = sorted(expected - out.keys())
+            logger.warning(
+                f'hostNetwork sshd ports for {missing} did not appear in '
+                f'ConfigMap {namespace}/{name} within '
+                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s; falling back to '
+                f'default SSH port for those pods.')
+            return out
+        time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -1766,6 +1826,21 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
+    # Per-pod sshd ports under hostNetwork. host:22 belongs to the K8s
+    # node's own sshd, so each pod's sshd binds a probed port instead;
+    # the SSH config writer needs that port per-pod. Wait for entries
+    # from the hostNetwork pods so the cached SSH config doesn't lock
+    # in 22 (= node's sshd, not the pod's).
+    host_network_pods = [
+        name for name, pod in running_pods.items()
+        if getattr(pod.spec, 'host_network', False)
+    ]
+    pod_sshd_ports = _read_host_network_sshd_ports(
+        cluster_name_on_cloud,
+        namespace,
+        context,
+        expected_pods=host_network_pods)
+
     head_pod_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
@@ -1777,7 +1852,7 @@ def get_cluster_info(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
                 external_ip=None,
-                ssh_port=port,
+                ssh_port=pod_sshd_ports.get(pod_name, port),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.

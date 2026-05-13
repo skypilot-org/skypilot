@@ -196,6 +196,55 @@ class TestConfigMapBody:
         # ConfigMap data values must be strings.
         assert body['data'] == {'gcs': '6380', 'dashboard': '8266'}
 
+    def test_sshd_port_is_keyed_by_pod_name(self):
+        body = host_network_probe._build_configmap_body(
+            name='c-ray-ports',
+            namespace='ns',
+            ports={
+                'gcs': 6380,
+                'sshd': 33445
+            },
+            owner_pod_name='c-head-xx',
+            owner_pod_uid='uid-1',
+        )
+        # 'sshd' is rewritten to 'sshd_<podname>' so multiple pods (head
+        # + each worker) can publish into the same ConfigMap without
+        # clobbering each other. 'gcs' stays flat (head-owned).
+        assert body['data'] == {'gcs': '6380', 'sshd_c-head-xx': '33445'}
+
+
+class TestSshdPortPropagation:
+    """sshd is probed by both head and worker; bootstrap snippet rebinds."""
+
+    def test_sshd_is_in_both_head_and_worker_port_sets(self):
+        # Each pod's sshd is in its own filesystem but shares the host
+        # net namespace under hostNetwork, so each pod needs its own
+        # probed port.
+        assert 'sshd' in host_network_probe._HEAD_PORT_NAMES
+        assert 'sshd' in host_network_probe._WORKER_PORT_NAMES
+
+    def test_env_file_emits_skypilot_sshd_port(self, tmp_path):
+        path = tmp_path / 'env.sh'
+        host_network_probe._write_env_file({'sshd': 33445}, str(path))
+        # The bootstrap snippet reads SKYPILOT_SSHD_PORT to rewrite
+        # /etc/ssh/sshd_config's Port directive before restart.
+        assert 'export SKYPILOT_SSHD_PORT=33445' in path.read_text()
+
+    def test_probe_cmd_rebinds_sshd_after_sourcing_env(self):
+        cmd = instance_setup.ray_head_start_command(custom_resource=None,
+                                                    custom_ray_options=None)
+        # The Port-directive rewrite is gated on SKYPILOT_SSHD_PORT
+        # being set (the probe just sourced the env file). Non-host-
+        # Network bootstraps leave it unset and skip the rewrite.
+        assert 'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]' in cmd
+        # We delete-then-append rather than substituting in place, so
+        # sshd_config files without an explicit Port directive still
+        # end up with one.
+        assert ('sed -i -E "/^[[:space:]]*#?[[:space:]]*Port'
+                '[[:space:]]+/d"') in cmd
+        assert 'echo "Port ${SKYPILOT_SSHD_PORT}"' in cmd
+        assert 'sudo service ssh restart' in cmd
+
 
 class TestWaitHeadGcsTcp:
     """The worker probe's TCP wait should accept once the head port is up."""

@@ -64,13 +64,18 @@ _HOST_NETWORK_PROBE_B64 = _read_host_network_probe_b64()
 
 
 def _host_network_probe_cmd(mode: str) -> str:
-    """Bash snippet that probes free Ray ports when running with hostNetwork.
+    """Bash snippet that probes Ray + sshd ports when running with hostNetwork.
 
     Returns a runtime-gated snippet: a no-op shell branch unless
     SKYPILOT_HOST_NETWORK=1 and SKYPILOT_RAY_PORTS_CONFIGMAP_NAME are
     set in the pod env. Non-hostNetwork bootstraps see no change — env
     vars stay unset and ``${VAR:-default}`` in the ray flags falls back
     to the constants.
+
+    Also rebinds the pod's sshd to the probed SKYPILOT_SSHD_PORT. Under
+    hostNetwork the node's own sshd already owns host:22 so the pod's
+    sshd silently failed to bind in apt-ssh-setup; rewriting Port in
+    sshd_config and restarting picks up the probed port instead.
 
     The probe is shipped base64-inline rather than invoked as a module
     because the K8s template installs stable skypilot from PyPI before
@@ -81,18 +86,29 @@ def _host_network_probe_cmd(mode: str) -> str:
     inside the rendered YAML's block-scalar indentation.
     """
     assert mode in ('head', 'worker'), mode
-    return ('if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
-            '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-            f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d > '
-            f'{_HOST_NETWORK_PROBE_TARGET}; '
-            f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
-            f'--mode {mode} '
-            f'--env-file {_HOST_NETWORK_ENV_FILE} '
-            '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
-            '--configmap-namespace '
-            '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
-            f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
-            'fi; ')
+    return (
+        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
+        '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
+        f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d > '
+        f'{_HOST_NETWORK_PROBE_TARGET}; '
+        f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
+        f'--mode {mode} '
+        f'--env-file {_HOST_NETWORK_ENV_FILE} '
+        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
+        '--configmap-namespace '
+        '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
+        f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
+        'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]; then '
+        # Delete any existing Port directive (commented or not) then
+        # append ours. Replace-in-place fails closed if sshd_config
+        # lacks any Port line, so this delete+append is more robust.
+        'sudo sed -i -E "/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d" '
+        '/etc/ssh/sshd_config; '
+        'echo "Port ${SKYPILOT_SSHD_PORT}" | '
+        'sudo tee -a /etc/ssh/sshd_config > /dev/null; '
+        'sudo service ssh restart; '
+        'fi; '
+        'fi; ')
 
 
 # Stdlib only — deliberately doesn't import `sky` so the read still
