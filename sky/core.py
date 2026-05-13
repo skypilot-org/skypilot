@@ -894,12 +894,15 @@ def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
     # remote — plain `python3` may point at a minimal system interpreter.
     cmd = f'{constants.SKY_PYTHON_CMD} -c {shlex.quote(codegen)}'
     try:
-        backend.run_on_head(
-            handle,
-            cmd,
-            stream_logs=False,
-            require_outputs=False,
-        )
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Running down hook on {cluster_name!r}')):
+            backend.run_on_head(
+                handle,
+                cmd,
+                stream_logs=False,
+                require_outputs=False,
+            )
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to run down hook on {cluster_name!r}: {e}. '
                        'Proceeding with teardown.')
