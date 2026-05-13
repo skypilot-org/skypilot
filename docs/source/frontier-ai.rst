@@ -77,7 +77,7 @@ For infra teams
    :align: center
    :width: 90%
 
-   Volumes and Auto Mounts: persistent uv / HuggingFace / pip caches auto-mounted to every workload on the cluster.
+   Volumes and Auto Mounts: persistent storage on Kubernetes (NFS, VAST, Weka, EFS, etc.) with Auto Mounts attaching volumes to every workload — here, shared uv / HuggingFace / pip caches.
 
 🔔 **Notifications** — Slack alerts for GPU failures, job lifecycle events, preemptions, and cluster events. Configurable per channel, with event-type and workspace filters.
 
