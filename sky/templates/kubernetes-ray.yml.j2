@@ -388,6 +388,12 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if k8s_host_network %}
+        # Under hostNetwork the default dnsPolicy silently falls back to
+        # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
+        # won't resolve, and the worker probe gets stuck dialing the head.
+        dnsPolicy: ClusterFirstWithHostNet
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
