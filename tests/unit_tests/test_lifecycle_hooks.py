@@ -591,6 +591,26 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
     assert r.hooks[0]['timeout'] == 30
 
 
+def test_sigterm_handler_installed_only_on_kubernetes(monkeypatch):
+    """SIGTERM-based preemption handling fires only on K8s.
+
+    On VM clouds (AWS/GCP/Azure), preemption is detected by the
+    metadata poller (PR2). The SIGTERM handler is K8s-specific
+    (kubelet sends SIGTERM during pod deletion / scale-down /
+    evictions). Gate the handler install so non-K8s skylets don't
+    intercept SIGTERM unnecessarily.
+    """
+    from sky.skylet import skylet
+
+    # K8s pod env: KUBERNETES_SERVICE_HOST is set.
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '10.0.0.1')
+    assert skylet._should_install_preemption_sigterm_handler() is True
+
+    # Non-K8s: env not set.
+    monkeypatch.delenv('KUBERNETES_SERVICE_HOST', raising=False)
+    assert skylet._should_install_preemption_sigterm_handler() is False
+
+
 def test_kubernetes_caps_preemption_hook_timeout_to_600(capsys):
     """K8s grace-period caps preemption hooks at 600s.
 
