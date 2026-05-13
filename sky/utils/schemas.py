@@ -180,6 +180,11 @@ _HOOK_EVENTS = ['autostop', 'preemption', 'down']
 
 _HOOKS_SCHEMA = {
     'type': 'array',
+    # Bound the array so the SetAutostop request payload can't grow
+    # past gRPC's default max_receive_message_length (4 MB). 32 entries
+    # × 16 KiB per `run` plus event/timeout overhead leaves comfortable
+    # headroom.
+    'maxItems': 32,
     'items': {
         'type': 'object',
         'required': ['run'],
@@ -188,6 +193,11 @@ _HOOKS_SCHEMA = {
             'run': {
                 'type': 'string',
                 'minLength': 1,
+                # 16 KiB cap. Matches typical shell-script size limits
+                # and keeps gRPC payloads tractable. Users with large
+                # bodies should put the script under workdir/ and call
+                # it from `run:` instead.
+                'maxLength': 16 * 1024,
             },
             # `events` is optional. When absent, Resources fills the
             # default list (all three events) at load time.

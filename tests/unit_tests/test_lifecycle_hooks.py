@@ -835,3 +835,40 @@ def test_hooks_from_protobuf_preserves_nonempty_events():
     msg.events.append(autostopv1_pb2.AUTOSTOP)
     out = autostop_lib.hooks_from_protobuf([msg])
     assert out[0]['events'] == ['autostop']
+
+
+def test_schema_rejects_oversized_run():
+    """`run` strings past 16 KiB must be rejected at schema time.
+
+    The skylet's gRPC server uses the default
+    max_receive_message_length (4 MB). Unbounded `run` plus many hooks
+    can blow past that with a confusing runtime gRPC error. Cap the
+    individual `run` so the error surfaces at YAML validation instead.
+    """
+    big = 'a' * (16 * 1024 + 1)  # one byte past the 16 KiB cap
+    with pytest.raises(Exception) as excinfo:
+        _validate({'hooks': [{'run': big}]})
+    msg = str(excinfo.value).lower()
+    assert 'long' in msg or 'maxlength' in msg or '16384' in msg, (
+        f'Validation error should mention the maxLength cap; got: {msg}')
+
+
+def test_schema_accepts_run_at_limit():
+    """Exactly 16 KiB is OK."""
+    _validate({'hooks': [{'run': 'a' * (16 * 1024)}]})
+
+
+def test_schema_rejects_too_many_hooks():
+    """Aggregate hooks array bounded to 32 entries."""
+    hooks = [{'run': f'echo {i}'} for i in range(33)]
+    with pytest.raises(Exception) as excinfo:
+        _validate({'hooks': hooks})
+    msg = str(excinfo.value).lower()
+    assert ('long' in msg or 'maxitems' in msg or 'too many' in msg or
+            '32' in msg), (
+                f'Validation error should mention the maxItems cap; got: {msg}')
+
+
+def test_schema_accepts_32_hooks():
+    """Exactly 32 is OK."""
+    _validate({'hooks': [{'run': f'echo {i}'} for i in range(32)]})
