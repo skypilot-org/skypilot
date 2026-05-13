@@ -69,12 +69,25 @@ def _host_network_probe_cmd(mode: str) -> str:
     is empty. Non-K8s callers and K8s callers without hostNetwork: true
     therefore see no behavior change — the env vars stay unset and
     ``${VAR:-default}`` in the ray flags falls back to the constants.
+
+    Invokes the probe by its filesystem path rather than ``python -m
+    sky.provision.kubernetes.host_network_probe`` because the K8s
+    bootstrap template re-installs skypilot from PyPI right after
+    installing the dev wheel (kubernetes-ray.yml.j2 line ~1067) — that
+    pinless install excludes pre-releases and downgrades the dev wheel,
+    leaving sky/__init__.py in a state where ``-m sky.X`` triggers an
+    ImportError. The probe module is stdlib-only, so loading it by path
+    sidesteps the broken package init entirely. sysconfig.get_paths()
+    is used to locate site-packages without importing ``sky`` itself.
     """
     assert mode in ('head', 'worker'), mode
+    probe_path_cmd = (f'{constants.SKY_PYTHON_CMD} -c "import sysconfig, os; '
+                      'print(os.path.join(sysconfig.get_paths()[\'purelib\'], '
+                      '\'sky/provision/kubernetes/host_network_probe.py\'))"')
     return ('if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
             '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-            f'{constants.SKY_PYTHON_CMD} -m '
-            'sky.provision.kubernetes.host_network_probe '
+            f'SKY_HOST_NETWORK_PROBE_PATH=$({probe_path_cmd}); '
+            f'{constants.SKY_PYTHON_CMD} "$SKY_HOST_NETWORK_PROBE_PATH" '
             f'--mode {mode} '
             f'--env-file {_HOST_NETWORK_ENV_FILE} '
             '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '

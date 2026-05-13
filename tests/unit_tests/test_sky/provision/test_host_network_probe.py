@@ -91,16 +91,19 @@ class TestRayStartCommands:
         # missing either makes it a no-op shell branch.
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
         assert '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]' in cmd
-        assert ('sky.provision.kubernetes.host_network_probe '
-                '--mode head') in cmd
+        # Probe is invoked by file path (not `-m sky.X`) so the broken
+        # sky/__init__.py left by the bootstrap's PyPI downgrade can't
+        # take the probe down — see _host_network_probe_cmd docstring.
+        assert 'sky/provision/kubernetes/host_network_probe.py' in cmd
+        assert '--mode head' in cmd
 
     def test_worker_prepended_probe_uses_worker_mode(self):
         cmd = instance_setup.ray_worker_start_command(custom_resource=None,
                                                       custom_ray_options=None,
                                                       no_restart=False)
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
-        assert ('sky.provision.kubernetes.host_network_probe '
-                '--mode worker') in cmd
+        assert 'sky/provision/kubernetes/host_network_probe.py' in cmd
+        assert '--mode worker' in cmd
 
     def test_worker_keeps_existing_object_manager_default(self):
         cmd = instance_setup.ray_worker_start_command(custom_resource=None,
