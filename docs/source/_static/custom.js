@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
-        { selector: '.toctree-l1 > a', text: 'Agent Skills' },
         { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
     ];
