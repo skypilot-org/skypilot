@@ -1151,6 +1151,7 @@ def tail_provision_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(51)
 @annotations.client_api
 def tail_hook_logs(cluster_name: str,
                    event: Optional[str] = None,

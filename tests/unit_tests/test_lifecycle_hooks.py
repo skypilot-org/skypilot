@@ -872,3 +872,27 @@ def test_schema_rejects_too_many_hooks():
 def test_schema_accepts_32_hooks():
     """Exactly 32 is OK."""
     _validate({'hooks': [{'run': f'echo {i}'} for i in range(32)]})
+
+
+def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
+    """`tail_hook_logs` is a new SDK method (introduced by PR1 — adds
+    the ``/hook_logs`` server route). A new client talking to an older
+    server (pre-/hook_logs) must surface a clean
+    ``APINotSupportedError`` from the ``@versions.minimal_api_version``
+    decorator rather than a 404 on the unknown endpoint.
+    """
+    from sky import exceptions
+    from sky.client import sdk
+    from sky.server import constants as server_constants
+    from sky.server import versions
+
+    # Pin the remote server to one less than the current API_VERSION so
+    # the decorator's gate fires for any new feature landing in this PR.
+    monkeypatch.setattr(versions, 'get_remote_api_version',
+                        lambda: server_constants.API_VERSION - 1)
+
+    with pytest.raises(exceptions.APINotSupportedError) as excinfo:
+        sdk.tail_hook_logs(cluster_name='ignored')
+    err = str(excinfo.value)
+    assert 'tail_hook_logs' in err, (
+        f'Error message should name the SDK function; got: {err!r}')

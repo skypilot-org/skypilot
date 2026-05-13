@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 50  # bundle credentials with launch response
+API_VERSION = 51  # lifecycle hooks: /hook_logs route + tail_hook_logs SDK
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
