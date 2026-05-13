@@ -1,4 +1,5 @@
 """Setup dependencies & services for instances."""
+import base64
 from concurrent import futures
 import functools
 import hashlib
@@ -60,22 +61,26 @@ _HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 
 
-def _read_host_network_probe_script() -> str:
-    # Load the probe source once at module import. __file__ resolves to
-    # whichever sky.provision.instance_setup is running (the local
-    # checkout for an editable install, the wheel's copy otherwise);
-    # the probe file ships alongside in sky/provision/kubernetes/.
+def _read_host_network_probe_b64() -> str:
+    # Load the probe source once at module import and base64-encode it.
+    # __file__ resolves to whichever sky.provision.instance_setup is
+    # running (the local checkout for an editable install, the wheel's
+    # copy otherwise); the probe file ships alongside in
+    # sky/provision/kubernetes/.
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'kubernetes', 'host_network_probe.py')
-    with open(path, encoding='utf-8') as f:
+    with open(path, 'rb') as f:
         body = f.read()
-    # Heredoc requires the terminator on its own line; guarantee a
-    # trailing newline so the closing _SKY_PROBE_EOF_ isn't smushed
-    # onto the script's last code line.
-    return body if body.endswith('\n') else body + '\n'
+    return base64.b64encode(body).decode('ascii')
 
 
-_HOST_NETWORK_PROBE_SCRIPT = _read_host_network_probe_script()
+# Base64 keeps the embedded content on a single YAML-safe line —
+# heredoc-inlining the raw script content puts column-0 lines inside a
+# block-scalar where they parse as new keys ("could not find expected
+# ':'"). Using b64 + a one-line `echo … | base64 -d > …` sidesteps
+# YAML indentation concerns entirely and stays well within bash's
+# command-line length limit (~19 KB for the current probe).
+_HOST_NETWORK_PROBE_B64 = _read_host_network_probe_b64()
 
 
 def _host_network_probe_cmd(mode: str) -> str:
@@ -93,24 +98,20 @@ def _host_network_probe_cmd(mode: str) -> str:
     therefore see no behavior change — the env vars stay unset and
     ``${VAR:-default}`` in the ray flags falls back to the constants.
 
-    Inlines the probe content via a single-quoted heredoc rather than
-    invoking the installed sky.provision.kubernetes.host_network_probe
-    module. The K8s bootstrap installs stable skypilot from PyPI before
-    ray_head_start_command runs in the pod (the dev wheel ships later
-    via kubernetes-ray.yml.j2's skypilot_wheel_installation_commands at
-    line ~1635) — so the probe file from the dev wheel isn't yet on
-    disk in site-packages at probe time. Heredoc-embedding makes the
-    bash command self-shipping: the script lands in /tmp from the
-    string we built on the SkyPilot host, regardless of what's
-    installed in the pod's site-packages.
+    Ships the probe content base64-encoded inside the bash command,
+    decoding it to /tmp on the pod at run time. The K8s bootstrap
+    installs stable skypilot from PyPI before ray_head_start_command
+    runs in the pod (the dev wheel ships later via
+    kubernetes-ray.yml.j2's skypilot_wheel_installation_commands at
+    line ~1635), so the probe file from the dev wheel isn't yet on
+    disk in site-packages at probe time. Inlining the bytes makes the
+    bash command self-shipping regardless of what's installed.
     """
     assert mode in ('head', 'worker'), mode
-    # The probe content contains Python dict literals with `{` and `}`,
-    # so it cannot live inside an f-string — concatenate it raw.
     return ('if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
             '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-            f'cat > {_HOST_NETWORK_PROBE_TARGET} <<\'_SKY_PROBE_EOF_\'\n' +
-            _HOST_NETWORK_PROBE_SCRIPT + '_SKY_PROBE_EOF_\n'
+            f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d > '
+            f'{_HOST_NETWORK_PROBE_TARGET}; '
             f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
             f'--mode {mode} '
             f'--env-file {_HOST_NETWORK_ENV_FILE} '
