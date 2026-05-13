@@ -27,6 +27,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
@@ -529,7 +530,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones  # Unused.
+        del zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -767,6 +768,41 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
+        # Detect hostNetwork: true in the user's pod_config. When set,
+        # the pod shares the host's network namespace and Ray's default
+        # ports would collide with any sibling SkyPilot pod scheduled to
+        # the same node. We auto-enable the host-network probe path:
+        # the head pod picks free ports and publishes them via a
+        # ConfigMap; workers read it back. See
+        # sky/provision/kubernetes/host_network_probe.py and
+        # sky/provision/instance_setup._host_network_probe_cmd.
+        # We re-derive the merged pod_config here (rather than reading
+        # the already-merged spec back from the rendered template) so
+        # the bootstrap env vars are wired into deploy_vars before the
+        # template is rendered. combine_pod_config_fields() merges the
+        # same sources again at template-merge time — both calls land
+        # on the same final pod_config.
+        merged_pod_config = skypilot_config.get_effective_region_config(
+            cloud=cloud_config_str,
+            region=context,
+            keys=('pod_config',),
+            default_value={})
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
+            dict_config=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
+            region=context,
+            keys=('pod_config',),
+            default_value={})
+        config_utils.merge_k8s_configs(merged_pod_config, override_pod_config)
+        k8s_host_network = bool(
+            merged_pod_config.get('spec', {}).get('hostNetwork', False))
+        if k8s_host_network:
+            cluster_name_on_cloud = cluster_name.name_on_cloud
+            k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'] = (
+                f'{cluster_name_on_cloud}-ray-ports')
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'] = namespace
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -825,6 +861,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
             'k8s_context': context,
             'k8s_namespace': namespace,
+            'k8s_host_network': k8s_host_network,
         }
 
         # Add ephemeral storage to deploy vars if specified.

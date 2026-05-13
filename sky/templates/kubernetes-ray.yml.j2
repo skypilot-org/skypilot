@@ -1086,6 +1086,18 @@ available_node_types:
                   # Start ray worker on the worker pod.
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+{% if k8s_host_network %}
+                  # hostNetwork: the head's GCS port is dynamic (picked
+                  # by sky.provision.kubernetes.host_network_probe to
+                  # avoid collisions on the shared host network
+                  # namespace). The worker probe inside
+                  # ray_worker_start_command below polls the
+                  # <cluster>-ray-ports ConfigMap for the head's port,
+                  # exports SKYPILOT_RAY_PORT, and TCP-waits for the
+                  # head's GCS to accept — covering the same role as the
+                  # constant-port `nc -z` check used in the non-host-
+                  # network path.
+{% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
                   until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
@@ -1095,6 +1107,7 @@ available_node_types:
                   until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
                     sleep 0.1
                   done
+{% endif %}
 
                   set +e
                   {{ ray_worker_start_command }}
