@@ -995,22 +995,56 @@ class Resources:
         autostop: Union[bool, int, str, Dict[str, Any], None],
         extra_hooks: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        legacy_hook_entry: Optional[Dict[str, Any]] = None
-        if isinstance(autostop, dict):
-            autostop = dict(autostop)  # avoid mutating caller
-            legacy_hook = autostop.pop('hook', None)
-            legacy_timeout = autostop.pop('hook_timeout', None)
-            if legacy_hook is not None:
-                # TODO(zpoint): remove this autostop.hook routing ~2
-                # minors after the lifecycle-hooks framework ships.
-                sys.stderr.write(hooks_deprecation.AUTOSTOP_HOOK_YAML)
-                legacy_hook_entry = _normalize_hook_entry({
-                    'run': legacy_hook,
-                    'events': ['autostop'],
-                    'timeout': legacy_timeout,
-                })
-        self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+        """Set autostop config and hooks together.
 
+        The two are interleaved: master's legacy ``autostop.hook`` /
+        ``autostop.hook_timeout`` YAML fields are routed into the new
+        ``hooks`` list. We split the actual work into two helpers below
+        so each has a single responsibility.
+        """
+        # 1) Pop legacy autostop.hook fields and convert to a hooks entry.
+        legacy_hook_entry, autostop = self._extract_legacy_autostop_hook(
+            autostop)
+        # 2) Set the autostop config itself.
+        self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+        # 3) Merge legacy + explicit hooks into self._hooks.
+        self._set_hooks(extra_hooks, legacy_hook_entry)
+
+    @staticmethod
+    def _extract_legacy_autostop_hook(
+        autostop: Union[bool, int, str, Dict[str, Any], None],
+    ) -> Tuple[Optional[Dict[str, Any]], Union[bool, int, str, Dict[str, Any],
+                                               None]]:
+        """Pop ``autostop.hook`` / ``autostop.hook_timeout`` and convert
+        to a normalized hook entry.
+
+        Returns (legacy_hook_entry_or_None, autostop_dict_without_legacy_keys).
+        Emits a stderr deprecation warning when the legacy form is used.
+
+        # TODO(zpoint): remove this autostop.hook routing ~2 minors
+        # after the lifecycle-hooks framework ships.
+        """
+        if not isinstance(autostop, dict):
+            return None, autostop
+        autostop = dict(autostop)  # avoid mutating caller
+        legacy_hook = autostop.pop('hook', None)
+        legacy_timeout = autostop.pop('hook_timeout', None)
+        if legacy_hook is None:
+            return None, autostop
+        sys.stderr.write(hooks_deprecation.AUTOSTOP_HOOK_YAML)
+        legacy_hook_entry = _normalize_hook_entry({
+            'run': legacy_hook,
+            'events': ['autostop'],
+            'timeout': legacy_timeout,
+        })
+        return legacy_hook_entry, autostop
+
+    def _set_hooks(
+        self,
+        extra_hooks: Optional[List[Dict[str, Any]]],
+        legacy_hook_entry: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Normalize and merge explicit + legacy hook entries into ``_hooks``."""
         collected: List[Dict[str, Any]] = []
         if extra_hooks:
             for entry in extra_hooks:
