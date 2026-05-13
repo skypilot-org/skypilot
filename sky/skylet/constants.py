@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import enum
 from typing import List, Tuple
 
 from packaging import version
@@ -168,7 +169,24 @@ AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
 # Lifecycle-hooks framework — per-event log directory on cluster nodes.
 HOOK_LOG_DIR = '.sky/hooks'
-HOOK_EVENTS = ('autostop', 'preemption', 'down')
+
+
+class LifecycleEvent(str, enum.Enum):
+    """The three lifecycle events that can trigger a hook.
+
+    Subclasses ``str`` so direct equality comparisons against the
+    canonical string spellings keep working (e.g.,
+    ``LifecycleEvent.AUTOSTOP == 'autostop'``). Use this enum at
+    callsites that handle events as identifiers; user-facing surfaces
+    (YAML, CLI help, log messages) continue to use the string forms.
+    """
+    AUTOSTOP = 'autostop'
+    PREEMPTION = 'preemption'
+    DOWN = 'down'
+
+
+# Backwards-compatible tuple of the three event strings.
+HOOK_EVENTS = tuple(e.value for e in LifecycleEvent)
 
 # Autostop hook timeout default (1 hour in seconds)
 DEFAULT_HOOK_TIMEOUT_SECONDS = 3600

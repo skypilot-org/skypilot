@@ -21,11 +21,14 @@ from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
 
-# Known events. Kept in sync with sky.utils.schemas._HOOK_EVENTS.
-AUTOSTOP = 'autostop'
-PREEMPTION = 'preemption'
-DOWN = 'down'
-EVENTS = (AUTOSTOP, PREEMPTION, DOWN)
+# Re-export the canonical event values via the shared enum. The
+# module-level uppercase constants are kept as string aliases for
+# backward compatibility with callers that imported them by name.
+LifecycleEvent = constants.LifecycleEvent
+AUTOSTOP = LifecycleEvent.AUTOSTOP.value
+PREEMPTION = LifecycleEvent.PREEMPTION.value
+DOWN = LifecycleEvent.DOWN.value
+EVENTS = constants.HOOK_EVENTS
 
 # Where per-event log files + the file-lock marker live on each node.
 HOOK_LOG_DIR = os.path.expanduser('~/.sky/hooks')
@@ -141,8 +144,7 @@ def run(event: str, hooks: Optional[List[Dict[str, Any]]]) -> None:
 
     for idx, entry in enumerate(matching):
         script = entry['run']
-        timeout = entry.get('timeout',
-                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         logger.info(f'Running {event} hook {idx + 1}/{len(matching)} '
                     f'(timeout={timeout}s).')
         rc = _run_script(script, log_path, timeout)
