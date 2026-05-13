@@ -641,6 +641,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # sync-down: new client, old server. Verifies the server still
+            # writes downloaded logs under the path the client expects to
+            # rewrite (api_server_user_logs_dir_prefix); regression check
+            # for https://github.com/skypilot-org/skypilot/issues/9315.
+            f'{self.ACTIVATE_CURRENT} && '
+            f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to current, cli in current, server in base
@@ -725,6 +732,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # sync-down: old client, new server. Verifies the new server
+            # still writes downloaded logs under the path the legacy
+            # client rewrites (api_server_user_logs_dir_prefix); regression
+            # check for https://github.com/skypilot-org/skypilot/issues/9315.
+            f'{self.ACTIVATE_BASE} && '
+            f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to base, cli in base, server in current
