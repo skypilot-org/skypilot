@@ -1309,12 +1309,23 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if not k8s_host_network %}
+          # Under hostNetwork: true the K8s scheduler treats containerPort
+          # entries as hostPort reservations, blocking a second pod on
+          # the same node with the same declarations (event "Predicate
+          # NodePorts failed: node(s) didn't have free ports for the
+          # requested pod ports"). The Ray ports here are also stale
+          # under hostNetwork because the probe picks them dynamically,
+          # so omit the block entirely in that mode. containerPort is
+          # informational only when hostNetwork is off — Services dial
+          # via targetPort, which still works.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
           - containerPort: 46590  # Used by Skylet gRPC
+          {% endif %}
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to
