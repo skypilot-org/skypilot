@@ -49,8 +49,6 @@ WORKDIR /home/sky
 SHELL ["/bin/bash", "-c"]
 
 # Install conda, uv, and skypilot runtime dependencies.
-# Keep the conda and Ray versions below in sync with the ones in skylet.constants
-# and with the GPU image (Dockerfile_k8s_gpu).
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
@@ -70,15 +68,9 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
-    # See Dockerfile_k8s_gpu for rationale on the setuptools / click pins.
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
-        'ray[default]==2.9.3' 'pycryptodome==3.12.0' \
-        'setuptools<70' 'click<8.3.0' && \
+        'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    curl -LO "https://dl.k8s.io/release/v1.33.11/bin/linux/$ARCH/kubectl" && \
-    chmod +x kubectl && \
-    mkdir -p $HOME/.local/bin && \
-    mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately

@@ -73,22 +73,9 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
-    # Pre-install setuptools<70 and click<8.3.0 here so that the per-launch
-    # pins in RAY_INSTALLATION_COMMANDS hit "already satisfied" and skip the
-    # network round-trip. setuptools<70 avoids pkg_resources packaging import
-    # break; click<8.3.0 avoids Ray CLI deepcopy break (ray-project/ray#56747).
-    # uv pip uninstall skypilot-nightly leaves all transitive deps in place,
-    # so subsequent `sky launch` only installs the matching skypilot wheel.
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
-        'ray[default]==2.9.3' 'pycryptodome==3.12.0' \
-        'setuptools<70' 'click<8.3.0' && \
+        'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    curl -LO "https://dl.k8s.io/release/v1.33.11/bin/linux/$ARCH/kubectl" && \
-    # Install kubectl to user's local bin instead of system path to avoid
-    # sudo-related issues during cross-architecture builds, especially on ARM
-    chmod +x kubectl && \
-    mkdir -p $HOME/.local/bin && \
-    mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
