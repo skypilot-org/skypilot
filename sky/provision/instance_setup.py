@@ -53,16 +53,39 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
 # substitution below.
 _HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 
+# Where the inlined probe script is written on the pod each time
+# ray_head_start_command / ray_worker_start_command runs. Reusing a
+# fixed path is fine — the content is identical across invocations and
+# the redirect (`cat >`) truncates on each write.
+_HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+
+
+def _read_host_network_probe_script() -> str:
+    # Load the probe source once at module import. __file__ resolves to
+    # whichever sky.provision.instance_setup is running (the local
+    # checkout for an editable install, the wheel's copy otherwise);
+    # the probe file ships alongside in sky/provision/kubernetes/.
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'kubernetes', 'host_network_probe.py')
+    with open(path, encoding='utf-8') as f:
+        body = f.read()
+    # Heredoc requires the terminator on its own line; guarantee a
+    # trailing newline so the closing _SKY_PROBE_EOF_ isn't smushed
+    # onto the script's last code line.
+    return body if body.endswith('\n') else body + '\n'
+
+
+_HOST_NETWORK_PROBE_SCRIPT = _read_host_network_probe_script()
+
 
 def _host_network_probe_cmd(mode: str) -> str:
     """Bash snippet that probes free Ray ports when running with hostNetwork.
 
-    Runs sky.provision.kubernetes.host_network_probe to grab a free port
-    set on the pod's host network namespace and write them to a
-    sourceable env file. For the head, the probe also publishes the
-    chosen ports to a ConfigMap so worker pods (which share the host net
-    namespace on different nodes but still need to dial the head's GCS)
-    can discover them.
+    Grabs a free port set on the pod's host network namespace and writes
+    them to a sourceable env file. For the head, the probe also
+    publishes the chosen ports to a ConfigMap so worker pods (which
+    share the host net namespace on different nodes but still need to
+    dial the head's GCS) can discover them.
 
     Gated entirely on runtime env vars: returns a no-op-ish snippet when
     SKYPILOT_HOST_NETWORK is unset or SKYPILOT_RAY_PORTS_CONFIGMAP_NAME
@@ -70,24 +93,25 @@ def _host_network_probe_cmd(mode: str) -> str:
     therefore see no behavior change — the env vars stay unset and
     ``${VAR:-default}`` in the ray flags falls back to the constants.
 
-    Invokes the probe by its filesystem path rather than ``python -m
-    sky.provision.kubernetes.host_network_probe`` because the K8s
-    bootstrap template re-installs skypilot from PyPI right after
-    installing the dev wheel (kubernetes-ray.yml.j2 line ~1067) — that
-    pinless install excludes pre-releases and downgrades the dev wheel,
-    leaving sky/__init__.py in a state where ``-m sky.X`` triggers an
-    ImportError. The probe module is stdlib-only, so loading it by path
-    sidesteps the broken package init entirely. sysconfig.get_paths()
-    is used to locate site-packages without importing ``sky`` itself.
+    Inlines the probe content via a single-quoted heredoc rather than
+    invoking the installed sky.provision.kubernetes.host_network_probe
+    module. The K8s bootstrap installs stable skypilot from PyPI before
+    ray_head_start_command runs in the pod (the dev wheel ships later
+    via kubernetes-ray.yml.j2's skypilot_wheel_installation_commands at
+    line ~1635) — so the probe file from the dev wheel isn't yet on
+    disk in site-packages at probe time. Heredoc-embedding makes the
+    bash command self-shipping: the script lands in /tmp from the
+    string we built on the SkyPilot host, regardless of what's
+    installed in the pod's site-packages.
     """
     assert mode in ('head', 'worker'), mode
-    probe_path_cmd = (f'{constants.SKY_PYTHON_CMD} -c "import sysconfig, os; '
-                      'print(os.path.join(sysconfig.get_paths()[\'purelib\'], '
-                      '\'sky/provision/kubernetes/host_network_probe.py\'))"')
+    # The probe content contains Python dict literals with `{` and `}`,
+    # so it cannot live inside an f-string — concatenate it raw.
     return ('if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
             '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-            f'SKY_HOST_NETWORK_PROBE_PATH=$({probe_path_cmd}); '
-            f'{constants.SKY_PYTHON_CMD} "$SKY_HOST_NETWORK_PROBE_PATH" '
+            f'cat > {_HOST_NETWORK_PROBE_TARGET} <<\'_SKY_PROBE_EOF_\'\n' +
+            _HOST_NETWORK_PROBE_SCRIPT + '_SKY_PROBE_EOF_\n'
+            f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
             f'--mode {mode} '
             f'--env-file {_HOST_NETWORK_ENV_FILE} '
             '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
