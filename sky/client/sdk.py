@@ -1506,7 +1506,7 @@ def autostop(
             hook fails, autostop will still proceed but a warning will be
             logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
             be terminated if it exceeds this timeout.
 
     Returns:

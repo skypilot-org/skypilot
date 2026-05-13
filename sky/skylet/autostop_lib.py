@@ -140,14 +140,14 @@ class AutostopConfig:
         self.hook = hook
         # Use the constant if hook_timeout is not specified
         if hook_timeout is None:
-            hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+            hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
         self.hook_timeout = hook_timeout
 
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
         state.setdefault('hook', None)
         state.setdefault('hook_timeout',
-                         constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+                         constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         self.__dict__.update(state)
 
 
@@ -160,7 +160,7 @@ def get_autostop_config() -> AutostopConfig:
     if not hasattr(config, 'hook'):
         config.hook = None
     if not hasattr(config, 'hook_timeout'):
-        config.hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        config.hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
     return config
 
 
@@ -200,7 +200,7 @@ def set_autostop(idle_minutes: int,
             'run': hook,
             'events': ['autostop'],
             'timeout': (hook_timeout or
-                        constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS),
+                        constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
         }])
 
     logger.debug(
@@ -277,7 +277,7 @@ def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
         # ints at runtime (Event is an int-backed enum).
         msg.events.extend(events)  # type: ignore[arg-type]
         msg.timeout = h.get('timeout',
-                            constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         out.append(msg)
     return out
 
@@ -301,7 +301,7 @@ def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
             'run': h.run,
             'events': events,
             'timeout': h.timeout
-                       or constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS,
+                       or constants.DEFAULT_HOOK_TIMEOUT_SECONDS,
         })
     return out
 
@@ -394,7 +394,7 @@ def execute_autostop_hook(hook: Optional[str],
     Args:
         hook: The hook script to execute, or None if no hook is set.
         hook_timeout: Timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
 
     Returns:
         True if hook executed successfully (or no hook), False if hook failed.
@@ -403,7 +403,7 @@ def execute_autostop_hook(hook: Optional[str],
         return True
 
     if hook_timeout is None:
-        hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
 
     logger.info(f'Executing autostop hook (timeout: {hook_timeout}s)...')
     log_path = os.path.expanduser(constants.AUTOSTOP_HOOK_LOG_FILE)

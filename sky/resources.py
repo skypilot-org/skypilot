@@ -135,7 +135,7 @@ def _normalize_hook_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     if 'timeout' in entry and entry['timeout'] is not None:
         result['timeout'] = entry['timeout']
     else:
-        result['timeout'] = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        result['timeout'] = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
     return result
 
 

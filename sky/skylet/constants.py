@@ -171,7 +171,7 @@ HOOK_LOG_DIR = '.sky/hooks'
 HOOK_EVENTS = ('autostop', 'preemption', 'down')
 
 # Autostop hook timeout default (1 hour in seconds)
-DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
+DEFAULT_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'

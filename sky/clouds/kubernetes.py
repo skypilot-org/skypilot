@@ -82,7 +82,7 @@ def _compute_preemption_hook_timeout(
     https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#does-ca-respect-gracefultermination-in-scale-down
     """
     timeouts = [
-        entry.get('timeout', constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+        entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         for entry in (hooks or [])
         if 'preemption' in (entry.get('events') or [])
     ]

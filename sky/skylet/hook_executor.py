@@ -142,7 +142,7 @@ def run(event: str, hooks: Optional[List[Dict[str, Any]]]) -> None:
     for idx, entry in enumerate(matching):
         script = entry['run']
         timeout = entry.get('timeout',
-                            constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         logger.info(f'Running {event} hook {idx + 1}/{len(matching)} '
                     f'(timeout={timeout}s).')
         rc = _run_script(script, log_path, timeout)

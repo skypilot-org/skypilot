@@ -30,7 +30,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 
-DEFAULT_TIMEOUT = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+DEFAULT_TIMEOUT = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
 ALL_EVENTS = ['autostop', 'preemption', 'down']
 
 
