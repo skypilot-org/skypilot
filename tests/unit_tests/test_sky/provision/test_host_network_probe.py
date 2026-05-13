@@ -10,7 +10,7 @@ Covers:
 The probe module's ConfigMap publish/poll paths require a live K8s API
 and are exercised by smoke tests instead.
 """
-import os
+import base64
 import re
 import socket
 
@@ -87,14 +87,11 @@ class TestRayStartCommands:
     def test_head_prepended_probe_is_runtime_gated(self):
         cmd = instance_setup.ray_head_start_command(custom_resource=None,
                                                     custom_ray_options=None)
-        # The probe runs only when both env vars are set on the pod;
-        # missing either makes it a no-op shell branch.
+        # No-op shell branch unless both env vars are set on the pod.
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
         assert '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]' in cmd
-        # Probe content is base64-shipped on a single line (not loaded
-        # from site-packages, not multiline-heredoc'd into the YAML);
-        # see _host_network_probe_cmd docstring.
-        assert '| base64 -d > /tmp/sky_host_network_probe.py' in cmd
+        assert (f'| base64 -d > {instance_setup._HOST_NETWORK_PROBE_TARGET}'
+                in cmd)
         assert '--mode head' in cmd
 
     def test_worker_prepended_probe_uses_worker_mode(self):
@@ -102,35 +99,27 @@ class TestRayStartCommands:
                                                       custom_ray_options=None,
                                                       no_restart=False)
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
-        assert '| base64 -d > /tmp/sky_host_network_probe.py' in cmd
+        assert (f'| base64 -d > {instance_setup._HOST_NETWORK_PROBE_TARGET}'
+                in cmd)
         assert '--mode worker' in cmd
 
     def test_probe_command_has_no_unencoded_newlines(self):
-        # Multi-line content in the bash command lands at column 0 of
-        # the rendered cluster YAML and breaks the block-scalar parse.
-        # Base64 encoding keeps the shipped content on one line; the
-        # only newlines should come from the bash structure itself, not
-        # from the embedded script.
+        # Newlines in the bash command land at column 0 of the rendered
+        # cluster YAML and break block-scalar parsing — the b64 payload
+        # must stay on one line.
         cmd = instance_setup.ray_head_start_command(custom_resource=None,
                                                     custom_ray_options=None)
-        # The base64 payload is one long token between `echo '` and `'`.
-        # Inspect it directly.
-        import re
         m = re.search(r"echo '([A-Za-z0-9+/=]+)' \| base64 -d", cmd)
         assert m is not None, ('expected base64 payload not found '
                                'in probe command')
         assert '\n' not in m.group(1)
 
     def test_probe_script_round_trips_through_base64(self):
-        # Verify the b64 payload decodes back to the actual probe
-        # source — guards against accidental truncation/corruption.
-        import base64 as _b64
-        import re
         cmd = instance_setup.ray_head_start_command(custom_resource=None,
                                                     custom_ray_options=None)
         m = re.search(r"echo '([A-Za-z0-9+/=]+)' \| base64 -d", cmd)
         assert m is not None
-        decoded = _b64.b64decode(m.group(1)).decode('utf-8')
+        decoded = base64.b64decode(m.group(1)).decode('utf-8')
         assert 'def _run_head' in decoded
         assert 'def _run_worker' in decoded
 
@@ -138,9 +127,6 @@ class TestRayStartCommands:
         cmd = instance_setup.ray_worker_start_command(custom_resource=None,
                                                       custom_ray_options=None,
                                                       no_restart=False)
-        # Worker's object-manager-port default of 8076 is preserved when
-        # the probe didn't run — same constant the old hardcoded form
-        # used, so non-hostNetwork worker pods see no change.
         assert ('--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-'
                 '8076}') in cmd
 

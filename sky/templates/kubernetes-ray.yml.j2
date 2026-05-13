@@ -539,11 +539,8 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
-            # metadata.name / metadata.uid via downward API rather than
-            # $HOSTNAME — under hostNetwork: true the container inherits
-            # the host node's hostname, so HOSTNAME points at the wrong
-            # thing for any pod self-identification (see
-            # sky.provision.kubernetes.host_network_probe).
+            # Downward API rather than $HOSTNAME — hostNetwork pods
+            # inherit the host node's hostname.
             - name: SKYPILOT_POD_NAME
               valueFrom:
                 fieldRef:
@@ -572,9 +569,7 @@ available_node_types:
               value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
-              # tojson quotes the value so YAML parses it as a string —
-              # K8s rejects pods whose env.value is anything but a string
-              # (e.g. when value is "1", a bare emit yields YAML int 1).
+              # tojson forces a quoted string; K8s rejects non-string env values.
               value: {{ value | tojson }}
             {% endfor %}
             {% if k8s_enable_docker_all %}
@@ -1103,16 +1098,8 @@ available_node_types:
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
 {% if k8s_host_network %}
-                  # hostNetwork: the head's GCS port is dynamic (picked
-                  # by sky.provision.kubernetes.host_network_probe to
-                  # avoid collisions on the shared host network
-                  # namespace). The worker probe inside
-                  # ray_worker_start_command below polls the
-                  # <cluster>-ray-ports ConfigMap for the head's port,
-                  # exports SKYPILOT_RAY_PORT, and TCP-waits for the
-                  # head's GCS to accept — covering the same role as the
-                  # constant-port `nc -z` check used in the non-host-
-                  # network path.
+                  # SKYPILOT_RAY_PORT and the head-up wait are handled
+                  # by the worker probe inside ray_worker_start_command.
 {% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
@@ -1310,15 +1297,9 @@ available_node_types:
               while true; do sleep infinity & wait $!; done
 
           {% if not k8s_host_network %}
-          # Under hostNetwork: true the K8s scheduler treats containerPort
-          # entries as hostPort reservations, blocking a second pod on
-          # the same node with the same declarations (event "Predicate
-          # NodePorts failed: node(s) didn't have free ports for the
-          # requested pod ports"). The Ray ports here are also stale
-          # under hostNetwork because the probe picks them dynamically,
-          # so omit the block entirely in that mode. containerPort is
-          # informational only when hostNetwork is off — Services dial
-          # via targetPort, which still works.
+          # Omitted under hostNetwork: the scheduler's NodePorts predicate
+          # treats containerPort as hostPort and blocks sibling pods even
+          # though the probe assigns Ray's ports dynamically.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port

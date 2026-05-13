@@ -768,20 +768,10 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
-        # Detect hostNetwork: true in the user's pod_config. When set,
-        # the pod shares the host's network namespace and Ray's default
-        # ports would collide with any sibling SkyPilot pod scheduled to
-        # the same node. We auto-enable the host-network probe path:
-        # the head pod picks free ports and publishes them via a
-        # ConfigMap; workers read it back. See
-        # sky/provision/kubernetes/host_network_probe.py and
-        # sky/provision/instance_setup._host_network_probe_cmd.
-        # We re-derive the merged pod_config here (rather than reading
-        # the already-merged spec back from the rendered template) so
-        # the bootstrap env vars are wired into deploy_vars before the
-        # template is rendered. combine_pod_config_fields() merges the
-        # same sources again at template-merge time — both calls land
-        # on the same final pod_config.
+        # Detect hostNetwork to wire the probe env vars into deploy_vars
+        # before the template is rendered. The same merge happens again
+        # later in combine_pod_config_fields when the user's pod_config
+        # is folded into the rendered YAML.
         merged_pod_config = skypilot_config.get_effective_region_config(
             cloud=cloud_config_str,
             region=context,

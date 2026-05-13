@@ -49,63 +49,36 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
                   'encoding="utf-8"))\';')
 
-# Path the probe writes; the bash snippet sources it to pull the chosen
-# ports into the env so ray start picks them up via ${VAR:-default}
-# substitution below.
 _HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
-
-# Where the inlined probe script is written on the pod each time
-# ray_head_start_command / ray_worker_start_command runs. Reusing a
-# fixed path is fine — the content is identical across invocations and
-# the redirect (`cat >`) truncates on each write.
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 
 
 def _read_host_network_probe_b64() -> str:
-    # Load the probe source once at module import and base64-encode it.
-    # __file__ resolves to whichever sky.provision.instance_setup is
-    # running (the local checkout for an editable install, the wheel's
-    # copy otherwise); the probe file ships alongside in
-    # sky/provision/kubernetes/.
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'kubernetes', 'host_network_probe.py')
     with open(path, 'rb') as f:
-        body = f.read()
-    return base64.b64encode(body).decode('ascii')
+        return base64.b64encode(f.read()).decode('ascii')
 
 
-# Base64 keeps the embedded content on a single YAML-safe line —
-# heredoc-inlining the raw script content puts column-0 lines inside a
-# block-scalar where they parse as new keys ("could not find expected
-# ':'"). Using b64 + a one-line `echo … | base64 -d > …` sidesteps
-# YAML indentation concerns entirely and stays well within bash's
-# command-line length limit (~19 KB for the current probe).
 _HOST_NETWORK_PROBE_B64 = _read_host_network_probe_b64()
 
 
 def _host_network_probe_cmd(mode: str) -> str:
     """Bash snippet that probes free Ray ports when running with hostNetwork.
 
-    Grabs a free port set on the pod's host network namespace and writes
-    them to a sourceable env file. For the head, the probe also
-    publishes the chosen ports to a ConfigMap so worker pods (which
-    share the host net namespace on different nodes but still need to
-    dial the head's GCS) can discover them.
+    Returns a runtime-gated snippet: a no-op shell branch unless
+    SKYPILOT_HOST_NETWORK=1 and SKYPILOT_RAY_PORTS_CONFIGMAP_NAME are
+    set in the pod env. Non-hostNetwork bootstraps see no change — env
+    vars stay unset and ``${VAR:-default}`` in the ray flags falls back
+    to the constants.
 
-    Gated entirely on runtime env vars: returns a no-op-ish snippet when
-    SKYPILOT_HOST_NETWORK is unset or SKYPILOT_RAY_PORTS_CONFIGMAP_NAME
-    is empty. Non-K8s callers and K8s callers without hostNetwork: true
-    therefore see no behavior change — the env vars stay unset and
-    ``${VAR:-default}`` in the ray flags falls back to the constants.
-
-    Ships the probe content base64-encoded inside the bash command,
-    decoding it to /tmp on the pod at run time. The K8s bootstrap
-    installs stable skypilot from PyPI before ray_head_start_command
-    runs in the pod (the dev wheel ships later via
-    kubernetes-ray.yml.j2's skypilot_wheel_installation_commands at
-    line ~1635), so the probe file from the dev wheel isn't yet on
-    disk in site-packages at probe time. Inlining the bytes makes the
-    bash command self-shipping regardless of what's installed.
+    The probe is shipped base64-inline rather than invoked as a module
+    because the K8s template installs stable skypilot from PyPI before
+    ray_head_start_command runs (the dev wheel ships later), so neither
+    `python -m sky.provision.kubernetes.host_network_probe` nor a
+    site-packages file lookup is reliable at probe time. The b64 form
+    also keeps the payload on a single line, which is required to stay
+    inside the rendered YAML's block-scalar indentation.
     """
     assert mode in ('head', 'worker'), mode
     return ('if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
@@ -122,17 +95,10 @@ def _host_network_probe_cmd(mode: str) -> str:
             'fi; ')
 
 
-# Python expression to read the chosen Ray port from ~/.sky/ray_port.json.
-# Stdlib only — deliberately does not import `sky`, so this survives a
-# half-baked sky package install. The K8s bootstrap re-runs `uv pip install
-# skypilot[kubernetes,remote]` right after the local dev wheel, which (without
-# --prerelease=allow) downgrades to the latest stable on PyPI; the resulting
-# install can leave `sky/__init__.py` in a state where `from sky.X import Y`
-# raises ImportError mid-import. The previous reader used `from sky.skylet
-# import job_lib` and silently fell back to `echo 6379` on error, sending the
-# health-check poll to the wrong port and forcing a 90s timeout. Falling back
-# to SKY_REMOTE_RAY_PORT (SkyPilot's default 6380) instead of legacy 6379 is
-# strictly more correct — any cluster launched after #1790 is on 6380.
+# Stdlib only — deliberately doesn't import `sky` so the read still
+# works during the K8s bootstrap's brief stable→dev skypilot reinstall
+# window. Falls back to SKY_REMOTE_RAY_PORT (not legacy 6379) so the
+# health-check poll lands on something Ray could plausibly be on.
 _READ_RAY_PORT_PY = (
     'import json, os; '
     'd = os.path.expanduser(os.environ.get('
@@ -152,10 +118,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
-# constants.RAY_STATUS pins RAY_ADDRESS to the SkyPilot default port. The
-# hostNetwork probe binds Ray to a dynamic free port, so use SKYPILOT_RAY_PORT
-# (exported by the probe just above this loop) when present, falling back to
-# the constant so non-hostNetwork bootstraps behave the same as before.
+# Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
+# the constants.RAY_STATUS literal — the probe picks a dynamic port.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
     f'{constants.SKY_REMOTE_RAY_PORT}}} '
@@ -388,16 +352,10 @@ def _ray_gpu_options(custom_resource: str) -> str:
 def ray_head_start_command(custom_resource: Optional[str],
                            custom_ray_options: Optional[Dict[str, Any]]) -> str:
     """Returns the command to start Ray on the head node."""
-    # Port flags use ${VAR:-default} substitution so that:
-    # * When SKYPILOT_HOST_NETWORK is unset (the common case), the env
-    #   vars are unset and the flags expand to their original constants
-    #   — bit-identical to the pre-hostNetwork behavior.
-    # * When the probe ran (hostNetwork: true K8s pod), the env file is
-    #   sourced first and the flags expand to the probed port numbers.
-    # New flags (node-manager-port, ray-client-server-port, dashboard
-    # agent / runtime-env agent / metrics export) use ${VAR:+--flag=...}
-    # so they are *omitted entirely* when unset, preserving Ray's own
-    # default-port behavior for non-hostNetwork clusters.
+    # Existing port flags use ${VAR:-default} (probed value when the
+    # hostNetwork probe ran, original constant otherwise). New flags
+    # use ${VAR:+--flag=...} so they vanish when unset, deferring to
+    # Ray's own defaults for non-hostNetwork bootstraps.
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
@@ -454,14 +412,9 @@ def ray_worker_start_command(custom_resource: Optional[str],
                              custom_ray_options: Optional[Dict[str, Any]],
                              no_restart: bool) -> str:
     """Returns the command to start Ray on the worker node."""
-    # SKYPILOT_RAY_PORT carries the head's GCS port. In the non-hostNetwork
-    # path the K8s template (or the SSH-fallback caller) exports it from a
-    # build-time constant; in the hostNetwork path the worker-side probe
-    # pulls it from the head's ConfigMap and writes it to the env file
-    # sourced just above. Local-bind ports (node-manager, object-manager,
-    # etc.) come from the worker's own probe via ${VAR:+...} substitution
-    # so they are omitted entirely (preserving Ray's default behavior)
-    # when the probe didn't run.
+    # SKYPILOT_RAY_PORT is the head's GCS port — exported as a constant
+    # by the K8s template's worker bootstrap, or as the probed value
+    # (read from the head's ConfigMap) by the hostNetwork worker probe.
     ray_options = (
         '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
         '--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076} '
