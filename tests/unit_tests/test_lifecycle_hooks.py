@@ -754,3 +754,49 @@ def test_relaunch_hooks_only_handles_missing_cluster_record(monkeypatch):
         'mycluster', [])
     assert kwargs['idle_minutes_to_autostop'] == -1
     assert kwargs['down'] is False
+
+
+def test_relaunch_warns_when_preemption_grace_increases():
+    """Re-launching a K8s cluster with a *larger* preemption-hook
+    timeout than the existing pod's terminationGracePeriodSeconds
+    must warn the user.
+
+    Pod templates are immutable after creation, so the larger timeout
+    would otherwise be silently truncated by kubelet at SIGTERM —
+    preemption hooks past the original grace get SIGKILLed mid-run.
+    """
+    from sky.backends.cloud_vm_ray_backend import (
+        _maybe_warn_preemption_grace_change)
+
+    prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
+    new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 300}]
+
+    warning = _maybe_warn_preemption_grace_change(k8s_cloud.Kubernetes(), prior,
+                                                  new)
+    assert warning is not None, (
+        'Expected a warning when re-launching K8s cluster with a '
+        'larger preemption-hook timeout than before.')
+    assert '60' in warning and '300' in warning, (
+        f'Warning should mention prior=60s and new=300s; got: {warning!r}')
+    assert 'sky down' in warning.lower() or 'restart' in warning.lower(), (
+        f'Warning should tell users to restart the cluster; got: {warning!r}')
+
+
+def test_relaunch_no_warning_when_preemption_grace_unchanged():
+    """Re-launch with same preemption-hook timeout = no warning."""
+    from sky.backends.cloud_vm_ray_backend import (
+        _maybe_warn_preemption_grace_change)
+    prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
+    new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
+    assert _maybe_warn_preemption_grace_change(k8s_cloud.Kubernetes(), prior,
+                                               new) is None
+
+
+def test_relaunch_no_warning_on_non_k8s_cloud():
+    """terminationGracePeriodSeconds is K8s-specific; warn only there."""
+    from sky.backends.cloud_vm_ray_backend import (
+        _maybe_warn_preemption_grace_change)
+    from sky.clouds import AWS
+    prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
+    new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 300}]
+    assert _maybe_warn_preemption_grace_change(AWS(), prior, new) is None

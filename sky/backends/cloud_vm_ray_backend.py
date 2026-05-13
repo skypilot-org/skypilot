@@ -326,6 +326,43 @@ def _is_message_too_long(returncode: int,
         return _check_output_for_match_str(output)
 
 
+def _maybe_warn_preemption_grace_change(
+    cloud: Optional['clouds.Cloud'],
+    prior_hooks: Optional[List[Dict[str, Any]]],
+    new_hooks: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Return a warning string if a re-launch would need more K8s grace.
+
+    Pod ``terminationGracePeriodSeconds`` is set at pod-creation time
+    and is immutable for the lifetime of the pod. Re-launching an
+    existing Kubernetes cluster with a *larger* preemption-hook timeout
+    than before means the new timeout would be silently truncated by
+    kubelet at SIGTERM — the preemption hook would be SIGKILLed
+    mid-run.
+
+    Returns ``None`` when no warning is needed (non-K8s cloud, no new
+    preemption hooks, or new timeout ≤ prior timeout).
+    """
+    if not isinstance(cloud, clouds.Kubernetes):
+        return None
+    # Lazy import to avoid circular: kubernetes.py imports backend utilities.
+    from sky.clouds.kubernetes import (_compute_preemption_hook_timeout)  # pylint: disable=import-outside-toplevel,cyclic-import
+    prior_t = _compute_preemption_hook_timeout(prior_hooks)
+    new_t = _compute_preemption_hook_timeout(new_hooks)
+    if new_t is None:
+        return None
+    if prior_t is not None and new_t <= prior_t:
+        return None
+    prior_label = f'{prior_t}s' if prior_t is not None else '~30s (k8s default)'
+    return (f'Re-launch increased the preemption-hook grace requirement '
+            f'from {prior_label} to {new_t}s, but Kubernetes pod\'s '
+            '`terminationGracePeriodSeconds` is fixed at pod creation and '
+            'cannot be updated in place. The new preemption hooks will be '
+            'SIGKILLed by kubelet once the existing grace expires. To apply '
+            'the new grace, run `sky down <cluster>` then `sky launch` to '
+            'recreate the pod.')
+
+
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
@@ -5938,6 +5975,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # onto to_provision so the next SetAutostop RPC carries the
             # up-to-date scripts / timeouts.
             if one_task_resource.hooks != to_provision.hooks:
+                # On Kubernetes the pod's terminationGracePeriodSeconds is
+                # fixed at pod-creation time. Warn if the new hooks would
+                # need more grace than the existing pod has.
+                grace_warning = _maybe_warn_preemption_grace_change(
+                    to_provision.cloud, to_provision.hooks,
+                    one_task_resource.hooks)
+                if grace_warning is not None:
+                    logger.warning(grace_warning)
                 to_provision = to_provision.copy(hooks=one_task_resource.hooks)
 
             # cluster_config_overrides should be the same for all resources.
