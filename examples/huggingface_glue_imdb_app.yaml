@@ -8,13 +8,12 @@ resources:
 # The setup command.  Will be run under the working directory.
 setup: |
   git clone https://github.com/huggingface/transformers/
-  # checkout to the correct version
   cd transformers
-  git checkout v4.25.1
+  git checkout v4.46.3
   pip3 install .
   cd examples/pytorch/text-classification
-  # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
-  pip3 install -r requirements.txt tensorboard torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+  # Pin cu121 PyTorch wheels for broad host driver compatibility.
+  pip3 install -r requirements.txt tensorboard torch --extra-index-url https://download.pytorch.org/whl/cu121
 
 # The command to run.  Will be run under the working directory.
 run: |
