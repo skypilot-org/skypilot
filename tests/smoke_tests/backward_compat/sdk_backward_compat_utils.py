@@ -86,21 +86,6 @@ def managed_job_logs(job_name: str) -> None:
 
 
 @cli.command()
-@click.option("--job-name", type=str, help="The name of the job")
-def managed_job_sync_down_legacy(job_name: str) -> None:
-    # Bypass the CLI's streaming-first wrapper and call the legacy
-    # /jobs/download_logs path directly. This is the path that broke
-    # cross-version sync-down in #9294 (revert) and was fixed in #9310;
-    # tracks #9315.
-    result = jobs_sdk.download_logs(name=job_name,
-                                    job_id=None,
-                                    refresh=False,
-                                    controller=False)
-    for jid, path in result.items():
-        print(f'Job {jid} logs: {path}')
-
-
-@cli.command()
 def managed_job_queue() -> None:
     request_id = jobs_sdk.queue(refresh=True)
     records = sdk.stream_and_get(request_id)

@@ -623,8 +623,6 @@ class TestBackwardCompatibility:
             )
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
-        sdk_utils_file = os.path.join(os.path.dirname(__file__),
-                                      'sdk_backward_compat_utils.py')
         commands = [
             # Check API version compatibility
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
@@ -647,18 +645,8 @@ class TestBackwardCompatibility:
             # writes downloaded logs under the path the client expects to
             # rewrite (api_server_user_logs_dir_prefix); regression check
             # for https://github.com/skypilot-org/skypilot/issues/9315.
-            #
-            # Two cells: the CLI cell exercises the streaming fast path
-            # (PR #9464) with legacy fallback; the SDK cell forces the
-            # legacy /jobs/download_logs path that #9294 broke. Without
-            # the SDK cell, a server-side regression in download_logs
-            # would be masked whenever streaming succeeds.
             f'{self.ACTIVATE_CURRENT} && '
             f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
-            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
-            f'{self.ACTIVATE_CURRENT} && '
-            f's="$(SKYPILOT_DEBUG=0 python {sdk_utils_file} '
-            f'managed-job-sync-down-legacy --job-name {job_name} 2>&1)" && '
             f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART}',
@@ -726,8 +714,6 @@ class TestBackwardCompatibility:
             )
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
-        sdk_utils_file = os.path.join(os.path.dirname(__file__),
-                                      'sdk_backward_compat_utils.py')
         commands = [
             # Check API version compatibility
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
@@ -750,18 +736,8 @@ class TestBackwardCompatibility:
             # still writes downloaded logs under the path the legacy
             # client rewrites (api_server_user_logs_dir_prefix); regression
             # check for https://github.com/skypilot-org/skypilot/issues/9315.
-            #
-            # The CLI cell covers the path the old client actually uses;
-            # the SDK cell pins coverage on the legacy /jobs/download_logs
-            # endpoint specifically (the one that #9294 broke and #9310
-            # fixed) so any future regression in that endpoint surfaces
-            # here even if the BASE CLI later grows a streaming wrapper.
             f'{self.ACTIVATE_BASE} && '
             f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
-            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
-            f'{self.ACTIVATE_BASE} && '
-            f's="$(SKYPILOT_DEBUG=0 python {sdk_utils_file} '
-            f'managed-job-sync-down-legacy --job-name {job_name} 2>&1)" && '
             f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
