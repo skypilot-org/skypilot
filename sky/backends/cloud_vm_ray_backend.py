@@ -5707,6 +5707,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.hook = hook
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
+                # On Kubernetes, cap any preemption-hook timeout to the
+                # pod's terminationGracePeriodSeconds cap so the stored
+                # value matches kubelet's actual SIGKILL boundary.
+                if isinstance(handle.launched_resources.cloud,
+                              clouds.Kubernetes):
+                    from sky.clouds import kubernetes as k8s_cloud  # pylint: disable=import-outside-toplevel
+                    hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
                 # v7+: send the full hooks list inline on the same RPC.
                 # Three states for the `hooks` arg:
                 #   None  → legacy/no-hook-aware caller; don't touch stored

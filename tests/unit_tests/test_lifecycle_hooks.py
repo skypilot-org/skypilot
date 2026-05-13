@@ -591,6 +591,56 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
     assert r.hooks[0]['timeout'] == 30
 
 
+def test_kubernetes_caps_preemption_hook_timeout_to_600(capsys):
+    """K8s grace-period caps preemption hooks at 600s.
+
+    The user-specified or default timeout for a *preemption*-event hook
+    is bounded by the pod's terminationGracePeriodSeconds, which we cap
+    at 600s (cluster-autoscaler's --max-graceful-termination-sec
+    default). When a user requests longer, we cap on send + warn — so
+    the skylet stores a number that matches what kubelet will actually
+    honor instead of one that misleads the user.
+    """
+    from sky.clouds.kubernetes import cap_preemption_hook_timeouts
+
+    hooks = [
+        {
+            'run': 'a',
+            'events': ['preemption'],
+            'timeout': 3600
+        },
+        {
+            'run': 'b',
+            'events': ['preemption'],
+            'timeout': 60
+        },
+        {
+            'run': 'c',
+            'events': ['autostop'],
+            'timeout': 3600
+        },
+    ]
+    capped = cap_preemption_hook_timeouts(hooks)
+    assert capped[0]['timeout'] == 600, (
+        'preemption hook with 3600s should be capped to 600')
+    assert capped[1]['timeout'] == 60, 'under-limit preemption stays'
+    # autostop-only hook isn't affected by the K8s grace cap.
+    assert capped[2]['timeout'] == 3600, (
+        'autostop-only hook should not be capped (no grace involvement)')
+
+    err = capsys.readouterr().err
+    assert '600' in err and 'kubernetes' in err.lower(), (
+        f'Should warn user about the cap; got: {err!r}')
+
+
+def test_kubernetes_no_cap_when_preemption_hooks_under_limit(capsys):
+    from sky.clouds.kubernetes import cap_preemption_hook_timeouts
+    hooks = [{'run': 'a', 'events': ['preemption'], 'timeout': 60}]
+    out = cap_preemption_hook_timeouts(hooks)
+    assert out[0]['timeout'] == 60
+    assert capsys.readouterr().err == ''
+
+
 def test_task_yaml_resources_hooks_form_now_rejected(tmp_path):
     """`resources.hooks:` is no longer accepted.
 

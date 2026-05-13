@@ -103,6 +103,41 @@ def _compute_preemption_hook_timeout(
     return raw
 
 
+def cap_preemption_hook_timeouts(
+    hooks: Optional[List[Dict[str, Any]]],) -> Optional[List[Dict[str, Any]]]:
+    """Cap each preemption-event hook's ``timeout`` to the K8s grace cap.
+
+    On Kubernetes the pod's ``terminationGracePeriodSeconds`` is
+    bounded by cluster-autoscaler's ``--max-graceful-termination-sec``
+    (default 600). A user-set or default hook ``timeout`` larger than
+    that is meaningless — kubelet SIGKILLs at the grace, leaving the
+    skylet's stored timeout misleading. Cap the individual timeout on
+    send so the stored value matches what kubelet will actually honor,
+    and warn the user once per offending hook.
+
+    Only ``preemption``-event entries are affected; ``autostop``/``down``
+    hooks don't interact with the pod grace.
+    """
+    if not hooks:
+        return hooks
+    out: List[Dict[str, Any]] = []
+    for entry in hooks:
+        if 'preemption' in (entry.get('events') or []) and entry.get(
+                'timeout', 0) > _PREEMPTION_GRACE_CAP_SECONDS:
+            sys.stderr.write(
+                f'WARNING: preemption-hook timeout {entry["timeout"]}s on '
+                f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
+                f'(pod terminationGracePeriodSeconds limit; '
+                f'cluster-autoscaler --max-graceful-termination-sec). '
+                f'Raise the autoscaler flag if longer hooks are needed.\n')
+            new = dict(entry)
+            new['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
+            out.append(new)
+        else:
+            out.append(entry)
+    return out
+
+
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
