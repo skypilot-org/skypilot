@@ -703,3 +703,54 @@ def test_sky_down_claims_teardown_even_without_down_hooks():
         "subsequent kubelet SIGTERM (during the K8s pod delete) cannot "
         "claim 'preemption' and fire the preemption hook on a sky "
         f"down. Codegen was:\n{cmd}")
+
+
+def test_relaunch_hooks_only_preserves_autostop(monkeypatch):
+    """Re-launching with only hooks changed must NOT unset autostop.
+
+    The buggy version of the ``elif hooks_payload is not None:`` branch
+    in :func:`sky.execution._execute` passed
+    ``idle_minutes_to_autostop=-1`` unconditionally, wiping any prior
+    autostop on a re-launch that added/changed only ``config.hooks``.
+
+    The fix extracts the kwarg computation into a helper that reads the
+    cluster's prior ``autostop`` + ``to_down`` from the local DB. This
+    test pins that helper.
+    """
+    from sky import execution
+    from sky import global_user_state
+
+    # Cluster previously had autostop=10 idle minutes + autodown.
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: {
+                            'autostop': 10,
+                            'to_down': True,
+                        })
+
+    hooks = [{'run': 'echo bye', 'events': ['down']}]
+    kwargs = execution._compute_set_autostop_args_for_hooks_only_relaunch(
+        'mycluster', hooks)
+
+    assert kwargs['idle_minutes_to_autostop'] == 10, (
+        f"Expected prior autostop=10 to be preserved, got "
+        f"{kwargs['idle_minutes_to_autostop']!r}. The buggy version "
+        f"unset autostop with -1.")
+    assert kwargs['down'] is True, (
+        f"Expected prior to_down=True to be preserved, got "
+        f"{kwargs['down']!r}.")
+    assert kwargs['hooks'] == hooks
+
+
+def test_relaunch_hooks_only_handles_missing_cluster_record(monkeypatch):
+    """If the cluster record can't be read (e.g. first launch / race),
+    fall back to ``idle_minutes_to_autostop=-1`` (no autostop) and
+    ``down=False`` rather than crashing."""
+    from sky import execution
+    from sky import global_user_state
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda *a, **kw: None)
+    kwargs = execution._compute_set_autostop_args_for_hooks_only_relaunch(
+        'mycluster', [])
+    assert kwargs['idle_minutes_to_autostop'] == -1
+    assert kwargs['down'] is False

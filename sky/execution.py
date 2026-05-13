@@ -155,6 +155,42 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
                 task.update_file_mounts({fm.mount_path: tmp_path})
 
 
+def _compute_set_autostop_args_for_hooks_only_relaunch(
+        cluster_name: str, hooks_payload: List[Dict[str,
+                                                    Any]]) -> Dict[str, Any]:
+    """Build set_autostop kwargs when a re-launch updates only hooks.
+
+    The `elif hooks_payload is not None:` branch in `_execute` updates
+    stored hooks on the skylet without the user re-passing
+    ``--idle-minutes-to-autostop`` (or YAML autostop) — for example,
+    re-launching a cluster with a new preemption hook. Previously this
+    path passed ``idle_minutes_to_autostop=-1`` (= "unset autostop"),
+    which silently wiped any prior autostop config.
+
+    We instead read the prior autostop value + ``to_down`` flag from
+    local state and pass them through, so re-launches that change only
+    hooks preserve the cluster's existing autostop. ``wait_for`` is not
+    persisted client-side; on this path it defaults back to
+    ``jobs_and_ssh`` (the documented default), which is the same value a
+    user would get on a fresh ``sky autostop``.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        prior_idle_minutes = -1
+        prior_to_down = False
+    else:
+        prior_idle_minutes = record.get('autostop', -1)
+        if prior_idle_minutes is None:
+            prior_idle_minutes = -1
+        prior_to_down = bool(record.get('to_down', False))
+    return dict(
+        idle_minutes_to_autostop=prior_idle_minutes,
+        wait_for=None,
+        down=prior_to_down,
+        hooks=hooks_payload,
+    )
+
+
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
@@ -608,11 +644,9 @@ def _execute_dag(
                 # hooks_payload=[] so the skylet clears its stored hooks.
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle,
-                                     idle_minutes_to_autostop=-1,
-                                     wait_for=None,
-                                     down=False,
-                                     hooks=hooks_payload)
+                kwargs = _compute_set_autostop_args_for_hooks_only_relaunch(
+                    handle.cluster_name, hooks_payload)
+                backend.set_autostop(handle, **kwargs)
 
         job_id = None
         if Stage.EXEC in stages:
