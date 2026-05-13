@@ -467,19 +467,18 @@ _VALID_HOOK_EVENTS = ('autostop', 'preemption', 'down')
 
 def _validate_hook_event(ctx: click.Context, param: click.Parameter,
                          value: Optional[str]) -> Optional[str]:
-    """Validator for `sky logs --hook [event]`.
+    """Pass-through validator for ``sky logs --hook [event]``.
 
-    Accepts: ``None`` (option not passed), ``''`` (option passed without
-    a value — auto-select sentinel), or one of the three valid event
-    names. We can't use ``click.Choice`` here because it rejects ``''``
-    even though we set it as ``flag_value``.
+    Accepts any string. The design-doc form ``sky logs --hook
+    <cluster>`` lets the cluster name slip in here (because Click
+    greedily consumes the next token as the option value). We can't
+    reject those tokens at callback time because positional parsing
+    happens later and ``ctx.args`` is already empty here. Instead, the
+    real validation + auto-select swap lives in :func:`logs` so it can
+    see both fields together.
     """
-    if value is None or value == '' or value in _VALID_HOOK_EVENTS:
-        return value
-    valid = ', '.join(repr(v) for v in _VALID_HOOK_EVENTS)
-    raise click.BadParameter(f'{value!r} is not one of {valid}.',
-                             ctx=ctx,
-                             param=param)
+    del ctx, param  # unused; kept for compatibility with click's signature
+    return value
 
 
 def _get_click_major_version():
@@ -2627,14 +2626,15 @@ def queue(clusters: List[str],
           '[default: --follow]'))
 @_TAIL_OPTION
 @click.argument('cluster',
-                required=True,
+                required=False,
+                default=None,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
-    cluster: str,
+    cluster: Optional[str],
     job_ids: Tuple[str, ...],
     provision: bool,
     autostop: bool,  # pylint: disable=redefined-outer-name
@@ -2673,6 +2673,23 @@ def logs(
     alias for ``--hook autostop``), stream the per-event lifecycle-hook
     log. Omit the event name to auto-select whichever log exists.
     """
+    # Smart-parse the design-doc form `sky logs --hook <cluster>`:
+    # Click greedily consumes the next token after --hook as the option
+    # value, so the cluster name lands in `hook_event`. When the value
+    # isn't a valid event name and we have no positional CLUSTER, treat
+    # it as the cluster name and route to auto-select (event='').
+    if (hook_event is not None and hook_event != '' and
+            hook_event not in _VALID_HOOK_EVENTS):
+        if cluster is None:
+            cluster = hook_event
+            hook_event = ''
+        else:
+            valid = ', '.join(repr(v) for v in _VALID_HOOK_EVENTS)
+            raise click.UsageError(
+                f'Invalid value for --hook: {hook_event!r} is not one of '
+                f'{valid}.')
+    if cluster is None:
+        raise click.UsageError("Missing argument 'CLUSTER'.")
     # --autostop is a deprecated alias for --hook autostop.
     # TODO(zpoint): drop the --autostop branch ~2 minors after the
     # lifecycle-hooks framework ships.

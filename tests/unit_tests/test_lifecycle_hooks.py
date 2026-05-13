@@ -874,6 +874,72 @@ def test_schema_accepts_32_hooks():
     _validate({'hooks': [{'run': f'echo {i}'} for i in range(32)]})
 
 
+def test_cli_hook_auto_select_with_cluster_only(monkeypatch):
+    """`sky logs --hook <cluster>` (no event) must auto-select.
+
+    Per termination_hook_design.md §1.4, ``--hook`` is optional-arg —
+    the cluster name immediately after means "auto-select whichever
+    event log exists". Click parses options greedily, so without a
+    smart callback ``--hook mycluster`` rejects ``mycluster`` as an
+    invalid event name. The fix: when the value isn't a valid event,
+    push it back into ctx.args for positional parsing and return the
+    auto-select sentinel.
+    """
+    from click.testing import CliRunner
+
+    from sky.client.cli import command as cli_command
+
+    captured = {}
+
+    def _fake_tail_hook_logs(cluster_name, event=None, follow=True, tail=0):
+        captured['cluster'] = cluster_name
+        captured['event'] = event
+        return 0
+
+    monkeypatch.setattr('sky.client.sdk.tail_hook_logs', _fake_tail_hook_logs)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_command.logs, ['--hook', 'mycluster'])
+
+    assert result.exit_code == 0, (
+        f'CLI exited with {result.exit_code}; expected 0 (auto-select).\n'
+        f'output: {result.output}\n'
+        f'exc: {result.exception!r}')
+    assert captured.get('cluster') == 'mycluster', (
+        f'Expected cluster=mycluster; got {captured!r}. The fix should '
+        f'route `sky logs --hook mycluster` as "auto-select on '
+        f'mycluster" — the design doc form.')
+    # Auto-select means event passed to SDK is None (empty sentinel
+    # rewritten by the CLI).
+    assert captured.get('event') is None
+
+
+def test_cli_hook_explicit_event_still_works(monkeypatch):
+    """`sky logs --hook autostop mycluster` (explicit event) keeps
+    working after the smart-callback fix."""
+    from click.testing import CliRunner
+
+    from sky.client.cli import command as cli_command
+
+    captured = {}
+
+    def _fake_tail_hook_logs(cluster_name, event=None, follow=True, tail=0):
+        captured['cluster'] = cluster_name
+        captured['event'] = event
+        return 0
+
+    monkeypatch.setattr('sky.client.sdk.tail_hook_logs', _fake_tail_hook_logs)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_command.logs,
+                           ['--hook', 'autostop', 'mycluster'])
+
+    assert result.exit_code == 0, (
+        f'CLI exit {result.exit_code}; output: {result.output}\n'
+        f'exc: {result.exception!r}')
+    assert captured == {'cluster': 'mycluster', 'event': 'autostop'}
+
+
 def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
     """`tail_hook_logs` is a new SDK method (introduced by PR1 — adds
     the ``/hook_logs`` server route). A new client talking to an older
