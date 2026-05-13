@@ -538,11 +538,10 @@ available_node_types:
           imagePullPolicy: Always
           image: {{image_id}}
           {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
-          # Forward kubelet SIGTERM to whichever sky-hook daemon owns
-          # this pod (skylet on the head, worker_hook_handler on
-          # workers). Skylet isn't PID 1 in the pod (the setup bash
-          # script is) so kubelet's SIGTERM doesn't reach it without
-          # this preStop hook.
+          # Forward kubelet SIGTERM to the skylet on the head pod.
+          # Skylet isn't PID 1 in the pod (the setup bash script is)
+          # so kubelet's SIGTERM doesn't reach it without this preStop
+          # hook.
           #
           # Discovery uses pgrep over the daemon's module name so we
           # are robust against:
@@ -559,7 +558,7 @@ available_node_types:
                 - /bin/sh
                 - -c
                 - |
-                  PID=$(pgrep -of 'sky\.skylet\.(skylet|worker_hook_handler)' || true)
+                  PID=$(pgrep -of 'sky\.skylet\.skylet' || true)
                   if [ -n "$PID" ]; then
                     kill -TERM "$PID" 2>/dev/null || true
                     # Wait up to grace seconds for the daemon to exit.
