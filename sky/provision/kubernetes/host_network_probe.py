@@ -99,7 +99,8 @@ def _bind_ephemeral_port() -> Tuple[socket.socket, int]:
     return s, s.getsockname()[1]
 
 
-def _probe_ports(names: List[str]) -> Tuple[List[socket.socket], Dict[str, int]]:
+def _probe_ports(
+        names: List[str]) -> Tuple[List[socket.socket], Dict[str, int]]:
     """Bind one ephemeral socket per name and return (held_sockets, ports).
 
     Sockets must be kept alive until just before ``ray start`` runs, then
@@ -153,28 +154,67 @@ def _k8s_api_request(
         return e.code, e.read()
 
 
-def _publish_configmap(name: str, namespace: str,
-                       ports: Dict[str, int]) -> None:
-    """Create or update a ConfigMap with the head's chosen ports.
+def _get_pod_uid(pod_name: str, namespace: str) -> str:
+    """Look up the head pod's UID for the ConfigMap's ownerReference."""
+    status, resp = _k8s_api_request(
+        'GET', f'/api/v1/namespaces/{namespace}/pods/{pod_name}')
+    if status >= 300:
+        raise RuntimeError(
+            f'Failed to GET pod {namespace}/{pod_name} to derive the '
+            f'ConfigMap ownerReference: status={status} '
+            f'body={resp.decode("utf-8", "replace")}')
+    return json.loads(resp)['metadata']['uid']
 
-    Idempotent: if the ConfigMap exists (head pod restarted), PUT replaces
-    its data with the new probe results so workers see fresh ports.
-    """
-    data = {k: str(v) for k, v in ports.items()}
-    metadata: Dict[str, Any] = {
-        'name': name,
-        'namespace': namespace,
-        'labels': {
-            'parent': 'skypilot',
-            'skypilot-ray-ports': 'true',
-        },
-    }
-    body: Dict[str, Any] = {
+
+def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
+                          owner_pod_name: str,
+                          owner_pod_uid: str) -> Dict[str, Any]:
+    """Build the ConfigMap body, including the ownerReference that ties its
+    lifetime to the head pod so K8s garbage-collects it on `sky down`."""
+    return {
         'apiVersion': 'v1',
         'kind': 'ConfigMap',
-        'metadata': metadata,
-        'data': data,
+        'metadata': {
+            'name': name,
+            'namespace': namespace,
+            'labels': {
+                'parent': 'skypilot',
+                'skypilot-ray-ports': 'true',
+            },
+            # When the head pod is deleted (sky down deletes pods), the
+            # K8s garbage collector cascades and removes this ConfigMap.
+            # controller=false because we're not actually controlling
+            # the pod; blockOwnerDeletion=false so deleting the pod
+            # doesn't wait on our cleanup.
+            'ownerReferences': [{
+                'apiVersion': 'v1',
+                'kind': 'Pod',
+                'name': owner_pod_name,
+                'uid': owner_pod_uid,
+                'controller': False,
+                'blockOwnerDeletion': False,
+            }],
+        },
+        'data': {k: str(v) for k, v in ports.items()},
     }
+
+
+def _publish_configmap(name: str, namespace: str, ports: Dict[str,
+                                                              int]) -> None:
+    """Create or update a ConfigMap with the head's chosen ports.
+
+    Idempotent: if the ConfigMap exists (head pod restarted with the same
+    UID), PUT replaces its data. If a stale ConfigMap exists from a prior
+    head pod (different UID — owner already gone but the GC sweep hasn't
+    fired yet), we refresh its ownerReference to the current head pod so
+    cleanup catches it.
+    """
+    # K8s exports the pod name as HOSTNAME by default. Required because
+    # this script runs inside the pod the OwnerReference will point at.
+    owner_pod_name = os.environ['HOSTNAME']
+    owner_pod_uid = _get_pod_uid(owner_pod_name, namespace)
+    body = _build_configmap_body(name, namespace, ports, owner_pod_name,
+                                 owner_pod_uid)
     base = f'/api/v1/namespaces/{namespace}/configmaps'
     status, resp = _k8s_api_request('POST', base, body)
     if status == 409:
@@ -185,7 +225,7 @@ def _publish_configmap(name: str, namespace: str,
                 f'Failed to GET ConfigMap {namespace}/{name} for update: '
                 f'status={status} body={resp.decode("utf-8", "replace")}')
         existing = json.loads(resp)
-        metadata['resourceVersion'] = (
+        body['metadata']['resourceVersion'] = (
             existing['metadata']['resourceVersion'])
         status, resp = _k8s_api_request('PUT', f'{base}/{name}', body)
     if status >= 300:
@@ -256,8 +296,7 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
 
 def _run_worker(env_file: str, configmap_name: str,
                 configmap_namespace: str) -> None:
-    head_data = _read_configmap_with_retry(configmap_name,
-                                           configmap_namespace)
+    head_data = _read_configmap_with_retry(configmap_name, configmap_namespace)
     head_gcs = head_data.get('gcs')
     if head_gcs is None:
         raise RuntimeError(
@@ -281,14 +320,14 @@ def _run_worker(env_file: str, configmap_name: str,
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--mode', choices=['head', 'worker'], required=True)
-    parser.add_argument('--env-file', required=True,
+    parser.add_argument('--env-file',
+                        required=True,
                         help='Path to write `export VAR=value` lines to.')
     parser.add_argument('--configmap-name', required=True)
     parser.add_argument('--configmap-namespace', required=True)
     args = parser.parse_args(argv)
     if args.mode == 'head':
-        _run_head(args.env_file, args.configmap_name,
-                  args.configmap_namespace)
+        _run_head(args.env_file, args.configmap_name, args.configmap_namespace)
     else:
         _run_worker(args.env_file, args.configmap_name,
                     args.configmap_namespace)

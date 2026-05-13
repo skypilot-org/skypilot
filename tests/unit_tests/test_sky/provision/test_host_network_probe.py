@@ -26,8 +26,7 @@ class TestProbePorts:
         held, ports = host_network_probe._probe_ports(
             host_network_probe._HEAD_PORT_NAMES)
         try:
-            assert set(ports.keys()) == set(
-                host_network_probe._HEAD_PORT_NAMES)
+            assert set(ports.keys()) == set(host_network_probe._HEAD_PORT_NAMES)
             assert len(set(ports.values())) == len(ports)
             for port in ports.values():
                 assert 1024 <= port <= 65535
@@ -81,9 +80,9 @@ class TestRayStartCommands:
         # hardcode a value).
         assert ('${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
                 '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT}') in cmd
-        assert ('${SKYPILOT_RAY_CLIENT_SERVER_PORT:+'
-                '--ray-client-server-port=$SKYPILOT_RAY_CLIENT_SERVER_PORT}'
-               ) in cmd
+        assert (
+            '${SKYPILOT_RAY_CLIENT_SERVER_PORT:+'
+            '--ray-client-server-port=$SKYPILOT_RAY_CLIENT_SERVER_PORT}') in cmd
 
     def test_head_prepended_probe_is_runtime_gated(self):
         cmd = instance_setup.ray_head_start_command(custom_resource=None,
@@ -120,12 +119,11 @@ class TestRayStartCommands:
         # last --port on the command line, so user overrides win.
         cmd = instance_setup.ray_head_start_command(
             custom_resource=None, custom_ray_options={'port': 7000})
-        port_positions = [
-            m.start() for m in re.finditer(r'--port=', cmd)
-        ]
+        port_positions = [m.start() for m in re.finditer(r'--port=', cmd)]
         assert len(port_positions) == 2
         # User value comes after the env-var substitution.
-        assert cmd.index('--port=7000') > cmd.index('--port=${SKYPILOT_RAY_PORT')
+        assert cmd.index('--port=7000') > cmd.index(
+            '--port=${SKYPILOT_RAY_PORT')
 
     def test_dump_ray_ports_reads_env_vars(self):
         # The runtime-resolved dict expression in
@@ -136,6 +134,49 @@ class TestRayStartCommands:
             constants.SKY_REMOTE_RAY_PORT_DICT_STR)
         assert 'os.environ.get("SKYPILOT_RAY_DASHBOARD_PORT"' in (
             constants.SKY_REMOTE_RAY_PORT_DICT_STR)
+
+
+class TestConfigMapBody:
+    """ConfigMap should carry an ownerReference so it is GC'd with the pod."""
+
+    def test_body_pins_lifetime_to_head_pod(self):
+        body = host_network_probe._build_configmap_body(
+            name='cluster-xyz-ray-ports',
+            namespace='my-ns',
+            ports={
+                'gcs': 6380,
+                'dashboard': 8266
+            },
+            owner_pod_name='cluster-xyz-head-abc',
+            owner_pod_uid='11111111-2222-3333-4444-555555555555',
+        )
+        # K8s deletes ConfigMaps whose owner Pod has been deleted, so on
+        # `sky down` (which deletes the head pod) the ConfigMap is GC'd
+        # without any extra teardown logic in SkyPilot.
+        owner_refs = body['metadata']['ownerReferences']
+        assert len(owner_refs) == 1
+        assert owner_refs[0]['kind'] == 'Pod'
+        assert owner_refs[0]['name'] == 'cluster-xyz-head-abc'
+        assert owner_refs[0]['uid'] == ('11111111-2222-3333-4444-555555555555')
+        # blockOwnerDeletion=false: deleting the head pod doesn't wait
+        # for the ConfigMap. controller=false: we're not the pod's
+        # controller, just a dependent.
+        assert owner_refs[0]['controller'] is False
+        assert owner_refs[0]['blockOwnerDeletion'] is False
+
+    def test_body_carries_port_data_as_strings(self):
+        body = host_network_probe._build_configmap_body(
+            name='c-ray-ports',
+            namespace='ns',
+            ports={
+                'gcs': 6380,
+                'dashboard': 8266
+            },
+            owner_pod_name='c-head-xx',
+            owner_pod_uid='uid-1',
+        )
+        # ConfigMap data values must be strings.
+        assert body['data'] == {'gcs': '6380', 'dashboard': '8266'}
 
 
 class TestWaitHeadGcsTcp:
