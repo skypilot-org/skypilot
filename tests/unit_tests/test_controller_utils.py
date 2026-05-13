@@ -700,6 +700,78 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     os.unlink(local_config_path)
 
 
+# ---------------------------------------------------------------------------
+# Tests for the SKYPILOT_CONFIG env / file_mount consistency fix.
+#
+# Bug: previously, the SKYPILOT_CONFIG env var on the controller was set
+# whenever `skypilot_config.loaded()` was True (i.e. the API server itself
+# had any config). But the file that env var pointed to was only file_mount'd
+# when `local_user_config` was non-empty. If admin_policy returned an empty
+# dict (or no admin_policy was set and the API server's config happened to
+# load from an empty file), the env var would point to a path that was
+# never created — controller process would FileNotFoundError on startup.
+#
+# Fix: gate the env var on the same condition that gates the file_mount —
+# `local_user_config_path is not None`. These tests pin that contract.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_set_when_local_config_present(
+        controller_type: str, monkeypatch):
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    user_config = {'jobs': {'controller': {'resources': {'cpus': '8+'}}}}
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', user_config.copy())
+
+    # local_user_config non-empty → tempfile written, file_mount populated.
+    assert result['local_user_config_path'] is not None
+    # And SKYPILOT_CONFIG env points to the file_mount target on the
+    # controller side.
+    env_vars = result['controller_envs']
+    assert env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == (
+        '/remote/path/config.yaml')
+
+    os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_NOT_set_when_local_config_empty(
+        controller_type: str, monkeypatch):
+    """Regression test: even if the API server's own config is loaded
+    (skypilot_config.loaded() is True), if the config we're passing to the
+    controller is empty, we MUST NOT set SKYPILOT_CONFIG — otherwise the
+    controller process tries to read a non-existent file and crashes."""
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    # Force the API server's own skypilot_config to look "loaded" — this
+    # used to be the gating condition and would incorrectly set the env
+    # even when the controller-side config is empty.
+    monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', {})
+
+    # Empty local_user_config → no tempfile, no file_mount.
+    assert result['local_user_config_path'] is None
+    # And critically: no SKYPILOT_CONFIG env on the controller (which would
+    # otherwise point at a path that file_mounts won't materialize).
+    env_vars = result['controller_envs']
+    assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in env_vars
+
+
 def _run_controller_cluster_name_refresh_test(controller_type: str):
     """Helper function to run in subprocess to avoid module pollution."""
     import importlib

@@ -39,6 +39,7 @@ class ManagedJobRuntime(Protocol):
         self,
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         cluster_name: str,
+        returncode: Optional[int] = None,
     ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
         """Query job status from the underlying runtime."""
         ...
@@ -77,13 +78,6 @@ class ManagedJobRuntime(Protocol):
         task_id: Optional[int],
     ) -> Optional[str]:
         """Download logs to a local file. Returns the path or None."""
-        ...
-
-    def cleanup(
-        self,
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    ) -> Optional[bool]:
-        """Clean up runtime-specific resources. Returns True / None."""
         ...
 
     def tail_logs(
@@ -161,10 +155,11 @@ def is_registered() -> bool:
 def get_job_status(
     handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
     cluster_name: str,
+    returncode: Optional[int] = None,
 ) -> Optional[Tuple[Optional['job_lib.JobStatus'], Optional[str]]]:
     if _current is None:
         return None
-    return _current.get_job_status(handle, cluster_name)
+    return _current.get_job_status(handle, cluster_name, returncode=returncode)
 
 
 def get_job_submitted_at(
@@ -201,13 +196,6 @@ def download_logs(
     if _current is None:
         return None
     return _current.download_logs(handle, job_id, task_id)
-
-
-def cleanup(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',) -> Optional[bool]:
-    if _current is None:
-        return None
-    return _current.cleanup(handle)
 
 
 def tail_logs(

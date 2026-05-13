@@ -244,6 +244,19 @@ class AWSIdentityType(enum.Enum):
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
+    # access_key     ****************abcd            login
+    # secret_key     ****************abcd            login
+    #     region                us-east-1      config-file    ~/.aws/config
+    # The `aws login` command (released 2026) is a browser-based OAuth 2.0 +
+    # PKCE flow that writes short-term credentials to ~/.aws/login/cache/ and
+    # auto-rotates them every 15 minutes. boto3 resolves them via the standard
+    # credential provider chain. No ~/.aws/credentials file is used.
+    # https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html
+    LOGIN = 'login'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
     # access_key     ****************abcd shared-credentials-file
     # secret_key     ****************abcd shared-credentials-file
     #     region                us-east-1      config-file    ~/.aws/config
@@ -1095,6 +1108,11 @@ class AWS(clouds.Cloud):
             # variables. So we don't check for the existence of ~/.aws/credentials.
             # i.e. the identity is not determined by the file.
             hints = f'AWS env is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.LOGIN:
+            # `aws login` stores credentials in ~/.aws/login/cache/ and rotates
+            # them automatically; the ~/.aws/credentials file is not used.
+            # boto3 resolves them via the standard credential provider chain.
+            hints = f'AWS login is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -1158,6 +1176,7 @@ class AWS(clouds.Cloud):
             AWSIdentityType.SSO,
             AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE,
+            AWSIdentityType.LOGIN,
         }
         return identity_type in non_static_types
 

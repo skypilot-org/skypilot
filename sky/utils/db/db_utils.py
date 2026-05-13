@@ -492,6 +492,38 @@ def get_max_connections():
     return _max_connections
 
 
+def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
+    """Build a SQLAlchemy ``async_creator`` that hands asyncpg a libpq DSN.
+
+    SQLAlchemy's asyncpg dialect normally parses the URL into kwargs and calls
+    ``asyncpg.connect(**kwargs)``. asyncpg's kwarg path accepts ``ssl=`` only;
+    the libpq query-param names (``sslmode``, ``sslcert``, ``sslkey``,
+    ``sslrootcert``, ``sslcrl``) are recognized only when asyncpg parses them
+    out of a DSN string itself (see ``asyncpg.connect_utils.
+    _parse_connect_dsn_and_args``). Leaving e.g. ``?sslmode=require`` in the
+    URL therefore raises ``connect() got an unexpected keyword argument
+    'sslmode'``.
+
+    Bypassing SQLAlchemy's URL disassembly via ``async_creator`` lets asyncpg
+    parse the DSN itself, so every libpq URI param is handled natively without
+    us having to translate. The creator takes no arguments per SQLAlchemy's
+    contract — connection params come from the captured DSN, not the URL
+    passed to ``create_async_engine`` (which is used only for dialect
+    selection).
+
+    Refs:
+      https://github.com/sqlalchemy/sqlalchemy/issues/6275
+      https://github.com/MagicStack/asyncpg/issues/737
+    """
+    # pylint: disable=import-outside-toplevel
+    import asyncpg
+
+    async def _connect() -> Any:
+        return await asyncpg.connect(dsn)
+
+    return _connect
+
+
 @typing.overload
 def get_engine(
         db_name: Optional[str],
@@ -520,14 +552,12 @@ def get_engine(
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        if async_engine:
-            conn_string = conn_string.replace('postgresql://',
-                                              'postgresql+asyncpg://')
+        # We use the same cache for both sync and async engines
+        # because we prefix the cache key in the async case,
+        # so they would not overlap.
+        cache_key = f'async:{conn_string}' if async_engine else conn_string
         with _db_creation_lock:
-            # We use the same cache for both sync and async engines
-            # because we change the conn_string in the async case,
-            # so they would not overlap.
-            if conn_string not in _postgres_engine_cache:
+            if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
@@ -540,16 +570,20 @@ def get_engine(
                     # context (e.g., a thread). NullPool creates a fresh
                     # connection per operation, avoiding this issue.
                     # Refer to https://docs.sqlalchemy.org/en/21/orm/extensions/asyncio.html#using-multiple-asyncio-event-loops for more details. # pylint: disable=line-too-long
-                    _postgres_engine_cache[conn_string] = (
+                    _postgres_engine_cache[cache_key] = (
                         sqlalchemy_async.create_async_engine(
-                            conn_string, poolclass=sqlalchemy.NullPool))
+                            # The URL is used only for dialect selection;
+                            # all connection params come from async_creator.
+                            'postgresql+asyncpg://',
+                            poolclass=sqlalchemy.NullPool,
+                            async_creator=_make_asyncpg_creator(conn_string)))
                 elif _max_connections == 0:
-                    _postgres_engine_cache[conn_string] = (
+                    _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(conn_string,
                                                  poolclass=sqlalchemy.NullPool))
                 else:
                     # Sync engines can safely use QueuePool for connection reuse
-                    _postgres_engine_cache[conn_string] = (
+                    _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(
                             conn_string,
                             poolclass=sqlalchemy.pool.QueuePool,
@@ -557,7 +591,7 @@ def get_engine(
                             max_overflow=max(0, 5 - _max_connections),
                             pool_pre_ping=True,
                             pool_recycle=1800))
-            engine = _postgres_engine_cache[conn_string]
+            engine = _postgres_engine_cache[cache_key]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
         db_path = runtime_utils.get_runtime_dir_path(f'.sky/{db_name}.db')

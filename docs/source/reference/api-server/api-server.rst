@@ -3,9 +3,20 @@
 API Server Deployment
 =====================
 
-SkyPilot implements a client-server architecture. When a user runs a command or invokes a SDK,
-a SkyPilot client submits :ref:`asynchronous requests <async>` to a **SkyPilot API server**, which
-handles all requests.
+SkyPilot allows you to deploy a centralized control plane — the **SkyPilot API server** — to run and manage all the AI workloads and GPUs in your org through a single endpoint.
+
+Why a centralized API server?
+
+- **Deploy once & onboard seamlessly**: Set up one SkyPilot API server (in the cloud or on Kubernetes), and team members can onboard with a single endpoint.
+- **Multi-tenancy**: Share clusters, jobs, and services securely among teammates.
+- **Unified view and management**: Get a single view of all running clusters and jobs across the organization and all infra you have.
+- **Fault-tolerant and cloud-native**: SkyPilot API server deployment is cloud-native and fully fault-tolerant, eliminating the risk of workload loss.
+- **Integrate with workflow orchestrators**: Schedule workflows with orchestrators (like Airflow or Temporal), and let SkyPilot manage your diverse infrastructure.
+
+.. tip::
+
+    Need help deploying the SkyPilot API server? The SkyPilot team is happy to help —
+    `fill out this form <https://forms.gle/4nMWXKFQP63EXCYz9>`_ to get in touch.
 
 .. _sky-api-server-local:
 
@@ -31,13 +42,7 @@ Remote API server (multi-user teams)
 
 For multi-user teams, SkyPilot can be deployed as a remote
 service. Multiple users in an organization can share the same
-SkyPilot API server. The benefits include:
-
-- **Deploy once & onboard seamlessly**: Set up one SkyPilot API server (in the cloud or on Kubernetes), and team members can onboard with a single endpoint.
-- **Multi-tenancy**: Share clusters, jobs, and services securely among teammates.
-- **Unified view and management**: Get a single view of all running clusters and jobs across the organization and all infra you have.
-- **Fault-tolerant and cloud-native**: SkyPilot API server deployment is cloud-native and fully fault-tolerant, eliminating the risk of workload loss.
-- **Integrate with workflow orchestrators**: Schedule workflows with orchestrators (like Airflow or Temporal), and let SkyPilot manage your diverse infrastructure.
+SkyPilot API server.
 
 .. image:: ../../images/client-server/remote.png
     :alt: SkyPilot API server remote mode
@@ -117,11 +122,10 @@ To verify that the API server is working, run ``sky api info``:
    :hidden:
 
    Deploying API Server <api-server-admin-deploy>
-   Upgrading API Server <api-server-upgrade>
+   Upgrades and High Availability <api-server-upgrade>
    Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
    Helm Chart Reference <helm-values-spec>
-   Advanced: High Availability Controller <examples/high-availability>
 
 By default, each user connected to the API server will only see their own resources.
 

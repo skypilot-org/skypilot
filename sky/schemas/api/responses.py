@@ -119,6 +119,11 @@ class StatusResponse(ResponseBaseModel):
     last_creation_command: Optional[str] = None
     is_managed: bool
     last_event: Optional[str] = None
+    # Latest LAUNCH_PROGRESS event reason for clusters in INIT status
+    # (rendered as LAUNCHING on the dashboard). None for all other
+    # statuses and for clusters that have not yet emitted a
+    # launch-progress event.
+    launch_status_reason: Optional[str] = None
     resources_str: Optional[str] = None
     resources_str_full: Optional[str] = None
     # credentials is a JSON, so we use Any here.

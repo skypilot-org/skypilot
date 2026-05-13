@@ -74,7 +74,9 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy>=2.0.0',
+    # 2.0.16 introduced create_async_engine(async_creator=...), which we
+    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
+    'sqlalchemy>=2.0.16',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',

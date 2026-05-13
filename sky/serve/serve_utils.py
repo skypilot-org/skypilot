@@ -57,7 +57,88 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-_CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
+# Retry settings for cross-pod controller HTTP calls. The DB row update of
+# `controller_ip` is atomic w.r.t. controller readiness (sky.serve.service
+# only flips DB after _wait_for_controller_ready), so the only failure modes
+# left are: (1) DB read replica lag right after a recovery; (2) brief network
+# blips between pods. Both resolve in <1s — a small bounded retry covers them.
+# Intermediate retries log at DEBUG to avoid spamming WARN every refresh tick
+# while the controller is intentionally absent (CONTROLLER_INIT /
+# SHUTTING_DOWN / FAILED_CLEANUP); the final-attempt failure logs once at
+# WARN.
+_CONTROLLER_HTTP_RETRY_ATTEMPTS = 3
+_CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
+# (connect_timeout, read_timeout). Connect timeout matters most: when the
+# controller pod is dead/unreachable, kernel ECONNREFUSED is instant on
+# loopback but cross-pod TCP can hang for 30s+ if the remote pod silently
+# drops SYN (e.g. NetworkPolicy, pod terminating mid-flight). Without an
+# explicit timeout, `requests` waits forever and `sky jobs pool status`
+# appears to hang. Read timeout is generous because /autoscaler/info on a
+# busy controller can take a moment.
+_CONTROLLER_HTTP_TIMEOUT_SECONDS = (2.0, 10.0)
+
+
+def _get_controller_url(service_name: str, controller_port: int) -> str:
+    """Resolve the controller HTTP URL.
+
+    In single-pod (or daemon == controller pod) deployments the IP read from
+    DB either matches our own POD_IP or is None — in both cases we fall back
+    to localhost. In HA where the request handler runs on a different pod
+    than the controller process, we route via the controller's pod IP from DB.
+    """
+    self_ip = os.environ.get('POD_IP')
+    record = serve_state.get_service_from_name(service_name)
+    controller_ip = record.get('controller_ip') if record else None
+    if controller_ip is None or controller_ip == self_ip:
+        url = f'http://localhost:{controller_port}'
+    else:
+        url = f'http://{controller_ip}:{controller_port}'
+    logger.debug(f'_get_controller_url for {service_name}: url={url} '
+                 f'self_ip={self_ip} controller_ip={controller_ip}')
+    return url
+
+
+def _request_to_controller_with_retry(method: str, service_name: str,
+                                      controller_port: int, path: str,
+                                      **kwargs):
+    """HTTP `method` to the controller with bounded retry on ConnectionError.
+    """
+    request_fn = getattr(requests, method)
+    # Force a bounded timeout.
+    if 'timeout' not in kwargs:
+        kwargs['timeout'] = _CONTROLLER_HTTP_TIMEOUT_SECONDS
+    for attempt in range(_CONTROLLER_HTTP_RETRY_ATTEMPTS):
+        url = _get_controller_url(service_name, controller_port) + path
+        try:
+            return request_fn(url, **kwargs)
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout):
+            if attempt < _CONTROLLER_HTTP_RETRY_ATTEMPTS - 1:
+                logger.debug(
+                    f'Connection to controller {url} failed '
+                    f'(attempt {attempt + 1}/'
+                    f'{_CONTROLLER_HTTP_RETRY_ATTEMPTS}); retrying after '
+                    f'{_CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS}s.')
+                time.sleep(_CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS)
+                continue
+            logger.warning(
+                f'Connection to controller {url} failed after '
+                f'{_CONTROLLER_HTTP_RETRY_ATTEMPTS} attempts. '
+                'Controller may be down, restarting, or mid-HA-flip.')
+            raise
+
+
+def _post_to_controller_with_retry(service_name: str, controller_port: int,
+                                   path: str, **kwargs):
+    return _request_to_controller_with_retry('post', service_name,
+                                             controller_port, path, **kwargs)
+
+
+def _get_to_controller_with_retry(service_name: str, controller_port: int,
+                                  path: str, **kwargs):
+    return _request_to_controller_with_retry('get', service_name,
+                                             controller_port, path, **kwargs)
+
 
 # NOTE(dev): We assume log are print with the hint 'sky api logs -l'. Be careful
 # when changing UX as this assumption is used to expand some log files while
@@ -297,18 +378,30 @@ def ha_recovery_for_consolidation_mode(pool: bool):
             if svc is None:
                 continue
             controller_pid = svc['controller_pid']
+            controller_ip = svc.get('controller_ip')
+            status_dbg = svc.get('status')
+            f.write(f'ha_recovery candidate {service_name}: '
+                    f'pid={controller_pid} ip={controller_ip} '
+                    f'status={status_dbg}')
             if controller_pid is not None:
                 try:
-                    if _controller_process_alive(controller_pid, service_name):
-                        f.write(f'Controller pid {controller_pid} for '
-                                f'{noun} {service_name} is still running. '
-                                'Skipping recovery.\n')
-                        continue
-                except Exception:  # pylint: disable=broad-except
-                    # _controller_process_alive may raise if psutil fails; we
-                    # should not crash the recovery logic because of this.
-                    f.write('Error checking controller pid '
-                            f'{controller_pid} for {noun} {service_name}\n')
+                    alive = _controller_process_alive(controller_pid,
+                                                      service_name)
+                except Exception as e:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails
+                    # (transient AccessDenied / cmdline read race / etc).
+                    # Treating "raised" as "dead" would replace a possibly-
+                    # alive controller every iteration that hits the
+                    # exception, churning pid/ip/port and disrupting
+                    # in-flight requests. Be conservative: skip this round.
+                    f.write(f'Error checking controller pid {controller_pid}'
+                            f' for {noun} {service_name}: {e}\n')
+                    continue
+                if alive:
+                    f.write(f'Controller pid {controller_pid} for '
+                            f'{noun} {service_name} is still running. '
+                            'Skipping recovery.\n')
+                    continue
 
             script = serve_state.get_ha_recovery_script(service_name)
             if script is None:
@@ -604,13 +697,13 @@ def update_service_encoded(service_name: str, version: int, mode: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{capnoun} {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-        '/controller/update_service',
-        json={
-            'version': version,
-            'mode': mode,
-        })
+    resp = _post_to_controller_with_retry(service_name,
+                                          controller_port,
+                                          '/controller/update_service',
+                                          json={
+                                              'version': version,
+                                              'mode': mode,
+                                          })
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
             # This only happens for services since pool is added after the
@@ -649,13 +742,13 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
                 'exist.')
 
     controller_port = service_status['controller_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-        '/controller/terminate_replica',
-        json={
-            'replica_id': replica_id,
-            'purge': purge,
-        })
+    resp = _post_to_controller_with_retry(service_name,
+                                          controller_port,
+                                          '/controller/terminate_replica',
+                                          json={
+                                              'replica_id': replica_id,
+                                              'purge': purge,
+                                          })
 
     message: str = resp.json()['message']
     if resp.status_code != 200:
@@ -727,9 +820,8 @@ def _get_service_status(
     record['target_num_replicas'] = 0
     try:
         controller_port = record['controller_port']
-        resp = requests.get(
-            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-            '/autoscaler/info')
+        resp = _get_to_controller_with_retry(service_name, controller_port,
+                                             '/autoscaler/info')
         record['target_num_replicas'] = resp.json()['target_num_replicas']
     except requests.exceptions.RequestException:
         record['target_num_replicas'] = None
@@ -1115,10 +1207,16 @@ def _terminate_failed_services(
 
     service_dir = os.path.expanduser(
         generate_remote_service_dir_name(service_name))
-    shutil.rmtree(service_dir)
-    serve_state.remove_service(service_name)
-    serve_state.delete_all_versions(service_name)
-    serve_state.remove_ha_recovery_script(service_name)
+    # Same atomicity argument as the success path in `_start`: remove all
+    # DB state in one transaction so an interrupted purge doesn't leave
+    # stragglers.
+    serve_state.remove_service_completely(service_name)
+    try:
+        shutil.rmtree(service_dir)
+    except FileNotFoundError:
+        # The service_dir may already be gone (e.g. the controller's own
+        # success path raced with a purge).
+        pass
 
     if not remaining_replica_clusters:
         return None
@@ -1145,7 +1243,23 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
             continue
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
-            # Already scheduled to be terminated.
+            if purge:
+                # Force-clean a zombie SHUTTING_DOWN row. This happens when
+                # the controller subprocess died mid-`_cleanup` (pod
+                # restart / OOM / SIGKILL) before it could remove the
+                # services row. The row is then unrecoverable: HA recovery
+                # can't relaunch (ha_recovery_script was deleted in
+                # cleanup's first step before the move to success-path),
+                # plain `down` skips it ("already scheduled"), and `apply`
+                # tries to update a dead controller. With --purge the user
+                # explicitly accepts a possible cluster-resource leak in
+                # exchange for clearing the row.
+                message = _terminate_failed_services(
+                    service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
+                if message is not None:
+                    messages.append(message)
+                terminated_service_names.append(service_name)
+            # Without --purge, treat as already scheduled to terminate.
             continue
         if pool:
             nonterminal_job_ids = (
@@ -1192,7 +1306,9 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
         else:
             # Send the terminate signal to controller.
             signal_file = pathlib.Path(
-                constants.SIGNAL_FILE_PATH.format(service_name))
+                constants.SIGNAL_FILE_PATH.format(service_name)).expanduser()
+            # Make sure parent directory exists.
+            signal_file.parent.mkdir(parents=True, exist_ok=True)
             # Filelock is needed to prevent race condition between signal
             # check/removal and signal writing.
             with filelock.FileLock(str(signal_file) + '.lock'):
@@ -1499,7 +1615,17 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of {repnoun} {replica_id}.{colorama.Style.RESET_ALL}')
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
-    if os.path.exists(log_file_name):
+    # The replica_<id>.log file is the post-mortem archive: it's only
+    # populated on the teardown path (terminate_cluster's redirect_log,
+    # or _download_and_stream_logs writing launch_log + ssh'd job logs
+    # into it). A 0-byte file on disk is a teardown-race remnant — e.g.
+    # `terminate_cluster` was invoked on a replica that never came up, so
+    # `ctx.redirect_log` created the file but no log lines were written;
+    # or `_download_and_stream_logs` opened with mode='w' and crashed
+    # before writing. If we trust `os.path.exists` alone, we commit to
+    # the (empty) main log and silently drop the launch log fallback,
+    # making `sky jobs pool logs` return empty for an alive replica.
+    if (os.path.exists(log_file_name) and os.path.getsize(log_file_name) > 0):
         if tail is not None:
             lines = common_utils.read_last_n_lines(log_file_name, tail)
             for line in lines:

@@ -13,6 +13,7 @@ from sky import task
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
+from sky.utils import status_lib
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -543,3 +544,70 @@ class TestIsMessageTooLong:
         mixed = "too long and request-uri too large"
         assert cloud_vm_ray_backend._is_message_too_long(255, output=mixed)
         assert cloud_vm_ray_backend._is_message_too_long(1, output=mixed)
+
+
+class TestCloudVmRayBackendTeardownNoLock:
+    """Tests for CloudVmRayBackend.teardown_no_lock() guards."""
+
+    @staticmethod
+    def _make_handle(cluster_name: str, cluster_yaml: str, has_ray: bool):
+
+        class _FakeLaunchedResources:
+
+            def __init__(self, cloud_obj):
+                self.cloud = cloud_obj
+
+            def assert_launchable(self):
+                return self
+
+        cloud = MagicMock()
+        cloud.PROVISIONER_VERSION = (
+            cloud_vm_ray_backend.clouds.ProvisionerVersion.SKYPILOT)
+        launched_resources = _FakeLaunchedResources(cloud)
+
+        handle = CloudVmRayResourceHandle(
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=f'{cluster_name}-on-cloud',
+            cluster_yaml=cluster_yaml,
+            launched_nodes=1,
+            launched_resources=launched_resources,
+        )
+        handle.provision_runtime_metadata = (
+            cloud_vm_ray_backend.provision_common.ProvisionRuntimeMetadata(
+                has_ray=has_ray))
+        handle.close_skylet_ssh_tunnel = MagicMock()
+        return handle
+
+    def test_uses_refreshed_handle_to_avoid_stale_metadata(self):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        stale_handle = self._make_handle('test-cluster',
+                                         '/tmp/stale.yaml',
+                                         has_ray=True)
+        refreshed_handle = self._make_handle('test-cluster',
+                                             '/tmp/refreshed.yaml',
+                                             has_ray=False)
+
+        with patch(
+                'sky.backends.cloud_vm_ray_backend.requests_lib.'
+                'kill_cluster_requests'), patch(
+                    'sky.backends.cloud_vm_ray_backend.backend_utils.'
+                    'refresh_cluster_status_handle',
+                    return_value=(
+                        status_lib.ClusterStatus.UP, refreshed_handle)), patch(
+                            'sky.backends.cloud_vm_ray_backend.'
+                            'global_user_state.'
+                            'get_cluster_yaml_dict',
+                            return_value={'provider': {
+                            }}) as (mock_get_yaml), patch(
+                                'sky.backends.cloud_vm_ray_backend'
+                                '.provisioner.teardown_cluster'), patch.object(
+                                    backend,
+                                    'post_teardown_cleanup'), patch.object(
+                                        backend,
+                                        'run_on_head') as mock_run_on_head:
+            backend.teardown_no_lock(stale_handle,
+                                     terminate=True,
+                                     refresh_cluster_status=True)
+
+        mock_run_on_head.assert_not_called()
+        mock_get_yaml.assert_called_once_with(refreshed_handle.cluster_yaml)

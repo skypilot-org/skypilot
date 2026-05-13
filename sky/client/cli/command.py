@@ -168,6 +168,88 @@ def _get_ws_proxy_command() -> str:
     return f'{escaped_executable_path} {escaped_websocket_proxy_path}'
 
 
+def _write_ssh_config_for_cluster(handle: Any, credentials: Dict[str, Any],
+                                  ws_proxy_cmd: str) -> None:
+    """Write a single cluster's entry into ``~/.ssh/config``.
+
+    Extracted from ``_get_cluster_records_and_set_ssh_config`` so the
+    launch path can reuse it without going through the records-loop:
+    when the server bundles credentials with the launch response, we
+    have everything we need (handle + credentials) without an extra
+    ``/status`` round-trip.
+    """
+    ips = handle.cached_external_ips
+    if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+        # Replace the proxy command to proxy through the SkyPilot API
+        # server with websocket.
+        escaped_key_path = shlex.quote(
+            (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                handle.cluster_name, credentials)))
+        # Instead of directly use websocket_proxy.py, we add an
+        # additional proxy, so that ssh can use the head pod in the
+        # cluster to jump to worker pods.
+        proxy_command = (
+            f'ssh -tt -i {escaped_key_path} '
+            '-o StrictHostKeyChecking=no '
+            '-o UserKnownHostsFile=/dev/null '
+            '-o IdentitiesOnly=yes '
+            '-W \'[%h]:%p\' '
+            f'{handle.ssh_user}@127.0.0.1 '
+            '-o ProxyCommand='
+            # TODO(zhwu): write the template to a temp file, don't use
+            # the one in skypilot repo, to avoid changing the file when
+            # updating skypilot.
+            f'\"{ws_proxy_cmd} '
+            f'{server_common.get_server_url()} '
+            f'{handle.cluster_name} '
+            f'kubernetes-pod-ssh-proxy\"')
+        credentials['ssh_proxy_command'] = proxy_command
+    elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
+        # Replace the proxy command to proxy through the SkyPilot API
+        # server with websocket.
+        # %w is a placeholder for the node index, substituted per-node
+        # in cluster_utils.SSHConfigHelper.add_cluster().
+        proxy_command = (f'{ws_proxy_cmd} '
+                         f'{server_common.get_server_url()} '
+                         f'{handle.cluster_name} '
+                         f'slurm-job-ssh-proxy %w')
+        credentials['ssh_proxy_command'] = proxy_command
+
+    cluster_utils.SSHConfigHelper.add_cluster(
+        handle.cluster_name,
+        handle.cluster_name_on_cloud,
+        ips,
+        credentials,
+        handle.cached_external_ssh_ports,
+        handle.docker_user,
+        handle.ssh_user,
+    )
+
+
+def _set_ssh_config_from_launch_response(handle: Any,
+                                         credentials: Dict[str, Any]) -> None:
+    """Write SSH config for a single just-launched cluster.
+
+    Used when the server bundled credentials with the launch response
+    (``MIN_LAUNCH_CREDENTIALS_API_VERSION``). Skips the ``/status``
+    round-trip that ``_get_cluster_records_and_set_ssh_config`` does
+    only to fetch credentials. The cluster is known to be UP and its
+    handle is already populated, so we don't need the records-list
+    machinery (existence check, multi-cluster cleanup, etc.) — the
+    cleanup path only matters when querying status across multiple
+    clusters.
+    """
+    if not handle.cached_external_ips or not handle.cached_external_ssh_ports:
+        # Defensive: should not happen for a successful launch, but if
+        # ips/ports aren't cached, ``add_cluster`` would fail. Fall back
+        # to the status-based path so the SSH config still gets written
+        # (and any stale entry cleaned up) instead of asserting.
+        _get_cluster_records_and_set_ssh_config(clusters=[handle.cluster_name])
+        return
+    ws_proxy_cmd = _get_ws_proxy_command()
+    _write_ssh_config_for_cluster(handle, credentials, ws_proxy_cmd)
+
+
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -214,53 +296,8 @@ def _get_cluster_records_and_set_ssh_config(
         # During the failover, even though a cluster does not exist, the handle
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
-        credentials = record['credentials']
-        ips = handle.cached_external_ips
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            # Replace the proxy command to proxy through the SkyPilot API
-            # server with websocket.
-            escaped_key_path = shlex.quote(
-                (cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials)))
-            # Instead of directly use websocket_proxy.py, we add an
-            # additional proxy, so that ssh can use the head pod in the
-            # cluster to jump to worker pods.
-            proxy_command = (
-                f'ssh -tt -i {escaped_key_path} '
-                '-o StrictHostKeyChecking=no '
-                '-o UserKnownHostsFile=/dev/null '
-                '-o IdentitiesOnly=yes '
-                '-W \'[%h]:%p\' '
-                f'{handle.ssh_user}@127.0.0.1 '
-                '-o ProxyCommand='
-                # TODO(zhwu): write the template to a temp file, don't use
-                # the one in skypilot repo, to avoid changing the file when
-                # updating skypilot.
-                f'\"{ws_proxy_cmd} '
-                f'{server_common.get_server_url()} '
-                f'{handle.cluster_name} '
-                f'kubernetes-pod-ssh-proxy\"')
-            credentials['ssh_proxy_command'] = proxy_command
-        elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # Replace the proxy command to proxy through the SkyPilot API
-            # server with websocket.
-            # %w is a placeholder for the node index, substituted per-node
-            # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (f'{ws_proxy_cmd} '
-                             f'{server_common.get_server_url()} '
-                             f'{handle.cluster_name} '
-                             f'slurm-job-ssh-proxy %w')
-            credentials['ssh_proxy_command'] = proxy_command
-
-        cluster_utils.SSHConfigHelper.add_cluster(
-            handle.cluster_name,
-            handle.cluster_name_on_cloud,
-            ips,
-            credentials,
-            handle.cached_external_ssh_ports,
-            handle.docker_user,
-            handle.ssh_user,
-        )
+        _write_ssh_config_for_cluster(handle, record['credentials'],
+                                      ws_proxy_cmd)
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -1393,16 +1430,35 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
+        # Ask the server to bundle SSH credentials with the launch
+        # response so we can write the SSH config without a separate
+        # ``/status`` round-trip. Old servers ignore this and we fall
+        # back to the legacy 2-tuple/status path below.
+        _include_credentials=True,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
-        job_id, handle = job_id_handle
+        # New servers (>= MIN_LAUNCH_CREDENTIALS_API_VERSION) return a
+        # 3-tuple. Old servers return the legacy 2-tuple — detect via
+        # length so we stay compatible against any server version.
+        launch_credentials: Optional[Dict[str, Any]] = None
+        if isinstance(job_id_handle, tuple) and len(job_id_handle) == 3:
+            job_id, handle, launch_credentials = job_id_handle
+        else:
+            job_id, handle = job_id_handle
         if not handle:
             assert dryrun, 'handle should only be None when dryrun is true'
             return
-        # Add ssh config for the cluster
-        _get_cluster_records_and_set_ssh_config(
-            clusters=[handle.get_cluster_name()])
+        # Add ssh config for the cluster. When the server bundled
+        # credentials with the launch response, write the config
+        # directly (saves a full ``/status`` RTT, ~200-500ms). When
+        # not bundled — old server, credential load failure, etc. —
+        # fall back to the status-based path.
+        if launch_credentials is not None:
+            _set_ssh_config_from_launch_response(handle, launch_credentials)
+        else:
+            _get_cluster_records_and_set_ssh_config(
+                clusters=[handle.get_cluster_name()])
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         returncode = 0

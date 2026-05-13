@@ -1558,6 +1558,43 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
             f'No autoscaler configured → short user timeout must not be '
             f'bumped, but loop ran for {clock.now}s.')
 
+    def test_emits_launch_progress_on_autoscale_detection(self, monkeypatch):
+        """When the autoscaler is detected, exactly one LAUNCH_PROGRESS event
+        must be emitted with the spinner's status text."""
+        _, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch,
+            autoscaler_type='gke',
+            autoscale_detected=True,
+        )
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # The autoscaler branch latches once — exactly one LAUNCH_PROGRESS emit.
+        launch_progress_calls = [
+            call for call in add_event.call_args_list
+            if call.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(launch_progress_calls) == 1
+        kwargs = launch_progress_calls[0].kwargs
+        assert kwargs['reason'].startswith('Launching (')
+        assert kwargs['nop_if_duplicate'] is True
+
 
 # ---------------------------------------------------------------------------
 # Helpers and tests for _condensed_pod_reason()
@@ -1922,3 +1959,98 @@ class TestFullPipeline:
         assert 'nvcr.io/nvidia/pytorch:bad-tag' in blocks
         assert 'Hint:' in blocks
         assert 'image' in blocks.lower() or 'registry' in blocks.lower()
+
+
+class TestWaitForPodsToRunLaunchProgressEmit:
+    """Tests for the LAUNCH_PROGRESS emit added to _wait_for_pods_to_run."""
+
+    @staticmethod
+    def _make_pod(name: str, cluster_name_on_cloud: str):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        # status_text branch in the production code only checks
+        # phase / container_statuses via _inspect_pod_status, which we
+        # mock below — so attribute values here can be loose.
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        return pod
+
+    def _setup(self, monkeypatch, inspect_results_per_iter):
+        """Drive the loop with a scripted sequence of _inspect_pod_status
+        return values. Each entry of inspect_results_per_iter is the list
+        the parallel-map returns for that iteration (one tuple per pod)."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_pod('pod-0', cluster_name_on_cloud)
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        results_iter = iter(inspect_results_per_iter)
+        monkeypatch.setattr(
+            'sky.utils.subprocess_utils.run_in_parallel',
+            lambda fn, items, n: next(results_iter),
+        )
+
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+        return pod, add_event
+
+    def test_emit_on_stage_change_dedup_on_no_change(self, monkeypatch):
+        """First iteration: pulling → emit. Second iteration: still pulling
+        → no emit (same status_text). Third iteration: all running → loop
+        exits."""
+        pod, add_event = self._setup(monkeypatch, [
+            [(False, 'Pulling')],
+            [(False, 'Pulling')],
+            [(True, None)],
+        ])
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert lp_calls[0].kwargs['reason'] == (
+            'Launching (1 pod(s) pending due to Pulling)')
+        assert lp_calls[0].kwargs['nop_if_duplicate'] is True
+
+    def test_no_emit_when_pending_reasons_empty(self, monkeypatch):
+        """When _inspect_pod_status returns no pending reason but is_running
+        is False, status_text is the bare 'Launching' — useless tooltip.
+        No emit must happen for that iteration."""
+        pod, add_event = self._setup(monkeypatch, [
+            [(False, None)],
+            [(True, None)],
+        ])
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert lp_calls == []

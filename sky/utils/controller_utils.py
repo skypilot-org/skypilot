@@ -576,8 +576,15 @@ def shared_controller_vars_to_fill(
         constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
             common_utils.get_using_remote_api_server()),
     })
-    if skypilot_config.loaded():
-        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
+    # Only set the SKYPILOT_CONFIG env var when we actually file_mount a
+    # config to the controller (i.e. local_user_config was non-empty so
+    # local_user_config_path is a real tempfile that gets rsynced/SSH'd to
+    # remote_user_config_path on the controller). Previously this gated on
+    # `skypilot_config.loaded()` (API server's own config), which can be True
+    # even when local_user_config is empty — pointing the controller's
+    # SKYPILOT_CONFIG env to a file that was never created and crashing it
+    # with FileNotFoundError on startup.
+    if local_user_config_path is not None:
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'].update(env_vars)

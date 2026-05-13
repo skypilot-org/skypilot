@@ -197,6 +197,8 @@ def refresh_volume_status_event():
 
 
 _managed_job_consolidation_mode_lock = None
+_pool_consolidation_mode_lock = None
+_serve_consolidation_mode_lock = None
 
 
 # Attempt to gracefully release the lock when the process exits.
@@ -208,7 +210,18 @@ def _release_managed_job_consolidation_mode_lock() -> None:
         _managed_job_consolidation_mode_lock = None
 
 
+def _release_serve_and_pool_consolidation_mode_locks() -> None:
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if _pool_consolidation_mode_lock is not None:
+        _pool_consolidation_mode_lock.release()
+        _pool_consolidation_mode_lock = None
+    if _serve_consolidation_mode_lock is not None:
+        _serve_consolidation_mode_lock.release()
+        _serve_consolidation_mode_lock = None
+
+
 atexit.register(_release_managed_job_consolidation_mode_lock)
+atexit.register(_release_serve_and_pool_consolidation_mode_locks)
 
 
 def managed_job_status_refresh_event():
@@ -278,7 +291,29 @@ def should_skip_managed_job_status_refresh():
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.serve import constants as serve_constants
     from sky.serve import serve_utils
+
+    # Acquire an advisory lock so that only one pod runs the recovery /
+    # controller-startup path at a time.
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if pool:
+        if _pool_consolidation_mode_lock is None:
+            _pool_consolidation_mode_lock = locks.get_lock(
+                serve_constants.POOL_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _pool_consolidation_mode_lock
+        lock_label = 'pool consolidation mode lock'
+    else:
+        if _serve_consolidation_mode_lock is None:
+            _serve_consolidation_mode_lock = locks.get_lock(
+                serve_constants.SERVE_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _serve_consolidation_mode_lock
+        lock_label = 'serve consolidation mode lock'
+
+    if not lock.is_locked():
+        logger.info(f'Acquiring the {lock_label}: {lock}')
+        lock.acquire()
+        logger.info(f'{lock_label} acquired')
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
@@ -322,6 +357,23 @@ def should_skip_server_heartbeat():
         # We are running as a controller.
         return True
     return False
+
+
+def expired_token_cleanup_event():
+    """Periodically remove expired managed-job API access tokens."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    logger.info('=== Cleaning up expired managed-job API access tokens ===')
+    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    # Read the interval from config on every iteration so operators can
+    # lower it (e.g., for testing) without restarting the API server.
+    interval = skypilot_config.get_nested(
+        ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
+        server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    logger.info(f'Expired token cleanup removed {removed} token(s). '
+                f'Sleeping {interval} seconds for the next sweep...\n')
+    time.sleep(interval)
 
 
 def server_heartbeat_event():
@@ -387,6 +439,10 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
         event_fn=server_heartbeat_event,
         should_skip=should_skip_server_heartbeat),
+    InternalRequestDaemon(
+        id='expired-token-cleanup-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
+        event_fn=expired_token_cleanup_event),
 ]
 
 HIDDEN_REQUEST_NAMES = [

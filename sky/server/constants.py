@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 49  # sky batch column in managed jobs
+API_VERSION = 50  # bundle credentials with launch response
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -44,6 +44,11 @@ MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
+
+# Minimum API version that supports bundling cluster credentials with the
+# launch response. Lets the CLI skip the follow-up /status round-trip that
+# only exists to fetch credentials for SSH config setup.
+MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3
@@ -130,3 +135,10 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
+
+# Interval for the daemon that sweeps expired managed-job API access tokens
+# from the service_account_tokens table. These tokens are normally revoked
+# by the jobs controller on completion, but the daemon ensures any tokens
+# that leak (e.g., due to controller crash mid-cleanup) are eventually
+# removed once their TTL has passed.
+EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour

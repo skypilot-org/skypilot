@@ -1484,11 +1484,11 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             queue_response = (
                 smoke_tests_utils.get_response_from_request_id_dashboard(
                     queue_request_id))
-            job_exist = False
-            for job in queue_response:
-                if job['job_id'] == job_id:
-                    job_exist = True
-                    break
+            # queue_v2 decoder returns (jobs, total, status_counts,
+            # total_no_filter); legacy queue returned a plain list.
+            jobs = queue_response[0] if isinstance(queue_response,
+                                                   tuple) else queue_response
+            job_exist = any(job.job_id == job_id for job in jobs)
             assert job_exist
             try:
                 with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
@@ -2338,6 +2338,426 @@ def test_lambda_cloud_open_ports():
             except Exception as e:
                 print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
+
+
+@pytest.mark.nebius
+# Smoke test verifies API integration; `list_security_rules` is the only
+# way to introspect SG state, hence the protected-access exception here.
+# pylint: disable=protected-access
+def test_nebius_security_group_lifecycle():
+    """Smoke test for Nebius security group helpers against the live API.
+
+    Cheap (no VM launch) but exercises every code path that interacts with
+    the Nebius VPC API. Catches API-contract bugs that the unit-test mocks
+    miss because they mock at our own helper boundary instead of at
+    `nebius.sync_call`. Specifically guards against:
+
+    - `CreateSecurityRuleRequest.metadata.name` being empty (Nebius rejects
+      with INVALID_ARGUMENT). Caught only by an end-to-end create call.
+    - `DeleteSecurityGroupRequest` being issued while child rules still
+      exist (Nebius rejects with FAILED_PRECONDITION:
+      "cannot be deleted because it contains rules"). Verified by
+      `delete_security_group` succeeding without manual rule cleanup.
+    - `add_ingress_tcp_ports` packing rules >8 ports (Nebius caps
+      `RuleIngress.destination_ports` at 8).
+
+    Requires Nebius credentials. Run with `pytest --nebius ...`.
+    """
+    # pylint: disable=import-outside-toplevel
+    import uuid
+
+    from sky.provision import common as provision_common
+    from sky.provision.nebius import config as nebius_config
+    from sky.provision.nebius import instance as nebius_instance
+    from sky.provision.nebius import utils as nebius_utils
+
+    region = 'eu-north1'
+    test_cluster = f'sg-smoke-{uuid.uuid4().hex[:6]}'
+    project_id = nebius_utils.get_project_by_region(region)
+    sg_name = nebius_utils.SECURITY_GROUP_TEMPLATE.format(test_cluster)
+    print(f'Smoke cluster name: {test_cluster}')
+
+    cfg = provision_common.ProvisionConfig(
+        provider_config={
+            'region': region,
+            'use_internal_ips': False
+        },
+        authentication_config={},
+        docker_config={},
+        node_config={},
+        count=1,
+        tags={},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+
+    sg_id = None
+    try:
+        # bootstrap_instances exercises: subnet -> network resolution,
+        # SG create, default rule creation (4 rules, with the metadata.name
+        # that the unit tests didn't enforce).
+        cfg = nebius_config.bootstrap_instances(region, test_cluster, cfg)
+        sg_id = cfg.provider_config['security_group']['GroupId']
+        print(f'Created SG {sg_id}')
+
+        rules = nebius_utils.list_security_rules(sg_id)
+        assert len(rules) == 4, (
+            f'expected 4 default rules (intra-cluster, ssh-22, ssh-10022, '
+            f'egress-allow-all), got {len(rules)}')
+
+        # Re-running bootstrap must be idempotent (no duplicate rules).
+        nebius_config.bootstrap_instances(region, test_cluster, cfg)
+        assert len(nebius_utils.list_security_rules(sg_id)) == 4, (
+            'bootstrap_instances duplicated rules on second call')
+
+        # open_ports adds a single batched rule for the user-declared ports.
+        nebius_instance.open_ports(test_cluster, ['8080', '9000-9002'],
+                                   provider_config={'region': region})
+        rules = nebius_utils.list_security_rules(sg_id)
+        assert len(rules) == 5, (
+            f'expected 4 default + 1 user-port rule, got {len(rules)}')
+
+        # Re-running open_ports must be idempotent.
+        nebius_instance.open_ports(test_cluster, ['8080', '9000-9002'],
+                                   provider_config={'region': region})
+        assert len(nebius_utils.list_security_rules(sg_id)) == 5, (
+            'open_ports duplicated rules on second call')
+
+        # >8 ports must be batched across multiple rules (Nebius limit).
+        many_ports = [str(p) for p in range(7000, 7020)]  # 20 ports
+        nebius_instance.open_ports(test_cluster,
+                                   many_ports,
+                                   provider_config={'region': region})
+        # 4 default + 1 (8080,9000-9002) + ceil(20/8)=3 = 8
+        assert len(nebius_utils.list_security_rules(sg_id)) == 8, (
+            f'expected 8 rules after adding 20 batched ports, got '
+            f'{len(nebius_utils.list_security_rules(sg_id))}')
+
+        # cleanup_ports must NOT delete the SG. SG ownership belongs to
+        # the VM lifecycle (terminate_instances), not the port lifecycle.
+        nebius_instance.cleanup_ports(test_cluster, ['8080'],
+                                      provider_config={'region': region})
+        assert nebius_utils.get_security_group_by_name(
+            project_id, sg_name) == sg_id, (
+                'cleanup_ports must not delete the SG; deleting it on a '
+                'still-running cluster would break SSH and intra-cluster '
+                'Ray traffic.')
+
+    finally:
+        # delete_security_group exercises the rule-drain-then-delete path
+        # that the unit tests didn't cover (they mocked list_security_rules
+        # to return [] so the drain logic was never exercised against the
+        # real Nebius "cannot delete with rules" precondition).
+        if sg_id is not None:
+            print(f'Cleaning up SG {sg_id}')
+            nebius_utils.delete_security_group(sg_id)
+            time.sleep(2)
+            assert nebius_utils.get_security_group_by_name(
+                project_id, sg_name) is None, (
+                    f'delete_security_group failed to remove {sg_id}; '
+                    f'manual cleanup required.')
+
+
+@pytest.mark.nebius
+def test_nebius_byo_security_group_lifecycle():
+    """End-to-end smoke for `nebius.security_group_name` (BYO SG), happy path.
+
+    Bypasses `sky launch` (a separate
+    `test_nebius_security_group_attached_and_enforced` covers the full
+    launch). Verifies, against real Nebius:
+
+      1. Empty BYO SG -> bootstrap raises ValueError. We deliberately do
+         NOT seed default rules into a user-managed SG (diverges from AWS
+         by design): silently adding SSH-from-anywhere would break the
+         "BYO means you own the rule set" contract.
+      2. Pre-seeded BYO SG -> bootstrap looks it up successfully and
+         stashes the right ID in provider_config.
+      3. Re-running bootstrap on a non-empty BYO SG does not mutate
+         existing rules.
+      4. terminate_instances with ManagedBySkyPilot=False does NOT delete
+         the user's SG.
+      5. Missing BYO SG -> ValueError naming the SG and config key.
+
+    Wrong-network BYO is exercised by a separate test
+    (`test_nebius_byo_security_group_wrong_network`) because that one
+    requires creating + deleting a real Nebius network.
+
+    Cheap: ~15-25s, no VM launch. Skipped by default; runs only with
+    `pytest --nebius`.
+    """
+    # pylint: disable=import-outside-toplevel
+    import uuid
+
+    from sky.provision import common as provision_common
+    from sky.provision.nebius import config as nebius_config
+    from sky.provision.nebius import instance as nebius_instance
+    from sky.provision.nebius import utils as nebius_utils
+
+    region = 'eu-north1'
+    test_cluster = f'byo-smoke-{uuid.uuid4().hex[:6]}'
+    project_id = nebius_utils.get_project_by_region(region)
+    subnet_id = nebius_utils.get_subnet_id(region, project_id)
+    network_id = nebius_utils.get_network_id_from_subnet(subnet_id)
+
+    byo_sg_name = f'byo-test-{uuid.uuid4().hex[:6]}'
+    byo_sg_id = nebius_utils.get_or_create_security_group(
+        project_id, byo_sg_name, network_id)
+    print(f'Pre-created BYO SG: {byo_sg_id} ({byo_sg_name})')
+
+    def _byo_provision_config(sg_name=byo_sg_name):
+        return provision_common.ProvisionConfig(
+            provider_config={
+                'region': region,
+                'use_internal_ips': False,
+                'security_group': {
+                    'GroupName': sg_name,
+                    'ManagedBySkyPilot': False,
+                },
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={},
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+
+    try:
+        # 1. Empty BYO SG -> ValueError.
+        try:
+            nebius_config.bootstrap_instances(region, test_cluster,
+                                              _byo_provision_config())
+            raise AssertionError(
+                'bootstrap should have raised ValueError for empty BYO SG')
+        except ValueError as e:
+            assert 'no rules' in str(e), str(e)
+            assert byo_sg_name in str(e), str(e)
+
+        # Seed the SG so subsequent assertions exercise the
+        # "BYO with rules -> use as-is" path.
+        nebius_utils.ensure_default_sg_rules(byo_sg_id)
+        rules = nebius_utils.list_security_rules(byo_sg_id)
+        assert rules, 'pre-seeded SG should now have rules'
+
+        # 2. Pre-seeded BYO SG: bootstrap resolves correctly.
+        cfg = nebius_config.bootstrap_instances(region, test_cluster,
+                                                _byo_provision_config())
+        out = cfg.provider_config['security_group']
+        assert out['GroupId'] == byo_sg_id
+        assert out['ManagedBySkyPilot'] is False
+
+        # 3. Re-running bootstrap on a non-empty BYO SG: no rule mutation.
+        rules_before = nebius_utils.list_security_rules(byo_sg_id)
+        nebius_config.bootstrap_instances(region, test_cluster,
+                                          _byo_provision_config())
+        rules_after = nebius_utils.list_security_rules(byo_sg_id)
+        assert len(rules_after) == len(rules_before), (
+            f'BYO SG rules should be unchanged; '
+            f'got {len(rules_before)} -> {len(rules_after)}')
+
+        # 4. terminate_instances with ManagedBySkyPilot=False MUST NOT
+        # delete the user's SG. We exercise this by calling terminate
+        # directly with no instances (filter returns empty), so the
+        # only possible side-effect is SG deletion - which must skip.
+        nebius_instance.terminate_instances(
+            test_cluster,
+            provider_config={
+                'region': region,
+                'security_group': {
+                    'GroupName': byo_sg_name,
+                    'ManagedBySkyPilot': False,
+                },
+            },
+            worker_only=False,
+        )
+        still_there = nebius_utils.get_security_group_by_name(
+            project_id, byo_sg_name)
+        assert still_there == byo_sg_id, (
+            f'BYO SG was deleted by terminate_instances despite '
+            f'ManagedBySkyPilot=False; got {still_there}')
+
+        # 5. Missing BYO SG: clear ValueError.
+        try:
+            nebius_config.bootstrap_instances(
+                region, 'nope',
+                _byo_provision_config('this-byo-sg-does-not-exist-zzz'))
+            raise AssertionError(
+                'bootstrap should have raised ValueError for missing BYO SG')
+        except ValueError as e:
+            assert 'this-byo-sg-does-not-exist-zzz' in str(e), str(e)
+            assert 'nebius.security_group_name' in str(e), str(e)
+
+    finally:
+        print(f'Cleaning up BYO SG {byo_sg_id}')
+        nebius_utils.delete_security_group(byo_sg_id)
+
+
+@pytest.mark.nebius
+def test_nebius_byo_security_group_wrong_network():
+    """BYO SG that lives in a different Nebius network than the cluster's
+    subnet must raise a clear, actionable ValueError before launch.
+
+    Split out from the main BYO smoke because creating + deleting a real
+    Nebius network is slow (~30-90s) and shouldn't slow the common-path
+    smoke. Skipped by default; runs only with `pytest --nebius`.
+    """
+    # pylint: disable=import-outside-toplevel
+    import uuid
+
+    from sky.adaptors import nebius as nebius_adaptor
+    from sky.provision import common as provision_common
+    from sky.provision.nebius import config as nebius_config
+    from sky.provision.nebius import utils as nebius_utils
+
+    region = 'eu-north1'
+    project_id = nebius_utils.get_project_by_region(region)
+    subnet_id = nebius_utils.get_subnet_id(region, project_id)
+    network_id = nebius_utils.get_network_id_from_subnet(subnet_id)
+
+    vpc = nebius_adaptor.vpc()
+    common_v1 = nebius_adaptor.nebius_common()
+    net_service = vpc.NetworkServiceClient(nebius_adaptor.sdk())
+    second_net_name = f'wrong-net-{uuid.uuid4().hex[:6]}'
+    second_net = nebius_adaptor.sync_call(
+        net_service.create(
+            vpc.CreateNetworkRequest(metadata=common_v1.ResourceMetadata(
+                parent_id=project_id, name=second_net_name),
+                                     spec=vpc.NetworkSpec()))).resource_id
+
+    wrong_sg_name = f'wrong-net-sg-{uuid.uuid4().hex[:6]}'
+    wrong_sg_id = nebius_utils.get_or_create_security_group(
+        project_id, wrong_sg_name, second_net)
+
+    try:
+        wrong_cfg = provision_common.ProvisionConfig(
+            provider_config={
+                'region': region,
+                'use_internal_ips': False,
+                'security_group': {
+                    'GroupName': wrong_sg_name,
+                    'ManagedBySkyPilot': False,
+                },
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={},
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+        try:
+            nebius_config.bootstrap_instances(region, 'wrong-net-cluster',
+                                              wrong_cfg)
+            raise AssertionError(
+                'bootstrap should have raised ValueError for wrong-network '
+                'BYO SG')
+        except ValueError as e:
+            msg = str(e)
+            assert wrong_sg_name in msg, msg
+            assert network_id in msg, msg
+            assert second_net in msg, msg
+            assert 'remove `nebius.security_group_name`' in msg, msg
+    finally:
+        nebius_utils.delete_security_group(wrong_sg_id)
+        nebius_adaptor.sync_call(
+            net_service.delete(vpc.DeleteNetworkRequest(id=second_net)))
+
+
+@pytest.mark.nebius
+# pylint: disable=protected-access
+def test_nebius_security_group_attached_and_enforced():
+    """End-to-end CLI smoke: launch a real VM and verify the SG is
+    actually attached + actually enforced by the Nebius VPC data plane.
+
+    Complements `test_nebius_security_group_lifecycle` (SDK only) by
+    going through the full sky launch path. Catches regressions where:
+    - bootstrap_instances populates `node_config['SecurityGroupIds']`
+      correctly but `run_instances` drops them on the way to
+      `utils.launch()`.
+    - The SG exists with correct rules but VPC enforcement isn't actually
+      filtering external traffic to port 52365 (the CVE-2023-48022
+      attack surface this PR is closing).
+
+    Cheap: small CPU instance, ~3-5 min including teardown. Skipped by
+    default; runs only with `pytest --nebius`.
+    """
+    # pylint: disable=import-outside-toplevel
+    import socket as _socket
+
+    from sky.provision.nebius import utils as nebius_utils
+
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'eu-north1'
+
+    def _verify_sg_attached_and_enforced():
+        # `cluster_name_on_cloud` is `name` plus a user-hash suffix that
+        # SkyPilot adds via `make_cluster_name_on_cloud`, so we can't
+        # compute the SG name from `name` alone. Instead, find this
+        # cluster's VMs by name-prefix and read the SG IDs directly off
+        # their NICs (the field populated in `list_instances` from
+        # `instance.spec.network_interfaces[0].security_groups`).
+        project_id = nebius_utils.get_project_by_region(region)
+        instances = nebius_utils.list_instances(project_id)
+        cluster_instances = {
+            i: info
+            for i, info in instances.items()
+            if info.get('name', '').startswith(name)
+        }
+        assert cluster_instances, (
+            f'no instances found whose name starts with {name!r}; '
+            f'all VM names in project: '
+            f'{[i.get("name") for i in instances.values()]}')
+
+        # Every VM in this cluster must have at least one SG attached.
+        # Empty `security_group_ids` means bootstrap or run_instances
+        # silently dropped them on the way to NetworkInterfaceSpec.
+        # (Don't assert on the SG name — under BYO config
+        # `nebius.security_group_name` the attached SG won't follow the
+        # `sky-sg-{cluster}` template; the meaningful check is that *some*
+        # SG is attached and that the external port-block below is real.)
+        for inst_id, info in cluster_instances.items():
+            assert info.get('security_group_ids'), (
+                f'instance {inst_id} ({info.get("name")}) has NO '
+                f'security groups attached; bootstrap or run_instances '
+                f'did not wire SecurityGroupIds through to the NIC.')
+
+        # Verify external port-block: pick the head node's public IP and
+        # try TCP-connecting to 52365. Must fail (refused or timeout).
+        head = next(
+            iter(i for i in cluster_instances.values()
+                 if i.get('name', '').endswith('-head')))
+        head_ip = head.get('external_ip')
+        assert head_ip, f'head has no external_ip: {head}'
+
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        sock.settimeout(5)
+        try:
+            sock.connect((head_ip, 52365))
+            sock.close()
+            raise AssertionError(
+                f'port 52365 (Ray dashboard agent) is REACHABLE on '
+                f'{head_ip} — the SG is not enforcing the external '
+                f'block. This is the CVE-2023-48022 attack surface.')
+        except (_socket.timeout, ConnectionRefusedError, OSError):
+            pass  # expected — connection refused / filtered
+        finally:
+            sock.close()
+
+    test = smoke_tests_utils.Test(
+        'nebius_sg_attached_and_enforced',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            _verify_sg_attached_and_enforced,
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('nebius'),
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 def test_cli_output(generic_cloud: str):

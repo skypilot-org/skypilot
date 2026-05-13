@@ -335,17 +335,26 @@ def test_batch_cancel(generic_cloud: str):
             f'{rm_r(f"{url}/.sky_batch_tmp/")} 2>/dev/null || true',
 
             # --- Launch in background, wait for RUNNING, then cancel ---
+            # NOTE: filter `sky jobs queue` by pool name first, otherwise
+            # we may pick up a RUNNING job from a concurrent test
+            # (multiple buildkite tests share the same apiserver) and
+            # cancel the wrong one. Then assert the picked job is in
+            # RUNNING state. Order matters: grep pool first → grep
+            # RUNNING (state column) — pool name is column near the end,
+            # so a status substring match in earlier columns is unlikely.
             (f"python examples/batch/simple/double_text.py &\n"
              f"BGPID=$!\n"
              f"echo \"Started batch job for cancel test (PID=$BGPID)\"\n"
              f"JOB_ID=''\n"
              f"for i in $(seq 1 90); do\n"
              f"  JOB_ID=$(sky jobs queue 2>/dev/null | "
+             f"grep -w \"{pool_name}\" | "
              f"awk '$1 ~ /^[0-9]+$/ && /RUNNING/ {{print $1; exit}}')\n"
              f"  if [ -n \"$JOB_ID\" ]; then break; fi\n"
              f"  sleep 5\n"
              f"done\n"
-             f"echo \"Found batch job ID=$JOB_ID, cancelling...\"\n"
+             f"echo \"Found batch job ID=$JOB_ID for pool {pool_name}, "
+             f"cancelling...\"\n"
              f"sky jobs cancel $JOB_ID -y\n"
              f"echo \"Cancel requested, waiting for background process...\"\n"
              f"wait $BGPID 2>/dev/null || true"),

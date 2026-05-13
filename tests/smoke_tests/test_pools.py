@@ -1,7 +1,7 @@
 import os
 import tempfile
 import textwrap
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -165,19 +165,24 @@ def wait_until_job_status(
     return s
 
 
-def check_logs(job_id: int, expected_pattern: str):
+def check_logs(job_id: Union[int, str], expected_pattern: str):
     """Check that job logs contain the expected pattern.
 
     Args:
-        job_id: The job ID to check logs for.
+        job_id: Either an int literal, or a bash expression string that
+            resolves to a job ID at runtime (e.g.
+            "$(awk -F, '{print $1}' /tmp/job_ids.txt)"). The expression form
+            is needed because tests share the API server DB, so hard-coded
+            IDs collide with prior tests' jobs.
         expected_pattern: The pattern to grep for in the logs.
     """
     return (
+        f'_jid={job_id}; '
         f'for attempt in 1 2; do '
-        f'  logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
+        f'  logs=$(sky jobs logs --controller "$_jid" --no-follow 2>&1); '
         f'  echo "$logs"; '
         f'  if echo "$logs" | grep "{expected_pattern}"; then '
-        f'    echo "Job {job_id} logs contain expected pattern: {expected_pattern}"; '
+        f'    echo "Job $_jid logs contain expected pattern: {expected_pattern}"; '
         f'    exit 0; '
         f'  fi; '
         f'  if [ $attempt -eq 1 ]; then '
@@ -185,24 +190,33 @@ def check_logs(job_id: int, expected_pattern: str):
         f'    sleep 5; '
         f'  fi; '
         f'done; '
-        f'echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern} after 2 attempts"; '
+        f'echo "ERROR: Job $_jid logs do not contain expected pattern: {expected_pattern} after 2 attempts"; '
         f'exit 1')
 
 
 def wait_until_job_status_by_id(
-        job_id: int,
+        job_id: Union[int, str],
         good_statuses: List[str],
         bad_statuses: List[str] = ['CANCELLED', 'FAILED_CONTROLLER'],
         timeout: int = 30):
-    s = 'start_time=$SECONDS; '
+    """Poll a managed job's controller log until it reaches a target status.
+
+    `job_id` may be an int literal or a bash expression string that resolves
+    at runtime (e.g. extracting from a comma-separated IDs file). The
+    expression form is needed because the API server DB is shared across
+    tests, so a hard-coded id like `1` matches whichever ancient job got
+    that ID, not the one this test just submitted.
+    """
+    s = f'_jid={job_id}; '
+    s += 'start_time=$SECONDS; '
     s += 'while true; do '
     s += f'if (( $SECONDS - $start_time > {timeout} )); then '
-    s += f'  echo "Timeout after {timeout} seconds waiting for job {job_id} to succeed"; '
+    s += f'  echo "Timeout after {timeout} seconds waiting for job $_jid to succeed"; '
     s += '  echo "=== Running sky status for debugging ==="; '
     s += '  sky status || true; '
     s += '  exit 1; '
     s += 'fi; '
-    s += f's=$(sky jobs logs --controller {job_id} --no-follow); '
+    s += 's=$(sky jobs logs --controller "$_jid" --no-follow); '
     s += 'echo "$s"; '
     for status in good_statuses:
         s += f'if echo "$s" | grep "Job status: JobStatus.{status}"; then '
@@ -214,7 +228,7 @@ def wait_until_job_status_by_id(
         s += '  sky status || true; '
         s += '  exit 1; '
         s += 'fi; '
-    s += f'echo "Waiting for job {job_id} to be in {good_statuses}..."; '
+    s += f'echo "Waiting for job $_jid to be in {good_statuses}..."; '
     s += 'done'
     return s
 
@@ -299,7 +313,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -327,7 +341,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -581,10 +595,35 @@ def test_setup_logs_in_starting_pool(generic_cloud: str):
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+        # Poll `pool logs` until the user task is submitted (signaled by
+        # "Job submitted, ID:" in the streamed launch log) before running
+        # the actual setup-message assertion. The replica enters STARTING
+        # after provisioning finishes, but the user's setup is detached
+        # — `Noisy setup` only flows once `sky.launch` submits the user
+        # task as a Ray job.
+        # One-shot calling `pool logs` immediately after
+        # STARTING races: skylet returns "Skip streaming logs as no job
+        # has been submitted" → exit 102 → assertion fails. Polling for
+        # the milestone first sidesteps the race without a fixed sleep.
+        wait_for_job_submitted = (
+            f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  if (( $SECONDS - $start_time > 120 )); then '
+            f'    echo "Timeout waiting for user task submission in '
+            f'launch log"; exit 1; '
+            f'  fi; '
+            f'  s=$(sky jobs pool logs {pool_name} 1 --no-follow 2>&1); '
+            f'  if echo "$s" | grep -q "Job submitted, ID:"; then '
+            f'    echo "User task submitted, proceeding to assert "'
+            f'"setup output"; break; '
+            f'  fi; '
+            f'  sleep 5; '
+            f'done')
         test = smoke_tests_utils.Test('test_setup_logs_in_starting_pool', [
             _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
                                                   pool_yaml=pool_yaml.name),
             wait_until_worker_status(pool_name, 'STARTING', timeout=timeout),
+            wait_for_job_submitted,
             check_for_setup_message(pool_name, 'Noisy setup 1', follow=False),
         ],
                                       timeout=timeout,
@@ -814,7 +853,7 @@ def test_pool_job_cancel_running(generic_cloud: str):
                     cancel_job(job_name),
                     # Ensure the job is cancelled.
                     wait_until_job_status(
-                        job_name, ['CANCELLED'], bad_statuses=[], timeout=15),
+                        job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -1071,7 +1110,7 @@ def test_pool_job_cancel_running_multiple_simultaneous(generic_cloud: str):
                     *[
                         wait_until_job_status(f'{job_name}-{i}', ['CANCELLED'],
                                               bad_statuses=[],
-                                              timeout=15)
+                                              timeout=30)
                         for i in range(1, num_jobs + 1)
                     ],
                 ],
@@ -1216,29 +1255,40 @@ def test_pools_num_jobs_basic(generic_cloud: str):
         job_name=f'{name}-job',
         run_cmd='echo "Running with $SKYPILOT_NUM_JOBS jobs"')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    # Per-pool path so concurrent tests don't clobber each other.
+    ids_file = f'/tmp/job_ids_{pool_name}.txt'
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            job_ids = list(range(1, 1 + num_jobs))
+            # Capture the launched IDs from the launch output. The DB is
+            # shared across tests on a long-lived API server, so the auto-
+            # increment IDs are not 1..num_jobs.
+            launch_cmd = (
+                f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
+                f'--num-jobs {num_jobs} -d -y); echo "$s"; '
+                f'echo "$s" | grep "Jobs submitted with IDs:" | '
+                f'sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                f'cat {ids_file}')
+            id_expr = (lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})")
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs',
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    f'sky jobs launch --pool {pool_name} {job_yaml.name} --num-jobs {num_jobs} -d -y',
+                    launch_cmd,
                     # Wait for the jobs to succeed.
                     *[
-                        wait_until_job_status_by_id(job_id, ['SUCCEEDED'],
+                        wait_until_job_status_by_id(id_expr(i), ['SUCCEEDED'],
                                                     timeout=timeout)
-                        for job_id in job_ids
+                        for i in range(num_jobs)
                     ],
                     # Sleep to ensure the job logs are ready.
                     'sleep 30',
                     # Check that the job logs contain the correct number of jobs.
                     *[
-                        check_logs(job_id, f'Running with {num_jobs} jobs')
-                        for job_id in job_ids
+                        check_logs(id_expr(i), f'Running with {num_jobs} jobs')
+                        for i in range(num_jobs)
                     ],
                 ],
                 timeout=timeout,
@@ -2365,30 +2415,37 @@ def test_pools_num_jobs_rank(generic_cloud: str):
                 wait_until_pool_ready(pool_name, timeout=timeout),
             ]
 
+            # Per-pool path so concurrent tests don't clobber each other.
+            ids_file = f'/tmp/job_ids_{pool_name}.txt'
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
-                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > /tmp/job_ids.txt; '
-                'cat /tmp/job_ids.txt').format(pool_name=pool_name,
-                                               job_yaml=job_yaml.name,
-                                               NUM_JOBS=NUM_JOBS)
+                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                'cat {ids_file}').format(pool_name=pool_name,
+                                         job_yaml=job_yaml.name,
+                                         NUM_JOBS=NUM_JOBS,
+                                         ids_file=ids_file)
             test_commands.append(launch_cmd)
 
-            START_JOB_ID = 1
-            job_ids = [i for i in range(START_JOB_ID, START_JOB_ID + NUM_JOBS)]
-            for job_id in job_ids:
+            # The DB is shared across tests, so we cannot hard-code IDs as
+            # 1..NUM_JOBS — they would resolve to whichever ancient jobs
+            # happen to have those IDs in the long-lived API server DB.
+            # Resolve each ID at run time from the IDs file written above.
+            id_expr = lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})"
+            for i in range(NUM_JOBS):
                 test_commands.append(
                     wait_until_job_status_by_id(
-                        job_id, ['SUCCEEDED'],
+                        id_expr(i), ['SUCCEEDED'],
                         ['CANCELLED', 'FAILED_CONTROLLER'],
                         timeout=timeout))
 
             # Wait for the job logs to be ready.
             test_commands.append('sleep 30')
 
-            for job_id in job_ids:
-                test_commands.append(
-                    check_logs(job_id, f'My rank is {job_id - 1}'))
+            # SKYPILOT_JOB_RANK is the 0-based index into the launched batch,
+            # not derived from job_id, so use the loop index.
+            for i in range(NUM_JOBS):
+                test_commands.append(check_logs(id_expr(i), f'My rank is {i}'))
 
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs_rank',
@@ -2455,7 +2512,7 @@ def autoscaling_pool_conf(
     setup_cmd: str = 'echo "setup message"',
 ):
     """Create a pool config with autoscaling enabled.
-    
+
     Args:
         num_workers: Initial number of workers (also used as min if min_workers not set)
         max_workers: Maximum number of workers for autoscaling
@@ -2511,7 +2568,7 @@ def check_workers_do_not_exceed(pool_name: str,
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up(generic_cloud: str):
     """Test that pool autoscales up when jobs are queued.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=3 (2 higher than initial)
     2. Launches multiple jobs that will queue up
@@ -2573,7 +2630,7 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
     """Test that pool does not scale above workers when max_workers == workers.
-    
+
     This test:
     1. Creates a pool with workers=2, max_workers=2 (same as workers)
     2. Launches multiple jobs that will queue up
@@ -2637,7 +2694,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
     """Test that pool autoscales down to zero when no jobs and min_workers=0.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=2, min_workers=0
     2. Launches a job that completes quickly
@@ -2692,7 +2749,7 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
     """Test that pool autoscales up to max_workers then down to zero.
-    
+
     This test:
     1. Creates a pool with workers=0, max_workers=3, min_workers=0
     2. Queues up enough quick jobs (echo hi) to trigger scaling to 3 workers

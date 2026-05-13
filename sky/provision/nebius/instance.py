@@ -4,8 +4,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
+from sky.provision.nebius import constants as nebius_constants
 from sky.provision.nebius import utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -142,7 +144,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 use_static_ip_address=config.provider_config.get(
                     'use_static_ip_address', False),
                 filesystems=config.node_config.get('filesystems', []),
-                network_tier=config.node_config.get('network_tier'))
+                network_tier=config.node_config.get('network_tier'),
+                security_group_ids=config.node_config.get('SecurityGroupIds'))
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -221,6 +224,31 @@ def terminate_instances(
     if not worker_only:
         utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
 
+    # Delete the cluster's SkyPilot-managed security group. Only when fully
+    # tearing down (worker_only=False) — partial scale-downs leave the SG
+    # in place since the head still uses it. delete_security_group drains
+    # rules first and retries SG-delete on dependency-violation, so it's
+    # safe even when VM termination above hasn't fully settled at the
+    # provider yet.
+    #
+    # Skip deletion when the user supplied a BYO SG (ManagedBySkyPilot=False).
+    # Mirrors the `ManagedBySkyPilot` guard in
+    # `sky.provision.aws.instance.cleanup_ports`. The flag flows
+    # through the rendered Ray YAML's `provider.security_group` block from
+    # `make_deploy_resources_variables`.
+    if not worker_only:
+        sg_block = provider_config.get('security_group') or {}
+        managed = bool(sg_block.get('ManagedBySkyPilot', True))
+        if managed:
+            project_id = utils.get_project_by_region(provider_config['region'])
+            sg_name = sg_block.get(
+                'GroupName',
+                nebius_constants.SECURITY_GROUP_TEMPLATE.format(
+                    cluster_name_on_cloud))
+            sg_id = utils.get_security_group_by_name(project_id, sg_name)
+            if sg_id is not None:
+                utils.delete_security_group(sg_id)
+
 
 def get_cluster_info(
         region: str,
@@ -288,9 +316,39 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    logger.debug(f'Skip opening ports {ports} for Nebius instances, as all '
-                 'ports are open by default.')
-    del cluster_name_on_cloud, provider_config, ports
+    assert provider_config is not None
+    sg_block = provider_config.get('security_group') or {}
+    managed = bool(sg_block.get('ManagedBySkyPilot', True))
+    if not managed:
+        # BYO SG: the user owns the rule set. We already warned at
+        # `make_deploy_resources_variables` time when ports were declared
+        # alongside `nebius.security_group_name`. Don't silently mutate
+        # the user's SG.
+        logger.info(
+            f'Skipping open_ports for cluster {cluster_name_on_cloud!r}: '
+            f'a user-managed (BYO) security group is configured. Add the '
+            f'ingress rules for {ports} to the security group manually.')
+        return
+    project_id = utils.get_project_by_region(provider_config['region'])
+    # Read the SG name from provider_config (set by bootstrap_instances).
+    # Fall back to the template for legacy clusters whose Ray YAML
+    # predates this PR — they may not have the security_group block.
+    sg_name = sg_block.get(
+        'GroupName',
+        nebius_constants.SECURITY_GROUP_TEMPLATE.format(cluster_name_on_cloud))
+    sg_id = utils.get_security_group_by_name(project_id, sg_name)
+    if sg_id is None:
+        # Pre-SG (legacy) cluster — no SG was created at provisioning time.
+        # Log and skip rather than create one for a cluster whose VMs cannot
+        # consume it (Nebius does not allow mutating a live NIC's SGs).
+        logger.warning(
+            f'Cannot open ports {ports}: SkyPilot security group '
+            f'{sg_name!r} not found. The cluster may predate network-level '
+            f'firewalling. Recreate it (`sky down` + `sky launch`) to '
+            f'enable port management.')
+        return
+    port_set = resources_utils.port_ranges_to_set(ports)
+    utils.add_ingress_tcp_ports(sg_id, port_set)
 
 
 def cleanup_ports(
@@ -298,4 +356,12 @@ def cleanup_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, ports, provider_config  # Unused.
+    """See sky/provision/__init__.py"""
+    # Intentional no-op. The cluster-specific security group is owned by
+    # the VM lifecycle, not the port lifecycle: it's created in
+    # `bootstrap_instances` and deleted in `terminate_instances` (when
+    # `worker_only=False`). Deleting it here would (a) tear down ingress
+    # for SSH and intra-cluster Ray traffic on a still-running cluster if
+    # this were ever called outside teardown, and (b) generate noisy
+    # FAILED_PRECONDITION retries while VMs still hold the NIC.
+    del cluster_name_on_cloud, ports, provider_config

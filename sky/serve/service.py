@@ -7,9 +7,10 @@ import multiprocessing
 import os
 import pathlib
 import shutil
+import socket
 import time
 import traceback
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import filelock
 
@@ -42,7 +43,8 @@ logger = sky_logging.init_logger('sky.serve.service')
 
 def _handle_signal(service_name: str) -> None:
     """Handles the signal user sent to controller."""
-    signal_file = pathlib.Path(constants.SIGNAL_FILE_PATH.format(service_name))
+    signal_file = pathlib.Path(
+        constants.SIGNAL_FILE_PATH.format(service_name)).expanduser()
     user_signal = None
     if signal_file.exists():
         # Filelock is needed to prevent race condition with concurrent
@@ -76,6 +78,7 @@ def cleanup_storage(yaml_content: str) -> bool:
         True if the storage is cleaned up successfully, False otherwise.
     """
     failed = False
+    task = None
 
     try:
         task = task_lib.Task.from_yaml_str(yaml_content)
@@ -84,8 +87,24 @@ def cleanup_storage(yaml_content: str) -> bool:
         # because when SkyPilot API server machine sends the yaml config to the
         # controller machine, only storage metadata is sent, not the storage
         # object itself.
-        for storage in task.storage_mounts.values():
-            storage.construct()
+        # Construct storages individually so a stale reference (bucket
+        # already deleted by a prior cleanup pass) doesn't abort cleanup of
+        # the rest. StorageBucketGetError on construct here means the bucket
+        # is already gone — which IS the cleanup target state, not a failure.
+        # Without this, FAILED_CLEANUP becomes self-perpetuating: the loop
+        # crashes on a stale storage entry, the service goes to
+        # FAILED_CLEANUP, ha_recovery_for_consolidation_mode respawns the
+        # controller, the controller re-reads the same yaml and crashes on
+        # the same stale entry — forever.
+        for storage_name in list(task.storage_mounts.keys()):
+            storage = task.storage_mounts[storage_name]
+            try:
+                storage.construct()
+            except exceptions.StorageBucketGetError as e:
+                logger.debug(f'cleanup_storage: bucket for storage '
+                             f'{storage_name!r} already gone, treating as '
+                             f'already cleaned: {e}')
+                del task.storage_mounts[storage_name]
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '
@@ -95,8 +114,10 @@ def cleanup_storage(yaml_content: str) -> bool:
         failed = True
 
     # Clean up any files mounted from the local disk, such as two-hop file
-    # mounts.
-    for file_mount in (task.file_mounts or {}).values():
+    # mounts. Guard against `task` being unbound if from_yaml_str raised above.
+    file_mount_values = (list(
+        (task.file_mounts or {}).values()) if task else [])
+    for file_mount in file_mount_values:
         try:
             if not data_utils.is_cloud_store_url(file_mount):
                 path = os.path.expanduser(file_mount)
@@ -213,10 +234,12 @@ def _cleanup(service_name: str, pool: bool) -> bool:
     if not all(map(cleanup_version_storage, versions)):
         failed = True
 
-    # Cleanup version metadata after all storages are cleaned up, otherwise
-    # the get_yaml_content will return None as all versions are deleted.
-    serve_state.delete_all_versions(service_name)
-
+    # NOTE: do not delete version_specs here. The success path in `_start`
+    # deletes them along with `remove_service`. Deleting them on failure
+    # makes the `services` row invisible to `get_service_from_name` (it
+    # uses an INNER JOIN with `version_specs`), so `sky ... status` /
+    # `sky ... down --purge` can no longer locate the FAILED_CLEANUP row,
+    # and the only way out is to manually delete the DB row.
     return failed
 
 
@@ -233,6 +256,60 @@ def _cleanup_task_run_script(job_id: int) -> None:
             logger.info(f'Task run script {this_task_run_script} removed')
         else:
             logger.warning(f'Task run script {this_task_run_script} not found')
+
+
+def _wait_for_controller_ready(host: str, port: int, timeout: int = 30) -> None:
+    """Block until the controller HTTP server is accepting connections.
+
+    We must not flip DB `controller_pid`/`controller_ip` until the new
+    subprocess is actually listening, otherwise clients routed by DB hit
+    the new pod's IP before its uvicorn binds and get ECONNREFUSED.
+    """
+    # When binding 0.0.0.0, probe via loopback.
+    probe_host = '127.0.0.1' if host == '0.0.0.0' else host
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            with socket.create_connection((probe_host, port), timeout=0.5):
+                return
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.2)
+    raise RuntimeError(f'Controller did not become ready on '
+                       f'{probe_host}:{port} within {timeout}s')
+
+
+def _orphan_exit(
+        controller_process: Optional[multiprocessing.Process],
+        load_balancer_process: Optional[multiprocessing.Process]) -> None:
+    """Quick exit path for an orphan sky.serve.service.
+
+    Triggered when our self-check sees DB `controller_pid` no longer matches
+    our own pid (a newer instance on another pod has taken over) or when the
+    services row has been removed (down completed). DB state is now owned by
+    that new instance — we must NOT call _cleanup, which would teardown
+    replicas and delete versions, racing with the new owner.
+
+    Just kill our own forked subprocesses and exit immediately.
+    """
+    logger.info(
+        f'_orphan_exit invoked: own_pid={os.getpid()} '
+        f'controller_process_pid='
+        f'{controller_process.pid if controller_process else None} '
+        f'load_balancer_process_pid='
+        f'{load_balancer_process.pid if load_balancer_process else None}')
+    process_to_kill = [
+        proc for proc in [load_balancer_process, controller_process]
+        if proc is not None
+    ]
+    if process_to_kill:
+        try:
+            subprocess_utils.kill_children_processes(
+                parent_pids=[p.pid for p in process_to_kill], force=True)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning('Failed to kill children during orphan exit; '
+                           'proceeding with os._exit anyway')
+    # os._exit() bypasses the try/finally which would call _cleanup.
+    os._exit(0)  # pylint: disable=protected-access
 
 
 def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
@@ -271,6 +348,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
 
+    # Pod IP for HA leader-aware routing.
+    pod_ip: Optional[str] = os.environ.get('POD_IP')
+
     if not is_recovery:
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
             if not controller_utils.can_start_new_process(task.service.pool):
@@ -290,6 +370,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 tls_encrypted=service_spec.tls_credential is not None,
                 pool=service_spec.pool,
                 controller_pid=os.getpid(),
+                controller_ip=pod_ip,
                 entrypoint=entrypoint)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
@@ -310,7 +391,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         if latest_version is None:
             raise ValueError(f'No version found for service {service_name}')
         version = latest_version
-        serve_state.update_service_controller_pid(service_name, os.getpid())
+        # NOTE: do NOT update controller_pid/controller_ip yet. We must wait
+        # until our subprocess is actually listening on the port (see the
+        # update_service_controller_pid_ip_and_port call after
+        # _wait_for_controller_ready below). Otherwise clients in other pods
+        # would route to our pod IP before uvicorn binds and get
+        # ECONNREFUSED for the duration of the boot.
 
     controller_process = None
     load_balancer_process = None
@@ -318,10 +404,17 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
             # Start the controller.
-            controller_port = (
-                common_utils.find_free_port(constants.CONTROLLER_PORT_START)
-                if not is_recovery else
-                serve_state.get_service_controller_port(service_name))
+            # NOTE: also pick a fresh free port on recovery — do NOT reuse
+            # the port from DB. The port in DB was chosen on the previous
+            # controller's pod (e.g. Pod A); on a different recovery pod
+            # (Pod B), that port may be in use by another service's
+            # controller, in which case our subprocess would fail to bind
+            # → _wait_for_controller_ready times out → daemon retries
+            # forever. Picking locally guarantees the port is free *on this
+            # pod*, and the post-bind atomic flip writes the new port to
+            # DB together with pid/ip so clients route correctly.
+            controller_port = common_utils.find_free_port(
+                constants.CONTROLLER_PORT_START)
 
             def _get_controller_host():
                 """Get the controller host address.
@@ -344,8 +437,51 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 args=(service_name, service_spec, version, controller_host,
                       controller_port))
             controller_process.start()
+            logger.debug(f'_start() spawned controller_process pid='
+                         f'{controller_process.pid} host={controller_host} '
+                         f'port={controller_port}')
 
-            if not is_recovery:
+            # NOTE: do NOT write controller_port to DB before the subprocess
+            # actually binds. If the spawn races with another service for
+            # the same port and our subprocess fails to bind, we don't want
+            # DB to advertise an unbound port to clients. Move the DB write
+            # to after `_wait_for_controller_ready` succeeds (below).
+
+            # Wait for the uvicorn server inside the controller subprocess to
+            # be listening before we (potentially) flip DB to point at us.
+            # This makes the recovery's DB update atomic from the client's
+            # perspective: DB either still points at the previous controller
+            # (which is alive) or it points at us (which is now ready).
+            try:
+                _wait_for_controller_ready(
+                    controller_host,
+                    controller_port,
+                    timeout=constants.SERVICE_REGISTER_TIMEOUT_SECONDS)
+            except RuntimeError:
+                # Controller subprocess failed to start. Bail; the daemon's
+                # next ha_recovery iteration will retry.
+                logger.error('Controller subprocess failed to start within '
+                             f'{constants.SERVICE_REGISTER_TIMEOUT_SECONDS}s; '
+                             'aborting _start. DB state untouched so the '
+                             'previous controller (if any) keeps serving.')
+                raise
+
+            # Now we know the subprocess is bound on `controller_port`. Write
+            # DB.
+            if is_recovery:
+                # Atomic flip: DB now points at us; clients route here. We're
+                # ready to serve.
+                logger.debug(f'is_recovery: flipping DB controller_pid '
+                             f'-> {os.getpid()}, controller_ip -> {pod_ip}, '
+                             f'controller_port -> {controller_port}')
+                serve_state.update_service_controller_pid_ip_and_port(
+                    service_name,
+                    controller_pid=os.getpid(),
+                    controller_ip=pod_ip,
+                    controller_port=controller_port)
+            else:
+                # Fresh up: add_service already wrote pid/ip with the row.
+                # Only the port needs to land in DB now (after bind).
                 serve_state.set_service_controller_port(service_name,
                                                         controller_port)
 
@@ -380,10 +516,47 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 serve_state.set_service_load_balancer_port(
                     service_name, load_balancer_port)
 
+        # Self-check cadence (seconds): how often we re-read DB to confirm
+        # we're still the authoritative controller. Ghost detection only
+        # matters in HA deployments and is checked once per
+        # interval to avoid DB load.
+        orphan_check_interval_seconds = 30
+        own_pid = os.getpid()
+        loop_count = 0
         while True:
             _handle_signal(service_name)
+            loop_count += 1
+            # Periodically check whether we still own the row in DB. If
+            # another instance on a different pod has taken over (HA recovery
+            # raced us to the row), or if down has removed the row entirely,
+            # exit immediately without running cleanup — that work belongs to
+            # the new owner / has already happened.
+            if loop_count % orphan_check_interval_seconds == 0:
+                db_read_failed = False
+                record: Optional[Dict[str, Any]] = None
+                try:
+                    record = serve_state.get_service_from_name(service_name)
+                except Exception:  # pylint: disable=broad-except
+                    # DB transient failure — keep running, retry next tick.
+                    db_read_failed = True
+                if not db_read_failed and record is None:
+                    logger.warning(
+                        f'Service {service_name} row no longer present in '
+                        'DB. Exiting as orphan without running cleanup.')
+                    _orphan_exit(controller_process, load_balancer_process)
+                elif (record is not None and
+                      record.get('controller_pid') is not None and
+                      record.get('controller_pid') != own_pid):
+                    logger.warning(
+                        f'Service {service_name} controller_pid in DB is '
+                        f'{record.get("controller_pid")} but our pid is '
+                        f'{own_pid}; another instance has taken over. '
+                        'Exiting as orphan without running cleanup.')
+                    _orphan_exit(controller_process, load_balancer_process)
             time.sleep(1)
     except exceptions.ServeUserTerminatedError:
+        logger.debug(f'Caught ServeUserTerminatedError for '
+                     f'{service_name}; setting status=SHUTTING_DOWN')
         serve_state.set_service_status_and_active_versions(
             service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
@@ -417,9 +590,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
-            shutil.rmtree(service_dir)
-            serve_state.remove_service(service_name)
-            serve_state.delete_all_versions(service_name)
+            serve_state.remove_service_completely(service_name)
+            try:
+                shutil.rmtree(service_dir)
+            except FileNotFoundError:
+                # The service_dir may already be gone (e.g. the controller's own
+                # success path raced with a purge).
+                pass
             logger.info(f'Service {service_name} terminated successfully.')
 
         _cleanup_task_run_script(job_id)
