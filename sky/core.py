@@ -884,12 +884,16 @@ def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
     # Only the VM/Ray backend is supported; other backends simply skip.
     if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
         return
+    # Claim the 'down' teardown slot unconditionally — even if no hook
+    # declares the `down` event. The claim blocks the SIGTERM handler
+    # (kubelet's SIGTERM at K8s pod delete) from later claiming
+    # 'preemption' and firing the preemption hook on what was
+    # intentionally `sky down`. `hook_executor.run('down', hooks)` is a
+    # no-op when no down-event hooks match.
     codegen = ('from sky.skylet import autostop_lib, hook_executor\n'
                'hooks = autostop_lib.get_hooks() or []\n'
-               'if any(\'down\' in (h.get(\'events\') '
-               'or hook_executor.EVENTS) for h in hooks):\n'
-               '    if hook_executor.try_claim_teardown(\'down\'):\n'
-               '        hook_executor.run(\'down\', hooks)\n')
+               'if hook_executor.try_claim_teardown(\'down\'):\n'
+               '    hook_executor.run(\'down\', hooks)\n')
     # Use SKY_PYTHON_CMD so the codegen sees the sky/ installation on the
     # remote — plain `python3` may point at a minimal system interpreter.
     cmd = f'{constants.SKY_PYTHON_CMD} -c {shlex.quote(codegen)}'

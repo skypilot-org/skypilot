@@ -648,3 +648,58 @@ def test_task_yaml_config_hooks_schema_rejects_unknown_event(tmp_path):
     p.write_text(yaml_str)
     with pytest.raises(Exception):
         Task.from_yaml(str(p))
+
+
+# ---------------------------------------------------------------------------
+# Review feedback (kevinmingtarja) — behavioral fixes
+# ---------------------------------------------------------------------------
+
+
+def test_sky_down_claims_teardown_even_without_down_hooks():
+    """`sky down` must claim the 'down' teardown slot unconditionally.
+
+    Otherwise a cluster declaring only ``events: [preemption]`` hooks
+    leaves the slot unclaimed during ``sky down`` → the kubelet SIGTERM
+    that follows pod deletion then claims ``preemption`` → fires the
+    preemption hook on what was actually an intentional teardown.
+
+    Verifies the codegen sent to the head:
+      1. Always calls `try_claim_teardown('down')`.
+      2. The claim is **not** gated by any `if any(... 'down' in ...)`
+         conditional that depends on the cluster's hook events.
+    """
+    from sky import core
+    from sky.backends import cloud_vm_ray_backend
+
+    captured = {}
+
+    class _FakeHandle:
+        pass
+
+    class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
+
+        def __init__(self):  # pylint: disable=super-init-not-called
+            pass
+
+        def run_on_head(self, handle, cmd, **kw):  # type: ignore[override]
+            captured['cmd'] = cmd
+            return 0
+
+    core._maybe_run_down_hooks(_FakeHandle(), _FakeBackend(), 'mycluster')
+
+    cmd = captured.get('cmd', '')
+    # The cmd is shell-quoted around the python -c '...' payload, so we
+    # search for the unquoted token rather than the surrounding quotes.
+    assert 'try_claim_teardown' in cmd, (
+        f"_maybe_run_down_hooks codegen missing teardown claim. "
+        f"Got: {cmd!r}")
+    # The 'down' claim must not be gated by an `if any(... in events)`
+    # filter — otherwise a cluster declaring only preemption hooks
+    # leaves the slot unclaimed and SIGTERM later fires the preemption
+    # hook on intentional teardown.
+    assert 'if any(' not in cmd, (
+        "The 'down' claim is currently nested inside `if any(... in "
+        "events ...)`. It must be filed unconditionally so that "
+        "subsequent kubelet SIGTERM (during the K8s pod delete) cannot "
+        "claim 'preemption' and fire the preemption hook on a sky "
+        f"down. Codegen was:\n{cmd}")
