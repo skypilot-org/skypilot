@@ -74,7 +74,11 @@ class TestApplyRefusesTerminalStates:
             return mock_update, mock_up
 
     def test_refuses_shutting_down(self):
-        with pytest.raises(RuntimeError, match='SHUTTING_DOWN'):
+        # SHUTTING_DOWN gets a friendlier "wait for shutdown" message that
+        # still mentions --purge as a fallback for stuck cleanups, so users
+        # who just ran `down` and re-applied aren't pushed straight to purge.
+        with pytest.raises(RuntimeError,
+                           match='shutting down.*Wait for shutdown.*--purge'):
             self._run_apply_with_status(serve_state.ServiceStatus.SHUTTING_DOWN,
                                         pool=True)
 

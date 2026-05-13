@@ -210,7 +210,7 @@ def _release_managed_job_consolidation_mode_lock() -> None:
         _managed_job_consolidation_mode_lock = None
 
 
-def _release_serve_consolidation_mode_locks() -> None:
+def _release_serve_and_pool_consolidation_mode_locks() -> None:
     global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
     if _pool_consolidation_mode_lock is not None:
         _pool_consolidation_mode_lock.release()
@@ -221,7 +221,7 @@ def _release_serve_consolidation_mode_locks() -> None:
 
 
 atexit.register(_release_managed_job_consolidation_mode_lock)
-atexit.register(_release_serve_consolidation_mode_locks)
+atexit.register(_release_serve_and_pool_consolidation_mode_locks)
 
 
 def managed_job_status_refresh_event():

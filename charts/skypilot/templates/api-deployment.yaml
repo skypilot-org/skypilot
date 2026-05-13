@@ -72,6 +72,12 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
+        {{- /* Detect whether POD_IP is already declared in extraEnvs (e.g. */ -}}
+        {{- /* injected by a downstream chart) so we don't emit duplicates. */ -}}
+        {{- $podIpInExtraEnvs := false }}
+        {{- range concat (default (list) $.Values.global.extraEnvs) (default (list) .Values.apiService.extraEnvs) }}
+        {{- if eq .name "POD_IP" }}{{- $podIpInExtraEnvs = true }}{{- end }}
+        {{- end }}
         {{- with $.Values.global.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -168,6 +174,12 @@ spec:
             resourceFieldRef:
               containerName: skypilot-api
               resource: requests.memory
+        {{- if not $podIpInExtraEnvs }}
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
