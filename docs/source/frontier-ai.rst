@@ -57,7 +57,7 @@ For infra teams
    :align: center
    :width: 90%
 
-   GPU Manager: fleet-wide GPU health, allocation, and utilization, with auto-remediation and job recovery on detected faults.
+   GPU Manager: fleet-wide GPU health, and utilization, with auto-remediation and job recovery.
 
 📡 **Production-ready model serving** — High-performance, multi-cluster model serving with cache-aware routing, PD disaggregation, autoscaling, rolling updates, and TLS / API-key auth. Share GPU capacity dynamically between training and serving on the same fleet.
 
