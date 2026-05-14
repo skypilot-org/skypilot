@@ -343,13 +343,13 @@ def test_hook_relaunch_preserves_autostop(generic_cloud: str):
             # (2) Verify the cluster's autostop is set + autodown enabled.
             # `sky status` formats AUTOSTOP as "10 min(down)" when both
             # idle_minutes and down are set.
-            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?min\\(down\\)"',
+            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)"',
             # (3) Re-launch with hooks-only change — autostop block omitted.
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
             f'{updated_yaml}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # (4) Critical assertion: autostop is STILL "10 min(down)".
             # Pre-fix this would have been "-" (unset).
-            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?min\\(down\\)" || '
+            f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)" || '
             f'(echo "REGRESSION: autostop was wiped by hooks-only re-launch. '
             f'sky status output:" && echo "$out" && false)',
             # (5) Sanity: the new hook actually replaced the old one in the
@@ -672,7 +672,7 @@ def test_hook_config_hooks_yaml_round_trip_dryrun():
             # to the server, which re-loads. Pre-fix this raised the
             # `resources.hooks` rejection on the server because
             # Resources.to_yaml_config emitted hooks under resources.
-            f'SKYPILOT_DEBUG=0 sky launch --dryrun {yaml_path} 2>&1 | '
+            f'SKYPILOT_DEBUG=0 sky launch -y --dryrun {yaml_path} 2>&1 | '
             f'tee /tmp/dryrun_out.log && '
             # No error mentioning resources.hooks should fire.
             f'! grep -i "resources.hooks" /tmp/dryrun_out.log || '
