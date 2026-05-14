@@ -1181,7 +1181,8 @@ def tail_hook_logs(cluster_name: str,
 
 
 # TODO(zpoint): deprecated alias for tail_hook_logs(event='autostop').
-# Remove ~2 minors after the lifecycle-hooks framework ships.
+# Remove after v0.15.0 (aligned with the autostop.hook removal
+# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api

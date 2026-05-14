@@ -4,8 +4,9 @@ deprecated lifecycle-hooks surface. The canonical form is
 ``autostop.hook`` form from master is routed with a one-line stderr
 warning so existing YAMLs keep working.
 
-# TODO(zpoint): remove this module ~2 minors after the lifecycle-hooks
-# framework ships.
+# TODO(zpoint): remove this module after v0.15.0 (aligned with
+# the autostop.hook removal pinned at v0.15.0 in
+# sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 """
 
 AUTOSTOP_HOOK_YAML = (

@@ -2132,7 +2132,8 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
 
 
 # TODO(zpoint): deprecated alias for /hook_logs (event='autostop').
-# Remove ~2 minors after the lifecycle-hooks framework ships.
+# Remove after v0.15.0 (aligned with the autostop.hook removal
+# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 @app.post('/autostop_logs')
 async def autostop_logs(
     request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,

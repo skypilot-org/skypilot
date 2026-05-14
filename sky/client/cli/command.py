@@ -2584,8 +2584,9 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
-# TODO(zpoint): deprecated alias for --hook autostop. Remove ~2 minors
-# after the lifecycle-hooks framework ships.
+# TODO(zpoint): deprecated alias for --hook autostop. Remove after
+# v0.15.0 (aligned with the autostop.hook removal pinned at v0.15.0
+# in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 @click.option('--autostop',
               is_flag=True,
               default=False,
@@ -2691,8 +2692,9 @@ def logs(
     if cluster is None:
         raise click.UsageError("Missing argument 'CLUSTER'.")
     # --autostop is a deprecated alias for --hook autostop.
-    # TODO(zpoint): drop the --autostop branch ~2 minors after the
-    # lifecycle-hooks framework ships.
+    # TODO(zpoint): drop the --autostop branch after v0.15.0
+    # (aligned with the autostop.hook removal pinned at v0.15.0 in
+    # sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
     if autostop:
         if hook_event is not None and hook_event != '' and hook_event != (
                 'autostop'):

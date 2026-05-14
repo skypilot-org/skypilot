@@ -163,8 +163,9 @@ SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
 # tail_hook_logs(event='autostop') can fall back to it on clusters
-# launched before the lifecycle-hooks framework. Remove ~2 minors
-# after the framework ships.
+# launched before the lifecycle-hooks framework. Remove after v0.15.0
+# (aligned with the autostop.hook removal pinned at v0.15.0 in
+# sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
 # Lifecycle-hooks framework — per-event log directory on cluster nodes.

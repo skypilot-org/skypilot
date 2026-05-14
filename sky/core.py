@@ -598,9 +598,25 @@ def _start(
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
-            # Synthesize legacy hook/hook_timeout from the first
-            # autostop-matching hooks entry (backward-compat with the
-            # existing set_autostop wire format).
+            # `controller_resource.hooks` is populated only when the user
+            # wrote the legacy `autostop.hook` field under
+            # `*.controller.resources` in ~/.sky/config.yaml (master-compat
+            # surface — the new `hooks:` form is rejected at schema time
+            # by _get_controller_schema). Resources.from_yaml_config
+            # routes the legacy field into _hooks with events=[autostop].
+            #
+            # Pull it back out into the pre-v7 wire fields
+            # (`hook` / `hook_timeout`) so non-consolidated controllers
+            # running an older skylet (< SKYLET_LIB_VERSION 7) — i.e.
+            # controllers that haven't been re-launched since the client
+            # upgrade — still receive the hook via the legacy
+            # SetAutostop fields. AutostopCodeGen.set_autostop dual-emits
+            # both `hook` and `hooks`, so v7+ skylets get it via either
+            # path; this loop only matters for the v<7 case.
+            #
+            # TODO(zpoint): remove after v0.15.0 — aligned with the
+            # autostop.hook removal already pinned at v0.15.0 in
+            # sky/utils/schemas.py:_AUTOSTOP_SCHEMA.
             for entry in (controller_resource.hooks or []):
                 if 'autostop' in entry.get('events', []):
                     hook = entry['run']
@@ -1355,7 +1371,8 @@ def tail_logs(cluster_name: str,
 
 
 # TODO(zpoint): deprecated server-side handler bound to /autostop_logs.
-# Remove ~2 minors after the lifecycle-hooks framework ships.
+# Remove after v0.15.0 (aligned with the autostop.hook removal
+# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 @usage_lib.entrypoint
 def tail_autostop_logs(cluster_name: str,
                        follow: bool = True,

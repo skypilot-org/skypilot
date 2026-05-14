@@ -8,7 +8,7 @@ the trigger ingress.
 Concurrency: each node has its own file-lock on
 ``~/.sky/hooks/.teardown_claim``; `try_claim_teardown` is atomic
 across every process that can touch the node's filesystem. The
-guarantee is per-node (see termination_hook_design.md §1.6.5).
+guarantee is per-node.
 """
 import fcntl
 import os

@@ -1021,8 +1021,9 @@ class Resources:
         Returns (legacy_hook_entry_or_None, autostop_dict_without_legacy_keys).
         Emits a stderr deprecation warning when the legacy form is used.
 
-        # TODO(zpoint): remove this autostop.hook routing ~2 minors
-        # after the lifecycle-hooks framework ships.
+        # TODO(zpoint): remove this autostop.hook routing after v0.15.0
+        # — aligned with the autostop.hook
+        # removal pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA.
         """
         if not isinstance(autostop, dict):
             return None, autostop

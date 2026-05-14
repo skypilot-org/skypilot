@@ -1,8 +1,8 @@
 """Failing tests for the generalized lifecycle-hooks framework (PR1).
 
-Target surface from termination_hook_design.md + termination_hook_impl.md:
+Target surface:
 
-- `resources.hooks: [{run, events?, timeout?}]` where `events` is
+- `config.hooks: [{run, events?, timeout?}]` where `events` is
   optional and defaults to `[autostop, preemption, down]`.
 - Schema rejects empty `events`, duplicates, unknown event names,
   non-positive timeouts, unknown keys.
@@ -961,7 +961,7 @@ def test_schema_accepts_32_hooks():
 def test_cli_hook_auto_select_with_cluster_only(monkeypatch):
     """`sky logs --hook <cluster>` (no event) must auto-select.
 
-    Per termination_hook_design.md §1.4, ``--hook`` is optional-arg —
+    The CLI design lets ``--hook`` take an optional event —
     the cluster name immediately after means "auto-select whichever
     event log exists". Click parses options greedily, so without a
     smart callback ``--hook mycluster`` rejects ``mycluster`` as an

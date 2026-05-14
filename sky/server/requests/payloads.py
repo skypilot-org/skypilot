@@ -421,8 +421,9 @@ class ProvisionLogsBody(RequestBody):
     worker: Optional[int] = None
 
 
-# TODO(zpoint): deprecated alias for HookLogsBody. Remove ~2 minors
-# after the lifecycle-hooks framework ships.
+# TODO(zpoint): deprecated alias for HookLogsBody. Remove after v0.15.0
+# (aligned with the autostop.hook removal pinned at v0.15.0 in
+# sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 class AutostopLogsBody(RequestBody):
     """Autostop logs request body (deprecated alias for HookLogsBody)."""
     cluster_name: str
