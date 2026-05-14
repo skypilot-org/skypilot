@@ -23,6 +23,7 @@ export function PluginPageSlot({ name, fallback = null }) {
     return fallback;
   }
 
+  // Dev-only: the slot already deterministically picks the first registration, so surfacing this in production would just spam the console without changing behavior.
   if (components.length > 1 && process.env.NODE_ENV !== 'production') {
     // eslint-disable-next-line no-console
     console.warn(

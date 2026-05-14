@@ -15,7 +15,6 @@ afterEach(() => {
 
 describe('PluginPageSlot', () => {
   it('renders fallback when no plugins are registered', () => {
-    mockRegistered = [];
     render(
       <PluginPageSlot name="infra.page" fallback={<div>Fallback content</div>} />
     );
@@ -48,5 +47,25 @@ describe('PluginPageSlot', () => {
       expect.anything()
     );
     warn.mockRestore();
+  });
+
+  it('does not warn in production mode when more than one is registered', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const First = () => <div>First plugin</div>;
+      const Second = () => <div>Second plugin</div>;
+      mockRegistered = [
+        { id: 'plugin-a', component: First },
+        { id: 'plugin-b', component: Second },
+      ];
+      render(<PluginPageSlot name="infra.page" fallback={<div>Fallback</div>} />);
+      expect(screen.getByText('First plugin')).toBeInTheDocument();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      warn.mockRestore();
+    }
   });
 });
