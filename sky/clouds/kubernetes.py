@@ -578,7 +578,7 @@ class Kubernetes(clouds.Cloud):
                 # Get the container image ID from the service catalog.
                 image_id = catalog.get_image_id_from_tag(image_id,
                                                          clouds='kubernetes')
-                image_id = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:202605140114' if acc_count > 0 else 'us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:202605140114'  # pylint: disable=line-too-long
+                image_id = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:202605140618' if acc_count > 0 else 'us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:202605140114'  # pylint: disable=line-too-long
             return image_id
 
         image_id = _get_image_id(resources)
