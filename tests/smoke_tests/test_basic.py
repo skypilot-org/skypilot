@@ -1827,6 +1827,36 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+def test_launch_image_pull_back_off():
+    """The launch error message for an unresolvable image must contain the
+    Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
+    bare CrashLoopBackOff text from an older code path.
+
+    Regression test for the truthful-launching-reason fix
+    (docs/superpowers/specs/2026-05-14-launching-tooltip-reason-design.md)."""
+    name = smoke_tests_utils.get_cluster_name() + '-pull-fail'
+    image = 'nonexistent-registry.invalid/sky/missing:bad-tag'
+    test = smoke_tests_utils.Test(
+        'launch_image_pull_back_off',
+        [
+            # Launch into Kubernetes with an unresolvable image. We expect
+            # the launch to fail and stderr to contain the kubelet's pull
+            # failure reason. `|| true` lets us capture the failure exit
+            # code without aborting the script; we grep its stderr next.
+            f'OUT=$(sky launch -y -c {name} --infra kubernetes '
+            f'--image-id docker:{image} '
+            f'-- echo hi 2>&1) || true; '
+            f'echo "$OUT" | grep -E "ImagePullBackOff|ErrImagePull" || '
+            f'(echo "Expected ImagePullBackOff/ErrImagePull in launch '
+            f'output; got:" && echo "$OUT" && exit 1)',
+        ],
+        teardown=f'sky down -y {name} || true',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_get_nodes():
     """Test the correctness of get_kubernetes_nodes,
