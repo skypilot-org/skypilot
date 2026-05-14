@@ -67,7 +67,28 @@ if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi
 
-kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+# Under hostNetwork the pod shares the K8s node's net namespace, so its
+# sshd cannot bind to port 22 (the node's own sshd is there on managed
+# K8s; even on kind there's no SkyPilot-owned listener on 22 once the
+# probe rebinds). The host_network_probe writes the probed sshd port
+# to the cluster's <cluster>-ray-ports ConfigMap under sshd_<pod>;
+# discover it here so port-forward routes to the right pod-internal
+# port. Falls back to 22 for non-hostNetwork pods (the common case).
+POD_PORT=22
+HOST_NETWORK=$(kubectl "${KUBECTL_ARGS[@]}" get pod "${POD_NAME}" \
+    -o jsonpath='{.spec.hostNetwork}' 2>/dev/null)
+if [ "${HOST_NETWORK}" = "true" ]; then
+    # SkyPilot pod names are <cluster>-head or <cluster>-worker<N>.
+    CLUSTER_NAME=$(echo "${POD_NAME}" | sed -E 's/-head$//; s/-worker[0-9]+$//')
+    PROBED_PORT=$(kubectl "${KUBECTL_ARGS[@]}" get configmap \
+        "${CLUSTER_NAME}-ray-ports" \
+        -o jsonpath="{.data.sshd_${POD_NAME}}" 2>/dev/null)
+    if [ -n "${PROBED_PORT}" ]; then
+        POD_PORT="${PROBED_PORT}"
+    fi
+fi
+
+kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" ":${POD_PORT}" > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!
