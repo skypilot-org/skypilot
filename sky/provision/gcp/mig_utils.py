@@ -68,7 +68,7 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
         'provisioningModel': 'FLEX_START',
         'instanceTerminationAction': 'DELETE',
         'maxRunDuration': {
-            'seconds': managed_instance_group_config['run_duration'],
+            'seconds': str(managed_instance_group_config['run_duration']),
         },
         'onHostMaintenance': 'TERMINATE',
     }
@@ -141,7 +141,7 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
             'name': group_name,
             'resizeBy': resize_by,
             'requestedRunDuration': {
-                'seconds': run_duration,
+                'seconds': str(run_duration),
             }
         }).execute()
     return operation

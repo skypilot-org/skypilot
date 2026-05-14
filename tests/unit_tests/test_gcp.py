@@ -149,7 +149,7 @@ def test_gcp_mig_instance_template_uses_flex_start(monkeypatch):
         'provisioningModel': 'FLEX_START',
         'instanceTerminationAction': 'DELETE',
         'maxRunDuration': {
-            'seconds': 3600,
+            'seconds': '3600',
         },
         'onHostMaintenance': 'TERMINATE',
     }
