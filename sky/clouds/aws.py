@@ -1328,6 +1328,9 @@ class AWS(clouds.Cloud):
                 pass
 
         result = cls._sts_get_caller_identity()
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dir explicitly before writing.
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(result))
         return result

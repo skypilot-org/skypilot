@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -30,9 +31,25 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
-    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
-os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
+# Catalogs are a regeneratable cache, downloaded from the hosted catalog
+# mirror on first read. Route them through SKY_RUNTIME_DIR (per the
+# pattern documented at sky/skylet/constants.py:9-22) so they live on
+# the SKY_RUNTIME_DIR-rooted location rather than the user's $HOME. On
+# environments where $HOME is a shared NFS mount (e.g. Slurm), this
+# avoids both the SQLite-on-NFS class of issue and cross-user
+# collisions on the catalogs directory itself.
+#
+# Note: constants.CATALOG_DIR is kept at '~/.sky/catalogs' for the
+# remote_path used by get_modified_catalog_file_mounts() below, where
+# the '~' is expanded by the receiving controller pod's shell.
+_ABSOLUTE_VERSIONED_CATALOG_DIR = runtime_utils.get_runtime_dir_path(
+    os.path.join('.sky/catalogs', constants.CATALOG_SCHEMA_VERSION))
+# The catalog dir is created lazily at the call sites that actually
+# write a file (e.g. _update_catalog below, _get_az_mappings,
+# initialize_vsphere_data). Creating it eagerly at module load is
+# unnecessary FS contact, and on shared-NFS $HOME setups it used to
+# crash `import sky` outright if the dir existed but was owned by a
+# different user.
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -63,9 +80,11 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    catalog_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
-    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-    return catalog_path
+    # Pure path getter, no side effects. Callers that intend to write
+    # to the returned path must create the parent dir themselves. This
+    # keeps `import sky` (and read-only commands) from touching the
+    # filesystem when ~/.sky/catalogs is not writable by the caller.
+    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
 
 
 def is_catalog_modified(filename: str) -> bool:
@@ -115,10 +134,17 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_list = _get_modified_catalogs()
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
-        # Use relative paths for remote to handle varying usernames on the cloud
+        # remote_path stays as '~/.sky/catalogs/<version>/<catalog>' so the
+        # file_mounts upload lands at the controller pod's $HOME (controllers
+        # don't set SKY_RUNTIME_DIR, so its catalog lookup also resolves to
+        # $HOME via the default in runtime_utils.get_runtime_dir_path).
         remote_path = os.path.join(constants.CATALOG_DIR,
                                    constants.CATALOG_SCHEMA_VERSION, catalog)
-        local_path = os.path.expanduser(remote_path)
+        # local_path comes from the same SKY_RUNTIME_DIR-aware resolution
+        # used to populate _ABSOLUTE_VERSIONED_CATALOG_DIR above, so that
+        # locally-modified catalogs are picked up from wherever they
+        # actually live (which may be SKY_RUNTIME_DIR-rooted, not $HOME).
+        local_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, catalog)
         modified_catalog_path_map[remote_path] = local_path
     return modified_catalog_path_map
 
@@ -184,7 +210,9 @@ def read_catalog(filename: str,
         cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    # The meta dir is created lazily inside _update_catalog before the
+    # filelock is acquired; see comment on _ABSOLUTE_VERSIONED_CATALOG_DIR.
 
     def _need_update() -> bool:
         if not os.path.exists(catalog_path):
@@ -204,6 +232,10 @@ def read_catalog(filename: str,
         if not _need_update():
             return False
 
+        # The meta dir must exist before the filelock + md5 file write
+        # below. Create it lazily here so module-level read_catalog()
+        # calls remain side-effect-free on the filesystem.
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
         # Atomic check, to avoid conflicts with other processes.
         with filelock.FileLock(meta_path + '.lock'):
             # Double check after acquiring the lock.
