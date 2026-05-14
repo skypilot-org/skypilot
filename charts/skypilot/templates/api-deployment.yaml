@@ -65,9 +65,26 @@ spec:
       - name: skypilot-api
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
+        {{- if .Values.apiService.devMode.enabled }}
+        # Dev mode: fully open securityContext. Runs as root with all
+        # capabilities so the developer can attach py-spy / strace, edit
+        # site-packages, and restart the server, regardless of what the
+        # tenant configured. NEVER enable in production.
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_PTRACE
+            - SYS_ADMIN
+        {{- else }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- end }}
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
@@ -252,6 +269,11 @@ spec:
           done
           {{- end }}
 
+          {{- if .Values.apiService.devMode.enabled }}
+          # Dev mode: hold the container without starting the API server so a
+          # developer can drive `sky api start` / `sky api stop` via kubectl exec.
+          exec tail -f /dev/null
+          {{- else }}
           {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
           # Use a FIFO instead of a pipe so that exec replaces the shell,
@@ -262,8 +284,10 @@ spec:
           {{- else }}
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           {{- end }}
+          {{- end }}
         ports:
         - containerPort: 46580
+        {{- if not .Values.apiService.devMode.enabled }}
         {{- with .Values.apiService.livenessProbe }}
         livenessProbe:
           {{- toYaml . | nindent 10 }}
@@ -284,6 +308,7 @@ spec:
           {{- end }}
           {{- end }}
           {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- end }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}

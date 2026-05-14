@@ -217,6 +217,14 @@
                 "terminationGracePeriodSeconds": {
                     "type": "integer"
                 },
+                "devMode": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "tolerations": {
                     "type": "array"
                 },
