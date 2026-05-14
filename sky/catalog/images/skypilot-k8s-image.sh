@@ -9,7 +9,7 @@
 # Usage: ./skypilot-k8s-image.sh [-p] [-g] [-l] [-r region]
 # -p: Push the image to the registry
 # -g: Builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64
-# -l: Use latest tag instead of the date tag. Date tag is of the form YYYYMMDDHHMMSS
+# -l: Use latest tag instead of the date tag. Date tag is of the form YYYYMMDDHHMM
 # -r: Specify the region to be us, europe or asia
 region=us
 push=false
@@ -55,7 +55,7 @@ TAG=$region-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot
 if [[ $latest == "true" ]]; then
   VERSION_TAG=latest
 else
-  VERSION_TAG=$(date +%Y%m%d%H%M%S)
+  VERSION_TAG=$(date +%Y%m%d%H%M)
 fi
 
 # Add -gpu to the tag if the GPU image is being built
