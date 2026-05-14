@@ -1920,7 +1920,7 @@ def test_launch_oom_killed():
         resources:
           cloud: kubernetes
           cpus: 1
-          memory: 0.3
+          memory: 0.1
         config:
           kubernetes:
             pod_config:
@@ -1928,6 +1928,8 @@ def test_launch_oom_killed():
                 containers:
                   - name: ray-node
                     resources:
+                      requests:
+                        memory: 100Mi
                       limits:
                         memory: 256Mi
         run: |
