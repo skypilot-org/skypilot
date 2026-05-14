@@ -9,6 +9,7 @@ port from that ConfigMap (worker). Stdlib-only so it can run during the
 window when the pod's skypilot install is in flux.
 """
 import argparse
+import functools
 import json
 import os
 import socket
@@ -67,6 +68,21 @@ _HEAD_GCS_TCP_WAIT_INTERVAL_S = 1
 # (409 Conflict from stale resourceVersion).
 _MERGE_RETRY_LIMIT = 5
 
+# Per-request budget for K8s API calls. Without this, urlopen would
+# block forever on a hung API server and freeze the pod bootstrap.
+_K8S_API_TIMEOUT_S = 10
+
+
+@functools.lru_cache(maxsize=None)
+def _api_auth_token() -> str:
+    with open(_SA_TOKEN_PATH, encoding='utf-8') as f:
+        return f.read().strip()
+
+
+@functools.lru_cache(maxsize=None)
+def _api_ssl_context() -> ssl.SSLContext:
+    return ssl.create_default_context(cafile=_SA_CA_PATH)
+
 
 def _bind_ephemeral_port() -> Tuple[socket.socket, int]:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -102,10 +118,8 @@ def _k8s_api_request(
         body: Optional[Dict[str, Any]] = None) -> Tuple[int, bytes]:
     api_host = os.environ['KUBERNETES_SERVICE_HOST']
     api_port = os.environ['KUBERNETES_SERVICE_PORT']
-    with open(_SA_TOKEN_PATH, encoding='utf-8') as f:
-        token = f.read().strip()
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': f'Bearer {_api_auth_token()}',
         'Accept': 'application/json',
     }
     data: bytes = b''
@@ -113,13 +127,14 @@ def _k8s_api_request(
         data = json.dumps(body).encode('utf-8')
         headers['Content-Type'] = 'application/json'
     url = f'https://{api_host}:{api_port}{path}'
-    ctx = ssl.create_default_context(cafile=_SA_CA_PATH)
     req = urllib.request.Request(url,
                                  data=data if data else None,
                                  headers=headers,
                                  method=method)
     try:
-        with urllib.request.urlopen(req, context=ctx) as resp:  # noqa: S310
+        with urllib.request.urlopen(
+                req, context=_api_ssl_context(),
+                timeout=_K8S_API_TIMEOUT_S) as resp:  # noqa: S310
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
