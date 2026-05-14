@@ -261,7 +261,9 @@ service_account_token_table = sqlalchemy.Table(
     Base.metadata,
     sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('token_name', sqlalchemy.Text),
-    sqlalchemy.Column('token_hash', sqlalchemy.Text),
+    # Indexed + unique: the auth middleware looks up rows by hash on every
+    # request to enforce revocation/rotation/expiration.
+    sqlalchemy.Column('token_hash', sqlalchemy.Text, index=True, unique=True),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
@@ -2802,6 +2804,34 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     with orm.Session(engine) as session:
         row = session.query(service_account_token_table).filter_by(
             token_id=token_id).first()
+    if row is None:
+        return None
+    return {
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    }
+
+
+@metrics_lib.time_me
+def get_service_account_token_by_hash(
+        token_hash: str) -> Optional[Dict[str, Any]]:
+    """Get a service account token by its sha256 hash.
+
+    Used by the request-auth middleware: hashing the incoming bearer token
+    and matching against this column is what makes revocation and rotation
+    take effect (the DB row's hash is updated on rotation, so old JWTs
+    stop matching). Relies on the unique index on token_hash.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(service_account_token_table).filter_by(
+            token_hash=token_hash).first()
     if row is None:
         return None
     return {
