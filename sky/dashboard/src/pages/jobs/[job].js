@@ -743,6 +743,7 @@ function JobDetails() {
             <PluginSlot
               name="jobs.detail.nodes"
               context={{
+                jobId: detailJobData.id,
                 clusterName: detailJobData.current_cluster_name,
                 clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
                 nodeNames: detailJobData.node_names,
