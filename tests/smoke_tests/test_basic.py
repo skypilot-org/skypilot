@@ -1857,6 +1857,44 @@ def test_launch_image_pull_back_off():
 
 
 @pytest.mark.kubernetes
+def test_launch_create_container_config_error():
+    """The launch error for a pod referencing a non-existent ConfigMap/Secret
+    must surface CreateContainerConfigError (or CreateContainerError on some
+    k8s versions -- both indicate the same root cause)."""
+    name = smoke_tests_utils.get_cluster_name() + '-cfg-err'
+    yaml_body = textwrap.dedent("""\
+        resources:
+          cloud: kubernetes
+          cpus: 1
+        experimental:
+          config_overrides:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - name: ray-head
+                      envFrom:
+                        - secretRef:
+                            name: this-secret-definitely-does-not-exist
+        run: echo hi
+        """)
+    test = smoke_tests_utils.Test(
+        'launch_create_container_config_error',
+        [
+            f'cat > /tmp/{name}.yaml <<\'EOF\'\n{yaml_body}EOF',
+            f'OUT=$(sky launch -y -c {name} /tmp/{name}.yaml 2>&1) || true; '
+            f'echo "$OUT" | grep -E "CreateContainer(Config)?Error" || '
+            f'(echo "Expected CreateContainer(Config)?Error in launch '
+            f'output; got:" && echo "$OUT" && exit 1)',
+            f'rm -f /tmp/{name}.yaml',
+        ],
+        teardown=f'sky down -y {name} || true; rm -f /tmp/{name}.yaml',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_get_nodes():
     """Test the correctness of get_kubernetes_nodes,
