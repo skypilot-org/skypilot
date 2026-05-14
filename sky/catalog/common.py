@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -30,8 +31,20 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
-    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
+# Catalogs are a regeneratable cache (downloaded CSVs from the hosted
+# catalog mirror on first read). Route them through SKY_RUNTIME_DIR,
+# matching the pattern documented at sky/skylet/constants.py:9-22 for
+# other runtime artifacts (SQLite DBs, the skypilot-runtime venv,
+# miniconda, etc.). When SKY_RUNTIME_DIR is set, catalogs land off
+# the user's $HOME (the same reason the SQLite DBs migrated, to
+# avoid shared-NFS-home pitfalls); when it isn't,
+# runtime_utils.get_runtime_dir_path() falls back to '~', so
+# behavior is unchanged.
+#
+# constants.CATALOG_DIR ('~/.sky/catalogs') is intentionally kept for
+# the remote_path computed by get_modified_catalog_file_mounts() below.
+_ABSOLUTE_VERSIONED_CATALOG_DIR = runtime_utils.get_runtime_dir_path(
+    os.path.join('.sky/catalogs', constants.CATALOG_SCHEMA_VERSION))
 os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
@@ -115,10 +128,18 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_list = _get_modified_catalogs()
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
-        # Use relative paths for remote to handle varying usernames on the cloud
+        # remote_path stays as '~/.sky/catalogs/<version>/<catalog>' so the
+        # file_mounts upload lands at the controller pod's $HOME (controllers
+        # don't set SKY_RUNTIME_DIR, so the controller-side catalog lookup
+        # also resolves to $HOME via the default in
+        # runtime_utils.get_runtime_dir_path()).
         remote_path = os.path.join(constants.CATALOG_DIR,
                                    constants.CATALOG_SCHEMA_VERSION, catalog)
-        local_path = os.path.expanduser(remote_path)
+        # local_path comes from the SKY_RUNTIME_DIR-aware
+        # _ABSOLUTE_VERSIONED_CATALOG_DIR above, not expanduser(remote_path),
+        # so that locally-modified catalogs are picked up from wherever they
+        # actually live (which may be SKY_RUNTIME_DIR-rooted, not $HOME).
+        local_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, catalog)
         modified_catalog_path_map[remote_path] = local_path
     return modified_catalog_path_map
 
