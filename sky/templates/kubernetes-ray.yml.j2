@@ -545,8 +545,11 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% if k8s_host_network %}
             # Downward API rather than $HOSTNAME — hostNetwork pods
-            # inherit the host node's hostname.
+            # inherit the host node's hostname. Used by
+            # host_network_probe to key per-pod ConfigMap entries and
+            # set ownerReferences for GC.
             - name: SKYPILOT_POD_NAME
               valueFrom:
                 fieldRef:
@@ -555,6 +558,7 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.uid
+            {% endif %}
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
