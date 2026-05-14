@@ -2216,6 +2216,51 @@ def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
     return last_term.reason
 
 
+def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
+    """Tier-1 sweep: derive a pending reason from pod.status.container_statuses.
+
+    For each container in turn:
+      1. state.waiting: skip ContainerCreating/PodInitializing; on
+         CrashLoopBackOff, unmask via last_state.terminated; else return the
+         waiting reason.
+      2. state.terminated: if exit_code != 0, return terminated.reason.
+      3. last_state.terminated: if exit_code != 0 and reason present, return
+         it (race-window: container restarted between iterations).
+    If a container matches none of (1)-(3), advance to the next container.
+    Returns None only after exhausting all containers.
+
+    Returns a bare reason string (e.g. "OOMKilled", not "OOMKilled (exit 137)") --
+    the exit-code suffix is intentionally omitted because it adds cardinality
+    that defeats nop_if_duplicate dedup on the LAUNCH_PROGRESS event.
+    """
+    container_statuses = getattr(pod.status, 'container_statuses', None) or []
+    for cs in container_statuses:
+        # 1. state.waiting
+        waiting = cs.state.waiting if cs.state else None
+        if waiting is not None:
+            if waiting.reason in ('ContainerCreating', 'PodInitializing'):
+                # Transient; fall through to checks 2/3 on this container.
+                pass
+            elif waiting.reason == 'CrashLoopBackOff':
+                unmasked = _unmask_crashloopbackoff_reason(cs)
+                return unmasked or 'CrashLoopBackOff'
+            else:
+                return waiting.reason
+
+        # 2. state.terminated (currently terminated, between restarts)
+        terminated = cs.state.terminated if cs.state else None
+        if terminated is not None and terminated.exit_code != 0:
+            return terminated.reason or 'Terminated'
+
+        # 3. last_state.terminated (previous run terminated badly)
+        last_term = cs.last_state.terminated if cs.last_state else None
+        if (last_term is not None and last_term.exit_code != 0 and
+                last_term.reason):
+            return last_term.reason
+
+    return None
+
+
 def _get_pod_pending_reason(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.

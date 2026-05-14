@@ -2105,3 +2105,124 @@ class TestUnmaskCrashloopbackoffReason:
             last_terminated=mock.MagicMock(reason='Error', exit_code=1),
         )
         assert instance._unmask_crashloopbackoff_reason(cs) == 'Error'
+
+
+class TestGetPodPendingReasonFromContainerStatus:
+    """Tier-1 sweep over pod.status.container_statuses. Per-container first-match
+    wins; iterates state.waiting (skipping ContainerCreating/PodInitializing),
+    then state.terminated, then last_state.terminated."""
+
+    @staticmethod
+    def _cs(*,
+            waiting=None,
+            terminated=None,
+            last_terminated=None,
+            running=False,
+            ready=False):
+        """Build a V1ContainerStatus-shaped mock."""
+        cs = mock.MagicMock()
+        cs.ready = ready
+        cs.state = mock.MagicMock()
+        cs.state.waiting = waiting
+        cs.state.terminated = terminated
+        cs.state.running = mock.MagicMock() if running else None
+        cs.last_state = mock.MagicMock()
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    @staticmethod
+    def _pod(container_statuses):
+        pod = mock.MagicMock()
+        pod.status = mock.MagicMock()
+        pod.status.container_statuses = container_statuses
+        return pod
+
+    def test_healthy_returns_none(self):
+        cs = self._cs(running=True, ready=True)
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_waiting_image_pull_back_off(self):
+        cs = self._cs(waiting=mock.MagicMock(reason='ImagePullBackOff',
+                                             message='Back-off pulling image'))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'ImagePullBackOff'
+
+    def test_waiting_container_creating_returns_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='ContainerCreating', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_waiting_pod_initializing_returns_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='PodInitializing', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_crashloopbackoff_unmasks_oomkilled(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                   message='back-off 5m0s'),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'OOMKilled'
+
+    def test_crashloopbackoff_without_last_state_falls_back(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                   message='back-off 5m0s'),
+            last_terminated=None,
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'CrashLoopBackOff'
+
+    def test_terminated_non_zero_exit(self):
+        cs = self._cs(terminated=mock.MagicMock(reason='Error', exit_code=1))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'Error'
+
+    def test_terminated_non_zero_exit_no_reason(self):
+        cs = self._cs(terminated=mock.MagicMock(reason=None, exit_code=139))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'Terminated'
+
+    def test_last_state_terminated_with_running_current(self):
+        # Race-window case: container restarted, current state Running, but
+        # last_state.terminated carries the OOM signal.
+        cs = self._cs(
+            running=True,
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'OOMKilled'
+
+    def test_last_state_terminated_completed_clean_exit_returns_none(self):
+        # Negative test: a cleanly-completed previous exit must NOT be
+        # surfaced as a pending reason.
+        cs = self._cs(
+            running=True,
+            last_terminated=mock.MagicMock(reason='Completed', exit_code=0),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_multi_container_returns_earliest_status_array_match(self):
+        # Walks pod.status.container_statuses in native array order
+        # (= pod-manifest spec order per k8s API).
+        healthy = self._cs(running=True, ready=True)
+        bad = self._cs(
+            waiting=mock.MagicMock(reason='ImagePullBackOff', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([healthy, bad])) == 'ImagePullBackOff'
+
+    def test_no_container_statuses_returns_none(self):
+        pod = self._pod(None)
+        assert instance._get_pod_pending_reason_from_container_status(
+            pod) is None
+
+    def test_empty_container_statuses_returns_none(self):
+        pod = self._pod([])
+        assert instance._get_pod_pending_reason_from_container_status(
+            pod) is None
