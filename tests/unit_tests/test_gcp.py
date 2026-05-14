@@ -10,6 +10,7 @@ from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.clouds import Region
 from sky.clouds import Zone
+from sky.clouds import gcp as gcp_cloud
 from sky.clouds.gcp import GCP
 from sky.clouds.utils import gcp_utils
 from sky.provision import common
@@ -153,6 +154,27 @@ def test_gcp_mig_instance_template_uses_flex_start(monkeypatch):
         },
         'onHostMaintenance': 'TERMINATE',
     }
+
+
+def test_gcp_check_quota_skips_for_managed_instance_group(monkeypatch):
+    """DWS/Flex-start should not be blocked by on-demand quota precheck."""
+    resources_obj = resources.Resources(cloud=GCP(),
+                                        region='us-central1',
+                                        accelerators={'A100-80GB': 1})
+    monkeypatch.setattr(
+        skypilot_config,
+        'get_effective_region_config',
+        lambda *args, **kwargs: {
+            'run_duration': 600,
+        },
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError('Quota subprocess should not be called for DWS.')
+
+    monkeypatch.setattr(gcp_cloud.subprocess_utils, 'run', fail_if_called)
+
+    assert GCP.check_quota_available(resources_obj) is True
 
 
 @pytest.mark.parametrize(

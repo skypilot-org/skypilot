@@ -1384,6 +1384,19 @@ class GCP(clouds.Cloud):
         accelerator = list(resources.accelerators.keys())[0]
         use_spot = resources.use_spot
         region = resources.region
+        managed_instance_group_config = (
+            skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=region,
+                keys=('managed_instance_group',),
+                default_value=None,
+                override_configs=resources.cluster_config_overrides))
+        if managed_instance_group_config is not None:
+            # Flex-start VMs use DWS and may consume preemptible quota, or
+            # standard quota for projects that have never requested preemptible
+            # quota. Avoid incorrectly failing early on the on-demand quota
+            # check and let the DWS resize request handle quota/capacity.
+            return True
 
         # pylint: disable=import-outside-toplevel
         from sky.catalog import gcp_catalog
