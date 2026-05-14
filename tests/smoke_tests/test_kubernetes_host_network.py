@@ -220,6 +220,6 @@ def test_kubernetes_host_network_multi_node():
         ],
         teardown=(f'sky down -y {name_anchor}; sky down -y {name_multi}; '
                   f'rm -f {cfg_anchor} {cfg_multi}'),
-        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+        timeout=5 * 60,
     )
     smoke_tests_utils.run_one_test(test)
