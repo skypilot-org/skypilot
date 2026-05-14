@@ -725,7 +725,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     f'{pod.metadata.name}. Error details: {msg}.')
 
     def _inspect_pod_status(pod):
-        # Check if pod is terminated/preempted/failed.
+        # Check if pod is terminated/preempted/failed (unchanged).
         if (pod.metadata.deletion_timestamp is not None or
                 pod.status.phase == 'Failed'):
             # Get the reason and write to cluster events before
@@ -738,40 +738,54 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 f'Pod {pod.metadata.name} failed: {condensed}')
 
         container_statuses = pod.status.container_statuses
-        # Continue if pod and all the containers within the
-        # pod are successfully created and running.
+        # Happy path: pod Running and every container Running (unchanged).
         if (pod.status.phase == 'Running' and container_statuses is not None and
                 all(container.state.running
                     for container in container_statuses)):
             return True, None
 
-        reason: Optional[str] = None
-        if pod.status.phase == 'Pending':
-            pending_reason = _get_pod_pending_reason(context, namespace,
-                                                     pod.metadata.name)
-            if pending_reason is not None:
-                reason, message = pending_reason
-                logger.debug(f'Pod {pod.metadata.name} is pending: '
-                             f'{reason}: {message}')
+        # Tier 1: container-status sweep. Computed once, consumed in both
+        # branches below.
+        container_reason = _get_pod_pending_reason_from_container_status(pod)
 
-            # Iterate over each container in pod to check their status
+        if pod.status.phase == 'Pending':
+            # Today's raise block -- control flow preserved, message enriched
+            # via _unmask_crashloopbackoff_reason when the waiting state is
+            # CrashLoopBackOff. msg body (waiting.message) is always preserved.
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    # If the container wasn't in 'ContainerCreating'
-                    # state, then we know pod wasn't scheduled or
-                    # had some other error, such as image pull error.
-                    # See list of possible reasons for waiting here:
-                    # https://stackoverflow.com/a/57886025
                     waiting = container_status.state.waiting
-                    if waiting is not None:
-                        if waiting.reason == 'PodInitializing':
-                            _check_init_containers(pod)
-                        elif waiting.reason != 'ContainerCreating':
-                            msg = waiting.message if (
-                                waiting.message) else str(waiting)
-                            raise config_lib.KubernetesError(
-                                f'{waiting.reason}: {msg}')
-        return False, reason
+                    if waiting is None:
+                        continue
+                    if waiting.reason == 'PodInitializing':
+                        _check_init_containers(pod)
+                    elif waiting.reason != 'ContainerCreating':
+                        msg = waiting.message if (
+                            waiting.message) else str(waiting)
+                        unmasked = _unmask_crashloopbackoff_reason(
+                            container_status)
+                        reason_text = (unmasked if unmasked is not None else
+                                       waiting.reason)
+                        raise config_lib.KubernetesError(
+                            f'{reason_text}: {msg}')
+
+            # Tier 1 wins; fall back to Tier 2/3 events (semantics changed --
+            # see _get_pod_pending_reason: Warning beats Normal regardless
+            # of timestamp).
+            reason: Optional[str] = container_reason
+            if reason is None:
+                pending_reason = _get_pod_pending_reason(
+                    context, namespace, pod.metadata.name)
+                if pending_reason is not None:
+                    reason, message = pending_reason
+                    logger.debug(f'Pod {pod.metadata.name} is pending: '
+                                 f'{reason}: {message}')
+            return False, reason
+
+        # phase == 'Running' but not all containers running (e.g. one is in
+        # CrashLoopBackOff). Surface tier-1's pending reason. Today this
+        # returns (False, None) silently; after, we surface OOMKilled/etc.
+        return False, container_reason
 
     missing_pods_retry = 0
     last_status_msg: Optional[str] = None

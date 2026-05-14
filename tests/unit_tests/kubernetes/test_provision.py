@@ -2327,3 +2327,193 @@ class TestGetPodPendingReasonTieredEventFilter:
 
         monkeypatch.setattr(instance, '_get_pod_events', raise_for_events)
         assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
+
+class TestInspectPodStatusTierIntegration:
+    """End-to-end behavior of _inspect_pod_status with the new tier-1 helper.
+
+    These tests exercise the closure indirectly by driving _wait_for_pods_to_run
+    with scripted pod objects. They lock in:
+    - Running-but-not-all-running pods now surface a pending reason instead of
+      returning (False, None).
+    - The Pending-raise path enriches the message via _unmask_crashloopbackoff_reason.
+    """
+
+    @staticmethod
+    def _make_pod(*,
+                  name='pod-0',
+                  phase,
+                  container_statuses,
+                  cluster_name_on_cloud='cn-on-cloud'):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        pod.status.phase = phase
+        pod.status.container_statuses = container_statuses
+        return pod
+
+    @staticmethod
+    def _cs(*,
+            waiting=None,
+            terminated=None,
+            last_terminated=None,
+            running=False,
+            ready=False):
+        cs = mock.MagicMock()
+        cs.ready = ready
+        cs.state.waiting = waiting
+        cs.state.terminated = terminated
+        cs.state.running = mock.MagicMock() if running else None
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    def _drive_one_iteration(self, monkeypatch, pod, then_running=True):
+        """Drive _wait_for_pods_to_run one iteration. Patches the API
+        list-pods call and the parallel-map. Returns the captured
+        add_cluster_event mock so tests can assert on emits.
+
+        If `then_running` is True, the second iteration returns an all-Running
+        pod so the loop exits cleanly.
+        """
+        # Second iteration: all containers running, all pods running → exit.
+        healthy_pod = self._make_pod(
+            phase='Running',
+            container_statuses=[self._cs(running=True, ready=True)],
+            name=pod.metadata.name,
+        )
+        core_api = mock.MagicMock()
+        call_count = {'n': 0}
+
+        def _list_pods(*a, **kw):
+            call_count['n'] += 1
+            return mock.MagicMock(
+                items=[pod if call_count['n'] == 1 else healthy_pod])
+
+        core_api.list_namespaced_pod.side_effect = _list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        # _inspect_pod_status is the function passed to run_in_parallel.
+        # We let the real function run by invoking fn(pod) inside our patch.
+        def _run_in_parallel(fn, items, n):
+            return [fn(p) for p in items]
+
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            _run_in_parallel)
+
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+        return add_event
+
+    def test_running_pod_with_crashloopbackoff_emits_oomkilled(
+            self, monkeypatch):
+        """phase=Running, container in CrashLoopBackOff + last_state OOMKilled.
+        Today this returns (False, None) and no LAUNCH_PROGRESS row is emitted.
+        After: emits a LAUNCH_PROGRESS row whose reason contains 'OOMKilled'."""
+        pod = self._make_pod(
+            phase='Running',
+            container_statuses=[
+                self._cs(
+                    waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                           message='back-off 5m0s'),
+                    last_terminated=mock.MagicMock(reason='OOMKilled',
+                                                   exit_code=137),
+                )
+            ],
+        )
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert 'OOMKilled' in lp_calls[0].kwargs['reason']
+        assert 'CrashLoopBackOff' not in lp_calls[0].kwargs['reason']
+
+    def test_pending_pod_with_crashloopbackoff_raises_enriched(
+            self, monkeypatch):
+        """phase=Pending, container in CrashLoopBackOff. Today raises
+        'CrashLoopBackOff: <msg>'. After: raises 'OOMKilled: <msg>'
+        (msg preserved). The bare 'CrashLoopBackOff' substring must NOT
+        appear because kubelet's waiting.message text is lowercased
+        'back-off Xs restarting failed container=...'."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(
+                    waiting=mock.MagicMock(
+                        reason='CrashLoopBackOff',
+                        message='back-off 5m0s restarting failed '
+                        'container=ray pod=foo',
+                    ),
+                    last_terminated=mock.MagicMock(reason='OOMKilled',
+                                                   exit_code=137),
+                )
+            ],
+        )
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            self._drive_one_iteration(monkeypatch, pod, then_running=False)
+        err = str(excinfo.value)
+        assert 'OOMKilled' in err
+        assert 'back-off 5m0s' in err
+        assert 'CrashLoopBackOff' not in err
+
+    def test_pending_pod_with_image_pull_back_off_raises_preserves_message(
+            self, monkeypatch):
+        """phase=Pending, ImagePullBackOff. Today raises 'ImagePullBackOff: <msg>'
+        and the message body (e.g. registry URL) is the critical debug info.
+        Verify it's preserved unchanged after the refactor."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(waiting=mock.MagicMock(
+                    reason='ImagePullBackOff',
+                    message='Back-off pulling image "registry.example/foo:bar": '
+                    'connection refused',
+                ))
+            ],
+        )
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            self._drive_one_iteration(monkeypatch, pod, then_running=False)
+        err = str(excinfo.value)
+        assert err.startswith('ImagePullBackOff:')
+        assert 'connection refused' in err
+        assert 'registry.example/foo:bar' in err
+
+    def test_pending_pod_container_creating_does_not_raise(self, monkeypatch):
+        """phase=Pending, ContainerCreating: tier-1 returns None, tier-2/3
+        consulted, no raise. Smoke check that the happy in-flight case still
+        loops."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(waiting=mock.MagicMock(reason='ContainerCreating',
+                                                message=''))
+            ],
+        )
+        # No events → tier-2 and tier-3 also return None.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        # Bare 'Launching' status text is skipped per the existing guard at
+        # instance.py:845. So no LAUNCH_PROGRESS row.
+        assert lp_calls == []
