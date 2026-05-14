@@ -345,8 +345,10 @@ def test_hook_relaunch_preserves_autostop(generic_cloud: str):
             # idle_minutes and down are set.
             f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)"',
             # (3) Re-launch with hooks-only change — autostop block omitted.
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
-            f'{updated_yaml}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Don't use VALIDATE_LAUNCH_OUTPUT here: with `--fast` on a
+            # re-launch the setup/run markers it expects are suppressed.
+            # All we need to verify is the command exits 0.
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast {updated_yaml}',
             # (4) Critical assertion: autostop is STILL "10 min(down)".
             # Pre-fix this would have been "-" (unset).
             f'out=$(sky status {name}) && echo "$out" | grep -E "10 ?(m|min) ?\\(down\\)" || '
