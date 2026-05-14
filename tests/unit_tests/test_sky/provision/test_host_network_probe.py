@@ -11,6 +11,7 @@ The probe module's ConfigMap publish/poll paths require a live K8s API
 and are exercised by smoke tests instead.
 """
 import base64
+import gzip
 import re
 import socket
 
@@ -90,8 +91,8 @@ class TestRayStartCommands:
         # No-op shell branch unless both env vars are set on the pod.
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
         assert '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]' in cmd
-        assert (f'| base64 -d > {instance_setup._HOST_NETWORK_PROBE_TARGET}'
-                in cmd)
+        assert (f'| base64 -d | gunzip > '
+                f'{instance_setup._HOST_NETWORK_PROBE_TARGET}') in cmd
         assert '--mode head' in cmd
 
     def test_worker_prepended_probe_uses_worker_mode(self):
@@ -99,8 +100,8 @@ class TestRayStartCommands:
                                                       custom_ray_options=None,
                                                       no_restart=False)
         assert 'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]' in cmd
-        assert (f'| base64 -d > {instance_setup._HOST_NETWORK_PROBE_TARGET}'
-                in cmd)
+        assert (f'| base64 -d | gunzip > '
+                f'{instance_setup._HOST_NETWORK_PROBE_TARGET}') in cmd
         assert '--mode worker' in cmd
 
     def test_probe_command_has_no_unencoded_newlines(self):
@@ -119,9 +120,16 @@ class TestRayStartCommands:
                                                     custom_ray_options=None)
         m = re.search(r"echo '([A-Za-z0-9+/=]+)' \| base64 -d", cmd)
         assert m is not None
-        decoded = base64.b64decode(m.group(1)).decode('utf-8')
+        # The payload is minified + gzipped before b64'ing to keep the
+        # rendered cluster YAML small. The bash counterpart pipes
+        # `base64 -d | gunzip`.
+        decoded = gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
+        # Minification must preserve identifiers and module structure
+        # — the probe still needs --mode head and --mode worker entry
+        # points and a parseable AST.
         assert 'def _run_head' in decoded
         assert 'def _run_worker' in decoded
+        compile(decoded, '<probe>', 'exec')
 
     def test_worker_keeps_existing_object_manager_default(self):
         cmd = instance_setup.ray_worker_start_command(custom_resource=None,

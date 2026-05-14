@@ -2,6 +2,7 @@
 import base64
 from concurrent import futures
 import functools
+import gzip
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
+from sky.utils import source_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -56,8 +58,13 @@ _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 def _read_host_network_probe_b64() -> str:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'kubernetes', 'host_network_probe.py')
-    with open(path, 'rb') as f:
-        return base64.b64encode(f.read()).decode('ascii')
+    with open(path, 'r', encoding='utf-8') as f:
+        source = f.read()
+    minified = source_utils.minify_python_source(source)
+    # Sanity-check: minified source must still parse.
+    compile(minified, path, 'exec')
+    compressed = gzip.compress(minified.encode('utf-8'))
+    return base64.b64encode(compressed).decode('ascii')
 
 
 _HOST_NETWORK_PROBE_B64 = _read_host_network_probe_b64()
@@ -77,19 +84,20 @@ def _host_network_probe_cmd(mode: str) -> str:
     sshd silently failed to bind in apt-ssh-setup; rewriting Port in
     sshd_config and restarting picks up the probed port instead.
 
-    The probe is shipped base64-inline rather than invoked as a module
-    because the K8s template installs stable skypilot from PyPI before
-    ray_head_start_command runs (the dev wheel ships later), so neither
-    `python -m sky.provision.kubernetes.host_network_probe` nor a
-    site-packages file lookup is reliable at probe time. The b64 form
+    The probe is shipped gzip+base64-inline rather than invoked as a
+    module because the K8s template installs stable skypilot from PyPI
+    before ray_head_start_command runs (the dev wheel ships later), so
+    neither `python -m sky.provision.kubernetes.host_network_probe` nor
+    a site-packages file lookup is reliable at probe time. The b64 form
     also keeps the payload on a single line, which is required to stay
-    inside the rendered YAML's block-scalar indentation.
+    inside the rendered YAML's block-scalar indentation. Gzip cuts the
+    payload by ~4x; the source on disk stays readable.
     """
     assert mode in ('head', 'worker'), mode
     return (
         'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
         '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-        f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d > '
+        f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d | gunzip > '
         f'{_HOST_NETWORK_PROBE_TARGET}; '
         f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
         f'--mode {mode} '
