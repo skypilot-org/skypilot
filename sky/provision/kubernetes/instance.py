@@ -2252,9 +2252,10 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
     If a container matches none of (1)-(3), advance to the next container.
     Returns None only after exhausting all containers.
 
-    Returns a bare reason string (e.g. "OOMKilled", not "OOMKilled (exit 137)") --
-    the exit-code suffix is intentionally omitted because it adds cardinality
-    that defeats nop_if_duplicate dedup on the LAUNCH_PROGRESS event.
+    Returns a bare reason string (e.g. "OOMKilled", not
+    "OOMKilled (exit 137)") -- the exit-code suffix is intentionally omitted
+    because it adds cardinality that defeats nop_if_duplicate dedup on the
+    LAUNCH_PROGRESS event.
     """
     container_statuses = getattr(pod.status, 'container_statuses', None) or []
     for cs in container_statuses:
