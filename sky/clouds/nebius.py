@@ -387,6 +387,7 @@ class Nebius(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_static_ip_address': use_static_ip_address,
             'region': region.name,
+            'project_id': utils.get_project_by_region(region.name),
             'image_id': image_id,
             # Nebius does not support specific zones.
             'zones': None,

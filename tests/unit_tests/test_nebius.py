@@ -47,9 +47,14 @@ class TestNebiusNetworkTier:
         # Should NOT have CUSTOM_NETWORK_TIER as unsupported
         assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER not in unsupported_features
 
+    @patch('sky.provision.nebius.utils.get_project_by_region',
+           return_value='test-project-id')
     @patch('sky.skypilot_config.get_nested')
-    def test_no_infiniband_options_without_docker(self, mock_get_nested):
+    def test_no_infiniband_options_without_docker(self, mock_get_nested,
+                                                  mock_get_project):
         """Test that InfiniBand options are not added without Docker image."""
+        del mock_get_project  # unused: stops make_deploy_resources_variables
+        # from hitting the Nebius IAM API in unit-test environments.
         mock_get_nested.return_value = []  # No filesystems
 
         # Create resources with H200:8, network_tier=best, but NO Docker image
@@ -82,10 +87,14 @@ class TestNebiusNetworkTier:
         assert '--device=/dev/infiniband' not in docker_options
         assert '--cap-add=IPC_LOCK' not in docker_options
 
+    @patch('sky.provision.nebius.utils.get_project_by_region',
+           return_value='test-project-id')
     @patch('sky.skypilot_config.get_nested')
     def test_no_infiniband_options_without_network_tier_best(
-            self, mock_get_nested):
+            self, mock_get_nested, mock_get_project):
         """Test that InfiniBand options are not added without network_tier=best."""
+        del mock_get_project  # unused: stops make_deploy_resources_variables
+        # from hitting the Nebius IAM API in unit-test environments.
         mock_get_nested.return_value = []  # No filesystems
 
         # Create resources with H200:8, Docker image, but NO network_tier=best
