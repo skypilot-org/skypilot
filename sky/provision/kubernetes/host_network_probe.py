@@ -331,7 +331,9 @@ def _run_worker(env_file: str, configmap_name: str,
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # No description: __doc__ is stripped by source_utils.minify_python_source
+    # before the script is inlined into the pod bootstrap.
+    parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['head', 'worker'], required=True)
     parser.add_argument('--env-file',
                         required=True,
