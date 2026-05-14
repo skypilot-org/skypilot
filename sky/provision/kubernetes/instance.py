@@ -62,8 +62,13 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
-COMMON_NON_PENDING_EVENT_REASONS = {
-    'Scheduled', 'Created', 'Started', 'Failed', 'Pulled'
+# Normal-type pod events that represent slow, legitimately-in-flight steps
+# whose state.waiting.reason is the uninformative 'ContainerCreating'.
+# Consulted only as a fallback when no Warning-type event is present.
+_PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
+    'Pulling',  # kubelet pulling image (can be minutes for large images)
+    'Provisioning',  # external CSI provisioner creating a PV
+    'WaitForFirstConsumer',  # late-binding storage class
 }
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
@@ -2265,8 +2270,15 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
 
-    Returns a (reason, message) tuple about why the pod is pending (e.g.,
-    ("FailedMount", "hostPath type check failed")) or None if no reason found.
+    Two-pass scan over the event list (sorted newest-first by _get_pod_events):
+      1. Tier 2 -- return the newest event with event.type == 'Warning'.
+      2. Tier 3 -- return the newest event whose reason is in
+         _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
+    Warnings always beat allow-listed Normals, regardless of timestamp ordering
+    in the event window -- a FailedScheduling Warning is a more truthful pending
+    reason than a Pulling Normal from a doomed retry.
+
+    Returns a (reason, message) tuple, or None if neither pass matches.
     """
     try:
         pod_events = _get_pod_events(context, namespace, pod_name)
@@ -2277,15 +2289,15 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
+    # Tier 2: Warning events.
     for event in pod_events:
-        # Omit common events that does not indicate a pending reason.
-        # We could also filter by event type 'Warning' or 'Error',
-        # but there might be useful 'Normal' events such as pulling
-        # image that we want to surface to the user.
-        if event.reason not in COMMON_NON_PENDING_EVENT_REASONS:
-            reason = event.reason or 'Unknown'
-            message = event.message or ''
-            return reason, message
+        if event.type == 'Warning':
+            return event.reason or 'Unknown', event.message or ''
+
+    # Tier 3: allow-listed Normal events.
+    for event in pod_events:
+        if event.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST:
+            return event.reason, event.message or ''
 
     return None
 

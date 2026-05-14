@@ -2226,3 +2226,104 @@ class TestGetPodPendingReasonFromContainerStatus:
         pod = self._pod([])
         assert instance._get_pod_pending_reason_from_container_status(
             pod) is None
+
+
+class TestGetPodPendingReasonTieredEventFilter:
+    """Two-pass scan: Warning events first (regardless of timestamp),
+    then a small allow-list of slow Normal events."""
+
+    @staticmethod
+    def _event(reason: str, event_type: str = 'Normal', message: str = ''):
+        ev = mock.MagicMock()
+        ev.reason = reason
+        ev.type = event_type
+        ev.message = message
+        return ev
+
+    def _patch_events(self, monkeypatch, events):
+        monkeypatch.setattr(instance, '_get_pod_events',
+                            lambda *a, **kw: events)
+
+    def test_no_events_returns_none(self, monkeypatch):
+        self._patch_events(monkeypatch, [])
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'pod-0') is None
+
+    def test_warning_wins_over_normal_regardless_of_age(self, monkeypatch):
+        # Newest event (index 0) is a Normal Pulling, older event is a
+        # Warning FailedScheduling. Warning must win.
+        events = [
+            self._event('Pulling', 'Normal', 'Pulling image "foo:bar"'),
+            self._event('FailedScheduling', 'Warning',
+                        '0/3 nodes are available: insufficient cpu.'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'FailedScheduling',
+            '0/3 nodes are available: insufficient cpu.',
+        )
+
+    def test_allow_listed_normal_returned_when_no_warning(self, monkeypatch):
+        events = [self._event('Pulling', 'Normal', 'Pulling image "foo:bar"')]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns', 'p') == ('Pulling', 'Pulling image "foo:bar"')
+
+    def test_non_allow_listed_normal_returns_none(self, monkeypatch):
+        # SuccessfulAttachVolume is the canonical false-positive we're killing.
+        events = [
+            self._event('SuccessfulAttachVolume', 'Normal',
+                        'AttachVolume.Attach succeeded for volume "x"'),
+            self._event('Pulled', 'Normal', 'Successfully pulled image'),
+            self._event('Created', 'Normal', 'Created container ray-head'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
+    def test_provisioning_normal_returned(self, monkeypatch):
+        events = [
+            self._event('Provisioning', 'Normal',
+                        'External provisioner is provisioning volume')
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'Provisioning',
+            'External provisioner is provisioning volume',
+        )
+
+    def test_wait_for_first_consumer_normal_returned(self, monkeypatch):
+        events = [
+            self._event('WaitForFirstConsumer', 'Normal',
+                        'waiting for first consumer to be created'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'WaitForFirstConsumer',
+            'waiting for first consumer to be created',
+        )
+
+    def test_warning_returns_first_in_newest_first_order(self, monkeypatch):
+        # When multiple Warnings, return newest (index 0 in our list).
+        events = [
+            self._event('FailedScheduling', 'Warning', 'newer'),
+            self._event('FailedMount', 'Warning', 'older'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns',
+                                                'p') == ('FailedScheduling',
+                                                         'newer')
+
+    def test_empty_message_returns_empty_string_not_none(self, monkeypatch):
+        # Preserve the today-behavior of event.message or '' for the second
+        # tuple element.
+        events = [self._event('FailedScheduling', 'Warning', '')]
+        self._patch_events(monkeypatch, events)
+        result = instance._get_pod_pending_reason('ctx', 'ns', 'p')
+        assert result == ('FailedScheduling', '')
+
+    def test_events_fetch_failure_returns_none(self, monkeypatch):
+
+        def raise_for_events(*a, **kw):
+            raise Exception('kube API down')
+
+        monkeypatch.setattr(instance, '_get_pod_events', raise_for_events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
