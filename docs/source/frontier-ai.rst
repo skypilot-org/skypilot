@@ -90,7 +90,7 @@ For security and governance
 
 .. note::
 
-   SOC 2 is available.
+   SkyPilot Platform is SOC 2 compliant.
 
 ----
 
