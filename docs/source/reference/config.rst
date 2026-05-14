@@ -1293,13 +1293,13 @@ Example:
 Managed instance group / DWS (optional).
 
 SkyPilot supports launching instances in a managed instance group (MIG)
-which schedules the GPU instance creation through DWS, offering a better
-availability. This feature is only applied when a resource request
-contains GPU instances.
+with Flex-start provisioning through DWS, offering a better availability.
+This feature is only applied when a resource request contains GPU instances.
 
 ``run_duration``: Duration for a created instance to be kept alive (in seconds, required).
-This is required for the DWS to work properly. After the specified duration,
-the instance will be terminated.
+This is required for DWS Flex-start provisioning to work properly. After the
+specified duration, the instance will be terminated. The value must be between
+``600`` (10 minutes) and ``604800`` (7 days).
 
 ``provision_timeout``: Timeout for provisioning an instance by DWS (in seconds, optional).
 This timeout determines how long SkyPilot will wait for a managed instance

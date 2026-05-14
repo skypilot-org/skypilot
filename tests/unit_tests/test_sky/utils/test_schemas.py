@@ -682,6 +682,25 @@ class TestGCPSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.exceptions.ValidationError):
             jsonschema.validate(instance=config, schema=self.gcp_schema)
 
+    def test_gcp_managed_instance_group_run_duration_bounds(self):
+        """Test GCP MIG run_duration validates Flex-start bounds."""
+        for run_duration in (600, 3600, 604800):
+            config = {
+                'managed_instance_group': {
+                    'run_duration': run_duration,
+                },
+            }
+            jsonschema.validate(instance=config, schema=self.gcp_schema)
+
+        for run_duration in (599, 604801):
+            config = {
+                'managed_instance_group': {
+                    'run_duration': run_duration,
+                },
+            }
+            with self.assertRaises(jsonschema.exceptions.ValidationError):
+                jsonschema.validate(instance=config, schema=self.gcp_schema)
+
 
 class TestAzureSchema(unittest.TestCase):
     """Tests for the Azure config schema."""

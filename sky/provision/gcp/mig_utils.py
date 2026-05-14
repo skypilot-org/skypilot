@@ -54,15 +54,29 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                         credentials=None,
                         cache_discovery=False)
     config = node_config.copy()
-    config.pop(constants.MANAGED_INSTANCE_GROUP_CONFIG, None)
+    managed_instance_group_config = config.pop(
+        constants.MANAGED_INSTANCE_GROUP_CONFIG, None)
+    assert managed_instance_group_config is not None, (
+        'Managed instance group config is required for DWS.')
 
     # We have to ignore user defined scheduling for DWS.
-    # TODO: Add a warning log for this behvaiour.
+    # TODO: Add a warning log for this behaviour.
     scheduling = config.get('scheduling', {})
     assert scheduling.get('provisioningModel') != 'SPOT', (
         'DWS does not support spot VMs.')
+    config['scheduling'] = {
+        'provisioningModel': 'FLEX_START',
+        'instanceTerminationAction': 'DELETE',
+        'maxRunDuration': {
+            'seconds': managed_instance_group_config['run_duration'],
+        },
+        'onHostMaintenance': 'TERMINATE',
+    }
 
-    reservations_affinity = config.pop('reservation_affinity', None)
+    reservations_affinity = config.pop('reservationAffinity', None)
+    legacy_reservations_affinity = config.pop('reservation_affinity', None)
+    if reservations_affinity is None:
+        reservations_affinity = legacy_reservations_affinity
     if reservations_affinity is not None:
         logger.warning(
             f'Ignoring reservations_affinity {reservations_affinity} '

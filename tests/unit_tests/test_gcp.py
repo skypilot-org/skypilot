@@ -15,6 +15,7 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -103,6 +104,55 @@ def test_gcp_reservation_name():
         specific_reservation_required=True,
         zone='zone')
     assert r.name == 'projects/<project>/reservations/<reservation-name>'
+
+
+def test_gcp_mig_instance_template_uses_flex_start(monkeypatch):
+    compute = MagicMock()
+    insert = compute.regionInstanceTemplates.return_value.insert
+    insert.return_value.execute.return_value = {'name': 'operation'}
+    monkeypatch.setattr(
+        mig_utils.gcp,
+        'build',
+        lambda *args, **kwargs: compute,
+    )
+
+    node_config = {
+        gcp_constants.MANAGED_INSTANCE_GROUP_CONFIG: {
+            'run_duration': 3600,
+            'provision_timeout': 900,
+        },
+        'machineType': 'n1-standard-4',
+        'guestAccelerators': [{
+            'acceleratorType': 'nvidia-tesla-a100',
+            'acceleratorCount': 1,
+        }],
+        'scheduling': {
+            'onHostMaintenance': 'TERMINATE',
+        },
+        'reservationAffinity': {
+            'consumeReservationType': 'SPECIFIC_RESERVATION',
+        },
+    }
+
+    operation = mig_utils.create_region_instance_template(
+        'cluster', 'project', 'us-central1', 'template', node_config)
+
+    assert operation == {'name': 'operation'}
+    insert.assert_called_once()
+    body = insert.call_args.kwargs['body']
+    properties = body['properties']
+    assert gcp_constants.MANAGED_INSTANCE_GROUP_CONFIG not in properties
+    assert properties['reservationAffinity'] == {
+        'consumeReservationType': 'NO_RESERVATION',
+    }
+    assert properties['scheduling'] == {
+        'provisioningModel': 'FLEX_START',
+        'instanceTerminationAction': 'DELETE',
+        'maxRunDuration': {
+            'seconds': 3600,
+        },
+        'onHostMaintenance': 'TERMINATE',
+    }
 
 
 @pytest.mark.parametrize(
