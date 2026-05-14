@@ -1866,16 +1866,15 @@ def test_launch_create_container_config_error():
         resources:
           cloud: kubernetes
           cpus: 1
-        experimental:
-          config_overrides:
-            kubernetes:
-              pod_config:
-                spec:
-                  containers:
-                    - name: ray-head
-                      envFrom:
-                        - secretRef:
-                            name: this-secret-definitely-does-not-exist
+        config:
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - name: ray-node
+                    envFrom:
+                      - secretRef:
+                          name: this-secret-definitely-does-not-exist
         run: echo hi
         """)
     test = smoke_tests_utils.Test(
@@ -1922,16 +1921,15 @@ def test_launch_oom_killed():
           cloud: kubernetes
           cpus: 1
           memory: 0.3
-        experimental:
-          config_overrides:
-            kubernetes:
-              pod_config:
-                spec:
-                  containers:
-                    - name: ray-head
-                      resources:
-                        limits:
-                          memory: 256Mi
+        config:
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - name: ray-node
+                    resources:
+                      limits:
+                        memory: 256Mi
         run: |
           python3 -c "a = bytearray(1 << 30)"
         """)
