@@ -98,13 +98,15 @@ def test_kubernetes_host_network_coexistence():
 
             # 3. The probe must have assigned distinct GCS ports to the
             #    two heads. The env file written by the probe is the
-            #    authoritative source on each pod.
+            #    authoritative source on each pod. Single-quote the
+            #    ssh remote command so $SKYPILOT_RAY_PORT expands on
+            #    the pod, not on the local test runner.
             f'A_GCS=$(ssh {name_a} '
-            f'". /tmp/sky_host_network_ports.env && '
-            f'echo $SKYPILOT_RAY_PORT") && '
+            f'\'. /tmp/sky_host_network_ports.env && '
+            f'echo $SKYPILOT_RAY_PORT\') && '
             f'B_GCS=$(ssh {name_b} '
-            f'". /tmp/sky_host_network_ports.env && '
-            f'echo $SKYPILOT_RAY_PORT") && '
+            f'\'. /tmp/sky_host_network_ports.env && '
+            f'echo $SKYPILOT_RAY_PORT\') && '
             f'echo "A_GCS=$A_GCS B_GCS=$B_GCS" && '
             f'[ -n "$A_GCS" ] && [ -n "$B_GCS" ] && '
             f'[ "$A_GCS" != "$B_GCS" ]',
