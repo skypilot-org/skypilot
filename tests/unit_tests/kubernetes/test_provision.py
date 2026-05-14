@@ -2054,3 +2054,54 @@ class TestWaitForPodsToRunLaunchProgressEmit:
             instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
         assert lp_calls == []
+
+
+class TestUnmaskCrashloopbackoffReason:
+    """Tests for _unmask_crashloopbackoff_reason: surfaces last_state.terminated.reason
+    when a container is in CrashLoopBackOff, else returns None."""
+
+    @staticmethod
+    def _cs(*, waiting=None, last_terminated=None):
+        """Build a V1ContainerStatus-shaped mock."""
+        cs = mock.MagicMock()
+        cs.state = mock.MagicMock()
+        cs.state.waiting = waiting
+        cs.last_state = mock.MagicMock()
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    def test_returns_none_when_state_waiting_is_none(self):
+        cs = self._cs(waiting=None)
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_waiting_reason_is_not_crashloop(self):
+        cs = self._cs(waiting=mock.MagicMock(reason='ImagePullBackOff'))
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_last_state_terminated_is_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=None,
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_last_terminated_reason_is_empty(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='', exit_code=137),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_last_terminated_reason_when_crashloop_and_present(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) == 'OOMKilled'
+
+    def test_returns_error_for_non_oom_crashloop(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='Error', exit_code=1),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) == 'Error'

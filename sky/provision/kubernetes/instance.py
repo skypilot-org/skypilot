@@ -2198,6 +2198,24 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reverse=True)
 
 
+def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
+    """Return `last_state.terminated.reason` iff cs is in CrashLoopBackOff
+    and a previous terminated reason is available; else None.
+
+    Used to surface OOMKilled / Error / etc. instead of bare CrashLoopBackOff.
+    """
+    state = getattr(cs, 'state', None)
+    waiting = getattr(state, 'waiting', None) if state is not None else None
+    if waiting is None or waiting.reason != 'CrashLoopBackOff':
+        return None
+    last_state = getattr(cs, 'last_state', None)
+    last_term = (getattr(last_state, 'terminated', None)
+                 if last_state is not None else None)
+    if last_term is None or not last_term.reason:
+        return None
+    return last_term.reason
+
+
 def _get_pod_pending_reason(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
