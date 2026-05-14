@@ -2690,7 +2690,7 @@ def logs(
                 f'Invalid value for --hook: {hook_event!r} is not one of '
                 f'{valid}.')
     if cluster is None:
-        raise click.UsageError("Missing argument 'CLUSTER'.")
+        raise click.UsageError('Missing argument \'CLUSTER\'.')
     # --autostop is a deprecated alias for --hook autostop.
     # TODO(zpoint): drop the --autostop branch after v0.15.0
     # (aligned with the autostop.hook removal pinned at v0.15.0 in

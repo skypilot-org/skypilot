@@ -1045,7 +1045,7 @@ class Resources:
         extra_hooks: Optional[List[Dict[str, Any]]],
         legacy_hook_entry: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Normalize and merge explicit + legacy hook entries into ``_hooks``."""
+        """Normalize and merge explicit + legacy hook entries into _hooks."""
         collected: List[Dict[str, Any]] = []
         if extra_hooks:
             for entry in extra_hooks:
