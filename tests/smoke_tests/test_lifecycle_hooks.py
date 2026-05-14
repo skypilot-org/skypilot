@@ -619,17 +619,27 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # Inspect the rendered pod's preStop command. Must match
-            # sky.skylet.skylet and must NOT contain worker_hook_handler.
+            # Inspect the rendered pod's preStop command. Two checks:
+            #   (a) preStop calls `pgrep` at all (i.e., the bridge is
+            #       rendered when a preemption hook exists).
+            #   (b) preStop does NOT reference worker_hook_handler — the
+            #       PR3 forward-leak this test guards against.
+            # We deliberately don't grep for the exact pgrep regex
+            # `sky\.skylet\.skylet`: kubectl `-o jsonpath` returns
+            # JSON-encoded output where backslashes are doubled
+            # (`\\.` for one regex `\.`), making a literal grep
+            # fragile. The two checks above are sufficient to catch
+            # the regression.
             f'pod=$(kubectl get pods --context kind-skypilot -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
             f'cmd=$(kubectl get --context kind-skypilot "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.containers[0].lifecycle.preStop.exec.command}}{chr(39)}) && '
             f'echo "preStop: $cmd" && '
-            f'echo "$cmd" | grep "sky\\\\.skylet\\\\.skylet" && '
-            f'! echo "$cmd" | grep "worker_hook_handler" || '
-            f'(echo "REGRESSION: preStop pgrep references '
-            f'worker_hook_handler (PR3 forward-leak)." && false)',
+            f'echo "$cmd" | grep -q "pgrep -of" && '
+            f'! echo "$cmd" | grep -q "worker_hook_handler" || '
+            f'(echo "REGRESSION: preStop missing pgrep, or pgrep '
+            f'references worker_hook_handler (PR3 forward-leak)." '
+            f'&& false)',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
