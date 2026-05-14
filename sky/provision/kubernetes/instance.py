@@ -1746,16 +1746,12 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
-# Short best-effort budget. get_cluster_info is on the `sky status` read
-# path; blocking it for tens of seconds during a pod-restart window would
-# be a worse regression than briefly falling back to port 22 (the
-# K8s node's sshd, which doesn't have SkyPilot keys). A freshly launched
-# cluster always reaches `get_cluster_info` after `ray start` has run on
-# every pod (provisioner.py calls it post-provision), so the probe has
-# already published by then and the first attempt succeeds. Pod
-# restarts top up on the next refresh.
-_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 5
-_HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 1
+# The probe runs as soon as ray-installation finishes in step 2 of the
+# pod bootstrap, typically within tens of seconds of the pod going
+# Running. 60s gives the common case plenty of slack without pinning
+# every status refresh during a pod restart to a multi-minute hang.
+_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
+_HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
 
 
 def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
@@ -1763,11 +1759,9 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
                                   expected_pods: List[str]) -> Dict[str, int]:
     """Read each pod's probed sshd port from the hostNetwork ConfigMap.
 
-    Best-effort: tries up to ``_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S`` for
-    every ``expected_pods`` entry to appear, but returns whatever is
-    present once the budget is exhausted. Missing pods fall back to
-    port 22 in the InstanceInfo and will be picked up on the next
-    refresh.
+    Polls until every entry in ``expected_pods`` is present (or the
+    timeout elapses); returning partial state would freeze every
+    subsequent SSH at port 22 until the next refresh.
     """
     if not expected_pods:
         return {}
@@ -1800,12 +1794,12 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
             return out
         if time.monotonic() >= deadline:
             missing = sorted(expected - out.keys())
-            logger.debug(
-                f'hostNetwork sshd ports for {missing} not yet in '
-                f'ConfigMap {namespace}/{name} after '
-                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s; falling back to '
-                f'port 22 for those pods. They will be picked up on the '
-                f'next refresh once the probe republishes.')
+            logger.warning(
+                f'hostNetwork sshd ports for {missing} did not appear '
+                f'in ConfigMap {namespace}/{name} within '
+                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s — `ssh <cluster>` '
+                f'to those pods will fail until the next '
+                f'`sky status -r`.')
             return out
         time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
 
