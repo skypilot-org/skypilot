@@ -14,7 +14,7 @@ For AI infra and platform teams supporting frontier AI work, **SkyPilot Platform
 - **Standardized GPU operations** — uniform health checks and incident response across the fleet; instant GPU failure detection and recovery across XID, NVML, NCCL, and dmesg signals, with Slack alerts.
 - **Production deployments** — multi-cluster model serving, HA managed API server, encrypted secrets, SSO.
 
-With **10× faster cluster launches**, already running at deployments of **200+ users** and **20K+ GPUs**.
+SkyPilot Platform offers **10× faster cluster launches** and is supporting deployments of **200+ users** and **20K+ GPUs**.
 
 .. tip::
 
