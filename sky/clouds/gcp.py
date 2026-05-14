@@ -1392,10 +1392,12 @@ class GCP(clouds.Cloud):
                 default_value=None,
                 override_configs=resources.cluster_config_overrides))
         if managed_instance_group_config is not None:
-            # Flex-start VMs use DWS and may consume preemptible quota, or
-            # standard quota for projects that have never requested preemptible
-            # quota. Avoid incorrectly failing early on the on-demand quota
-            # check and let the DWS resize request handle quota/capacity.
+            # Flex-start VMs use DWS. GCP documents that these requests consume
+            # preemptible quota once a project has requested preemptible quota;
+            # projects that have never requested preemptible quota may consume
+            # standard quota instead. Avoid incorrectly failing early on the
+            # on-demand quota check and let the DWS resize request handle
+            # quota/capacity.
             return True
 
         # pylint: disable=import-outside-toplevel

@@ -8,9 +8,9 @@ from sky import logs
 from sky import resources
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.clouds import gcp as gcp_cloud
 from sky.clouds import Region
 from sky.clouds import Zone
-from sky.clouds import gcp as gcp_cloud
 from sky.clouds.gcp import GCP
 from sky.clouds.utils import gcp_utils
 from sky.provision import common
