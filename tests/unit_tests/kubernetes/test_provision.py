@@ -2517,3 +2517,126 @@ class TestInspectPodStatusTierIntegration:
         # Bare 'Launching' status text is skipped per the existing guard at
         # instance.py:845. So no LAUNCH_PROGRESS row.
         assert lp_calls == []
+
+
+class TestCheckInitContainersEnrichedRaise:
+    """Tests the enriched raise message in _check_init_containers when an
+    init container is in CrashLoopBackOff."""
+
+    @staticmethod
+    def _make_init_status(*,
+                          waiting=None,
+                          terminated=None,
+                          last_terminated=None):
+        s = mock.MagicMock()
+        s.state.waiting = waiting
+        s.state.terminated = terminated
+        s.last_state.terminated = last_terminated
+        return s
+
+    @staticmethod
+    def _make_pod(init_container_statuses, name='pod-0'):
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.status.init_container_statuses = init_container_statuses
+        return pod
+
+    def test_init_crashloopbackoff_unmasks_oomkilled(self, monkeypatch):
+        # We drive _wait_for_pods_to_run with a pod whose main container is
+        # in waiting.reason='PodInitializing', which causes _inspect_pod_status
+        # to call _check_init_containers, which then raises the enriched error.
+        init_cs = self._make_init_status(
+            waiting=mock.MagicMock(
+                reason='CrashLoopBackOff',
+                message='back-off 5m0s restarting failed container=init pod=foo',
+            ),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        pod = self._make_pod([init_cs])
+        pod.status.phase = 'Pending'
+        pod.metadata.deletion_timestamp = None
+        from sky.provision import constants as prov_constants
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        # Main container in PodInitializing so we dispatch to _check_init_containers.
+        main_cs = mock.MagicMock()
+        main_cs.state.waiting = mock.MagicMock(reason='PodInitializing',
+                                               message='')
+        main_cs.state.terminated = None
+        main_cs.state.running = None
+        main_cs.last_state.terminated = None
+        pod.status.container_statuses = [main_cs]
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=[pod])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            instance._wait_for_pods_to_run(
+                namespace='ns',
+                context='ctx',
+                cluster_name='cn',
+                new_pods=[pod],
+            )
+
+        err = str(excinfo.value)
+        assert 'Failed to create init container' in err
+        assert 'OOMKilled' in err
+        assert 'CrashLoopBackOff' not in err
+        assert 'back-off 5m0s' in err  # waiting.message body preserved
+
+    def test_init_other_waiting_reason_unchanged(self, monkeypatch):
+        """Non-CrashLoopBackOff init failure: raise message format matches
+        today (no unmask)."""
+        init_cs = self._make_init_status(waiting=mock.MagicMock(
+            reason='ImagePullBackOff',
+            message='Back-off pulling image "init-img:bad"',
+        ),)
+        pod = self._make_pod([init_cs])
+        pod.status.phase = 'Pending'
+        pod.metadata.deletion_timestamp = None
+        from sky.provision import constants as prov_constants
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        main_cs = mock.MagicMock()
+        main_cs.state.waiting = mock.MagicMock(reason='PodInitializing',
+                                               message='')
+        main_cs.state.terminated = None
+        main_cs.state.running = None
+        main_cs.last_state.terminated = None
+        pod.status.container_statuses = [main_cs]
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=[pod])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            instance._wait_for_pods_to_run(
+                namespace='ns',
+                context='ctx',
+                cluster_name='cn',
+                new_pods=[pod],
+            )
+
+        err = str(excinfo.value)
+        assert 'Failed to create init container' in err
+        assert 'ImagePullBackOff' in err
+        assert 'init-img:bad' in err

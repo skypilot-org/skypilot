@@ -720,9 +720,13 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 #  them as needed.
                 msg = init_waiting.message if (
                     init_waiting.message) else str(init_waiting)
+                unmasked = _unmask_crashloopbackoff_reason(init_status)
+                reason_text = (unmasked
+                               if unmasked is not None else init_waiting.reason)
                 raise config_lib.KubernetesError(
-                    'Failed to create init container for pod '
-                    f'{pod.metadata.name}. Error details: {msg}.')
+                    f'Failed to create init container for pod '
+                    f'{pod.metadata.name}. Error details: '
+                    f'{reason_text}: {msg}.')
 
     def _inspect_pod_status(pod):
         # Check if pod is terminated/preempted/failed (unchanged).
