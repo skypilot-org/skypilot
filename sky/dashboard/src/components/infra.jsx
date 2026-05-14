@@ -76,6 +76,7 @@ import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { PluginPageSlot } from '@/plugins/PluginPageSlot';
 import { PluginWrapperSlot } from '@/plugins/PluginWrapperSlot';
 import {
   useAllDataProviders,
@@ -3336,118 +3337,131 @@ export function GPUs() {
           onResult={recordExtraInfraResult}
         />
       ))}
-      {selectedContext && (
-        // Detail-view header: small back button on its own line, then a
-        // larger h1 row below (rendered further down). This matches the
-        // dashboard's other detail pages and gives the leaf identifier
-        // proper visual weight.
-        <div className="mb-2">
-          <Link
-            href="/infra"
-            className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 cursor-pointer"
-          >
-            ← Infrastructure
-          </Link>
-        </div>
-      )}
-      {/* List-view top bar: title link + workspace selector + Refresh +
-          plugin header actions. Skipped entirely on a detail page —
-          the back link above already serves as the leaf navigation,
-          and the page-level Refresh / Add Infra controls don't apply
-          when viewing one infra. Hiding the whole row also closes the
-          ~36px gap (h-5 + mb-4) between the back link and the h1. */}
-      {!selectedContext && (
-        <div className="flex items-center justify-between mb-4 h-5">
-          <div className="text-base flex items-center">
-            <Link href="/infra" className="text-sky-blue cursor-default">
-              Infrastructure
+      {selectedContext ? (
+        // Detail view — back link, attention banner, h1 with header actions,
+        // then the per-context tab content. Unchanged from the original layout.
+        <>
+          {/* Detail-view header: small back button on its own line, then a
+              larger h1 row below (rendered further down). This matches the
+              dashboard's other detail pages and gives the leaf identifier
+              proper visual weight. */}
+          <div className="mb-2">
+            <Link
+              href="/infra"
+              className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 cursor-pointer"
+            >
+              ← Infrastructure
             </Link>
           </div>
-          <div className="flex items-center">
-            {/* Workspace Selector */}
-            {availableWorkspaces.length > 0 && (
-              <div className="flex items-center mr-4">
-                <label className="text-sm font-medium text-gray-700 mr-2">
-                  Workspace:
-                </label>
-                <Select
-                  value={selectedWorkspace}
-                  onValueChange={setSelectedWorkspace}
-                >
-                  <SelectTrigger className="w-40 h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Workspaces</SelectItem>
-                    {availableWorkspaces.map((workspace) => (
-                      <SelectItem key={workspace} value={workspace}>
-                        {workspace}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {isAnyLoading && (
-              <div className="flex items-center mr-2">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
-              </div>
-            )}
-            {!isAnyLoading && lastFetchedTime && (
-              <LastUpdatedTimestamp
-                timestamp={lastFetchedTime}
-                className="mr-2"
-              />
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={isAnyLoading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          <PluginSlot name="infra.attentionBanner" />
+          {/* Large h1 title + plugin-injected header actions (e.g. Remove)
+              on a single row. */}
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <h1
+              className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${
+                selectedContext.startsWith('ssh-') ||
+                slurmClusters.includes(selectedContext)
+                  ? ''
+                  : 'font-mono'
+              }`}
             >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && 'Refresh'}
-            </button>
-            <PluginSlot name="infra.headerActions" wrapperClassName="ml-3" />
-          </div>
-        </div>
-      )}
-
-      <PluginSlot name="infra.attentionBanner" />
-
-      {selectedContext && (
-        // Large h1 title + plugin-injected header actions (e.g. Remove)
-        // on a single row.
-        <div className="flex items-center justify-between gap-3 mb-5">
-          <h1
-            className={`text-2xl font-semibold text-gray-900 leading-tight tracking-tight ${
-              selectedContext.startsWith('ssh-') ||
-              slurmClusters.includes(selectedContext)
-                ? ''
-                : 'font-mono'
-            }`}
-          >
-            {selectedContext.startsWith('ssh-')
-              ? selectedContext.replace(/^ssh-/, '')
-              : selectedContext}
-          </h1>
-          <PluginSlot
-            name="infra.contextDetail.headerActions"
-            context={{
-              contextName: selectedContext.startsWith('ssh-')
+              {selectedContext.startsWith('ssh-')
                 ? selectedContext.replace(/^ssh-/, '')
-                : selectedContext,
-              isSlurm: slurmClusters.includes(selectedContext),
-              isSsh: selectedContext.startsWith('ssh-'),
-            }}
-            wrapperClassName="flex items-center gap-2"
-          />
-        </div>
-      )}
+                : selectedContext}
+            </h1>
+            <PluginSlot
+              name="infra.contextDetail.headerActions"
+              context={{
+                contextName: selectedContext.startsWith('ssh-')
+                  ? selectedContext.replace(/^ssh-/, '')
+                  : selectedContext,
+                isSlurm: slurmClusters.includes(selectedContext),
+                isSsh: selectedContext.startsWith('ssh-'),
+              }}
+              wrapperClassName="flex items-center gap-2"
+            />
+          </div>
+          {/* Each section handles its own loading state */}
+          {renderKubernetesTab()}
+        </>
+      ) : (
+        // List view — owned by a plugin when one registers `infra.page`;
+        // else the OSS fallback is rendered.
+        <PluginPageSlot
+          name="infra.page"
+          fallback={
+            <>
+              {/* List-view top bar: title link + workspace selector + Refresh +
+                  plugin header actions. Skipped entirely on a detail page —
+                  the back link above already serves as the leaf navigation,
+                  and the page-level Refresh / Add Infra controls don't apply
+                  when viewing one infra. Hiding the whole row also closes the
+                  ~36px gap (h-5 + mb-4) between the back link and the h1. */}
+              <div className="flex items-center justify-between mb-4 h-5">
+                <div className="text-base flex items-center">
+                  <Link href="/infra" className="text-sky-blue cursor-default">
+                    Infrastructure
+                  </Link>
+                </div>
+                <div className="flex items-center">
+                  {/* Workspace Selector */}
+                  {availableWorkspaces.length > 0 && (
+                    <div className="flex items-center mr-4">
+                      <label className="text-sm font-medium text-gray-700 mr-2">
+                        Workspace:
+                      </label>
+                      <Select
+                        value={selectedWorkspace}
+                        onValueChange={setSelectedWorkspace}
+                      >
+                        <SelectTrigger className="w-40 h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Workspaces</SelectItem>
+                          {availableWorkspaces.map((workspace) => (
+                            <SelectItem key={workspace} value={workspace}>
+                              {workspace}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
-      {/* Each section handles its own loading state */}
-      {renderKubernetesTab()}
+                  {isAnyLoading && (
+                    <div className="flex items-center mr-2">
+                      <CircularProgress size={15} className="mt-0" />
+                      <span className="ml-2 text-gray-500">Loading...</span>
+                    </div>
+                  )}
+                  {!isAnyLoading && lastFetchedTime && (
+                    <LastUpdatedTimestamp
+                      timestamp={lastFetchedTime}
+                      className="mr-2"
+                    />
+                  )}
+                  <button
+                    onClick={handleRefresh}
+                    disabled={isAnyLoading}
+                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  >
+                    <RotateCwIcon className="h-4 w-4 mr-1.5" />
+                    {!isMobile && 'Refresh'}
+                  </button>
+                  <PluginSlot
+                    name="infra.headerActions"
+                    wrapperClassName="ml-3"
+                  />
+                </div>
+              </div>
+              <PluginSlot name="infra.attentionBanner" />
+              {/* Each section handles its own loading state */}
+              {renderKubernetesTab()}
+            </>
+          }
+        />
+      )}
 
       {/* SSH Node Pool Modal - Always available */}
       <SSHNodePoolModal
