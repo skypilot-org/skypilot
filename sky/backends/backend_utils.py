@@ -2820,6 +2820,15 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
+        # be checked before some_nodes_not_stopped, which would otherwise
+        # report the misleading "some but not all nodes are stopped" for
+        # a single-node cluster whose only node is INIT.
+        abnormal_state_nodes = [
+            name for name, (s, _) in node_statuses.items()
+            if s not in (status_lib.ClusterStatus.UP,
+                         status_lib.ClusterStatus.STOPPED)
+        ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif ray_cluster_unhealthy:
@@ -2831,6 +2840,17 @@ def _update_cluster_status(
             else:
                 init_reason = (
                     f'ray cluster is unhealthy ({ray_status_details})')
+        elif abnormal_state_nodes:
+            if status_reason:
+                init_reason = status_reason
+                status_reason = ''
+            else:
+                distinct_states = sorted(
+                    {node_statuses[n][0].value for n in abnormal_state_nodes})
+                init_reason = (
+                    f'{len(abnormal_state_nodes)} of {handle.launched_nodes} '
+                    f'node(s) in unexpected state: '
+                    f'{", ".join(distinct_states)}')
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '

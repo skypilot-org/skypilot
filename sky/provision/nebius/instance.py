@@ -9,6 +9,7 @@ from sky.provision.nebius import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
@@ -123,36 +124,59 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             time.sleep(utils.POLL_INTERVAL)  # to avoid fake STOPPED status
             logger.info(f'Started instance {stopped_instance_id}.')
 
-    for _ in range(to_start_count):
-        node_type = 'head' if head_instance_id is None else 'worker'
-        try:
-            platform, preset = config.node_config['InstanceType'].split('_')
+    # Launch new VMs in parallel. Each utils.launch issues an independent
+    # CreateInstance gRPC and then polls until the instance reaches STARTING;
+    # those calls don't share state, so a thread pool gives us ~N× speedup
+    # for multi-node clusters. Mirrors Azure (sky/provision/azure/instance.py)
+    # and Kubernetes (sky/provision/kubernetes/instance.py).
+    platform, preset = config.node_config['InstanceType'].split('_')
+    new_head_idx = 0 if head_instance_id is None else None
 
-            instance_id = utils.launch(
-                cluster_name_on_cloud=cluster_name_on_cloud,
-                node_type=node_type,
-                platform=platform,
-                preset=preset,
-                region=region,
-                image_id_or_family=config.node_config['ImageId'],
-                disk_size=config.node_config['DiskSize'],
-                user_data=config.node_config['UserData'],
-                use_spot=config.node_config['use_spot'],
-                associate_public_ip_address=(
-                    not config.provider_config['use_internal_ips']),
-                disk_tier=config.node_config['disk_tier'],
-                use_static_ip_address=config.provider_config.get(
-                    'use_static_ip_address', False),
-                filesystems=config.node_config.get('filesystems', []),
-                network_tier=config.node_config.get('network_tier'),
-                security_group_ids=config.node_config.get('SecurityGroupIds'))
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'run_instances error: {e}')
-            raise
+    def _launch_one(idx: int) -> str:
+        node_type = 'head' if idx == new_head_idx else 'worker'
+        return utils.launch(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            node_type=node_type,
+            platform=platform,
+            preset=preset,
+            region=region,
+            image_id_or_family=config.node_config['ImageId'],
+            disk_size=config.node_config['DiskSize'],
+            user_data=config.node_config['UserData'],
+            use_spot=config.node_config['use_spot'],
+            associate_public_ip_address=(
+                not config.provider_config['use_internal_ips']),
+            disk_tier=config.node_config['disk_tier'],
+            use_static_ip_address=config.provider_config.get(
+                'use_static_ip_address', False),
+            filesystems=config.node_config.get('filesystems', []),
+            network_tier=config.node_config.get('network_tier'),
+            security_group_ids=config.node_config.get('SecurityGroupIds'))
+
+    # When we're creating a brand-new head, launch it synchronously first.
+    # utils.launch calls get_or_create_gpu_cluster for InfiniBand presets —
+    # that get-then-create has a TOCTOU window, so parallel launches racing
+    # to create the same GPU cluster would have all but one fail with
+    # "already exists". Workers in a scale-up don't race because the GPU
+    # cluster already exists from the original head launch.
+    try:
+        if new_head_idx is not None and to_start_count > 0:
+            new_instance_ids = [_launch_one(0)]
+            new_instance_ids.extend(
+                subprocess_utils.run_in_parallel(_launch_one,
+                                                 list(range(1,
+                                                            to_start_count))))
+        else:
+            new_instance_ids = subprocess_utils.run_in_parallel(
+                _launch_one, list(range(to_start_count)))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'run_instances error: {e}')
+        raise
+    for instance_id in new_instance_ids:
         logger.info(f'Launched instance {instance_id}.')
-        created_instance_ids.append(instance_id)
-        if head_instance_id is None:
-            head_instance_id = instance_id
+    created_instance_ids.extend(new_instance_ids)
+    if head_instance_id is None and new_instance_ids:
+        head_instance_id = new_instance_ids[0]
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='nebius',
                                   cluster_name=cluster_name_on_cloud,

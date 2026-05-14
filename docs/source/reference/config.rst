@@ -101,6 +101,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         A100: 3.50     # $/accelerator/hr
+    :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -1987,6 +1990,27 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
           # Overrides only the cpu rate; memory and accelerators are
           # inherited from the cloud-level pricing above.
           cpu: 0.08
+
+.. _config-yaml-kubernetes-apt-mirrors:
+
+``kubernetes.apt_mirrors``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Override the APT mirrors tried when installing packages on a pod (optional).
+Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
+fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    apt_mirrors:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
+
+Can also be set per-context via ``context_configs``.
 
 .. _config-yaml-kubernetes-context-configs:
 

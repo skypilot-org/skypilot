@@ -84,4 +84,8 @@ MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
 # TTL for service-account tokens issued to managed jobs with
 # api_server_access. Kept short so any tokens that leak past the controller
 # cleanup are reaped quickly by the expired-token-cleanup daemon.
+# TODO(lloyd-brown): The controller does not renew this token while the job is
+# still running, so long-running jobs (e.g. multi-day training) can have their
+# api_server_access token expire mid-run. Add token renewal so the TTL only
+# bounds leaked-token lifetime, not in-use token lifetime.
 MANAGED_JOB_TOKEN_TTL_DAYS = 3
