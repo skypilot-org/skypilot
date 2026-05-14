@@ -146,8 +146,7 @@ class AutostopConfig:
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
         state.setdefault('hook', None)
-        state.setdefault('hook_timeout',
-                         constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        state.setdefault('hook_timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         self.__dict__.update(state)
 
 
@@ -199,8 +198,7 @@ def set_autostop(idle_minutes: int,
         set_hooks([{
             'run': hook,
             'events': ['autostop'],
-            'timeout': (hook_timeout or
-                        constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
+            'timeout': (hook_timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
         }])
 
     logger.debug(
@@ -276,8 +274,7 @@ def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
         # events field is typed as Iterable[Event] in the .pyi but accepts
         # ints at runtime (Event is an int-backed enum).
         msg.events.extend(events)  # type: ignore[arg-type]
-        msg.timeout = h.get('timeout',
-                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        msg.timeout = h.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         out.append(msg)
     return out
 
@@ -300,8 +297,7 @@ def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
         out.append({
             'run': h.run,
             'events': events,
-            'timeout': h.timeout
-                       or constants.DEFAULT_HOOK_TIMEOUT_SECONDS,
+            'timeout': h.timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS,
         })
     return out
 

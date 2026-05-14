@@ -43,6 +43,7 @@ from sky.backends import backend_utils
 from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
+from sky.clouds import kubernetes as k8s_cloud
 from sky.clouds.utils import gcp_utils
 from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
@@ -345,10 +346,8 @@ def _maybe_warn_preemption_grace_change(
     """
     if not isinstance(cloud, clouds.Kubernetes):
         return None
-    # Lazy import to avoid circular: kubernetes.py imports backend utilities.
-    from sky.clouds.kubernetes import (_compute_preemption_hook_timeout)  # pylint: disable=import-outside-toplevel,cyclic-import
-    prior_t = _compute_preemption_hook_timeout(prior_hooks)
-    new_t = _compute_preemption_hook_timeout(new_hooks)
+    prior_t = k8s_cloud._compute_preemption_hook_timeout(prior_hooks)  # pylint: disable=protected-access
+    new_t = k8s_cloud._compute_preemption_hook_timeout(new_hooks)  # pylint: disable=protected-access
     if new_t is None:
         return None
     if prior_t is not None and new_t <= prior_t:
@@ -5712,7 +5711,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # value matches kubelet's actual SIGKILL boundary.
                 if isinstance(handle.launched_resources.cloud,
                               clouds.Kubernetes):
-                    from sky.clouds import kubernetes as k8s_cloud  # pylint: disable=import-outside-toplevel
                     hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
                 # v7+: send the full hooks list inline on the same RPC.
                 # Three states for the `hooks` arg:
