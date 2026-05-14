@@ -1832,8 +1832,8 @@ def test_launch_image_pull_back_off():
     Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
     bare CrashLoopBackOff text from an older code path.
 
-    Regression test for the truthful-launching-reason fix
-    (docs/superpowers/specs/2026-05-14-launching-tooltip-reason-design.md)."""
+    Regression test for the truthful-launching-reason refactor in
+    _inspect_pod_status / _get_pod_pending_reason."""
     name = smoke_tests_utils.get_cluster_name() + '-pull-fail'
     image = 'nonexistent-registry.invalid/sky/missing:bad-tag'
     test = smoke_tests_utils.Test(
