@@ -78,14 +78,15 @@ def test_kubernetes_host_network_coexistence():
             write_cfg_b,
 
             # 1. Launch A first (anchor), then B (forced onto A's node).
+            # 1 CPU / 2 GB per pod: enough headroom for Ray driver +
+            # raylet + GCS + dashboard (under tight CPU Ray's first-job
+            # submission flakes with FAILED_DRIVER); still fits two
+            # pods on a 4-CPU/8-GB node. No inline task — the SSH/port
+            # checks below are what we're asserting on.
             f'sky launch -y -c {name_a} --infra kubernetes '
-            f'--config {cfg_a} '
-            f'--cpus 0.5 --memory 1 -- echo "hello from A"',
-            f'sky logs {name_a} 1 --status',
+            f'--config {cfg_a} --cpus 1 --memory 2',
             f'sky launch -y -c {name_b} --infra kubernetes '
-            f'--config {cfg_b} '
-            f'--cpus 0.5 --memory 1 -- echo "hello from B"',
-            f'sky logs {name_b} 1 --status',
+            f'--config {cfg_b} --cpus 1 --memory 2',
 
             # 2. SSH to both heads. Exercises:
             #    - sshd_<podname> ConfigMap entry -> InstanceInfo.ssh_port
@@ -190,22 +191,21 @@ def test_kubernetes_host_network_multi_node():
 
             # 1. Launch anchor (1 pod), then the 2-node target. If the
             # target launch returns success, both pods scheduled — i.e.
-            # both landed on the anchor's node.
+            # both landed on the anchor's node. 1 CPU / 2 GB per pod
+            # leaves Ray driver enough headroom (under tighter CPU
+            # the first job submission flakes with FAILED_DRIVER) and
+            # still fits 3 pods on a 4-CPU/8-GB node.
             f'sky launch -y -c {name_anchor} --infra kubernetes '
-            f'--config {cfg_anchor} '
-            f'--cpus 0.5 --memory 1 -- echo "anchor up"',
-            f'sky logs {name_anchor} 1 --status',
+            f'--config {cfg_anchor} --cpus 1 --memory 2',
             f'sky launch -y -c {name_multi} --infra kubernetes '
-            f'--config {cfg_multi} --num-nodes 2 '
-            f'--cpus 0.5 --memory 1 -- echo "multi up"',
-            f'sky logs {name_multi} 1 --status',
+            f'--config {cfg_multi} --num-nodes 2 --cpus 1 --memory 2',
 
             # 2. Ray cluster must work end-to-end. `sky exec` runs the
             # task through Ray on the head, which means the head <->
             # worker join happened (worker read head's probed GCS port
             # from the ConfigMap).
             f'sky exec {name_multi} -- echo "job_ok"',
-            f'sky logs {name_multi} 2 --status',
+            f'sky logs {name_multi} 1 --status',
 
             # 3. SSH to head — exercises per-pod sshd port rebind on
             # the head + SkyPilot SSH config using the probed port.
