@@ -66,20 +66,16 @@ spec:
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- if .Values.apiService.devMode.enabled }}
-        # Dev mode: fully open securityContext. Runs as root with all
-        # capabilities so the developer can attach py-spy / strace, edit
-        # site-packages, and restart the server, regardless of what the
-        # tenant configured. NEVER enable in production.
+        # Dev mode: fully open securityContext. Runs as root and
+        # `privileged: true` implicitly grants all capabilities (including
+        # SYS_PTRACE for py-spy/strace) and allowPrivilegeEscalation, so the
+        # developer can edit site-packages and restart the server regardless
+        # of what the tenant configured. NEVER enable in production.
         securityContext:
           privileged: true
           runAsUser: 0
           runAsGroup: 0
           readOnlyRootFilesystem: false
-          allowPrivilegeEscalation: true
-          capabilities:
-            add:
-            - SYS_PTRACE
-            - SYS_ADMIN
         {{- else }}
         {{- with .Values.securityContext }}
         securityContext:
