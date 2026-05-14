@@ -192,6 +192,12 @@ class ClusterInfo:
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
+    # True for Kubernetes clusters launched with pod_config.spec.hostNetwork.
+    # Used by the SSH-over-websocket proxy: for hostNetwork the pod's sshd
+    # is on a probed port (held in InstanceInfo.ssh_port); otherwise the
+    # pod's sshd is always on the container-internal port 22 even if the
+    # external SSH port is a NodePort.
+    host_network: bool = False
 
     @property
     def num_instances(self) -> int:

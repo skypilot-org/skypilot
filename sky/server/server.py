@@ -2771,12 +2771,18 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
-    # Under hostNetwork the pod's sshd binds a probed port (not 22,
-    # which is owned by the K8s node's own sshd). head_ssh_port flows
-    # from InstanceInfo.ssh_port through cached_external_ssh_ports.
-    head_ssh_port = handle.head_ssh_port or 22
+    # kubectl port-forward needs the pod-internal sshd port. Always 22
+    # except under hostNetwork, where the K8s node's own sshd owns
+    # host:22 and the probe puts our sshd on a free port (carried in
+    # head_ssh_port via InstanceInfo.ssh_port). For NodePort networking
+    # without hostNetwork, head_ssh_port holds the external NodePort,
+    # which would forward to a non-listening port here.
+    cluster_info = handle.cached_cluster_info
+    is_host_network = bool(cluster_info) and getattr(cluster_info,
+                                                     'host_network', False)
+    pod_ssh_port = (handle.head_ssh_port or 22) if is_host_network else 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
-        port_forward=[(None, head_ssh_port)])
+        port_forward=[(None, pod_ssh_port)])
     # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
     # `uv_spawn`, which on Linux always uses fork().
     # The forked child runs `PyOS_AfterFork_Child` which tears down inherited

@@ -1923,7 +1923,8 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config)
+        provider_config=provider_config,
+        host_network=bool(host_network_pods))
 
 
 class NodeHealthInfo:
