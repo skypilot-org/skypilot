@@ -56,7 +56,7 @@ import pathlib
 import tempfile
 import threading
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
 import sqlalchemy
@@ -831,6 +831,24 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+# Hooks invoked at the end of `update_api_server_config_no_lock`, after the
+# new config has been persisted and reloaded in-process. Plugins use this to
+# invalidate caches that were derived from the config (e.g. a request that
+# memoized the result of `get_nested(...)` for a TTL). Registered at server
+# startup during single-threaded plugin loading, so no lock is needed.
+_CONFIG_UPDATE_HOOKS: List[Callable[[], None]] = []
+
+
+def register_config_update_hook(fn: Callable[[], None]) -> None:
+    """Register a callback to be invoked when the API server config is updated.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. The callback runs after the new config has been
+    persisted and reloaded; exceptions are caught and logged so a misbehaving
+    hook cannot fail the config update.
+    """
+    _CONFIG_UPDATE_HOOKS.append(fn)
+
 
 def get_effective_queue_name(
         cloud: str,
@@ -1041,3 +1059,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 config, global_config_path)
 
     reload_config()
+    for hook in _CONFIG_UPDATE_HOOKS:
+        try:
+            hook()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Config-update hook {hook!r} raised: {e}')
