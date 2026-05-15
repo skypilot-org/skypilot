@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
@@ -29,6 +30,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import host_network
+
 logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
@@ -40,13 +44,22 @@ _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); '
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
-DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
-                  f'runtime_dir = os.path.expanduser(os.environ.get('
-                  f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
-                  f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-                  f'open(os.path.join(runtime_dir, '
-                  f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
-                  'encoding="utf-8"))\';')
+
+def _dump_ray_ports_cmd(
+        port_dict_str: str = constants.SKY_REMOTE_RAY_PORT_DICT_STR) -> str:
+    """Shell that writes the Ray port file. ``port_dict_str`` is a Python dict
+    literal; hostNetwork bakes the deterministic ports in here so
+    ``job_lib.get_ray_port()`` (and thus ``ray status``, skylet) is correct."""
+    return (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
+            f'runtime_dir = os.path.expanduser(os.environ.get('
+            f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
+            f'json.dump({port_dict_str}, '
+            f'open(os.path.join(runtime_dir, '
+            f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+            'encoding="utf-8"))\';')
+
+
+DUMP_RAY_PORTS = _dump_ray_ports_cmd()
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
@@ -291,17 +304,57 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
-def ray_head_start_command(custom_resource: Optional[str],
-                           custom_ray_options: Optional[Dict[str, Any]]) -> str:
-    """Returns the command to start Ray on the head node."""
-    ray_options = (
-        # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-        f'--disable-usage-stats '
-        f'--port={constants.SKY_REMOTE_RAY_PORT} '
-        f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
-        f'--min-worker-port 11002 '
-        f'--object-manager-port=8076 '
-        f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
+def ray_head_start_command(
+    custom_resource: Optional[str],
+    custom_ray_options: Optional[Dict[str, Any]],
+    host_network_params: Optional['host_network.HostNetworkRayParams'] = None,
+) -> str:
+    """Returns the command to start Ray on the head node.
+
+    When ``host_network_params`` is given (Kubernetes ``hostNetwork: true``)
+    every Ray port is the cluster's deterministic rank-0 value and all Ray
+    daemons are pinned to the head's per-pod loopback IP, so a sibling
+    SkyPilot pod sharing the K8s node's net namespace can't collide on ports
+    and Ray's client-side NodeID->endpoint cache can't collapse two raylets
+    onto one address. ``None`` keeps the command byte-identical to before.
+    """
+    if host_network_params is None:
+        ray_options = (
+            # --disable-usage-stats saves 10 seconds of idle wait.
+            f'--disable-usage-stats '
+            f'--port={constants.SKY_REMOTE_RAY_PORT} '
+            f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+            f'--min-worker-port 11002 '
+            f'--object-manager-port=8076 '
+            f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
+        dump_ray_ports = DUMP_RAY_PORTS
+        wait_initialized = RAY_HEAD_WAIT_INITIALIZED_COMMAND
+    else:
+        p = host_network_params.head_ports
+        node_ip = host_network_params.head_node_ip
+        ray_options = (
+            f'--disable-usage-stats '
+            f'--port={p.gcs} '
+            f'--dashboard-port={p.dashboard} '
+            f'--min-worker-port 11002 '
+            f'--object-manager-port={p.object_manager} '
+            f'--node-manager-port={p.node_manager} '
+            f'--ray-client-server-port={p.ray_client_server} '
+            f'--dashboard-agent-listen-port={p.dashboard_agent_listen} '
+            f'--runtime-env-agent-port={p.runtime_env_agent} '
+            f'--metrics-export-port={p.metrics_export} '
+            f'--node-ip-address={node_ip} '
+            f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
+        # Bake the real ports into the port file so job_lib.get_ray_port()
+        # (hence `ray status`, skylet) reports the deterministic GCS port.
+        dump_ray_ports = _dump_ray_ports_cmd(
+            f'{{"ray_port":{p.gcs},"ray_dashboard_port":{p.dashboard}}}')
+        # GCS binds the loopback IP, not 127.0.0.1:6380 — poll the right addr.
+        wait_initialized = (
+            f'while `RAY_ADDRESS={node_ip}:{p.gcs} '
+            f'{constants.SKY_RAY_CMD} status | '
+            'grep -q "No cluster status."`; do sleep 0.5; '
+            'echo "Waiting ray cluster to be initialized"; done;')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
         ray_options += _ray_gpu_options(custom_resource)
@@ -330,18 +383,43 @@ def ray_head_start_command(custom_resource: Optional[str],
         # the warning when the worker count is >12x CPUs.
         'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
         f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
-        _RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+        _RAY_PRLIMIT + dump_ray_ports + wait_initialized)
     return cmd
 
 
-def ray_worker_start_command(custom_resource: Optional[str],
-                             custom_ray_options: Optional[Dict[str, Any]],
-                             no_restart: bool) -> str:
-    """Returns the command to start Ray on the worker node."""
+def ray_worker_start_command(
+    custom_resource: Optional[str],
+    custom_ray_options: Optional[Dict[str, Any]],
+    no_restart: bool,
+    host_network_params: Optional['host_network.HostNetworkRayParams'] = None,
+) -> str:
+    """Returns the command to start Ray on the worker node.
+
+    When ``host_network_params`` is given (Kubernetes ``hostNetwork: true``)
+    the worker's Ray ports are its deterministic per-rank slot and
+    ``--node-ip-address`` pins this pod's raylet to a distinct loopback IP, so
+    it neither collides on ports with nor gets cache-collapsed against the
+    head (or another pod) sharing the K8s node's net namespace. The rank is
+    resolved in-pod (``rank_shell``) since one rendered worker command serves
+    every worker. ``None`` keeps the command byte-identical to before.
+    """
     # We need to use the ray port in the env variable, because the head node
     # determines the port to be used for the worker node.
     ray_options = ('--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
                    '--object-manager-port=8076')
+    if host_network_params is not None:
+        # SKYPILOT_RAY_HEAD_IP/PORT are exported (template) to the head's
+        # deterministic loopback IP + GCS port. $SKYPILOT_NODE_RANK is set by
+        # rank_shell (prepended below) before this command runs.
+        e = host_network_params.worker_port_exprs
+        ray_options = (
+            '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+            f'--object-manager-port={e["object_manager"]} '
+            f'--node-manager-port={e["node_manager"]} '
+            f'--dashboard-agent-listen-port={e["dashboard_agent_listen"]} '
+            f'--runtime-env-agent-port={e["runtime_env_agent"]} '
+            f'--metrics-export-port={e["metrics_export"]} '
+            f'--node-ip-address={host_network_params.worker_node_ip_expr}')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -367,6 +445,10 @@ def ray_worker_start_command(custom_resource: Optional[str],
             f'|| {{ {cmd} }}')
     else:
         cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+    if host_network_params is not None:
+        # Define $SKYPILOT_NODE_RANK before anything references it (the
+        # ray-options arithmetic and node-ip expression both use it).
+        cmd = f'{host_network_params.rank_shell}; ' + cmd
     return cmd
 
 

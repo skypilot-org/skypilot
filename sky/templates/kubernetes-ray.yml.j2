@@ -388,6 +388,13 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if k8s_host_network %}
+        # Under hostNetwork the default dnsPolicy silently falls back to the
+        # host's resolv.conf, so Service DNS (e.g. *.svc.cluster.local) won't
+        # resolve. SkyPilot itself dials the head over its deterministic
+        # loopback IP, but in-cluster DNS is still needed for other lookups.
+        dnsPolicy: ClusterFirstWithHostNet
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -539,6 +546,16 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% if k8s_host_network %}
+            # Downward API rather than $HOSTNAME: hostNetwork pods inherit the
+            # host node's hostname. ray_worker_start_command derives the
+            # worker's rank ($SKYPILOT_NODE_RANK) from this to index its
+            # deterministic per-rank port slot.
+            - name: SKYPILOT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {% endif %}
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
@@ -1052,6 +1069,17 @@ available_node_types:
               skypilot:ssh_public_key_content
               SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
+                {% if k8s_host_network %}
+                # Under hostNetwork the K8s node's own sshd owns host:22, so
+                # the pod's sshd silently fails to bind there. Rebind it to
+                # this pod's deterministic sshd port (cluster hash + rank).
+                # Delete-then-append so a config with no Port line (which
+                # would default to 22) is fixed too. The restart below picks
+                # the new port up.
+                {{ k8s_host_network_rank_shell }};
+                $(prefix_cmd) sed -i -E '/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d' /etc/ssh/sshd_config;
+                echo "Port {{ k8s_host_network_sshd_port_expr }}" | $(prefix_cmd) tee -a /etc/ssh/sshd_config > /dev/null;
+                {% endif %}
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
 
@@ -1120,8 +1148,18 @@ available_node_types:
                 else
                   # Start ray worker on the worker pod.
                   # Wait until the head pod is available with an IP address
+                  {% if k8s_host_network %}
+                  # Under hostNetwork the head's GCS binds the head's
+                  # deterministic loopback IP (not the host IP that the
+                  # *.svc.cluster.local Service resolves to), so dial that
+                  # directly. Reachable because the worker shares the K8s
+                  # node's net namespace (same-node hostNetwork).
+                  export SKYPILOT_RAY_HEAD_IP="{{k8s_host_network_head_ip}}"
+                  export SKYPILOT_RAY_PORT={{k8s_host_network_head_gcs_port}}
+                  {% else %}
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
+                  {% endif %}
                   # Wait until the ray cluster is started on the head pod
                   until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
                     sleep 0.1
@@ -1315,12 +1353,18 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if not k8s_host_network %}
+          # Omitted under hostNetwork: the scheduler's NodePorts predicate
+          # treats containerPort as a host port and would block a sibling
+          # SkyPilot pod from the node, even though every Ray/sshd port here
+          # is reassigned to a deterministic per-pod value at provision time.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
           - containerPort: 46590  # Used by Skylet gRPC
+          {% endif %}
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to

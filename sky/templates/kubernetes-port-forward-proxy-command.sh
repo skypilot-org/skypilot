@@ -3,9 +3,13 @@ set -uo pipefail
 
 KUBE_CONTEXT=""
 KUBE_NAMESPACE=""
+# Deterministic in-pod sshd port (cluster hash + rank), passed by SkyPilot.
+# Only used for pods that are actually hostNetwork (host:22 is owned by the
+# K8s node's own sshd there); non-hostNetwork pods keep the default 22.
+POD_SSHD_PORT=""
 
 # Parse flags
-while getopts ":c:n:" opt; do
+while getopts ":c:n:p:" opt; do
   case ${opt} in
     c)
       KUBE_CONTEXT="$OPTARG"
@@ -13,9 +17,12 @@ while getopts ":c:n:" opt; do
     n)
       KUBE_NAMESPACE="$OPTARG"
       ;;
+    p)
+      POD_SSHD_PORT="$OPTARG"
+      ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
-      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace] [-p pod_sshd_port]" >&2
       exit 1
       ;;
     :)
@@ -30,7 +37,7 @@ shift $((OPTIND -1))
 
 # Check if pod name is passed as an argument
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace] [-p pod_sshd_port]" >&2
   exit 1
 fi
 
@@ -67,7 +74,20 @@ if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi
 
-kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+# Under hostNetwork the pod's sshd can't bind host:22 (the K8s node's own
+# sshd owns it), so SkyPilot rebinds it to a deterministic port and passes
+# that here via -p. Only honour it when the pod is actually hostNetwork; a
+# single read-only `kubectl get pod` (no ConfigMap, no extra RBAC) decides.
+POD_PORT=22
+if [ -n "${POD_SSHD_PORT}" ]; then
+  HOST_NETWORK=$(kubectl "${KUBECTL_ARGS[@]}" get pod "${POD_NAME}" \
+      -o jsonpath='{.spec.hostNetwork}' 2>/dev/null)
+  if [ "${HOST_NETWORK}" = "true" ]; then
+    POD_PORT="${POD_SSHD_PORT}"
+  fi
+fi
+
+kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" ":${POD_PORT}" > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!

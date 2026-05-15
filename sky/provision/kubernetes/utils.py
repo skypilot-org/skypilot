@@ -30,6 +30,7 @@ from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import constants as kubernetes_constants
+from sky.provision.kubernetes import host_network
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -209,7 +210,7 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 2
+PORT_FORWARD_PROXY_CMD_VERSION = 3
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
@@ -2990,6 +2991,7 @@ def construct_ssh_jump_command(
         ssh_jump_user: str = 'sky',
         proxy_cmd_path: Optional[str] = None,
         proxy_cmd_target_pod: Optional[str] = None,
+        proxy_cmd_pod_port: Optional[int] = None,
         current_kube_context: Optional[str] = None,
         current_kube_namespace: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
@@ -3008,9 +3010,15 @@ def construct_ssh_jump_command(
             current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
+        # The pod's deterministic sshd port under hostNetwork (host:22 is
+        # owned by the K8s node's own sshd). The script only honours it for
+        # pods that are actually hostNetwork; harmless to pass otherwise.
+        pod_port_flag = (f'-p {proxy_cmd_pod_port} '
+                         if proxy_cmd_pod_port is not None else '')
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
                                    f'{kube_context_flag}'
                                    f'{kube_namespace_flag}'
+                                   f'{pod_port_flag}'
                                    f'{proxy_cmd_target_pod}\'')
     return ssh_jump_proxy_command
 
@@ -3055,12 +3063,19 @@ def get_ssh_proxy_command(
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
     ssh_jump_proxy_command_path = create_proxy_command_script()
+    # Deterministic sshd port for this pod (cluster hash + rank); the proxy
+    # script only port-forwards to it for pods that are actually hostNetwork,
+    # so this is a no-op for the common (non-hostNetwork) case.
+    cluster_name_on_cloud, rank = (
+        host_network.cluster_and_rank_from_pod_name(pod_name))
+    pod_sshd_port = host_network.derive_ports(cluster_name_on_cloud, rank).sshd
     ssh_jump_proxy_command = construct_ssh_jump_command(
         private_key_path,
         ssh_jump_ip,
         ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
         proxy_cmd_path=ssh_jump_proxy_command_path,
         proxy_cmd_target_pod=pod_name,
+        proxy_cmd_pod_port=pod_sshd_port,
         # We embed both the current context and namespace to the SSH proxy
         # command to make sure SSH still works when the current
         # context/namespace is changed by the user.

@@ -18,6 +18,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -1799,6 +1800,22 @@ def get_cluster_info(
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
+        ssh_port = port
+        # Under hostNetwork the pod shares the host's net namespace: its sshd
+        # can't own host:22 (the K8s node's own sshd does), and its pod_ip is
+        # the host IP. Both the sshd port and the per-pod loopback IP are
+        # deterministic functions of the cluster name + rank (see
+        # host_network), so recompute them here — no ConfigMap, no probe, no
+        # extra API call. Mirroring internal_ip to the loopback keeps
+        # RayCodeGen's cluster_ips_to_node_id aligned with what
+        # ray.util.get_node_ip_address() (the pod's --node-ip-address)
+        # reports inside the pod.
+        if getattr(pod.spec, 'host_network', False):
+            rank = host_network.rank_from_pod_name(pod_name)
+            internal_ip = host_network.derive_node_ip(cluster_name_on_cloud,
+                                                      rank)
+            ssh_port = host_network.derive_ports(cluster_name_on_cloud,
+                                                 rank).sshd
         # Get the k8s node name the pod is running on (for dashboard display)
         k8s_node_name = getattr(pod.spec, 'node_name', None)
         pods[pod_name] = [
@@ -1806,7 +1823,7 @@ def get_cluster_info(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
                 external_ip=None,
-                ssh_port=port,
+                ssh_port=ssh_port,
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.

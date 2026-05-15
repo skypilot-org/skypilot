@@ -19,6 +19,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import host_network
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -27,6 +28,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
@@ -529,7 +531,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones  # Unused.
+        del zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -767,6 +769,44 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
+        # Detect `hostNetwork: true` up front so the deterministic Ray/sshd
+        # ports and per-pod loopback IPs (see sky.provision.kubernetes.
+        # host_network) can be baked into the rendered cluster YAML at
+        # provision time — no startup probe, no ConfigMap, no RBAC. The same
+        # pod_config merge happens again later in combine_pod_config_fields
+        # when the user's pod_config is folded into the rendered YAML.
+        cluster_name_on_cloud = cluster_name.name_on_cloud
+        merged_pod_config = skypilot_config.get_effective_region_config(
+            cloud=cloud_config_str,
+            region=context,
+            keys=('pod_config',),
+            default_value={})
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
+            dict_config=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
+            region=context,
+            keys=('pod_config',),
+            default_value={})
+        config_utils.merge_k8s_configs(merged_pod_config, override_pod_config)
+        k8s_host_network = host_network.is_host_network(merged_pod_config)
+        # Passed to ray_{head,worker}_start_command so they emit deterministic
+        # port flags; None keeps the non-hostNetwork command byte-identical.
+        host_network_params = (
+            host_network.HostNetworkRayParams.build(cluster_name_on_cloud)
+            if k8s_host_network else None)
+        k8s_host_network_head_ip = (host_network_params.head_node_ip
+                                    if host_network_params else None)
+        k8s_host_network_head_gcs_port = (host_network_params.head_ports.gcs
+                                          if host_network_params else None)
+        # Bash that sets $SKYPILOT_NODE_RANK + the deterministic sshd port
+        # expression; the template uses them to rebind every pod's sshd off
+        # host:22 (owned by the K8s node's own sshd under hostNetwork).
+        k8s_host_network_rank_shell = (host_network_params.rank_shell
+                                       if host_network_params else None)
+        k8s_host_network_sshd_port_expr = (
+            host_network_params.worker_port_exprs['sshd']
+            if host_network_params else None)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -796,10 +836,15 @@ class Kubernetes(clouds.Cloud):
             'image_id': image_id,
             'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
             'ray_head_start_command': instance_setup.ray_head_start_command(
-                custom_resources, custom_ray_options),
+                custom_resources,
+                custom_ray_options,
+                host_network_params=host_network_params),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
-                custom_resources, custom_ray_options, no_restart=False),
+                custom_resources,
+                custom_ray_options,
+                no_restart=False,
+                host_network_params=host_network_params),
             'k8s_high_availability_deployment_volume_mount_name':
                 (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
                 ),
@@ -825,6 +870,14 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
             'k8s_context': context,
             'k8s_namespace': namespace,
+            'k8s_host_network': k8s_host_network,
+            # Head's deterministic loopback IP + GCS port. Workers export
+            # these (template) so `ray start --address` dials the head over
+            # the shared host netns instead of the (host-IP) Service DNS.
+            'k8s_host_network_head_ip': k8s_host_network_head_ip,
+            'k8s_host_network_head_gcs_port': k8s_host_network_head_gcs_port,
+            'k8s_host_network_rank_shell': k8s_host_network_rank_shell,
+            'k8s_host_network_sshd_port_expr': k8s_host_network_sshd_port_expr,
         }
 
         # Add ephemeral storage to deploy vars if specified.
