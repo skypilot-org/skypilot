@@ -221,7 +221,7 @@ sky logs CLUSTER JOB_ID --status
 sky queue CLUSTER -o json --skip-finished
 ssh CLUSTER 'log_dir=$(ls -dt ~/sky_logs/JOB_ID-* 2>/dev/null | head -1) && tail -n 1000 "$log_dir/run.log" | tr "\r" "\n" | grep -E "Traceback|ERROR|checkpoint|eval|loss|step" | tail -n 50'
 ssh CLUSTER 'nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits'
-ssh CLUSTER 'ps -eo pid,ppid,stat,pcpu,pmem,etime,args | grep python'
+ssh CLUSTER 'ps -eo pid,ppid,stat,pcpu,pmem,etime,args | grep [p]ython'
 ```
 
 Use `sky logs CLUSTER JOB_ID --sync-down` when you need the complete log
