@@ -360,10 +360,14 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky logs {name} 2 --status',
                 f'sky status -r {name} | grep UP',
 
-                # Verify the hook was executed by checking the autostop hook log and skylet logs
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
-                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
+                # Verify the hook was executed by checking the stop-event
+                # hook log and skylet logs. The legacy `autostop.hook` YAML
+                # field routes to `events: [stop]` when `autostop.down` is
+                # false (the default), so the log lives at
+                # ~/.sky/hooks/stop.log and is read via `--hook stop`.
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
+                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Stop hook executed successfully"',
             ],
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) +

@@ -152,9 +152,5 @@ def run(event: str, hooks: Optional[List[Dict[str, Any]]]) -> None:
             logger.warning(
                 f'{event} hook exited with code {rc}; continuing teardown.')
         else:
-            # Phrasing matches master's pre-refactor `execute_autostop_hook`
-            # success log so master's `test_launch_fast_with_autostop_hook`
-            # smoke test (which greps the skylet log for
-            # "Autostop hook executed successfully") keeps passing.
             logger.info(f'{event.capitalize()} hook executed successfully '
                         f'({idx + 1}/{len(matching)}, timeout={timeout}s).')
