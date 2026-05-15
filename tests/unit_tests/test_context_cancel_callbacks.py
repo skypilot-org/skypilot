@@ -4,9 +4,29 @@ The cancel callback channel lets blocking sync work (e.g. a gRPC streaming
 iterator stuck in Condition.wait inside __next__) react to ctx.cancel()
 even though it cannot poll is_canceled() itself.
 """
+import asyncio
 import threading
 
+import pytest
+
 from sky.utils import context
+
+
+@pytest.fixture(autouse=True)
+def _ensure_event_loop():
+    """``SkyPilotContext.__init__`` calls ``asyncio.Event()``, which on
+    Python 3.9 needs a current event loop in the main thread. A prior test
+    in the same session can call ``asyncio.set_event_loop(None)`` and
+    suppress the lazy main-thread auto-creation, so install a fresh loop
+    for each test here.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
 
 
 def test_callback_fires_on_cancel():
