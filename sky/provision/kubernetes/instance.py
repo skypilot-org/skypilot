@@ -62,8 +62,13 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
-COMMON_NON_PENDING_EVENT_REASONS = {
-    'Scheduled', 'Created', 'Started', 'Failed', 'Pulled'
+# Normal-type pod events that represent slow, legitimately-in-flight steps
+# whose state.waiting.reason is the uninformative 'ContainerCreating'.
+# Consulted only as a fallback when no Warning-type event is present.
+_PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
+    'Pulling',  # kubelet pulling image (can be minutes for large images)
+    'Provisioning',  # external CSI provisioner creating a PV
+    'WaitForFirstConsumer',  # late-binding storage class
 }
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
@@ -715,12 +720,16 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 #  them as needed.
                 msg = init_waiting.message if (
                     init_waiting.message) else str(init_waiting)
+                unmasked = _unmask_crashloopbackoff_reason(init_status)
+                reason_text = (unmasked if unmasked is not None else
+                               (init_waiting.reason or 'Unknown'))
                 raise config_lib.KubernetesError(
-                    'Failed to create init container for pod '
-                    f'{pod.metadata.name}. Error details: {msg}.')
+                    f'Failed to create init container for pod '
+                    f'{pod.metadata.name}. Error details: '
+                    f'{reason_text}: {msg}.')
 
     def _inspect_pod_status(pod):
-        # Check if pod is terminated/preempted/failed.
+        # Check if pod is terminated/preempted/failed (unchanged).
         if (pod.metadata.deletion_timestamp is not None or
                 pod.status.phase == 'Failed'):
             # Get the reason and write to cluster events before
@@ -733,40 +742,55 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 f'Pod {pod.metadata.name} failed: {condensed}')
 
         container_statuses = pod.status.container_statuses
-        # Continue if pod and all the containers within the
-        # pod are successfully created and running.
+        # Happy path: pod Running and every container Running (unchanged).
         if (pod.status.phase == 'Running' and container_statuses is not None and
                 all(container.state.running
                     for container in container_statuses)):
             return True, None
 
-        reason: Optional[str] = None
-        if pod.status.phase == 'Pending':
-            pending_reason = _get_pod_pending_reason(context, namespace,
-                                                     pod.metadata.name)
-            if pending_reason is not None:
-                reason, message = pending_reason
-                logger.debug(f'Pod {pod.metadata.name} is pending: '
-                             f'{reason}: {message}')
+        # Tier 1: container-status sweep. Computed once, consumed in both
+        # branches below.
+        container_reason = _get_pod_pending_reason_from_container_status(pod)
 
-            # Iterate over each container in pod to check their status
+        if pod.status.phase == 'Pending':
+            # Today's raise block -- control flow preserved, message enriched
+            # via _unmask_crashloopbackoff_reason when the waiting state is
+            # CrashLoopBackOff. msg body (waiting.message) is always preserved.
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    # If the container wasn't in 'ContainerCreating'
-                    # state, then we know pod wasn't scheduled or
-                    # had some other error, such as image pull error.
-                    # See list of possible reasons for waiting here:
-                    # https://stackoverflow.com/a/57886025
-                    waiting = container_status.state.waiting
-                    if waiting is not None:
-                        if waiting.reason == 'PodInitializing':
-                            _check_init_containers(pod)
-                        elif waiting.reason != 'ContainerCreating':
-                            msg = waiting.message if (
-                                waiting.message) else str(waiting)
-                            raise config_lib.KubernetesError(
-                                f'{waiting.reason}: {msg}')
-        return False, reason
+                    waiting = (container_status.state.waiting
+                               if container_status.state else None)
+                    if waiting is None:
+                        continue
+                    if waiting.reason == 'PodInitializing':
+                        _check_init_containers(pod)
+                    elif waiting.reason != 'ContainerCreating':
+                        msg = waiting.message if (
+                            waiting.message) else str(waiting)
+                        unmasked = _unmask_crashloopbackoff_reason(
+                            container_status)
+                        reason_text = (unmasked if unmasked is not None else
+                                       (waiting.reason or 'Unknown'))
+                        raise config_lib.KubernetesError(
+                            f'{reason_text}: {msg}')
+
+            # Tier 1 wins; fall back to Tier 2/3 events (semantics changed --
+            # see _get_pod_pending_reason: Warning beats Normal regardless
+            # of timestamp).
+            reason: Optional[str] = container_reason
+            if reason is None:
+                pending_reason = _get_pod_pending_reason(
+                    context, namespace, pod.metadata.name)
+                if pending_reason is not None:
+                    reason, message = pending_reason
+                    logger.debug(f'Pod {pod.metadata.name} is pending: '
+                                 f'{reason}: {message}')
+            return False, reason
+
+        # phase == 'Running' but not all containers running (e.g. one is in
+        # CrashLoopBackOff). Surface tier-1's pending reason -- previously this
+        # returned (False, None) silently, masking OOMKilled etc.
+        return False, container_reason
 
     missing_pods_retry = 0
     last_status_msg: Optional[str] = None
@@ -2198,12 +2222,83 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reverse=True)
 
 
+def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
+    """Return `last_state.terminated.reason` iff cs is in CrashLoopBackOff
+    and a previous terminated reason is available; else None.
+
+    Used to surface OOMKilled / Error / etc. instead of bare CrashLoopBackOff.
+    """
+    waiting = cs.state.waiting if cs.state else None
+    if waiting is None or waiting.reason != 'CrashLoopBackOff':
+        return None
+    last_term = cs.last_state.terminated if cs.last_state else None
+    if last_term is None or not last_term.reason:
+        return None
+    return last_term.reason
+
+
+def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
+    """Tier-1 sweep: derive a pending reason from pod.status.container_statuses.
+
+    For each container in turn:
+      1. state.waiting: on ContainerCreating/PodInitializing, fall through to
+         checks 2 and 3 on the *same* container (a transient-waiting current
+         state can coexist with a prior bad termination — surface the prior
+         fault); on CrashLoopBackOff, unmask via last_state.terminated; else
+         return the waiting reason.
+      2. state.terminated: if exit_code != 0, return terminated.reason.
+      3. last_state.terminated: if exit_code != 0 and reason present, return
+         it (race-window: container restarted between iterations).
+    If a container matches none of (1)-(3), advance to the next container.
+    Returns None only after exhausting all containers.
+
+    Returns a bare reason string (e.g. "OOMKilled", not
+    "OOMKilled (exit 137)") -- the exit-code suffix is intentionally omitted
+    because it adds cardinality that defeats nop_if_duplicate dedup on the
+    LAUNCH_PROGRESS event.
+    """
+    container_statuses = getattr(getattr(pod, 'status', None),
+                                 'container_statuses', None) or []
+    for cs in container_statuses:
+        # 1. state.waiting
+        waiting = cs.state.waiting if cs.state else None
+        if waiting is not None:
+            if waiting.reason in ('ContainerCreating', 'PodInitializing'):
+                # Transient; fall through to checks 2/3 on this container.
+                pass
+            elif waiting.reason == 'CrashLoopBackOff':
+                unmasked = _unmask_crashloopbackoff_reason(cs)
+                return unmasked or 'CrashLoopBackOff'
+            else:
+                return waiting.reason
+
+        # 2. state.terminated (currently terminated, between restarts)
+        terminated = cs.state.terminated if cs.state else None
+        if terminated is not None and terminated.exit_code != 0:
+            return terminated.reason or 'Terminated'
+
+        # 3. last_state.terminated (previous run terminated badly)
+        last_term = cs.last_state.terminated if cs.last_state else None
+        if (last_term is not None and last_term.exit_code is not None and
+                last_term.exit_code != 0 and last_term.reason):
+            return last_term.reason
+
+    return None
+
+
 def _get_pod_pending_reason(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
 
-    Returns a (reason, message) tuple about why the pod is pending (e.g.,
-    ("FailedMount", "hostPath type check failed")) or None if no reason found.
+    Two-pass scan over the event list (sorted newest-first by _get_pod_events):
+      1. Tier 2 -- return the newest event with event.type == 'Warning'.
+      2. Tier 3 -- return the newest event whose reason is in
+         _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
+    Warnings always beat allow-listed Normals, regardless of timestamp ordering
+    in the event window -- a FailedScheduling Warning is a more truthful pending
+    reason than a Pulling Normal from a doomed retry.
+
+    Returns a (reason, message) tuple, or None if neither pass matches.
     """
     try:
         pod_events = _get_pod_events(context, namespace, pod_name)
@@ -2214,15 +2309,15 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
+    # Tier 2: Warning events.
     for event in pod_events:
-        # Omit common events that does not indicate a pending reason.
-        # We could also filter by event type 'Warning' or 'Error',
-        # but there might be useful 'Normal' events such as pulling
-        # image that we want to surface to the user.
-        if event.reason not in COMMON_NON_PENDING_EVENT_REASONS:
-            reason = event.reason or 'Unknown'
-            message = event.message or ''
-            return reason, message
+        if event.type == 'Warning':
+            return event.reason or 'Unknown', event.message or ''
+
+    # Tier 3: allow-listed Normal events.
+    for event in pod_events:
+        if event.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST:
+            return event.reason, event.message or ''
 
     return None
 
