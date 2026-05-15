@@ -12,6 +12,7 @@
     @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
     .diag .flow { animation: flow-dash 1.8s linear infinite; }
 ]]></style>
+  <g><rect x="70" y="60" width="380" height="350" rx="20" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-dasharray="2 5"/><g transform="translate(96 60)"><rect x="-12" y="-16" width="260" height="32" rx="16" fill="#FFFFFF" stroke="#0A55EE" stroke-width="1.25"/><text x="0" y="6" font-family="BerkeleyMono, monospace" font-size="14" letter-spacing="0.18em" font-weight="700" fill="#0A55EE">SKYPILOT&#160;JOB&#160;GROUP</text></g></g>
   <g><path d="M 730.0 80 L 730.0 390 A 120.0 24 0 0 0 970.0 390 L 970.0 80 A 120.0 24 0 0 1 730.0 80 Z" fill="#E4F2FB" stroke="#0A55EE" stroke-width="1.5"/><ellipse cx="850" cy="80" rx="120.0" ry="24" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/><text x="850" y="223.0" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="22" font-weight="700" fill="#062152">/checkpoints</text><text x="850" y="251.0" text-anchor="middle" class="annot" fill="#243142">Kubernetes PVC · shared volume</text><text x="850" y="277.0" text-anchor="middle" class="mono" font-size="13" fill="#5d6a7a">my-checkpoint-volume</text></g>
   <g transform="translate(90 80)"><rect x="0" y="0" width="340" height="140" rx="14" fill="#FFFFFF" stroke="#C7402E" stroke-width="1.5"/><text x="22" y="32" class="role">TASK&#160;01</text><text x="22" y="72" font-family="Waldenburg, sans-serif" font-size="28" font-weight="500" fill="#04070B" letter-spacing="-0.015em">trainer</text><text x="22" y="100" class="annot">writes a checkpoint every N steps</text></g>
   <g transform="translate(90 250)"><rect x="0" y="0" width="340" height="140" rx="14" fill="#FFFFFF" stroke="#0A55EE" stroke-width="1.5"/><text x="22" y="32" class="role">TASK&#160;02</text><text x="22" y="72" font-family="Waldenburg, sans-serif" font-size="28" font-weight="500" fill="#04070B" letter-spacing="-0.015em">evaluator</text><text x="22" y="100" class="annot">polls the volume for new checkpoints</text></g>
@@ -25,5 +26,4 @@
       <polyline points="449.00,313.50 438,320.0 449.00,326.50" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
       <text x="582.00" y="306.00" text-anchor="middle" class="flow-label">read</text>
       </g>
-  <g transform="translate(90 26)"><rect x="0" y="0" width="188" height="26" rx="13" fill="none" stroke="#C8C6C7" stroke-width="1"/><text x="94" y="17" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" letter-spacing="0.16em" fill="#243142">EXECUTION:&#160;PARALLEL</text></g>
 </svg>
