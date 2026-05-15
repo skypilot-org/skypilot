@@ -95,7 +95,10 @@ run: |
   echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
   echo "Model: ${MODEL_NAME}"
 
-  # Start SGLang server in background
+  # Start SGLang server in background. SGLang's launch_server natively exposes
+  # /update_weights_from_disk and /flush_cache — the trainer calls these via
+  # the router (port 30000), which broadcasts them to every backend so all
+  # SGLang instances reload the freshly-saved policy from /shared/policy.
   python -m sglang.launch_server \
     --model ${MODEL_NAME} \
     --host 0.0.0.0 \
