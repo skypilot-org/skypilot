@@ -2865,17 +2865,14 @@ class _CancelAwareStub:
         method = getattr(self._stub, name)
         if name in self._streaming:
 
-            def wrapped_streaming(request, timeout=None):
-                return backend_utils.invoke_grpc_streaming(method,
-                                                           request,
-                                                           timeout=timeout)
+            def wrapped_streaming(*args, **kwargs):
+                return backend_utils.invoke_grpc_streaming(
+                    method, *args, **kwargs)
 
             return wrapped_streaming
 
-        def wrapped_unary(request, timeout=None):
-            return backend_utils.invoke_grpc_unary(method,
-                                                   request,
-                                                   timeout=timeout)
+        def wrapped_unary(*args, **kwargs):
+            return backend_utils.invoke_grpc_unary(method, *args, **kwargs)
 
         return wrapped_unary
 

@@ -143,7 +143,8 @@ def test_unary_with_ctx_uses_future_and_cancels_on_ctx_cancel():
         try:
             results.append(
                 backend_utils.invoke_grpc_unary(method, 'req', timeout=None))
-        except Exception as e:  # pylint: disable=broad-except
+        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+            # CancelledError is BaseException in py3.8+, not Exception.
             errors.append(e)
 
     snapshot = contextvars.copy_context()
@@ -161,7 +162,11 @@ def test_unary_with_ctx_uses_future_and_cancels_on_ctx_cancel():
     assert not t.is_alive(), 'Worker did not exit after ctx.cancel()'
     assert method.calls[0].cancelled(), (
         'Underlying gRPC call.cancel() was not invoked')
-    assert errors, 'Expected the cancellation to surface as an error'
+    # The CANCELLED RpcError must surface as asyncio.CancelledError so the
+    # request executor classifies the request as CANCELLED, not FAILED.
+    assert len(errors) == 1, f'expected one error, got {errors}'
+    assert isinstance(errors[0], asyncio.CancelledError), (
+        f'expected CancelledError, got {type(errors[0]).__name__}')
 
 
 def test_unary_cleans_up_callback_on_success():
@@ -198,7 +203,7 @@ def test_streaming_cancels_iterator_on_ctx_cancel():
         try:
             for item in backend_utils.invoke_grpc_streaming(method, 'req'):
                 received.append(item)
-        except grpc.RpcError as e:
+        except (grpc.RpcError, asyncio.CancelledError) as e:
             errors.append(e)
 
     snapshot = contextvars.copy_context()
@@ -214,7 +219,10 @@ def test_streaming_cancels_iterator_on_ctx_cancel():
     ctx.cancel()
     t.join(timeout=2)
     assert not t.is_alive(), 'Consumer did not exit after ctx.cancel()'
-    assert errors, 'Expected CANCELLED error to be raised'
+    # CANCELLED RpcError must be translated to asyncio.CancelledError.
+    assert len(errors) == 1, f'expected one error, got {errors}'
+    assert isinstance(errors[0], asyncio.CancelledError), (
+        f'expected CancelledError, got {type(errors[0]).__name__}')
 
 
 def test_streaming_cleans_up_callback_on_normal_completion():
@@ -227,6 +235,46 @@ def test_streaming_cleans_up_callback_on_normal_completion():
     # already-finished iterator (cb was unregistered).
     ctx.cancel()
     assert not call.cancelled_event_is_set()
+
+
+def test_unary_forwards_extra_grpc_options():
+    """Callers must be able to pass metadata / wait_for_ready / credentials."""
+    context.initialize()
+    method = mock.MagicMock()
+    fut = mock.MagicMock()
+    fut.result.return_value = 'value'
+    method.future.return_value = fut
+    backend_utils.invoke_grpc_unary(
+        method,
+        'req',
+        timeout=1.0,
+        metadata=(('x-extra', '1'),),
+        wait_for_ready=True,
+    )
+    method.future.assert_called_once_with(
+        'req',
+        timeout=1.0,
+        metadata=(('x-extra', '1'),),
+        wait_for_ready=True,
+    )
+
+
+def test_streaming_forwards_extra_grpc_options():
+    context.initialize()
+    call = _FakeStreamingCall(['only-one'])
+    method = mock.MagicMock(return_value=call)
+    list(
+        backend_utils.invoke_grpc_streaming(
+            method,
+            'req',
+            timeout=None,
+            metadata=(('x-extra', '1'),),
+        ))
+    method.assert_called_once_with(
+        'req',
+        timeout=None,
+        metadata=(('x-extra', '1'),),
+    )
 
 
 def test_invoke_skylet_with_retries_bails_on_ctx_cancel_during_backoff():
