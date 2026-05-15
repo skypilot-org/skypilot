@@ -1,9 +1,8 @@
 # Ubuntu 22.04 to match the GPU image's base (nvidia/cuda:*-ubuntu22.04 is
-# layered on top of ubuntu:22.04). Keeping the OS/glibc aligned makes
-# debugging across CPU controller pods and GPU worker pods consistent.
+# layered on top of ubuntu:22.04).
 FROM ubuntu:22.04
 
-# Detect architecture
+# Detect architecture using ARG with default value
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -48,7 +47,9 @@ WORKDIR /home/sky
 
 SHELL ["/bin/bash", "-c"]
 
-# Install conda, uv, and skypilot runtime dependencies.
+# Install conda and other dependencies based on architecture
+# Keep the conda and Ray versions below in sync with the ones in skylet.constants
+# Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
@@ -71,6 +72,12 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
         'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
+    curl -LO "https://dl.k8s.io/release/v1.33.12/bin/linux/$ARCH/kubectl" && \
+    # Install kubectl to user's local bin instead of system path to avoid
+    # sudo-related issues during cross-architecture builds, especially on ARM
+    chmod +x kubectl && \
+    mkdir -p $HOME/.local/bin && \
+    mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
