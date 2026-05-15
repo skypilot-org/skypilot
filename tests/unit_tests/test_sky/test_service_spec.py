@@ -1,4 +1,6 @@
 """Tests for SkyServiceSpec, specifically pool configuration validation."""
+import pickle
+
 import pytest
 
 from sky.serve import constants as serve_constants
@@ -190,6 +192,25 @@ class TestReadinessProbeConfiguration:
 
         assert spec.endpoint_probe_interval_seconds == 7
         assert spec.consecutive_failure_threshold_timeout == 45
+
+    def test_unpickle_old_spec_backfills_new_probe_fields(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+            },
+            'replicas': 1,
+        })
+        del spec._endpoint_probe_interval_seconds
+        del spec._lb_stream_timeout_seconds
+        del spec._consecutive_failure_threshold_timeout
+
+        restored = pickle.loads(pickle.dumps(spec))
+
+        assert (restored.endpoint_probe_interval_seconds ==
+                serve_constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        assert (restored.lb_stream_timeout_seconds ==
+                serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
+        assert restored.consecutive_failure_threshold_timeout is None
 
 
 class TestLoadBalancerConfiguration:

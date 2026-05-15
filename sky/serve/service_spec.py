@@ -163,6 +163,17 @@ class SkyServiceSpec:
                 self.base_ondemand_fallback_replicas is not None and
                 self.base_ondemand_fallback_replicas > 0)
 
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """Set state from pickled state, for backward compatibility."""
+        # These fields were added after earlier releases had already persisted
+        # SkyServiceSpec objects in the serve DB.
+        state.setdefault('_endpoint_probe_interval_seconds',
+                         constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        state.setdefault('_lb_stream_timeout_seconds',
+                         constants.DEFAULT_LB_STREAM_TIMEOUT)
+        state.setdefault('_consecutive_failure_threshold_timeout', None)
+        self.__dict__.update(state)
+
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
         common_utils.validate_schema(config, schemas.get_service_schema(),
