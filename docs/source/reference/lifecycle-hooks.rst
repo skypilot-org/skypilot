@@ -5,9 +5,9 @@ Lifecycle hooks
 ===============
 
 Lifecycle hooks let a SkyPilot task run scripts on the cluster in response to
-**autostop**, **preemption**, or **down** (``sky down``) events. Each hook
-script runs on the remote cluster before the cluster is stopped or torn down,
-with access to the cluster's filesystem and environment variables.
+**stop**, **preemption**, or **down** events. Each hook script runs on the
+remote cluster before the cluster is stopped or torn down, with access to the
+cluster's filesystem and environment variables.
 
 Common use cases include committing code, saving checkpoints, uploading logs,
 sending notifications, and performing cleanup before the cluster goes away.
@@ -16,7 +16,7 @@ Quick start
 -----------
 
 Add a ``hooks:`` list under the task YAML's ``config:`` block. Each entry
-runs on the cluster on lifecycle events — ``autostop``, ``preemption``,
+runs on the cluster on lifecycle events — ``stop``, ``preemption``,
 or ``down``:
 
 .. code-block:: yaml
@@ -41,9 +41,9 @@ Schema
 Each entry under ``config.hooks`` is an object with three fields:
 
 - ``run`` (required): The shell script to execute on the cluster.
-- ``events`` (optional, default ``[autostop, preemption, down]``): The list of
+- ``events`` (optional, default ``[stop, preemption, down]``): The list of
   lifecycle events that trigger this hook. Each item must be one of
-  ``autostop``, ``preemption``, ``down``.
+  ``stop``, ``preemption``, ``down``.
 - ``timeout`` (optional, default ``3600`` seconds, minimum ``1``): Maximum
   number of seconds the hook is allowed to run. On timeout, the hook is
   terminated and the lifecycle event proceeds.
@@ -55,16 +55,22 @@ a warning is logged.
 Events
 ------
 
-- ``autostop``: Fires when the cluster's idle timer elapses
-  (``resources.autostop`` / ``sky autostop -i N``). Runs on the head node
-  before stop or tear-down. See :ref:`auto-stop`.
+Events are named by the outcome (what's about to happen to the cluster), not
+by the trigger. Hook authors choose the event by what they want their script
+to react to, regardless of which mechanism caused the teardown.
+
+- ``stop``: Fires when the cluster's idle timer pauses the cluster
+  (``resources.autostop`` / ``sky autostop -i N`` with ``down: false``).
+  Runs on the head node before the cluster is stopped. See :ref:`auto-stop`.
 - ``preemption``: Fires when the cluster receives a termination signal from
   the cloud or Kubernetes (e.g., spot reclamation, node drain). On
   Kubernetes, SkyPilot automatically extends the pod's
   ``terminationGracePeriodSeconds`` to fit the longest preemption-hook
   ``timeout``.
-- ``down``: Fires when ``sky down <cluster>`` is invoked. Runs on the head
-  node before the cluster is torn down.
+- ``down``: Fires when the cluster is being torn down — either by
+  ``sky down <cluster>`` or by the idle timer with autodown enabled
+  (``autostop.down: true``). Runs on the head node before the cluster is
+  torn down.
 
 .. note::
 
@@ -80,19 +86,16 @@ Use ``sky logs --hook`` to stream them:
 
 .. code-block:: bash
 
-   # Stream the autostop hook log
-   sky logs --hook autostop mycluster
+   # Stream the stop hook log
+   sky logs --hook stop mycluster
 
    # Auto-select whichever log exists (e.g., after a preemption)
    sky logs --hook mycluster
 
-The ``sky logs --autostop`` flag is kept as a deprecated alias for
-``sky logs --hook autostop``.
-
 Examples
 --------
 
-.. dropdown:: Committing and pushing code changes (autostop)
+.. dropdown:: Committing and pushing code changes (stop)
 
     .. code-block:: yaml
 
@@ -106,9 +109,9 @@ Examples
                git add .
                git commit -m "Auto-commit before shutdown"
                git push
-             events: [autostop]
+             events: [stop]
 
-.. dropdown:: Saving model checkpoints to persistent storage (autostop + preemption)
+.. dropdown:: Saving model checkpoints to persistent storage (stop + preemption)
 
     .. code-block:: yaml
 
@@ -119,7 +122,7 @@ Examples
                cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
                # Or upload to S3
                aws s3 sync /workspace/checkpoints/ s3://my-bucket/checkpoints/
-             events: [autostop, preemption]
+             events: [stop, preemption]
              timeout: 120
 
 .. dropdown:: Uploading logs or results to cloud storage
@@ -145,7 +148,7 @@ Examples
                wandb sync ./wandb
                # Or sync a specific run
                # wandb sync ./wandb/run-20250813_124246-n67z9ude
-             events: [autostop, preemption]
+             events: [stop, preemption]
 
 .. dropdown:: Sending notifications about cluster shutdown
 
@@ -173,7 +176,7 @@ Examples
                curl -X POST https://airflow.example.com/api/v1/dags/model_eval/dag_runs \
                     -H "Content-Type: application/json" \
                     -d '{"conf": {"model_path": "s3://my-bucket/models/v1"}}'
-             events: [autostop]
+             events: [stop]
 
 .. dropdown:: Pushing model to Hugging Face Hub
 
@@ -184,4 +187,4 @@ Examples
            - run: |
                # Upload the trained model to Hugging Face Hub
                huggingface-cli upload my-org/my-model /workspace/model-output .
-             events: [autostop]
+             events: [stop]

@@ -16,7 +16,6 @@ import logging
 import os
 import platform
 import subprocess
-import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -57,7 +56,6 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
-from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1175,32 +1173,6 @@ def tail_hook_logs(cluster_name: str,
                                  tail=tail)
     response = server_common.make_authenticated_request(
         'POST', '/hook_logs', json=json.loads(body.model_dump_json()))
-    request_id: server_common.RequestId[int] = server_common.get_request_id(
-        response)
-    return stream_and_get(request_id)
-
-
-# TODO(zpoint): deprecated alias for tail_hook_logs(event='autostop').
-# Remove after v0.15.0 (aligned with the autostop.hook removal
-# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
-
-    Emits a stderr deprecation warning; behavior otherwise identical
-    to ``tail_hook_logs``. Scheduled for removal a couple of minor
-    releases after the lifecycle-hooks framework ships.
-    """
-    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
-    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
-                                     follow=follow,
-                                     tail=tail)
-    response = server_common.make_authenticated_request(
-        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     return stream_and_get(request_id)

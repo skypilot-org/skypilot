@@ -88,7 +88,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
-from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -462,7 +461,7 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
 
 
-_VALID_HOOK_EVENTS = ('autostop', 'preemption', 'down')
+_VALID_HOOK_EVENTS = ('stop', 'preemption', 'down')
 
 
 def _validate_hook_event(ctx: click.Context, param: click.Parameter,
@@ -2584,13 +2583,6 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
-# TODO(zpoint): deprecated alias for --hook autostop. Remove after
-# v0.15.0 (aligned with the autostop.hook removal pinned at v0.15.0
-# in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
-@click.option('--autostop',
-              is_flag=True,
-              default=False,
-              help='Deprecated alias for --hook autostop.')
 @click.option('--hook',
               'hook_event',
               callback=_validate_hook_event,
@@ -2638,7 +2630,6 @@ def logs(
     cluster: Optional[str],
     job_ids: Tuple[str, ...],
     provision: bool,
-    autostop: bool,  # pylint: disable=redefined-outer-name
     hook_event: Optional[str],
     worker: Optional[int],
     sync_down: bool,
@@ -2670,9 +2661,9 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
 
-    5. If ``--hook [event]`` is specified (or the permanent ``--autostop``
-    alias for ``--hook autostop``), stream the per-event lifecycle-hook
-    log. Omit the event name to auto-select whichever log exists.
+    5. If ``--hook [event]`` is specified, stream the per-event
+    lifecycle-hook log. Omit the event name to auto-select whichever
+    log exists.
     """
     # Smart-parse the design-doc form `sky logs --hook <cluster>`:
     # Click greedily consumes the next token after --hook as the option
@@ -2691,17 +2682,6 @@ def logs(
                 f'{valid}.')
     if cluster is None:
         raise click.UsageError('Missing argument \'CLUSTER\'.')
-    # --autostop is a deprecated alias for --hook autostop.
-    # TODO(zpoint): drop the --autostop branch after v0.15.0
-    # (aligned with the autostop.hook removal pinned at v0.15.0 in
-    # sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
-    if autostop:
-        if hook_event is not None and hook_event != '' and hook_event != (
-                'autostop'):
-            raise click.UsageError(
-                f'--autostop cannot be combined with --hook {hook_event!r}.')
-        sys.stderr.write(hooks_deprecation.LOGS_AUTOSTOP_FLAG)
-        hook_event = 'autostop'
     # Sentinel `''` means --hook was passed without an event argument.
     hook_auto_select = (hook_event == '')
 
@@ -2714,7 +2694,7 @@ def logs(
 
     if provision and (hook_event is not None):
         raise click.UsageError(
-            '--provision and --hook/--autostop cannot be used together.')
+            '--provision and --hook cannot be used together.')
 
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
@@ -2723,9 +2703,8 @@ def logs(
 
     if hook_event is not None and (sync_down or status or job_ids or
                                    worker is not None):
-        raise click.UsageError(
-            '--hook/--autostop cannot be combined with job log options '
-            '(--sync-down/--status/--worker/job IDs).')
+        raise click.UsageError('--hook cannot be combined with job log options '
+                               '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(

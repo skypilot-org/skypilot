@@ -20,7 +20,7 @@ enum AutostopWaitFor {
 // on any given node via the file-lock CAS.
 enum Event {
   EVENT_UNSPECIFIED = 0;
-  EVENT_AUTOSTOP = 1;
+  EVENT_STOP = 1;
   EVENT_PREEMPTION = 2;
   EVENT_DOWN = 3;
 }

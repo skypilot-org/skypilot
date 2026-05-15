@@ -34,9 +34,9 @@ _HOOKS_CONFIG_KEY = 'lifecycle_hooks'
 
 # This key-value is stored inside the 'configs' sqlite3 database, because both
 # user-issued commands (this module) and the Skylet process running the
-# AutostopEvent need to access that state.
+# StopEvent need to access that state.
 _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
-# AutostopEvent sets this to the boot time when the autostop of the cluster
+# StopEvent sets this to the boot time when the autostop of the cluster
 # starts. This is used for checking whether the cluster is in the process
 # of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
@@ -190,14 +190,18 @@ def set_autostop(idle_minutes: int,
 
     # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
     # translate it into the generalized hooks list so hook_executor
-    # sees a single source of truth.
+    # sees a single source of truth. Pre-v7 master had a single
+    # autostop hook that fired on idle-timer teardown regardless of
+    # autodown — route it to ``down`` for autodown and ``stop``
+    # otherwise so the new event taxonomy stays consistent.
     # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
     # this translation once SKYLET_LIB_VERSION's minimum supported
     # client is ≥ 7.
     if hook:
+        legacy_event = 'down' if down else 'stop'
         set_hooks([{
             'run': hook,
-            'events': ['autostop'],
+            'events': [legacy_event],
             'timeout': (hook_timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
         }])
 
@@ -257,7 +261,7 @@ def _ensure_event_maps() -> None:
     if _EVENT_TO_PROTO:
         return
     _EVENT_TO_PROTO.update({
-        'autostop': autostopv1_pb2.EVENT_AUTOSTOP,
+        'stop': autostopv1_pb2.EVENT_STOP,
         'preemption': autostopv1_pb2.EVENT_PREEMPTION,
         'down': autostopv1_pb2.EVENT_DOWN,
     })
@@ -293,7 +297,7 @@ def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
         events = [_PROTO_TO_EVENT[e] for e in h.events if e in _PROTO_TO_EVENT]
         if not events:
             # Match Resources._normalize_hook_entry on the send side.
-            events = ['autostop', 'preemption', 'down']
+            events = ['stop', 'preemption', 'down']
         out.append({
             'run': h.run,
             'events': events,
@@ -463,12 +467,15 @@ class AutostopCodeGen:
         """
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
-        # Pre-v7 flattening: take the first autostop-matching hook.
+        # Pre-v7 flattening: pre-v7 skylets fire their single ``hook``
+        # on idle-timer teardown. Match the new-event equivalent for
+        # this launch: ``down`` for autodown, ``stop`` for autostop.
         flat_hook = hook
         flat_timeout = hook_timeout
+        legacy_event = 'down' if down else 'stop'
         if flat_hook is None and hooks:
             for entry in hooks:
-                if 'autostop' in (entry.get('events') or []):
+                if legacy_event in (entry.get('events') or []):
                     flat_hook = entry['run']
                     flat_timeout = entry.get('timeout')
                     break

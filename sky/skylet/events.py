@@ -190,8 +190,12 @@ class UsageHeartbeatReportEvent(SkyletEvent):
         )
 
 
-class AutostopEvent(SkyletEvent):
-    """Skylet event for autostop.
+class StopEvent(SkyletEvent):
+    """Skylet event for the idle-timer-driven teardown path.
+
+    Fires either the ``stop`` hook (when ``autostop.down`` is false)
+    or the ``down`` hook (autodown, when ``autostop.down`` is true)
+    before issuing the actual cluster teardown.
 
     Idleness timer gets set to 0 whenever:
       - A first autostop setting is set. By "first", either there's never any
@@ -253,23 +257,29 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _execute_hook_if_present(self, autostop_config) -> None:
-        """Run every stored autostop hook via hook_executor under CAS.
+        """Run stored hooks via hook_executor under CAS.
+
+        Routes idle-timer-driven teardown to the right event:
+          - ``autostop.down=False`` (pause): fires ``stop`` hooks.
+          - ``autostop.down=True`` (autodown): fires ``down`` hooks
+            (same event as ``sky down`` — both are teardowns).
 
         The CAS first-in-wins flag ensures we don't double-fire if
         another teardown trigger (SIGTERM from preemption, etc.) has
         already claimed this teardown.
         """
-        del autostop_config  # kept for backward-compat of the signature
-        if not hook_executor.try_claim_teardown(hook_executor.AUTOSTOP):
+        event = (hook_executor.DOWN
+                 if autostop_config.down else hook_executor.STOP)
+        if not hook_executor.try_claim_teardown(event):
             logger.info('Teardown already claimed by '
                         f'{hook_executor.current_teardown_event()!r}; skipping '
-                        'autostop hooks.')
+                        f'{event!r} hooks.')
             return
         hooks = autostop_lib.get_hooks()
         if hooks:
             logger.info(f'Executing {len(hooks)} stored lifecycle hook(s) for '
-                        'autostop.')
-            hook_executor.run(hook_executor.AUTOSTOP, hooks)
+                        f'{event!r}.')
+            hook_executor.run(event, hooks)
 
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==

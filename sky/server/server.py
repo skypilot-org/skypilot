@@ -2131,38 +2131,6 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
-# TODO(zpoint): deprecated alias for /hook_logs (event='autostop').
-# Remove after v0.15.0 (aligned with the autostop.hook removal
-# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
-@app.post('/autostop_logs')
-async def autostop_logs(
-    request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
-    background_tasks: fastapi.BackgroundTasks
-) -> fastapi.responses.StreamingResponse:
-    """Tails the autostop hook logs of a cluster.
-
-    Deprecated: use /hook_logs with event='autostop'.
-    """
-    executor.check_request_thread_executor_available()
-    request_task = await executor.prepare_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
-        request_body=autostop_logs_body,
-        func=core.tail_autostop_logs,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=autostop_logs_body.cluster_name,
-        auth_user=request.state.auth_user,
-    )
-    task = executor.execute_request_in_coroutine(request_task)
-    background_tasks.add_task(task.cancel)
-    return stream_utils.stream_response_for_long_request(
-        request_id=request.state.request_id,
-        logs_path=request_task.log_path,
-        background_tasks=background_tasks,
-        kill_request_on_disconnect=False,
-    )
-
-
 @app.post('/hook_logs')
 async def hook_logs(
     request: fastapi.Request, hook_logs_body: payloads.HookLogsBody,

@@ -3,7 +3,7 @@
 Target surface:
 
 - `config.hooks: [{run, events?, timeout?}]` where `events` is
-  optional and defaults to `[autostop, preemption, down]`.
+  optional and defaults to `[stop, preemption, down]`.
 - Schema rejects empty `events`, duplicates, unknown event names,
   non-positive timeouts, unknown keys.
 - Controller resources (`jobs.controller.resources`,
@@ -12,7 +12,8 @@ Target surface:
 - Pickle migration `_VERSION` 32 → 33 routes master's
   `AutostopConfig.hook` / `hook_timeout` into the new `_hooks` list.
 - Legacy `autostop.hook` YAML parses with a one-line stderr
-  deprecation warning and routes into `_hooks`.
+  deprecation warning and routes into `_hooks` (`down` event for
+  autodown, `stop` otherwise).
 - `hook_executor` exposes `try_claim_teardown`, `run`, constants,
   and a per-event log path layout.
 - `SKYLET_LIB_VERSION` bumps to 7.
@@ -31,7 +32,17 @@ from sky.utils import common_utils
 from sky.utils import schemas
 
 DEFAULT_TIMEOUT = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
-ALL_EVENTS = ['autostop', 'preemption', 'down']
+ALL_EVENTS = ['stop', 'preemption', 'down']
+
+
+def _autostop_yaml(idle_minutes, hook, *, down=False, hook_timeout=None):
+    """Build the legacy ``autostop: {...}`` YAML dict the loader accepts."""
+    out = {'idle_minutes': idle_minutes, 'hook': hook}
+    if down:
+        out['down'] = True
+    if hook_timeout is not None:
+        out['hook_timeout'] = hook_timeout
+    return out
 
 
 def _validate(hooks_payload):
@@ -52,19 +63,19 @@ def _validate(hooks_payload):
 
 
 def test_schema_accepts_hook_with_no_events_key():
-    """`events` is optional; omission = [autostop, preemption, down]."""
+    """`events` is optional; omission = [stop, preemption, down]."""
     _validate({'hooks': [{'run': 'echo hi'}]})
 
 
 def test_schema_accepts_single_event():
-    _validate({'hooks': [{'run': 'echo hi', 'events': ['autostop']}]})
+    _validate({'hooks': [{'run': 'echo hi', 'events': ['stop']}]})
 
 
 def test_schema_accepts_all_events_and_timeout():
     _validate({
         'hooks': [{
             'run': 'save.sh',
-            'events': ['autostop', 'preemption', 'down'],
+            'events': ['stop', 'preemption', 'down'],
             'timeout': 120,
         }],
     })
@@ -93,7 +104,7 @@ def test_schema_accepts_multiple_hook_entries():
 @pytest.mark.parametrize('bad_hook', [
     {},
     {
-        'events': ['autostop']
+        'events': ['stop']
     },
     {
         'run': ''
@@ -104,7 +115,7 @@ def test_schema_accepts_multiple_hook_entries():
     },
     {
         'run': 'x',
-        'events': ['autostop', 'autostop']
+        'events': ['stop', 'stop']
     },
     {
         'run': 'x',
@@ -152,12 +163,12 @@ def test_resources_round_trip_preserves_hooks():
     hooks = [
         {
             'run': 'a',
-            'events': ['autostop'],
+            'events': ['stop'],
             'timeout': 60
         },
         {
             'run': 'b',
-            'events': ['autostop', 'down']
+            'events': ['stop', 'down']
         },
     ]
     task = Task.from_yaml_config({
@@ -179,7 +190,7 @@ def test_resources_round_trip_preserves_hooks():
     assert cfg_hooks, f'Expected config.hooks; got: {out!r}'
     assert len(cfg_hooks) == 2
     assert cfg_hooks[0]['run'] == 'a'
-    assert sorted(cfg_hooks[0]['events']) == ['autostop']
+    assert sorted(cfg_hooks[0]['events']) == ['stop']
     assert cfg_hooks[0]['timeout'] == 60
 
     # Now feed the dumped YAML back through the loader — should not
@@ -208,12 +219,12 @@ def test_resources_copy_override_replaces_hooks():
                 'run': 'x',
                 'events': ['down']
             }]}))
-    new_hooks = [{'run': 'y', 'events': ['autostop']}]
+    new_hooks = [{'run': 'y', 'events': ['stop']}]
     r2 = r.copy(hooks=new_hooks)
     # copy(hooks=...) may or may not re-default-fill; compare on run+events.
     assert len(r2.hooks) == 1
     assert r2.hooks[0]['run'] == 'y'
-    assert sorted(r2.hooks[0]['events']) == ['autostop']
+    assert sorted(r2.hooks[0]['events']) == ['stop']
 
 
 def test_resources_no_hooks_yields_none_or_empty():
@@ -239,7 +250,8 @@ def test_legacy_autostop_hook_routes_into_hooks(capsys):
     assert r.hooks and len(r.hooks) == 1
     entry = r.hooks[0]
     assert entry['run'] == 'echo legacy'
-    assert sorted(entry['events']) == ['autostop']
+    # autostop.down defaults to False → legacy hook routes to `stop`.
+    assert sorted(entry['events']) == ['stop']
     assert entry['timeout'] == 42
 
     # Legacy attrs scrubbed from AutostopConfig.
@@ -251,6 +263,21 @@ def test_legacy_autostop_hook_routes_into_hooks(capsys):
     err = capsys.readouterr().err
     assert 'autostop.hook' in err
     assert 'deprecated' in err.lower()
+
+
+def test_legacy_autodown_hook_routes_to_down_event():
+    """``autostop: {down: true, hook: ...}`` routes the legacy hook to
+    the ``down`` event — autodown's outcome is teardown, not pause."""
+    (r,) = list(
+        Resources.from_yaml_config({
+            'autostop': {
+                'idle_minutes': 10,
+                'down': True,
+                'hook': 'echo legacy-autodown',
+            },
+        }))
+    assert r.hooks and len(r.hooks) == 1
+    assert sorted(r.hooks[0]['events']) == ['down']
 
 
 def test_legacy_autostop_hook_default_timeout():
@@ -301,7 +328,7 @@ def test_pickle_migration_routes_legacy_hook_attrs():
 
     assert fresh.hooks and fresh.hooks[0]['run'] == 'legacy.sh'
     assert fresh.hooks[0]['timeout'] == 99
-    assert sorted(fresh.hooks[0]['events']) == ['autostop']
+    assert sorted(fresh.hooks[0]['events']) == ['stop']
     assert getattr(fresh.autostop_config, 'hook', None) is None
     assert getattr(fresh.autostop_config, 'hook_timeout', None) is None
 
@@ -325,7 +352,7 @@ def test_controller_schema_rejects_hooks():
                     'cpus': 4,
                     'hooks': [{
                         'run': 'x',
-                        'events': ['autostop']
+                        'events': ['stop']
                     }],
                 }
             }
@@ -373,7 +400,7 @@ def hook_executor(tmp_path, monkeypatch):
 
 
 def test_try_claim_teardown_first_in_wins(hook_executor):
-    assert hook_executor.try_claim_teardown('autostop') is True
+    assert hook_executor.try_claim_teardown('stop') is True
     assert hook_executor.try_claim_teardown('preemption') is False
     assert hook_executor.try_claim_teardown('down') is False
 
@@ -386,7 +413,7 @@ def test_try_claim_teardown_thread_safety(hook_executor):
             winners.append(evt)
 
     threads = [
-        threading.Thread(target=_claim, args=('autostop',)),
+        threading.Thread(target=_claim, args=('stop',)),
         threading.Thread(target=_claim, args=('preemption',)),
         threading.Thread(target=_claim, args=('down',)),
     ]
@@ -398,7 +425,7 @@ def test_try_claim_teardown_thread_safety(hook_executor):
 
 
 def test_hook_executor_log_path_per_event(hook_executor):
-    assert hook_executor._log_path_for('autostop').endswith('/autostop.log')
+    assert hook_executor._log_path_for('stop').endswith('/stop.log')
     assert hook_executor._log_path_for('preemption').endswith('/preemption.log')
     assert hook_executor._log_path_for('down').endswith('/down.log')
 
@@ -414,7 +441,7 @@ def test_hook_executor_filters_by_event(hook_executor, monkeypatch):
     hooks = [
         {
             'run': 'a',
-            'events': ['autostop']
+            'events': ['stop']
         },
         {
             'run': 'b',
@@ -422,10 +449,10 @@ def test_hook_executor_filters_by_event(hook_executor, monkeypatch):
         },
         {
             'run': 'c',
-            'events': ['autostop', 'down']
+            'events': ['stop', 'down']
         },
     ]
-    hook_executor.run('autostop', hooks)
+    hook_executor.run('stop', hooks)
     assert calls == ['a', 'c']
 
 
@@ -433,8 +460,8 @@ def test_hook_executor_sequential(hook_executor, monkeypatch):
     order = []
     monkeypatch.setattr(hook_executor, '_run_script',
                         lambda s, l, t: order.append(s) or 0)
-    hooks = [{'run': str(i), 'events': ['autostop']} for i in range(3)]
-    hook_executor.run('autostop', hooks)
+    hooks = [{'run': str(i), 'events': ['stop']} for i in range(3)]
+    hook_executor.run('stop', hooks)
     assert order == ['0', '1', '2']
 
 
@@ -446,14 +473,14 @@ def test_hook_executor_failure_continues(hook_executor, monkeypatch):
         return 1 if script == 'boom' else 0
 
     monkeypatch.setattr(hook_executor, '_run_script', _fake)
-    hook_executor.run('autostop', [
+    hook_executor.run('stop', [
         {
             'run': 'boom',
-            'events': ['autostop']
+            'events': ['stop']
         },
         {
             'run': 'ok',
-            'events': ['autostop']
+            'events': ['stop']
         },
     ])
     assert called == ['boom', 'ok']
@@ -463,9 +490,9 @@ def test_hook_executor_empty_and_no_match_are_noops(hook_executor, monkeypatch):
     called = []
     monkeypatch.setattr(hook_executor, '_run_script',
                         lambda *a, **k: called.append(a) or 0)
-    hook_executor.run('autostop', [])
-    hook_executor.run('autostop', None)
-    hook_executor.run('down', [{'run': 'x', 'events': ['autostop']}])
+    hook_executor.run('stop', [])
+    hook_executor.run('stop', None)
+    hook_executor.run('down', [{'run': 'x', 'events': ['stop']}])
     assert not called
 
 
@@ -513,7 +540,7 @@ def test_preemption_grace_ignores_non_preemption_events():
     timeout = k8s_cloud._compute_preemption_hook_timeout([
         {
             'run': 'a',
-            'events': ['autostop'],
+            'events': ['stop'],
             'timeout': 30
         },
         {
@@ -536,7 +563,7 @@ def test_preemption_grace_none_when_no_preemption_hook():
     assert k8s_cloud._compute_preemption_hook_timeout([]) is None
     assert k8s_cloud._compute_preemption_hook_timeout([{
         'run': 'a',
-        'events': ['autostop'],
+        'events': ['stop'],
         'timeout': 30
     }]) is None
 
@@ -605,7 +632,7 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
                 'config:\n'
                 '  hooks:\n'
                 '    - run: echo from-config-hooks\n'
-                '      events: [autostop]\n'
+                '      events: [stop]\n'
                 '      timeout: 30\n'
                 'resources:\n'
                 '  cpus: 2\n')
@@ -615,7 +642,7 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
     (r,) = list(task.resources)
     assert r.hooks and len(r.hooks) == 1
     assert r.hooks[0]['run'] == 'echo from-config-hooks'
-    assert sorted(r.hooks[0]['events']) == ['autostop']
+    assert sorted(r.hooks[0]['events']) == ['stop']
     assert r.hooks[0]['timeout'] == 30
 
 
@@ -664,7 +691,7 @@ def test_kubernetes_caps_preemption_hook_timeout_to_600(capsys):
         },
         {
             'run': 'c',
-            'events': ['autostop'],
+            'events': ['stop'],
             'timeout': 3600
         },
     ]
@@ -916,9 +943,9 @@ def test_hooks_from_protobuf_preserves_nonempty_events():
     from sky.skylet import autostop_lib
 
     msg = autostopv1_pb2.Hook(run='echo hi', timeout=60)
-    msg.events.append(autostopv1_pb2.EVENT_AUTOSTOP)
+    msg.events.append(autostopv1_pb2.EVENT_STOP)
     out = autostop_lib.hooks_from_protobuf([msg])
-    assert out[0]['events'] == ['autostop']
+    assert out[0]['events'] == ['stop']
 
 
 def test_schema_rejects_oversized_run():
@@ -999,7 +1026,7 @@ def test_cli_hook_auto_select_with_cluster_only(monkeypatch):
 
 
 def test_cli_hook_explicit_event_still_works(monkeypatch):
-    """`sky logs --hook autostop mycluster` (explicit event) keeps
+    """`sky logs --hook stop mycluster` (explicit event) keeps
     working after the smart-callback fix."""
     from click.testing import CliRunner
 
@@ -1015,13 +1042,12 @@ def test_cli_hook_explicit_event_still_works(monkeypatch):
     monkeypatch.setattr('sky.client.sdk.tail_hook_logs', _fake_tail_hook_logs)
 
     runner = CliRunner()
-    result = runner.invoke(cli_command.logs,
-                           ['--hook', 'autostop', 'mycluster'])
+    result = runner.invoke(cli_command.logs, ['--hook', 'stop', 'mycluster'])
 
     assert result.exit_code == 0, (
         f'CLI exit {result.exit_code}; output: {result.output}\n'
         f'exc: {result.exception!r}')
-    assert captured == {'cluster': 'mycluster', 'event': 'autostop'}
+    assert captured == {'cluster': 'mycluster', 'event': 'stop'}
 
 
 def test_tail_hook_logs_minimal_api_version_required(monkeypatch):

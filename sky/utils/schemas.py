@@ -175,8 +175,8 @@ _AUTOSTOP_SCHEMA = {
     ],
 }
 
-# Supported events in resources.hooks[*].events.
-_HOOK_EVENTS = ['autostop', 'preemption', 'down']
+# Supported events in config.hooks[*].events.
+_HOOK_EVENTS = ['stop', 'preemption', 'down']
 
 _HOOKS_SCHEMA = {
     'type': 'array',

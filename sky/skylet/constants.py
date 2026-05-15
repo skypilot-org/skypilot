@@ -162,7 +162,7 @@ SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
-# tail_hook_logs(event='autostop') can fall back to it on clusters
+# tail_hook_logs(event='stop') can fall back to it on clusters
 # launched before the lifecycle-hooks framework. Remove after v0.15.0
 # (aligned with the autostop.hook removal pinned at v0.15.0 in
 # sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
@@ -177,11 +177,16 @@ class LifecycleEvent(str, enum.Enum):
 
     Subclasses ``str`` so direct equality comparisons against the
     canonical string spellings keep working (e.g.,
-    ``LifecycleEvent.AUTOSTOP == 'autostop'``). Use this enum at
+    ``LifecycleEvent.STOP == 'stop'``). Use this enum at
     callsites that handle events as identifiers; user-facing surfaces
     (YAML, CLI help, log messages) continue to use the string forms.
+
+    Naming convention follows k8s: events describe lifecycle position
+    (``stop``, ``down``), not trigger. Autodown (idle timer with
+    ``autostop.down: true``) fires ``down`` — not ``stop`` — because
+    the outcome is teardown, not pause.
     """
-    AUTOSTOP = 'autostop'
+    STOP = 'stop'
     PREEMPTION = 'preemption'
     DOWN = 'down'
 

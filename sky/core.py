@@ -603,7 +603,8 @@ def _start(
             # `*.controller.resources` in ~/.sky/config.yaml (master-compat
             # surface — the new `hooks:` form is rejected at schema time
             # by _get_controller_schema). Resources.from_yaml_config
-            # routes the legacy field into _hooks with events=[autostop].
+            # routes the legacy field into _hooks with events=[stop] or
+            # events=[down] depending on autostop.down.
             #
             # Pull it back out into the pre-v7 wire fields
             # (`hook` / `hook_timeout`) so non-consolidated controllers
@@ -617,8 +618,10 @@ def _start(
             # TODO(zpoint): remove after v0.15.0 — aligned with the
             # autostop.hook removal already pinned at v0.15.0 in
             # sky/utils/schemas.py:_AUTOSTOP_SCHEMA.
+            legacy_event = ('down'
+                            if controller_autostop_config.down else 'stop')
             for entry in (controller_resource.hooks or []):
-                if 'autostop' in entry.get('events', []):
+                if legacy_event in entry.get('events', []):
                     hook = entry['run']
                     hook_timeout = entry.get('timeout')
                     break
@@ -1370,20 +1373,6 @@ def tail_logs(cluster_name: str,
     return returnval
 
 
-# TODO(zpoint): deprecated server-side handler bound to /autostop_logs.
-# Remove after v0.15.0 (aligned with the autostop.hook removal
-# pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
-@usage_lib.entrypoint
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Deprecated. Use :func:`tail_hook_logs` with ``event='autostop'``."""
-    return tail_hook_logs(cluster_name,
-                          event='autostop',
-                          follow=follow,
-                          tail=tail)
-
-
 @usage_lib.entrypoint
 def tail_hook_logs(cluster_name: str,
                    event: Optional[str] = None,
@@ -1393,7 +1382,7 @@ def tail_hook_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
-        event: one of 'autostop', 'preemption', 'down'. When ``None``,
+        event: one of 'stop', 'preemption', 'down'. When ``None``,
             auto-selects whichever hook log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.

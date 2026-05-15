@@ -1,4 +1,4 @@
-"""Smoke tests for the lifecycle-hooks framework (resources.hooks:).
+"""Smoke tests for the lifecycle-hooks framework (config.hooks:).
 
 Run all tests against the default generic cloud::
 
@@ -87,15 +87,14 @@ def _write_yaml_raw(top_level: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Combined autostop + retrieval coverage. One launch + one autostop cycle
+# Combined stop + retrieval coverage. One launch + one autostop cycle
 # verifies the union of:
-#   - autostop hook fires and is retrievable
+#   - stop hook fires and is retrievable (idle-timer teardown w/ down=false)
 #   - omitting `events:` defaults to all three events on the stored config
 #   - multi-event hook entry fires only on matching events
 #   - `sky logs --hook` (no event) auto-selects whichever log exists
-#   - `sky logs --autostop` is a deprecated alias (stderr warning + works)
 #   - legacy YAML `autostop.hook` is routed through the new framework with
-#     a stderr deprecation warning at launch
+#     a stderr deprecation warning at launch (autostop.down=false → `stop`)
 #   - hook timeout kills the script mid-run; teardown still completes and
 #     the log captures the partial output
 #   - hook with multi-line `run` + literal "EOF" survives JSON round-trip
@@ -131,12 +130,12 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             # Multi-event filter + multi-line + EOF survival.
             {
                 'run': multiline_run,
-                'events': ['autostop', 'down'],
+                'events': ['stop', 'down'],
             },
             # Hook timeout: prints, then sleeps until the 5s timeout kills it.
             {
                 'run': f'echo {timeout_marker} && sleep 9999',
-                'events': ['autostop'],
+                'events': ['stop'],
                 'timeout': 5,
             },
         ],
@@ -153,13 +152,13 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
             # (1) legacy autostop.hook routing → stderr deprecation warning
             f'echo "$s" | grep -i "deprecated"',
-            # (2) defaults: omitted events → [autostop, preemption, down]
+            # (2) defaults: omitted events → [stop, preemption, down]
             # (3) multi-line run + literal "EOF" survives sqlite round-trip
             # (4) legacy hook routed into the hooks list
             f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
-            f'echo "$out" | grep -q autostop && '
+            f'echo "$out" | grep -qw stop && '
             f'echo "$out" | grep -q preemption && '
-            f'echo "$out" | grep -q down && '
+            f'echo "$out" | grep -qw down && '
             f'echo "$out" | grep -q line1 && '
             f'echo "$out" | grep -q EOF && '
             f'echo "$out" | grep -q done && '
@@ -175,8 +174,8 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast '
             f'tests/test_yamls/minimal.yaml) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # (5) autostop log carries every autostop-matching marker
-            f'out=$(sky logs {name} --hook autostop --no-follow) && '
+            # (5) stop log carries every stop-matching marker
+            f'out=$(sky logs {name} --hook stop --no-follow) && '
             f'echo "$out" | grep "{legacy_marker}" && '
             f'echo "$out" | grep "{multi_event_marker}" && '
             # (6) timeout-killed hook still wrote its initial echo
@@ -184,12 +183,7 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             # (7) `sky logs --hook` (no event) auto-selects the log
             f'out=$(sky logs {name} --hook --no-follow) && '
             f'echo "$out" | grep "{legacy_marker}"',
-            # (8) `sky logs --autostop` is the deprecated alias — works
-            # AND prints a deprecation warning to stderr
-            f'out=$(sky logs {name} --autostop --no-follow 2>&1) && '
-            f'echo "$out" | grep "{legacy_marker}" && '
-            f'echo "$out" | grep -i "deprecated"',
-            # (9) multi-event hook with `events:[autostop, down]` did NOT
+            # (8) multi-event hook with `events:[stop, down]` did NOT
             # fire on `down` — its marker must not appear in down.log
             f'! sky logs {name} --hook down --no-follow 2>&1 | '
             f'grep -q "{multi_event_marker}"',
@@ -668,7 +662,7 @@ def test_hook_config_hooks_yaml_round_trip_dryrun():
         'hooks': [
             {
                 'run': 'echo a',
-                'events': ['autostop'],
+                'events': ['stop'],
                 'timeout': 60,
             },
             {
@@ -737,7 +731,7 @@ def test_hook_invalid_inputs_rejected():
             f'echo "$out" | grep -iE "hooks|controller"',
             # (3) CLI: --hook with unknown event name
             'out=$(sky logs --hook reboot fake-cluster 2>&1 || true); '
-            'echo "$out" | grep -iE "autostop|preemption|down|invalid"',
+            'echo "$out" | grep -iE "stop|preemption|down|invalid"',
         ],
         teardown=None,
         timeout=180,

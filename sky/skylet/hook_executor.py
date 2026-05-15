@@ -1,7 +1,7 @@
 """Lifecycle-hook executor on each cluster node.
 
-Runs `resources.hooks` entries in response to teardown events
-(`autostop`, `preemption`, `down`). Head and worker processes both
+Runs `config.hooks` entries in response to teardown events
+(`stop`, `preemption`, `down`). Head and worker processes both
 use the same `run(event, hooks)` function — the only difference is
 the trigger ingress.
 
@@ -23,9 +23,9 @@ logger = sky_logging.init_logger(__name__)
 
 # Re-export the canonical event values via the shared enum. The
 # module-level uppercase constants are kept as string aliases for
-# backward compatibility with callers that imported them by name.
+# callers that imported them by name.
 LifecycleEvent = constants.LifecycleEvent
-AUTOSTOP = LifecycleEvent.AUTOSTOP.value
+STOP = LifecycleEvent.STOP.value
 PREEMPTION = LifecycleEvent.PREEMPTION.value
 DOWN = LifecycleEvent.DOWN.value
 EVENTS = constants.HOOK_EVENTS

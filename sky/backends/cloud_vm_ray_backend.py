@@ -4864,7 +4864,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         Args:
             handle: The handle to the cluster.
-            event: One of 'autostop', 'preemption', 'down'. When ``None``,
+            event: One of 'stop', 'preemption', 'down'. When ``None``,
                 auto-selects whichever per-event log exists on the head.
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
@@ -4901,9 +4901,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                    f'fi')
         else:
             log_path = f'{new_log_dir}/{event}.log'
-            if event == 'autostop':
+            if event == 'stop':
                 # Legacy-path fallback for clusters predating the hooks
-                # framework.
+                # framework — master's single autostop_hook.log corresponds
+                # to the new ``stop`` event (idle-timer teardown without
+                # autodown). Autodown clusters had their hook log under
+                # the same legacy path; users who want it via ``--hook down``
+                # should re-launch (the legacy cluster's skylet won't write
+                # to ~/.sky/hooks/down.log anyway).
                 # TODO(zpoint): drop the legacy_log_path branch after
                 # v0.15.0 (aligned with the autostop.hook removal pinned
                 # at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).

@@ -120,9 +120,9 @@ class AutostopConfig:
         return None
 
 
-# Events supported by resources.hooks[*].events (mirror of
+# Events supported by config.hooks[*].events (mirror of
 # sky.utils.schemas._HOOK_EVENTS).
-_HOOK_EVENTS = ('autostop', 'preemption', 'down')
+_HOOK_EVENTS = ('stop', 'preemption', 'down')
 
 
 def _normalize_hook_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -1033,9 +1033,14 @@ class Resources:
         if legacy_hook is None:
             return None, autostop
         sys.stderr.write(hooks_deprecation.AUTOSTOP_HOOK_YAML)
+        # Master's autostop.hook fired on idle-timer teardown for both
+        # autostop and autodown. In the new event taxonomy, route to
+        # ``down`` when autodown is set (outcome is teardown), else
+        # ``stop`` (outcome is pause).
+        legacy_event = 'down' if autostop.get('down') else 'stop'
         legacy_hook_entry = _normalize_hook_entry({
             'run': legacy_hook,
-            'events': ['autostop'],
+            'events': [legacy_event],
             'timeout': legacy_timeout,
         })
         return legacy_hook_entry, autostop
@@ -2862,16 +2867,20 @@ class Resources:
         if version < 33:
             # Route legacy AutostopConfig.hook / hook_timeout attrs into the
             # new _hooks list, and scrub them from AutostopConfig.
+            # Autodown-aware: route to ``down`` for autodown clusters,
+            # ``stop`` otherwise, matching the new event semantics.
             hooks = list(state.get('_hooks') or [])
             autostop = state.get('_autostop_config')
             legacy_hook = getattr(autostop, 'hook', None) if autostop else None
             legacy_timeout = (getattr(autostop, 'hook_timeout', None)
                               if autostop else None)
             if legacy_hook is not None:
+                legacy_event = ('down'
+                                if getattr(autostop, 'down', False) else 'stop')
                 hooks.append(
                     _normalize_hook_entry({
                         'run': legacy_hook,
-                        'events': ['autostop'],
+                        'events': [legacy_event],
                         'timeout': legacy_timeout,
                     }))
             if autostop is not None:

@@ -510,7 +510,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
     Regression test for https://github.com/skypilot-org/skypilot/issues/9524.
     psutil's get_terminal_map() is module-globally memoized; if skylet's
-    first AutostopEvent tick after `sky start` runs with no SSH attached,
+    first StopEvent tick after `sky start` runs with no SSH attached,
     the cache freezes empty and any later SSH session is invisible. The
     cluster then autostops despite an active interactive session even
     when wait_for=jobs_and_ssh.
@@ -529,7 +529,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
             # The #9524 trigger: stop, then start. Crucially, do not SSH
             # during `sky start` so /dev/pts/ is empty when skylet's first
-            # AutostopEvent tick fires (~60s after boot) and primes the
+            # StopEvent tick fires (~60s after boot) and primes the
             # buggy cache.
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -542,7 +542,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
 
-            # Arm autostop FIRST so AutostopEvent ticks actually call
+            # Arm autostop FIRST so StopEvent ticks actually call
             # has_active_ssh_sessions() (otherwise they early-exit on
             # boot_time mismatch and never touch psutil's terminal-map
             # cache). idle_minutes=3 leaves a buffer past the assertion
@@ -552,7 +552,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
             f'sky status | grep {name} | grep "3m"',
 
             # Now wait 90s with NO SSH so skylet's first 1-2
-            # AutostopEvent ticks call has_active_ssh_sessions() while
+            # StopEvent ticks call has_active_ssh_sessions() while
             # /dev/pts/ is empty, priming the buggy psutil cache as empty.
             'sleep 90',
 

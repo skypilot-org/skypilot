@@ -29,7 +29,7 @@ logger.info(f'Skylet started with version {constants.SKYLET_VERSION}; '
             f'SkyPilot v{sky.__version__} (commit: {sky.__commit__})')
 
 EVENTS = [
-    events.AutostopEvent(),
+    events.StopEvent(),
     events.JobSchedulerEvent(),
     # The managed job update event should be after the job update event.
     # Otherwise, the abnormal managed job status update will be delayed

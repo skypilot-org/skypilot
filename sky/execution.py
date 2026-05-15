@@ -420,18 +420,6 @@ def _execute_dag(
                     'All resources must have the same autostop config.')
         resource_autostop_config = resources[0].autostop_config
 
-        # Synthesize the legacy hook/hook_timeout pair from the first
-        # autostop-matching entry in resources.hooks — this keeps the existing
-        # set_autostop wire format working until the Proto v7 / set_hooks
-        # commit lands later in this PR.
-        hook: Optional[str] = None
-        hook_timeout: Optional[int] = None
-        for entry in (resources[0].hooks or []):
-            if 'autostop' in entry.get('events', []):
-                hook = entry['run']
-                hook_timeout = entry.get('timeout')
-                break
-
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
@@ -627,6 +615,19 @@ def _execute_dag(
                 hooks_payload = []
             else:
                 hooks_payload = None
+            # Synthesize the legacy pre-v7 hook/hook_timeout pair from
+            # the new-style hooks list. Match the event equivalent for
+            # this launch: ``down`` for autodown, ``stop`` otherwise.
+            # AutostopCodeGen.set_autostop dual-emits both fields so
+            # pre-v7 skylets keep working until v0.15.0.
+            hook: Optional[str] = None
+            hook_timeout: Optional[int] = None
+            legacy_event = 'down' if down else 'stop'
+            for entry in (resources[0].hooks or []):
+                if legacy_event in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
