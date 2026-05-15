@@ -876,14 +876,11 @@ def test_relaunch_warns_when_preemption_grace_increases():
     would otherwise be silently truncated by kubelet at SIGTERM —
     preemption hooks past the original grace get SIGKILLed mid-run.
     """
-    from sky.backends.cloud_vm_ray_backend import (
-        _maybe_warn_preemption_grace_change)
-
     prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
     new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 300}]
 
-    warning = _maybe_warn_preemption_grace_change(k8s_cloud.Kubernetes(), prior,
-                                                  new)
+    warning = k8s_cloud.warn_if_preemption_grace_change_requires_relaunch(
+        k8s_cloud.Kubernetes(), prior, new)
     assert warning is not None, (
         'Expected a warning when re-launching K8s cluster with a '
         'larger preemption-hook timeout than before.')
@@ -895,22 +892,19 @@ def test_relaunch_warns_when_preemption_grace_increases():
 
 def test_relaunch_no_warning_when_preemption_grace_unchanged():
     """Re-launch with same preemption-hook timeout = no warning."""
-    from sky.backends.cloud_vm_ray_backend import (
-        _maybe_warn_preemption_grace_change)
     prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
     new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
-    assert _maybe_warn_preemption_grace_change(k8s_cloud.Kubernetes(), prior,
-                                               new) is None
+    assert k8s_cloud.warn_if_preemption_grace_change_requires_relaunch(
+        k8s_cloud.Kubernetes(), prior, new) is None
 
 
 def test_relaunch_no_warning_on_non_k8s_cloud():
     """terminationGracePeriodSeconds is K8s-specific; warn only there."""
-    from sky.backends.cloud_vm_ray_backend import (
-        _maybe_warn_preemption_grace_change)
     from sky.clouds import AWS
     prior = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 60}]
     new = [{'run': 'a.sh', 'events': ['preemption'], 'timeout': 300}]
-    assert _maybe_warn_preemption_grace_change(AWS(), prior, new) is None
+    assert k8s_cloud.warn_if_preemption_grace_change_requires_relaunch(
+        AWS(), prior, new) is None
 
 
 def test_hooks_from_protobuf_defaults_empty_events_to_all():

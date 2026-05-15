@@ -103,6 +103,45 @@ def _compute_preemption_hook_timeout(
     return raw
 
 
+def warn_if_preemption_grace_change_requires_relaunch(
+    cloud: Optional['clouds.Cloud'],
+    prior_hooks: Optional[List[Dict[str, Any]]],
+    new_hooks: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Return a warning string if a re-launch would need more K8s grace.
+
+    Pod ``terminationGracePeriodSeconds`` is set at pod-creation time
+    and is immutable for the lifetime of the pod. Re-launching an
+    existing Kubernetes cluster with a *larger* preemption-hook timeout
+    than before means the new timeout would be silently truncated by
+    kubelet at SIGTERM — the preemption hook would be SIGKILLed
+    mid-run.
+
+    Returns ``None`` when no warning is needed (non-K8s cloud, no new
+    preemption hooks, or new timeout ≤ prior timeout).
+
+    Lives here (rather than in the re-launch caller in
+    ``cloud_vm_ray_backend``) so the ``_compute_preemption_hook_timeout``
+    helper stays a same-module private — see review thread on PR #9064.
+    """
+    if not isinstance(cloud, Kubernetes):
+        return None
+    prior_t = _compute_preemption_hook_timeout(prior_hooks)
+    new_t = _compute_preemption_hook_timeout(new_hooks)
+    if new_t is None:
+        return None
+    if prior_t is not None and new_t <= prior_t:
+        return None
+    prior_label = f'{prior_t}s' if prior_t is not None else '~30s (k8s default)'
+    return (f'Re-launch increased the preemption-hook grace requirement '
+            f'from {prior_label} to {new_t}s, but Kubernetes pod\'s '
+            '`terminationGracePeriodSeconds` is fixed at pod creation and '
+            'cannot be updated in place. The new preemption hooks will be '
+            'SIGKILLed by kubelet once the existing grace expires. To apply '
+            'the new grace, run `sky down <cluster>` then `sky launch` to '
+            'recreate the pod.')
+
+
 def cap_preemption_hook_timeouts(
     hooks: Optional[List[Dict[str, Any]]],) -> Optional[List[Dict[str, Any]]]:
     """Cap each preemption-event hook's ``timeout`` to the K8s grace cap.

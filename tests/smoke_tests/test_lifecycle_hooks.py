@@ -494,7 +494,8 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             f'[ "$val" = "60" ]',
             # (3) Re-launch with larger timeout. Warning expected on
             # stderr — message comes from
-            # _maybe_warn_preemption_grace_change in cloud_vm_ray_backend.
+            # warn_if_preemption_grace_change_requires_relaunch in
+            # sky/clouds/kubernetes.py.
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {large_yaml} 2>&1) && '
