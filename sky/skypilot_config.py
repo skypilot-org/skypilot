@@ -847,7 +847,8 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
     persisted and reloaded; exceptions are caught and logged so a misbehaving
     hook cannot fail the config update.
     """
-    _CONFIG_UPDATE_HOOKS.append(fn)
+    if fn not in _CONFIG_UPDATE_HOOKS:
+        _CONFIG_UPDATE_HOOKS.append(fn)
 
 
 def get_effective_queue_name(
@@ -1059,8 +1060,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 config, global_config_path)
 
     reload_config()
-    for hook in _CONFIG_UPDATE_HOOKS:
+    for hook in list(_CONFIG_UPDATE_HOOKS):
         try:
             hook()
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Config-update hook {hook!r} raised: {e}')
+            logger.warning(f'Config-update hook {hook!r} raised: {e}', exc_info=True)
