@@ -4374,6 +4374,74 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
 T = TypeVar('T')
 
 
+def _raise_if_ctx_canceled() -> None:
+    """If we are running inside a cancelled SkyPilotContext, raise immediately.
+
+    Used between gRPC retry attempts so a context cancelled during the
+    backoff sleep does not silently start a new RPC that nobody is waiting
+    for.
+    """
+    ctx = context_lib.get()
+    if ctx is not None and ctx.is_canceled():
+        raise asyncio.CancelledError(
+            'SkyPilotContext cancelled during Skylet retry')
+
+
+def invoke_grpc_unary(method: Any,
+                      request: Any,
+                      timeout: Optional[float] = None) -> Any:
+    """Call a gRPC unary method; cancel it when the SkyPilotContext is cancelled.
+
+    Without this wrapper, ``method(request, timeout=...)`` blocks the worker
+    thread inside ``threading.Condition.wait()`` until the gRPC deadline
+    fires, even if the surrounding asyncio task has already been cancelled
+    and nobody is waiting for the result.
+
+    Using ``method.future(...)`` exposes the underlying call object, which
+    can be cancelled from any thread; we register that cancellation with the
+    active SkyPilotContext so it fires on client disconnect, request
+    cancellation, or any other code path that calls ``ctx.cancel()``.
+
+    If there is no active context, falls through to the plain blocking call.
+    """
+    ctx = context_lib.get()
+    if ctx is None:
+        return method(request, timeout=timeout)
+    call = method.future(request, timeout=timeout)
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        return call.result()
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
+def invoke_grpc_streaming(method: Any,
+                          request: Any,
+                          timeout: Optional[float] = None) -> Iterator[Any]:
+    """Call a gRPC unary-stream method; cancel it on SkyPilotContext cancel.
+
+    The streaming iterator returned by gRPC is a ``_MultiThreadedRendezvous``
+    whose ``.cancel()`` aborts the RPC and unblocks any thread stuck in
+    ``__next__``. We register that on the current SkyPilotContext so a
+    client disconnect tears the stream down instead of leaking a worker
+    thread until the (often absent) deadline.
+
+    The returned generator unregisters the callback on completion or error,
+    so successful streams that outlive the cancel scope don't leak the
+    iterator's ``.cancel`` reference.
+    """
+    ctx = context_lib.get()
+    call = method(request, timeout=timeout)
+    if ctx is None:
+        yield from call
+        return
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        yield from call
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
 def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     """Generic helper for making Skylet gRPC requests.
 
@@ -4386,6 +4454,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             return func()
         except grpc.RpcError as e:
@@ -4405,6 +4474,7 @@ def invoke_skylet_streaming_with_retries(
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             for response in stream_func():
                 yield response
