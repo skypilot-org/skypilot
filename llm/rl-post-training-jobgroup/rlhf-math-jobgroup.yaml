@@ -22,6 +22,10 @@
 #   The trainer connects to the router endpoint on port 30000.
 #
 # Usage:
+#   # First, create the shared volume for policy weight sync:
+#   sky volume apply llm/rl-post-training-jobgroup/rlhf-policy-volume.yaml
+#
+#   # Then launch the job group:
 #   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
 #
 # The components communicate over the job group network using DNS names:
@@ -73,15 +77,12 @@ resources:
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
 
-# Shared path between trainer and rollout-server. The trainer writes the
+# Shared volume between trainer and rollout-server. The trainer writes
 # updated policy weights here every N steps; the rollout-server's SGLang
-# reads from the same path via /update_weights_from_disk. Replace with
-# your own bucket name or swap for a faster shared filesystem (NFS, PVC
-# with ReadWriteMany, etc.) for production.
-file_mounts:
-  /shared/policy:
-    name: skypilot-rlhf-policy
-    mode: MOUNT
+# reads from the same path via /update_weights_from_disk. Create the
+# volume first with: sky volume apply llm/rl-post-training-jobgroup/rlhf-policy-volume.yaml
+volumes:
+  /shared/policy: rlhf-policy
 
 setup: |
   # Install system dependencies (libnuma is required by SGLang kernel)
@@ -191,11 +192,11 @@ envs:
 
 file_mounts:
   /code: llm/rl-post-training-jobgroup/code
-  # Shared with rollout-server — trainer saves updated weights here every
-  # --policy-sync-interval steps; rollout-server reloads them in place.
-  /shared/policy:
-    name: skypilot-rlhf-policy
-    mode: MOUNT
+
+# Shared with rollout-server — trainer saves updated weights here every
+# --policy-sync-interval steps; rollout-server reloads them in place.
+volumes:
+  /shared/policy: rlhf-policy
 
 setup: |
   uv pip install torch transformers accelerate httpx --system
