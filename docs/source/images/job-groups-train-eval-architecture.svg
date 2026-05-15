@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1100 460" width="100%" height="auto" class="diag" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Parallel train-eval Job Group: trainer writes checkpoints to a shared PVC; evaluator reads them concurrently.">
+  <style><![CDATA[
+    .diag { font-family: 'Waldenburg', system-ui, -apple-system, sans-serif; color: #04070B; letter-spacing: -0.01em; }
+    .diag .mono { font-family: 'BerkeleyMono', ui-monospace, Menlo, monospace; font-feature-settings: "zero" 1; letter-spacing: 0.02em; }
+    .diag .eyebrow { font-family: 'BerkeleyMono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; fill: #5d6a7a; font-feature-settings: "zero" 1; }
+    .diag .role { font-family: 'BerkeleyMono', monospace; font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; fill: #5d6a7a; }
+    .diag .task-name { font-family: 'Waldenburg', sans-serif; font-size: 22px; font-weight: 500; letter-spacing: -0.015em; fill: #04070B; }
+    .diag .annot { font-family: 'Waldenburg', sans-serif; font-size: 15px; font-weight: 400; fill: #5d6a7a; }
+    .diag .flow-label { font-family: 'BerkeleyMono', monospace; font-size: 13px; letter-spacing: 0.04em; font-weight: 600; fill: #0A55EE; paint-order: stroke; stroke: #FFFFFF; stroke-width: 6; stroke-linejoin: round; }
+    .diag .flow-label.hot { fill: #C7402E; }
+    @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
+    .diag .flow { animation: flow-dash 1.8s linear infinite; }
+]]></style>
+  <g><path d="M 730.0 80 L 730.0 390 A 120.0 24 0 0 0 970.0 390 L 970.0 80 A 120.0 24 0 0 1 730.0 80 Z" fill="#E4F2FB" stroke="#0A55EE" stroke-width="1.5"/><ellipse cx="850" cy="80" rx="120.0" ry="24" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/><text x="850" y="223.0" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="22" font-weight="700" fill="#062152">/checkpoints</text><text x="850" y="251.0" text-anchor="middle" class="annot" fill="#243142">Kubernetes PVC · shared volume</text><text x="850" y="277.0" text-anchor="middle" class="mono" font-size="13" fill="#5d6a7a">my-checkpoint-volume</text></g>
+  <g transform="translate(90 80)"><rect x="0" y="0" width="340" height="140" rx="14" fill="#FFFFFF" stroke="#C7402E" stroke-width="1.5"/><text x="22" y="32" class="role">TASK&#160;01</text><text x="22" y="72" font-family="Waldenburg, sans-serif" font-size="28" font-weight="500" fill="#04070B" letter-spacing="-0.015em">trainer</text><text x="22" y="100" class="annot">writes a checkpoint every N steps</text></g>
+  <g transform="translate(90 250)"><rect x="0" y="0" width="340" height="140" rx="14" fill="#FFFFFF" stroke="#0A55EE" stroke-width="1.5"/><text x="22" y="32" class="role">TASK&#160;02</text><text x="22" y="72" font-family="Waldenburg, sans-serif" font-size="28" font-weight="500" fill="#04070B" letter-spacing="-0.015em">evaluator</text><text x="22" y="100" class="annot">polls the volume for new checkpoints</text></g>
+  <g>
+      <path d="M 438 150.0 Q 582.00 150.00 726.0 150.0" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+      <polyline points="715.00,156.50 726.0,150.0 715.00,143.50" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="582.00" y="136.00" text-anchor="middle" class="flow-label hot">write</text>
+      </g>
+  <g>
+      <path d="M 726.0 320.0 Q 582.00 320.00 438 320.0" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="6 5" class="flow"/>
+      <polyline points="449.00,313.50 438,320.0 449.00,326.50" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="582.00" y="306.00" text-anchor="middle" class="flow-label">read</text>
+      </g>
+  <g transform="translate(90 26)"><rect x="0" y="0" width="188" height="26" rx="13" fill="none" stroke="#C8C6C7" stroke-width="1"/><text x="94" y="17" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" letter-spacing="0.16em" fill="#243142">EXECUTION:&#160;PARALLEL</text></g>
+</svg>

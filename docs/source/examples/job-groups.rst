@@ -203,7 +203,7 @@ Parallel train-eval with shared storage
 This example runs training and evaluation in parallel, sharing checkpoints via
 a Kubernetes PVC volume:
 
-.. figure:: ../images/job-groups-train-eval-architecture.png
+.. figure:: ../images/job-groups-train-eval-architecture.svg
    :width: 80%
    :align: center
    :alt: Parallel Train-Eval Architecture with Job Groups
@@ -237,6 +237,13 @@ See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. figure:: ../images/job-groups-rl-architecture.svg
+   :width: 95%
+   :align: center
+   :alt: RL post-training Job Group: rollout-server and ppo-trainer on GPU; data-server, reward-server, and replay-buffer on CPU. Samples flow rollout → reward → buffer → trainer; policy weights loop back to rollout.
+
+   Five tasks run side-by-side in one Job Group: samples flow rollout → reward → buffer → trainer; new policy weights loop back from the trainer to the rollout server every step.
 
 This example demonstrates a distributed RL post-training architecture with 5 tasks:
 

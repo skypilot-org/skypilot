@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 620" width="100%" height="auto" class="diag" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RL post-training Job Group: rollout-server and ppo-trainer on GPU; data-server, reward-server, and replay-buffer on CPU. Samples flow rollout → reward → buffer → trainer; policy weights loop back to rollout.">
+  <style><![CDATA[
+    .diag { font-family: 'Waldenburg', system-ui, -apple-system, sans-serif; color: #04070B; letter-spacing: -0.01em; }
+    .diag .mono { font-family: 'BerkeleyMono', ui-monospace, Menlo, monospace; font-feature-settings: "zero" 1; letter-spacing: 0.02em; }
+    .diag .eyebrow { font-family: 'BerkeleyMono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; fill: #5d6a7a; font-feature-settings: "zero" 1; }
+    .diag .role { font-family: 'BerkeleyMono', monospace; font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; fill: #5d6a7a; }
+    .diag .task-name { font-family: 'Waldenburg', sans-serif; font-size: 22px; font-weight: 500; letter-spacing: -0.015em; fill: #04070B; }
+    .diag .annot { font-family: 'Waldenburg', sans-serif; font-size: 15px; font-weight: 400; fill: #5d6a7a; }
+    .diag .flow-label { font-family: 'BerkeleyMono', monospace; font-size: 13px; letter-spacing: 0.04em; font-weight: 600; fill: #0A55EE; paint-order: stroke; stroke: #FFFFFF; stroke-width: 6; stroke-linejoin: round; }
+    .diag .flow-label.hot { fill: #C7402E; }
+    @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
+    .diag .flow { animation: flow-dash 1.8s linear infinite; }
+]]></style>
+  <g><rect x="40" y="32" width="1200" height="470" rx="20" fill="none" stroke="#C8C6C7" stroke-width="1.25" stroke-dasharray="2 5"/><g transform="translate(66 32)"><rect x="-10" y="-14" width="220" height="28" rx="14" fill="#FFFFFF"/><text x="0" y="5" font-family="BerkeleyMono, monospace" font-size="13" letter-spacing="0.18em" font-weight="700" fill="#243142">JOB&#160;GROUP<tspan fill="#5d6a7a" font-weight="400">&#160;·&#160;rlhf-experiment</tspan></text></g></g>
+  <g transform="translate(300 110)">
+      <rect x="0" y="0" width="250" height="124" rx="12" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.5"/>
+      <text x="16" y="24" class="role">sample generation</text>
+      <text x="16" y="52" class="task-name">rollout-server</text>
+      <g transform="translate(0 62)">
+      <g transform="translate(14 0)"><rect x="0" y="0" width="64.40" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="10" y="15.5" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">A100×2</text></g>
+      <g transform="translate(86.4 0)"><rect x="0" y="0" width="71.80" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">2 nodes</text></g>
+      </g>
+      </g>
+      <g transform="translate(790 110)">
+      <rect x="0" y="0" width="250" height="124" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
+      <text x="16" y="24" class="role">policy update</text>
+      <text x="16" y="52" class="task-name">ppo-trainer</text>
+      <g transform="translate(0 62)">
+      <g transform="translate(14 0)"><rect x="0" y="0" width="64.40" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="10" y="15.5" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">A100×2</text></g>
+      <g transform="translate(86.4 0)"><rect x="0" y="0" width="71.80" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">2 nodes</text></g>
+      </g>
+      </g>
+      <g transform="translate(120 360)">
+      <rect x="0" y="0" width="230" height="106" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+      <text x="16" y="24" class="role">prompts</text>
+      <text x="16" y="52" class="task-name">data-server</text>
+      <g transform="translate(0 62)">
+      <g transform="translate(14 0)"><rect x="0" y="0" width="64.40" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">CPU:4+</text></g>
+      </g>
+      </g>
+      <g transform="translate(525 360)">
+      <rect x="0" y="0" width="230" height="106" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+      <text x="16" y="24" class="role">reward scoring</text>
+      <text x="16" y="52" class="task-name">reward-server</text>
+      <g transform="translate(0 62)">
+      <g transform="translate(14 0)"><rect x="0" y="0" width="64.40" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">CPU:8+</text></g>
+      </g>
+      </g>
+      <g transform="translate(930 360)">
+      <rect x="0" y="0" width="230" height="106" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+      <text x="16" y="24" class="role">experience</text>
+      <text x="16" y="52" class="task-name">replay-buffer</text>
+      <g transform="translate(0 62)">
+      <g transform="translate(14 0)"><rect x="0" y="0" width="64.40" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">CPU:4+</text></g>
+      <g transform="translate(86.4 0)"><rect x="0" y="0" width="42.20" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="10" y="15.5" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">32G</text></g>
+      </g>
+      </g>
+    <g>
+      <path d="M 255.0 360 Q 293.67 285.48 360 234" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+      <polyline points="355.30,245.88 360,234 347.32,235.61" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="293.67" y="275.48" text-anchor="middle" class="flow-label">prompts</text>
+      </g>
+  <g>
+      <path d="M 480 234 Q 517.14 309.80 585 360" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+      <polyline points="572.29,358.68 585,360 580.02,348.23" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="517.14" y="299.80" text-anchor="middle" class="flow-label">samples</text>
+      </g>
+  <g>
+      <path d="M 755 413.0 Q 842.50 413.00 930 413.0" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+      <polyline points="919.00,419.50 930,413.0 919.00,406.50" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="842.50" y="402.00" text-anchor="middle" class="flow-label">scored</text>
+      </g>
+  <g>
+      <path d="M 1025.0 360 Q 1015.83 289.00 970 234" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+      <polyline points="982.04,238.29 970,234 972.05,246.61" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="1015.83" y="279.00" text-anchor="middle" class="flow-label">batches</text>
+      </g>
+  <g>
+      <path d="M 870 110 Q 670.00 54.00 470 110" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="6 5" class="flow"/>
+      <polyline points="478.84,100.77 470,110 482.35,113.29" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+      <text x="670.00" y="74.00" text-anchor="middle" class="flow-label hot">policy weights ↺</text>
+      </g>
+  <g transform="translate(40 564)"><text x="0" y="0" class="eyebrow">SERVICE&#160;DISCOVERY</text><text x="0" y="26" class="mono" font-size="14" fill="#243142">{task}-0.${SKYPILOT_JOBGROUP_NAME}<tspan fill="#5d6a7a">&#160;·&#160;e.g.&#160;</tspan><tspan fill="#0A55EE">rollout-server-0.rlhf-experiment:8001</tspan></text></g>
+  <g transform="translate(880 576)"><g><line x1="0" y1="6" x2="32" y2="6" stroke="#0A55EE" stroke-width="1.5" stroke-dasharray="8 4"/><polyline points="21.00,12.50 32,6 21.00,-0.50" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/><text x="42" y="11" class="annot" font-size="14" fill="#243142">data flow</text></g><g transform="translate(170 0)"><line x1="0" y1="6" x2="32" y2="6" stroke="#C7402E" stroke-width="1.5" stroke-dasharray="6 5"/><polyline points="21.00,12.50 32,6 21.00,-0.50" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/><text x="42" y="11" class="annot" font-size="14" fill="#243142">control / weights</text></g></g>
+</svg>
