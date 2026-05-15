@@ -388,6 +388,14 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if k8s_enable_oci_roce %}
+        # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
+        # network namespace; pods must share host networking to reach the
+        # RDMA fabric. ClusterFirstWithHostNet still routes .svc.cluster.local
+        # lookups to CoreDNS so inter-node Ray comms work.
+        hostNetwork: true
+        dnsPolicy: ClusterFirstWithHostNet
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -460,6 +468,11 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        {% if k8s_enable_oci_roce %}
+        - name: devinf
+          hostPath:
+            path: /dev/infiniband
+        {% endif %}
         {% if k8s_fuse_device_required %}
         - name: fusermount-shared-dir
           hostPath:
@@ -1328,6 +1341,10 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
+          {% if k8s_enable_oci_roce %}
+          - mountPath: /dev/infiniband
+            name: devinf
+          {% endif %}
           {% if k8s_enable_gpudirect_tcpx %}
           - name: tcpx-socket
             mountPath: /tmp
@@ -1418,8 +1435,14 @@ available_node_types:
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
-          {% if k8s_ipc_lock_capability %}
+          {% if k8s_ipc_lock_capability or k8s_enable_oci_roce %}
           securityContext:
+            {% if k8s_enable_oci_roce %}
+            # OCI OKE bare-metal GPU shapes have no RDMA device plugin;
+            # pods must mount /dev/infiniband from the host and run
+            # privileged to access the RoCE NICs.
+            privileged: true
+            {% endif %}
             capabilities:
               add:
                 - IPC_LOCK

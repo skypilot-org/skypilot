@@ -876,6 +876,11 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
 
+        # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
+        # hostPath mount of /dev/infiniband (no device plugin on OCI).
+        deploy_vars['k8s_enable_oci_roce'] = (
+            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+
         # User-specified APT mirror candidates for pod package installs.
         # None means unset (template uses built-in defaults); an empty list
         # explicitly disables fallback mirrors.
@@ -1348,6 +1353,15 @@ class Kubernetes(clouds.Cloud):
                         if label_key.startswith('node-role.together.ai/'):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
+                                None)
+                        # OCI OKE bare-metal GPU nodes provisioned in a
+                        # dedicated RDMA capacity pool. The `rdma.*` label
+                        # family is only set on RoCE-capable nodes; matching
+                        # broader `oci.oraclecloud.com/` would false-positive
+                        # on non-RDMA OCI nodes.
+                        if label_key.startswith('oci.oraclecloud.com/rdma.'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.OCI_ROCE,
                                 None)
                         if label_key.startswith(
                             ('k8s.io/cloud-provider-aws', 'topology.k8s.aws',

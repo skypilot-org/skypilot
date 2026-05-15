@@ -697,6 +697,168 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
 
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_oci_roce_network_tier_with_gpu_environment_variables(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Test OCI OKE RoCE network tier sets the right deploy vars and envs."""
+
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = "8CPU--32GB--B200:8"
+        gpu_resources.accelerators = {'B200': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = "oci-context"
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.OCI_ROCE, None)
+
+        mock_get_current_context.return_value = "oci-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_accelerator_label_key_values.return_value = (
+            'skypilot.co/accelerator', ['b200'], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-gpu-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=gpu_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-oci-cluster",
+                name_on_cloud="test-oci-cluster"),
+            region=mock.MagicMock(name="oci-context"),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # OCI RoCE requires hostNetwork, privileged, and /dev/infiniband.
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # IPC_LOCK is shared with other high-perf types and stays True.
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+        # Sanity: GPUDirect flags are False for OCI.
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_tcpx'])
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_tcpxo'])
+        self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
+
+        k8s_env_vars = deploy_vars['k8s_env_vars']
+        self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
+        self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
+        self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
+        self.assertEqual(k8s_env_vars['NCCL_SOCKET_IFNAME'], 'eth0')
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_oci_roce_not_enabled_when_network_tier_standard(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """On STANDARD network tier, OCI RoCE must NOT be enabled even if
+        the cluster carries RDMA labels — protects against silently applying
+        RoCE config to users who didn't opt in."""
+
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = "8CPU--32GB--B200:8"
+        gpu_resources.accelerators = {'B200': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = "oci-context"
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.STANDARD
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+
+        # _detect_network_type short-circuits to NONE when network_tier is
+        # not BEST, regardless of node labels.
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+
+        mock_get_current_context.return_value = "oci-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_accelerator_label_key_values.return_value = (
+            'skypilot.co/accelerator', ['b200'], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-gpu-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=gpu_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-oci-cluster",
+                name_on_cloud="test-oci-cluster"),
+            region=mock.MagicMock(name="oci-context"),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertFalse(deploy_vars['k8s_enable_oci_roce'])
+        self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
+        self.assertNotIn('NCCL_IB_GID_INDEX', deploy_vars['k8s_env_vars'])
+
 
 class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     """Test cases for Kubernetes.make_deploy_resources_variables method."""
@@ -2903,6 +3065,48 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.TOGETHER,
              None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_oci_oke_rdma_detection(self, mock_get_nodes):
+        """Test detection of OCI OKE bare-metal GPU nodes via rdma.* labels."""
+        mock_node = self._create_mock_node({
+            'oci.oraclecloud.com/rdma.cluster_id': 'rpqe7pvxukq',
+            'oci.oraclecloud.com/rdma.host_id': 'pniggyfeimq',
+            'oci.oraclecloud.com/host.id': '3699d047506',
+            'node.kubernetes.io/instance-type': 'BM.GPU.B200.8',
+            'kubernetes.io/hostname': 'node-1',
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.OCI_ROCE,
+             None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_oci_oke_without_rdma_labels_not_detected(self, mock_get_nodes):
+        """OCI nodes that only carry non-`rdma.*` `oci.oraclecloud.com/`
+        labels (e.g. regular VMs, non-cluster-network pools) must NOT
+        match — guards against the prefix being too broad."""
+        mock_node = self._create_mock_node({
+            'oci.oraclecloud.com/compartment.id': 'aaaa',
+            'oci.oraclecloud.com/fault-domain': 'FAULT-DOMAIN-1',
+            'oci.oraclecloud.com/host.id': '3699d047506',
+            'node.kubernetes.io/instance-type': 'VM.GPU.A10.1',
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_gke_a3_highgpu_detection(self, mock_get_nodes):
