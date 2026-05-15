@@ -702,14 +702,6 @@ class ReplicaManager:
         # Oldest version among the currently provisioned and launched replicas
         self.least_recent_version: int = version
 
-    def _consecutive_failure_threshold_timeout(self) -> int:
-        """The timeout for the consecutive failure threshold in seconds.
-
-        We reduce the timeout for pool to 10 seconds to make the pool more
-        responsive to the failure.
-        """
-        return 10 if self._is_pool else 180
-
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
