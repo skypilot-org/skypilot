@@ -1827,6 +1827,73 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+def test_launch_image_pull_back_off():
+    """The launch error message for an unresolvable image must contain the
+    Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
+    bare CrashLoopBackOff text from an older code path.
+
+    Regression test for the truthful-launching-reason refactor in
+    _inspect_pod_status / _get_pod_pending_reason."""
+    name = smoke_tests_utils.get_cluster_name() + '-pull-fail'
+    image = 'nonexistent-registry.invalid/sky/missing:bad-tag'
+    test = smoke_tests_utils.Test(
+        'launch_image_pull_back_off',
+        [
+            # Launch into Kubernetes with an unresolvable image. We expect
+            # the launch to fail and stderr to contain the kubelet's pull
+            # failure reason. `|| true` lets us capture the failure exit
+            # code without aborting the script; we grep its stderr next.
+            f'OUT=$(sky launch -y -c {name} --infra kubernetes '
+            f'--image-id docker:{image} '
+            f'-- echo hi 2>&1) || true; '
+            f'echo "$OUT" | grep -E "ImagePullBackOff|ErrImagePull" || '
+            f'(echo "Expected ImagePullBackOff/ErrImagePull in launch '
+            f'output; got:" && echo "$OUT" && exit 1)',
+        ],
+        teardown=f'sky down -y {name} || true',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_launch_create_container_config_error():
+    """The launch error for a pod referencing a non-existent ConfigMap/Secret
+    must surface CreateContainerConfigError (or CreateContainerError on some
+    k8s versions -- both indicate the same root cause)."""
+    name = smoke_tests_utils.get_cluster_name() + '-cfg-err'
+    yaml_body = textwrap.dedent("""\
+        resources:
+          cloud: kubernetes
+          cpus: 1
+        config:
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - name: ray-node
+                    envFrom:
+                      - secretRef:
+                          name: this-secret-definitely-does-not-exist
+        run: echo hi
+        """)
+    test = smoke_tests_utils.Test(
+        'launch_create_container_config_error',
+        [
+            f'cat > /tmp/{name}.yaml <<\'EOF\'\n{yaml_body}EOF',
+            f'OUT=$(sky launch -y -c {name} /tmp/{name}.yaml 2>&1) || true; '
+            f'echo "$OUT" | grep -E "CreateContainer(Config)?Error" || '
+            f'(echo "Expected CreateContainer(Config)?Error in launch '
+            f'output; got:" && echo "$OUT" && exit 1)',
+            f'rm -f /tmp/{name}.yaml',
+        ],
+        teardown=f'sky down -y {name} || true; rm -f /tmp/{name}.yaml',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_get_nodes():
     """Test the correctness of get_kubernetes_nodes,
