@@ -721,8 +721,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 msg = init_waiting.message if (
                     init_waiting.message) else str(init_waiting)
                 unmasked = _unmask_crashloopbackoff_reason(init_status)
-                reason_text = (unmasked
-                               if unmasked is not None else init_waiting.reason)
+                reason_text = (unmasked if unmasked is not None else
+                               (init_waiting.reason or 'Unknown'))
                 raise config_lib.KubernetesError(
                     f'Failed to create init container for pod '
                     f'{pod.metadata.name}. Error details: '
@@ -758,7 +758,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # CrashLoopBackOff. msg body (waiting.message) is always preserved.
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    waiting = container_status.state.waiting
+                    waiting = (container_status.state.waiting
+                               if container_status.state else None)
                     if waiting is None:
                         continue
                     if waiting.reason == 'PodInitializing':
@@ -769,7 +770,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         unmasked = _unmask_crashloopbackoff_reason(
                             container_status)
                         reason_text = (unmasked if unmasked is not None else
-                                       waiting.reason)
+                                       (waiting.reason or 'Unknown'))
                         raise config_lib.KubernetesError(
                             f'{reason_text}: {msg}')
 
@@ -2257,7 +2258,8 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
     because it adds cardinality that defeats nop_if_duplicate dedup on the
     LAUNCH_PROGRESS event.
     """
-    container_statuses = getattr(pod.status, 'container_statuses', None) or []
+    container_statuses = getattr(getattr(pod, 'status', None),
+                                 'container_statuses', None) or []
     for cs in container_statuses:
         # 1. state.waiting
         waiting = cs.state.waiting if cs.state else None
