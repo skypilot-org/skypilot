@@ -400,6 +400,22 @@ function JobDetails() {
               </Card>
             </div>
 
+            {/* Plugin Slot: Job Overview — for at-a-glance status that's
+                useful immediately on opening a running/recovering job
+                (e.g. pod readiness for elastic K8s jobs). Sits above
+                Logs/Telemetry so it's visible without scrolling. */}
+            <PluginSlot
+              name="jobs.detail.overview"
+              context={{
+                jobId: detailJobData.id,
+                status: detailJobData.status,
+                clusterName: detailJobData.current_cluster_name,
+                clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
+                infra: detailJobData.full_infra,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Tasks Section - only show for multi-task jobs */}
             {isMultiTask && (
               <div id="tasks-section" className="mt-6">
