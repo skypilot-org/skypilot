@@ -721,18 +721,6 @@ Tails the provisioning logs (provision.log) for a cluster.
 **Returns:**
     Exit code 0 on streaming success; raises on HTTP error.
 
-### `sky.tail_autostop_logs`
-
-```python
-sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
-```
-
-Deprecated alias for ``tail_hook_logs(event='autostop', ...)``.
-
-Emits a stderr deprecation warning; behavior otherwise identical
-to ``tail_hook_logs``. Scheduled for removal a couple of minor
-releases after the lifecycle-hooks framework ships.
-
 ### `sky.download_logs`
 
 ```python
