@@ -2689,11 +2689,11 @@ async def set_below_min_since_async(job_id: int,
                                     task_id: int,
                                     *,
                                     ts: float) -> None:
-    """Set spot.below_min_since via COALESCE.
+    """Set spot.below_min_since to :ts iff currently NULL. Idempotent.
 
-    Updates the column to :ts only if currently NULL; otherwise preserves
-    the existing value. Idempotent — repeated calls are no-ops once a
-    timestamp is set.
+    Called every monitor-loop tick, so the WHERE clause gates the write
+    itself — once a timestamp is persisted, repeated calls match zero rows
+    and issue no UPDATE.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -2702,15 +2702,17 @@ async def set_below_min_since_async(job_id: int,
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
-                )).values({
-                    spot_table.c.below_min_since: sqlalchemy.func.coalesce(
-                        spot_table.c.below_min_since, ts),
-                }))
+                    spot_table.c.below_min_since.is_(None),
+                )).values({spot_table.c.below_min_since: ts}))
         await session.commit()
 
 
 async def clear_below_min_since_async(job_id: int, task_id: int) -> None:
-    """Set spot.below_min_since to NULL. Idempotent."""
+    """Set spot.below_min_since to NULL iff currently non-NULL. Idempotent.
+
+    Called every monitor-loop tick when the job is at/above min; the
+    IS NOT NULL guard skips the write when the column is already cleared.
+    """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(
@@ -2718,6 +2720,7 @@ async def clear_below_min_since_async(job_id: int, task_id: int) -> None:
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
+                    spot_table.c.below_min_since.is_not(None),
                 )).values({spot_table.c.below_min_since: None}))
         await session.commit()
 
