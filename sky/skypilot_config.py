@@ -1064,4 +1064,5 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         try:
             hook()
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Config-update hook {hook!r} raised: {e}', exc_info=True)
+            logger.warning(f'Config-update hook {hook!r} raised: {e}',
+                           exc_info=True)
