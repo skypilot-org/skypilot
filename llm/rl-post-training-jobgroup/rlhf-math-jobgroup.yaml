@@ -73,6 +73,16 @@ resources:
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
 
+# Shared path between trainer and rollout-server. The trainer writes the
+# updated policy weights here every N steps; the rollout-server's SGLang
+# reads from the same path via /update_weights_from_disk. Replace with
+# your own bucket name or swap for a faster shared filesystem (NFS, PVC
+# with ReadWriteMany, etc.) for production.
+file_mounts:
+  /shared/policy:
+    name: skypilot-rlhf-policy
+    mode: MOUNT
+
 setup: |
   # Install system dependencies (libnuma is required by SGLang kernel)
   sudo apt-get update && sudo apt-get install -y libnuma-dev
@@ -181,6 +191,11 @@ envs:
 
 file_mounts:
   /code: llm/rl-post-training-jobgroup/code
+  # Shared with rollout-server — trainer saves updated weights here every
+  # --policy-sync-interval steps; rollout-server reloads them in place.
+  /shared/policy:
+    name: skypilot-rlhf-policy
+    mode: MOUNT
 
 setup: |
   uv pip install torch transformers accelerate httpx --system
@@ -217,7 +232,9 @@ run: |
       --replay-buffer ${REPLAY_BUFFER} \
       --model ${MODEL_NAME} \
       --batch-size ${BATCH_SIZE} \
-      --num-epochs ${NUM_EPOCHS}
+      --num-epochs ${NUM_EPOCHS} \
+      --policy-sync-path /shared/policy/latest \
+      --policy-sync-interval 10
   else
     echo "Worker node ${SKYPILOT_NODE_RANK} ready for distributed training"
     # In a full implementation, worker nodes would join distributed training
