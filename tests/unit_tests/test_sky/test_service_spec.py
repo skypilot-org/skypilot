@@ -220,6 +220,22 @@ class TestLoadBalancerConfiguration:
         assert (spec.lb_stream_timeout_seconds ==
                 serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
 
+    def test_to_yaml_config_omits_default_new_fields_for_compatibility(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+            },
+            'replicas': 1,
+        })
+
+        config = spec.to_yaml_config()
+
+        assert 'load_balancer' not in config
+        assert 'endpoint_probe_interval_seconds' not in config[
+            'readiness_probe']
+        assert 'consecutive_failure_threshold_timeout' not in config[
+            'readiness_probe']
+
     def test_load_balancer_stream_timeout_seconds_override(self):
 
         spec = service_spec.SkyServiceSpec.from_yaml_config({
@@ -229,3 +245,24 @@ class TestLoadBalancerConfiguration:
         })
 
         assert spec.lb_stream_timeout_seconds == 240
+
+    def test_to_yaml_config_keeps_non_default_new_fields(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+                'endpoint_probe_interval_seconds': 7,
+                'consecutive_failure_threshold_timeout': 45,
+            },
+            'load_balancer': {
+                'stream_timeout_seconds': 240,
+            },
+            'replicas': 1,
+        })
+
+        config = spec.to_yaml_config()
+
+        assert (
+            config['readiness_probe']['endpoint_probe_interval_seconds'] == 7)
+        assert (config['readiness_probe']
+                ['consecutive_failure_threshold_timeout'] == 45)
+        assert config['load_balancer']['stream_timeout_seconds'] == 240

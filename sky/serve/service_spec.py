@@ -462,13 +462,20 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
         add_if_not_none('readiness_probe', 'timeout_seconds',
                         self.readiness_timeout_seconds)
-        add_if_not_none('readiness_probe', 'endpoint_probe_interval_seconds',
-                        self.endpoint_probe_interval_seconds)
+        # Omit default-valued newer fields to preserve compatibility with
+        # older controllers that do not recognize them during serve update.
+        if (self.endpoint_probe_interval_seconds !=
+                constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS):
+            add_if_not_none('readiness_probe',
+                            'endpoint_probe_interval_seconds',
+                            self.endpoint_probe_interval_seconds)
         add_if_not_none('readiness_probe',
                         'consecutive_failure_threshold_timeout',
                         self.consecutive_failure_threshold_timeout)
-        add_if_not_none('load_balancer', 'stream_timeout_seconds',
-                        self.lb_stream_timeout_seconds)
+        if (self.lb_stream_timeout_seconds !=
+                constants.DEFAULT_LB_STREAM_TIMEOUT):
+            add_if_not_none('load_balancer', 'stream_timeout_seconds',
+                            self.lb_stream_timeout_seconds)
         add_if_not_none('readiness_probe', 'headers', self._readiness_headers)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
