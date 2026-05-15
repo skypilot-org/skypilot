@@ -788,8 +788,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             return False, reason
 
         # phase == 'Running' but not all containers running (e.g. one is in
-        # CrashLoopBackOff). Surface tier-1's pending reason. Today this
-        # returns (False, None) silently; after, we surface OOMKilled/etc.
+        # CrashLoopBackOff). Surface tier-1's pending reason -- previously this
+        # returned (False, None) silently, masking OOMKilled etc.
         return False, container_reason
 
     missing_pods_retry = 0
@@ -2228,13 +2228,10 @@ def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
 
     Used to surface OOMKilled / Error / etc. instead of bare CrashLoopBackOff.
     """
-    state = getattr(cs, 'state', None)
-    waiting = getattr(state, 'waiting', None) if state is not None else None
+    waiting = cs.state.waiting if cs.state else None
     if waiting is None or waiting.reason != 'CrashLoopBackOff':
         return None
-    last_state = getattr(cs, 'last_state', None)
-    last_term = (getattr(last_state, 'terminated', None)
-                 if last_state is not None else None)
+    last_term = cs.last_state.terminated if cs.last_state else None
     if last_term is None or not last_term.reason:
         return None
     return last_term.reason
@@ -2244,9 +2241,11 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
     """Tier-1 sweep: derive a pending reason from pod.status.container_statuses.
 
     For each container in turn:
-      1. state.waiting: skip ContainerCreating/PodInitializing; on
-         CrashLoopBackOff, unmask via last_state.terminated; else return the
-         waiting reason.
+      1. state.waiting: on ContainerCreating/PodInitializing, fall through to
+         checks 2 and 3 on the *same* container (a transient-waiting current
+         state can coexist with a prior bad termination — surface the prior
+         fault); on CrashLoopBackOff, unmask via last_state.terminated; else
+         return the waiting reason.
       2. state.terminated: if exit_code != 0, return terminated.reason.
       3. last_state.terminated: if exit_code != 0 and reason present, return
          it (race-window: container restarted between iterations).
@@ -2280,8 +2279,8 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
 
         # 3. last_state.terminated (previous run terminated badly)
         last_term = cs.last_state.terminated if cs.last_state else None
-        if (last_term is not None and last_term.exit_code != 0 and
-                last_term.reason):
+        if (last_term is not None and last_term.exit_code is not None and
+                last_term.exit_code != 0 and last_term.reason):
             return last_term.reason
 
     return None

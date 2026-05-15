@@ -2217,6 +2217,21 @@ class TestGetPodPendingReasonFromContainerStatus:
         assert instance._get_pod_pending_reason_from_container_status(
             self._pod([healthy, bad])) == 'ImagePullBackOff'
 
+    def test_transient_waiting_with_prior_oom_beats_later_container(self):
+        # Container A is in transient ContainerCreating but has a prior
+        # OOMKilled in last_state -- checks 2/3 still run on A and surface the
+        # OOM, before B's ImagePullBackOff is ever consulted. Pins the choice
+        # documented in _get_pod_pending_reason_from_container_status's
+        # docstring.
+        a = self._cs(
+            waiting=mock.MagicMock(reason='ContainerCreating', message=''),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        b = self._cs(
+            waiting=mock.MagicMock(reason='ImagePullBackOff', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([a, b])) == 'OOMKilled'
+
     def test_no_container_statuses_returns_none(self):
         pod = self._pod(None)
         assert instance._get_pod_pending_reason_from_container_status(
