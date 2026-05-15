@@ -216,9 +216,8 @@ class SkyServiceSpec:
             lb_stream_timeout_seconds = load_balancer_section.get(
                 'stream_timeout_seconds', None)
         if lb_stream_timeout_seconds is None:
-            lb_stream_timeout_seconds = constants.LB_STREAM_TIMEOUT
-        service_config['lb_stream_timeout_seconds'] = (
-            lb_stream_timeout_seconds)
+            lb_stream_timeout_seconds = constants.DEFAULT_LB_STREAM_TIMEOUT
+        service_config['lb_stream_timeout_seconds'] = lb_stream_timeout_seconds
         if isinstance(post_data, str):
             try:
                 post_data = json.loads(post_data)
