@@ -3,10 +3,6 @@
 Job Groups for RL
 =================
 
-.. warning::
-
-  **This is an experimental feature.** The interface may change in future versions.
-
 Job Groups allow you to run multiple related tasks in parallel as a single managed unit.
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
