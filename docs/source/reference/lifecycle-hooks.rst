@@ -59,7 +59,8 @@ Events are named by the outcome (what's about to happen to the cluster), not
 by the trigger. Hook authors choose the event by what they want their script
 to react to, regardless of which mechanism caused the teardown.
 
-- ``stop``: Fires when the cluster's idle timer pauses the cluster
+- ``stop``: Fires when the cluster is being stopped (disks preserved) —
+  either by ``sky stop <cluster>`` or by the idle timer
   (``resources.autostop`` / ``sky autostop -i N`` with ``down: false``).
   Runs on the head node before the cluster is stopped. See :ref:`auto-stop`.
 - ``preemption``: Fires when the cluster receives a termination signal from
@@ -71,6 +72,24 @@ to react to, regardless of which mechanism caused the teardown.
   ``sky down <cluster>`` or by the idle timer with autodown enabled
   (``autostop.down: true``). Runs on the head node before the cluster is
   torn down.
+
+Environment variables
+~~~~~~~~~~~~~~~~~~~~~
+
+Each hook script sees ``SKYPILOT_HOOK_EVENT`` set to the firing event
+(``stop`` / ``preemption`` / ``down``). A single hook that defaults to
+all three events (no ``events:`` key) can branch on it instead of
+requiring three separate entries:
+
+.. code-block:: yaml
+
+   config:
+     hooks:
+       - run: |
+           case "$SKYPILOT_HOOK_EVENT" in
+             preemption) ./fast_save.sh ;;
+             stop|down)  ./full_save.sh && ./git_commit.sh ;;
+           esac
 
 .. note::
 

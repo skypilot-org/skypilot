@@ -890,36 +890,39 @@ def down(cluster_name: str,
     backend.teardown(handle, terminate=True, purge=purge)
 
 
-def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
-                          backend: 'backends.Backend',
-                          cluster_name: str) -> None:
-    """Runs ``down`` lifecycle hooks on the head before teardown.
+def _maybe_run_teardown_hooks(handle: 'backends.ResourceHandle',
+                              backend: 'backends.Backend', cluster_name: str,
+                              event: str) -> None:
+    """Runs ``event`` lifecycle hooks on the head before teardown.
 
-    Best-effort: if the head is unreachable or running the hooks fails,
-    we log a warning and proceed with teardown so users can never be
-    stuck. Per-node exactly-once semantics are enforced on the head
-    via the CAS in ``hook_executor.try_claim_teardown``.
+    Handles both ``down`` (``sky down``) and ``stop`` (``sky stop``)
+    user-initiated teardowns. Best-effort: if the head is unreachable
+    or running the hooks fails, we log a warning and proceed with
+    teardown so users can never be stuck. Per-node exactly-once
+    semantics are enforced on the head via the CAS in
+    ``hook_executor.try_claim_teardown``.
     """
     # Only the VM/Ray backend is supported; other backends simply skip.
     if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
         return
-    # Claim the 'down' teardown slot unconditionally — even if no hook
-    # declares the `down` event. The claim blocks the SIGTERM handler
+    # Claim the event slot unconditionally — even if no hook declares
+    # this event. For 'down', the claim blocks the SIGTERM handler
     # (kubelet's SIGTERM at K8s pod delete) from later claiming
     # 'preemption' and firing the preemption hook on what was
-    # intentionally `sky down`. `hook_executor.run('down', hooks)` is a
-    # no-op when no down-event hooks match.
+    # intentionally `sky down`. For 'stop', it blocks a racing
+    # idle-timer fire on the head. `hook_executor.run(event, hooks)`
+    # is a no-op when no matching hooks exist.
     codegen = ('from sky.skylet import autostop_lib, hook_executor\n'
                'hooks = autostop_lib.get_hooks() or []\n'
-               'if hook_executor.try_claim_teardown(\'down\'):\n'
-               '    hook_executor.run(\'down\', hooks)\n')
+               f'if hook_executor.try_claim_teardown({event!r}):\n'
+               f'    hook_executor.run({event!r}, hooks)\n')
     # Use SKY_PYTHON_CMD so the codegen sees the sky/ installation on the
     # remote — plain `python3` may point at a minimal system interpreter.
     cmd = f'{constants.SKY_PYTHON_CMD} -c {shlex.quote(codegen)}'
     try:
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Running down hook on {cluster_name!r}')):
+                    f'Running {event} hook on {cluster_name!r}')):
             backend.run_on_head(
                 handle,
                 cmd,
@@ -927,8 +930,28 @@ def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
                 require_outputs=False,
             )
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to run down hook on {cluster_name!r}: {e}. '
+        logger.warning(f'Failed to run {event} hook on {cluster_name!r}: {e}. '
                        'Proceeding with teardown.')
+
+
+def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
+                          backend: 'backends.Backend',
+                          cluster_name: str) -> None:
+    """Runs ``down`` lifecycle hooks on the head before teardown."""
+    _maybe_run_teardown_hooks(handle, backend, cluster_name, event='down')
+
+
+def _maybe_run_stop_hooks(handle: 'backends.ResourceHandle',
+                          backend: 'backends.Backend',
+                          cluster_name: str) -> None:
+    """Runs ``stop`` lifecycle hooks on the head before stop.
+
+    Fires on user-initiated ``sky stop``. The idle-timer-driven stop
+    path (``events.StopEvent``) fires the ``stop`` event independently
+    on the head with no client involvement, so this codegen only runs
+    for the user-command path.
+    """
+    _maybe_run_teardown_hooks(handle, backend, cluster_name, event='stop')
 
 
 @usage_lib.entrypoint
@@ -1007,6 +1030,7 @@ def stop(cluster_name: str,
                              terminate=False)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    _maybe_run_stop_hooks(handle, backend, cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
 
 

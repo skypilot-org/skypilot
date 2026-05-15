@@ -249,6 +249,53 @@ def test_hook_down_and_race(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
+# User-initiated `sky stop` fires the `stop` event (the original
+# design's exclusion of `sky stop` was dropped: any path that takes the
+# cluster offline fires a hook). Also pins that the hook subprocess
+# sees the new `SKYPILOT_HOOK_EVENT` env var set to the firing event.
+# ---------------------------------------------------------------------------
+@_no_autostop
+@pytest.mark.no_kubernetes
+def test_hook_sky_stop_fires_stop_event_with_env_var(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    stop_marker = f'hook-stop-{time.time()}'
+    yaml_path = _write_yaml({
+        'hooks': [{
+            'run': (f'echo {stop_marker} && '
+                    f'echo "EVENT=$SKYPILOT_HOOK_EVENT"'),
+            'events': ['stop'],
+            'timeout': 60,
+        }],
+    })
+    test = smoke_tests_utils.Test(
+        'test_hook_sky_stop_fires_stop_event_with_env_var',
+        [
+            # (1) Launch with a stop hook.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # (2) User-initiated `sky stop`. Pre-PR1-rename this fired
+            # no hook; now it fires `stop`.
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # (3) Bring it back up so we can read the per-event log file.
+            f'sky start -y {name}',
+            # (4) Stop hook fired AND `$SKYPILOT_HOOK_EVENT` was set to 'stop'.
+            f'out=$(sky logs {name} --hook stop --no-follow) && '
+            f'echo "$out" | grep "{stop_marker}" && '
+            f'echo "$out" | grep "EVENT=stop"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + 300,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
 # Re-launch dropping `hooks:` clears the skylet's stored list (proto3
 # `repeated` has no presence — implementation sends `clear_hooks=True`).
 # Kept separate from the combined test because the re-launch sequencing

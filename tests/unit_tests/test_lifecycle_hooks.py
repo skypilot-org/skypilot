@@ -433,7 +433,8 @@ def test_hook_executor_log_path_per_event(hook_executor):
 def test_hook_executor_filters_by_event(hook_executor, monkeypatch):
     calls = []
 
-    def _fake_run(script, log_path, timeout):
+    def _fake_run(script, log_path, timeout, event):
+        del log_path, timeout, event
         calls.append(script)
         return 0
 
@@ -459,7 +460,7 @@ def test_hook_executor_filters_by_event(hook_executor, monkeypatch):
 def test_hook_executor_sequential(hook_executor, monkeypatch):
     order = []
     monkeypatch.setattr(hook_executor, '_run_script',
-                        lambda s, l, t: order.append(s) or 0)
+                        lambda s, l, t, e: order.append(s) or 0)
     hooks = [{'run': str(i), 'events': ['stop']} for i in range(3)]
     hook_executor.run('stop', hooks)
     assert order == ['0', '1', '2']
@@ -468,7 +469,8 @@ def test_hook_executor_sequential(hook_executor, monkeypatch):
 def test_hook_executor_failure_continues(hook_executor, monkeypatch):
     called = []
 
-    def _fake(script, log_path, timeout):
+    def _fake(script, log_path, timeout, event):
+        del log_path, timeout, event
         called.append(script)
         return 1 if script == 'boom' else 0
 
@@ -764,6 +766,72 @@ def test_task_yaml_config_hooks_schema_rejects_unknown_event(tmp_path):
 # ---------------------------------------------------------------------------
 # Review feedback (kevinmingtarja) — behavioral fixes
 # ---------------------------------------------------------------------------
+
+
+def test_hook_executor_injects_event_env_var(hook_executor, monkeypatch,
+                                             tmp_path):
+    """``$SKYPILOT_HOOK_EVENT`` is exposed to the hook subprocess so a
+    single hook entry defaulted to all events can dispatch internally."""
+    captured = {}
+
+    def _fake_run_with_log(cmd, log_path, **kwargs):
+        del cmd, log_path
+        captured['env'] = kwargs.get('env')
+        return 0
+
+    monkeypatch.setattr('sky.skylet.log_lib.run_with_log', _fake_run_with_log)
+    rc = hook_executor._run_script(
+        'echo $SKYPILOT_HOOK_EVENT',
+        str(tmp_path / 'stop.log'),
+        timeout=10,
+        event='stop',
+    )
+    assert rc == 0
+    env = captured.get('env') or {}
+    assert env.get('SKYPILOT_HOOK_EVENT') == 'stop', (
+        f"Hook subprocess env must carry SKYPILOT_HOOK_EVENT=stop; got "
+        f"{env.get('SKYPILOT_HOOK_EVENT')!r}.")
+    # Sanity: surrounding env (PATH etc) must still be present so user
+    # hook scripts can find common binaries.
+    assert 'PATH' in env, 'Hook env must inherit PATH from the skylet.'
+
+
+def test_sky_stop_fires_stop_hook_via_codegen():
+    """`sky stop` must claim the 'stop' teardown slot and run hooks on
+    the head before the backend stop call.
+
+    Mirrors ``test_sky_down_claims_teardown_even_without_down_hooks``
+    for the user-initiated stop path added per review feedback to
+    drop the original `sky stop`-exclusion.
+    """
+    from sky import core
+    from sky.backends import cloud_vm_ray_backend
+
+    captured = {}
+
+    class _FakeHandle:
+        pass
+
+    class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
+
+        def __init__(self):  # pylint: disable=super-init-not-called
+            pass
+
+        def run_on_head(self, handle, cmd, **kw):  # type: ignore[override]
+            del handle, kw
+            captured['cmd'] = cmd
+            return 0
+
+    core._maybe_run_stop_hooks(_FakeHandle(), _FakeBackend(), 'mycluster')
+
+    cmd = captured.get('cmd', '')
+    assert 'try_claim_teardown' in cmd, (
+        f"_maybe_run_stop_hooks codegen missing teardown claim. Got: {cmd!r}")
+    # The codegen must reference the 'stop' event (not 'down') — easy
+    # copy-paste mistake to guard against.
+    assert "'stop'" in cmd, (
+        f"_maybe_run_stop_hooks codegen should claim 'stop', not 'down'. "
+        f"Got: {cmd!r}")
 
 
 def test_sky_down_claims_teardown_even_without_down_hooks():

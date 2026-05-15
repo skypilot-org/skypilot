@@ -95,19 +95,30 @@ def _log_path_for(event: str) -> str:
     return os.path.join(HOOK_LOG_DIR, f'{event}.log')
 
 
-def _run_script(script: str, log_path: str, timeout: int) -> int:
+_HOOK_EVENT_ENV = 'SKYPILOT_HOOK_EVENT'
+
+
+def _run_script(script: str, log_path: str, timeout: int, event: str) -> int:
     """Execute a single hook script, teeing output to `log_path`.
+
+    The shell sees ``$SKYPILOT_HOOK_EVENT`` set to the firing event
+    (``stop`` / ``preemption`` / ``down``). A single hook that defaults
+    to all three events (no ``events:`` key) can dispatch on it without
+    needing three separate entries.
 
     Returns the process exit code. Timeouts and other failures are
     converted into a non-zero return so the caller can keep going.
     """
+    env = os.environ.copy()
+    env[_HOOK_EVENT_ENV] = event
     try:
         return log_lib.run_with_log(script,
                                     log_path,
                                     require_outputs=False,
                                     shell=True,
                                     process_stream=True,
-                                    timeout=timeout)
+                                    timeout=timeout,
+                                    env=env)
     except subprocess.TimeoutExpired:
         logger.warning(f'Hook timed out after {timeout}s; continuing teardown.')
         return 124
@@ -147,7 +158,7 @@ def run(event: str, hooks: Optional[List[Dict[str, Any]]]) -> None:
         timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         logger.info(f'Running {event} hook {idx + 1}/{len(matching)} '
                     f'(timeout={timeout}s).')
-        rc = _run_script(script, log_path, timeout)
+        rc = _run_script(script, log_path, timeout, event)
         if rc != 0:
             logger.warning(
                 f'{event} hook exited with code {rc}; continuing teardown.')
