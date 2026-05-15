@@ -222,8 +222,8 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT

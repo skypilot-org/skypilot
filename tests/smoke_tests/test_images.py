@@ -455,7 +455,6 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
@@ -464,6 +463,8 @@ def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
         timeout *= 3
+    elif generic_cloud == 'nebius':
+        timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',

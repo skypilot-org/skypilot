@@ -858,14 +858,16 @@ available_node_types:
                     echo "/tmp/apt-update.log not found" >&2
                   fi
                 }
-                # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
-                # so that both fusemount and fusermount3 can be masked before enabling SSH access.
-                PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
+                # FUSE compatibility: we want libfuse2 (FUSE 2 ABI for legacy
+                # clients like older s3fs/sshfs) AND fuse3 (binary + libfuse3-3
+                # for hf-mount, rclone, blobfuse2, etc.). On Ubuntu 22.04+
+                # `fuse3 Breaks: fuse` (both ship /usr/bin/fusermount), so the
+                # two packages cannot coexist. FUSE is handled out-of-band below.
+                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl, rsync, ssh and wget are available sooner to unblock the following
                 # conda installation and rsync.
-                # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
@@ -875,13 +877,34 @@ available_node_types:
                       INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
                     fi
                   elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ] || [ "$pkg" == "wget" ]; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "wget" ]; then
                       INSTALL_FIRST="$INSTALL_FIRST $pkg";
                     else
                       MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
                     fi
                   fi
                 done;
+
+                # FUSE handling — four cases for (fuse_installed, fuse3_installed):
+                #   (0, 0): install fuse first then fuse3. apt's Breaks
+                #           resolution removes the `fuse` package while leaving
+                #           libfuse2 → final state: libfuse2 (FUSE 2 ABI) +
+                #           fuse3 (binary + libfuse3-3 for FUSE 3 ABI).
+                #   (1, 0): only fuse3 missing. Queue it in MISSING_PACKAGES;
+                #           apt removes `fuse` package but libfuse2 survives.
+                #   (0, 1): already the desired state (SkyPilot default images).
+                #           User-supplied images may lack libfuse2, need to handle
+                #           this.
+                #   (1, 1): impossible on Ubuntu 22.04+ (Breaks declaration);
+                #           treated as no-op for forward-compat.
+                HAS_FUSE=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse " && HAS_FUSE=1
+                HAS_FUSE3=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse3 " && HAS_FUSE3=1
+                if [ "$HAS_FUSE" = "0" ] && [ "$HAS_FUSE3" = "0" ]; then
+                  INSTALL_FIRST="$INSTALL_FIRST fuse"
+                  MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
+                elif [ "$HAS_FUSE" = "1" ] && [ "$HAS_FUSE3" = "0" ]; then
+                  MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
+                fi
 
                 # Detect distro for mirror fallback
                 APT_OS="unknown"
@@ -916,6 +939,9 @@ available_node_types:
                 fi
                 {% endif %}
 
+                # Wrap the candidate-mirror loop in a function so we can
+                # short-circuit when nothing needs installing.
+                run_apt_install_with_fallback() {
                 INSTALL_SUCCESS=false
                 backup_source
                 for candidate in "" $MIRROR_CANDIDATES; do
@@ -968,6 +994,15 @@ available_node_types:
                   break
                 done
                 restore_source
+                }
+
+                INSTALL_SUCCESS=false
+                if [ -z "$INSTALL_FIRST" ] && [ -z "$MISSING_PACKAGES" ]; then
+                  echo "All required packages already installed; skipping apt-update/install." >> /tmp/apt-update.log
+                  INSTALL_SUCCESS=true
+                else
+                  run_apt_install_with_fallback
+                fi
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
