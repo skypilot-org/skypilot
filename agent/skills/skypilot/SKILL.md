@@ -61,7 +61,7 @@ These are the SkyPilot behaviors agents most often get wrong:
     `~/sky_logs/<job-id>-<job-name>/run.log`; if the directory is unclear, use
     `sky logs`/`sky logs --sync-down` or inspect `sky queue` for the job ID.
     Normalize carriage returns before grepping progress-bar logs:
-    `tr "\r" "\n" < ~/sky_logs/<job>/run.log | grep -E "PATTERN"`.
+    tail -n 1000 ~/sky_logs/<job>/run.log | tr "\r" "\n" | grep -E "PATTERN"
 12. Use targeted log filters for long jobs. Prefer patterns like
     `Traceback|ERROR|RuntimeError|CUDA out|checkpoint|eval|loss|step` and
     `tail -n 50` over streaming full logs.
