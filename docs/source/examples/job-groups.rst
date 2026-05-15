@@ -280,6 +280,14 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
         --rollout-server rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001 \
         --reward-server reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
 
+.. figure:: ../images/job-groups-dashboard.png
+   :width: 100%
+   :align: center
+   :alt: Job Groups in SkyPilot Dashboard
+
+   The same Job Group running in production, viewed from the SkyPilot dashboard.
+   Each task has independent resources and can be monitored separately.
+
 See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in the SkyPilot repository.
 
 Primary and auxiliary tasks
