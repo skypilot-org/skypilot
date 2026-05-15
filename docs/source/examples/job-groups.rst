@@ -11,14 +11,12 @@ Job Groups allow you to run multiple related tasks in parallel as a single manag
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
-.. figure:: ../images/job-groups-dashboard.png
+.. figure:: ../images/job-groups-rl-architecture.svg
    :width: 100%
    :align: center
-   :alt: Job Groups in SkyPilot Dashboard
+   :alt: SkyPilot Job Group: five tasks running in parallel for RL post-training — rollout-server and ppo-trainer on GPU; data-server, reward-server, and replay-buffer on CPU. Samples flow rollout → reward → buffer → trainer; policy weights loop back to rollout every step.
 
-   A Job Group with 4 tasks (data-server, rollout-server, reward-server, ppo-trainer)
-   running in parallel on Kubernetes. Each task has different resource requirements
-   and can be monitored independently through the dashboard.
+   A **SkyPilot Job Group** for RL post-training. Five heterogeneous tasks run side by side: samples flow rollout → reward → buffer → trainer, and new policy weights loop back to the rollout server every step.
 
 Overview
 --------
@@ -238,14 +236,7 @@ See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. figure:: ../images/job-groups-rl-architecture.svg
-   :width: 95%
-   :align: center
-   :alt: RL post-training Job Group: rollout-server and ppo-trainer on GPU; data-server, reward-server, and replay-buffer on CPU. Samples flow rollout → reward → buffer → trainer; policy weights loop back to rollout.
-
-   Five tasks run side-by-side in one Job Group: samples flow rollout → reward → buffer → trainer; new policy weights loop back from the trainer to the rollout server every step.
-
-This example demonstrates a distributed RL post-training architecture with 5 tasks:
+This example demonstrates a distributed RL post-training architecture with 5 tasks (see the hero diagram at the top of the page):
 
 .. code-block:: yaml
 

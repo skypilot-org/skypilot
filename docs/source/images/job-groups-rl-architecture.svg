@@ -12,7 +12,7 @@
     @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
     .diag .flow { animation: flow-dash 1.8s linear infinite; }
 ]]></style>
-  <g><rect x="40" y="32" width="1200" height="470" rx="20" fill="none" stroke="#C8C6C7" stroke-width="1.25" stroke-dasharray="2 5"/><g transform="translate(66 32)"><rect x="-10" y="-14" width="220" height="28" rx="14" fill="#FFFFFF"/><text x="0" y="5" font-family="BerkeleyMono, monospace" font-size="13" letter-spacing="0.18em" font-weight="700" fill="#243142">JOB&#160;GROUP<tspan fill="#5d6a7a" font-weight="400">&#160;·&#160;rlhf-experiment</tspan></text></g></g>
+  <g><rect x="40" y="32" width="1200" height="470" rx="20" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-dasharray="2 5"/><g transform="translate(66 32)"><rect x="-12" y="-16" width="340" height="32" rx="16" fill="#FFFFFF" stroke="#0A55EE" stroke-width="1.25"/><text x="0" y="6" font-family="BerkeleyMono, monospace" font-size="14" letter-spacing="0.18em" font-weight="700" fill="#0A55EE">SKYPILOT&#160;JOB&#160;GROUP<tspan fill="#5d6a7a" font-weight="400">&#160;·&#160;rlhf-experiment</tspan></text></g></g>
   <g transform="translate(300 110)">
       <rect x="0" y="0" width="250" height="124" rx="12" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.5"/>
       <text x="16" y="24" class="role">sample generation</text>
