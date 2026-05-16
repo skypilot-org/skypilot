@@ -1125,12 +1125,22 @@ def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
     from sky.server import versions
 
     # Pin the remote server to one less than the current API_VERSION so
-    # the decorator's gate fires for any new feature landing in this PR.
+    # the decorator's gate fires. Combine the function-level monkeypatch
+    # (so the decorator sees the pinned value) with an explicit
+    # ContextVar reset in `finally` — the outer ``check_server_healthy``
+    # decorator runs first and otherwise calls ``set_remote_api_version``
+    # with a real int that would persist into subsequent tests in the
+    # same xdist worker.
     monkeypatch.setattr(versions, 'get_remote_api_version',
                         lambda: server_constants.API_VERSION - 1)
-
-    with pytest.raises(exceptions.APINotSupportedError) as excinfo:
-        sdk.tail_hook_logs(cluster_name='ignored')
-    err = str(excinfo.value)
-    assert 'tail_hook_logs' in err, (
-        f'Error message should name the SDK function; got: {err!r}')
+    try:
+        with pytest.raises(exceptions.APINotSupportedError) as excinfo:
+            sdk.tail_hook_logs(cluster_name='ignored')
+        err = str(excinfo.value)
+        assert 'tail_hook_logs' in err, (
+            f'Error message should name the SDK function; got: {err!r}')
+    finally:
+        # Even with monkeypatch reverting the function-level patch,
+        # explicitly clear the ContextVar so we never leak whatever the
+        # auth path / decorator wrote into it.
+        versions.set_remote_api_version(None)

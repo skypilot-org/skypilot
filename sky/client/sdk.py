@@ -1159,8 +1159,8 @@ def tail_hook_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
-        event: one of ``autostop``, ``preemption``, ``down``. When
-            None, auto-selects whichever log exists on the cluster.
+        event: one of ``stop``, ``preemption``, ``down``. When None,
+            auto-selects whichever log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
