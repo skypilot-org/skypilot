@@ -24,6 +24,21 @@ logger = sky_logging.init_logger(__name__)
 
 _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
+_DEFAULT_INGRESS_NAMESPACE = 'ingress-nginx'
+
+
+def get_ingress_namespace(context: Optional[str]) -> str:
+    """Returns the namespace where the ingress-nginx controller is installed.
+
+    Reads the configured namespace from ``kubernetes.ingress_namespace``
+    (optionally overridden per-context via ``kubernetes.context_configs``),
+    falling back to the upstream default (``ingress-nginx``).
+    """
+    return skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('ingress_namespace',),
+        default_value=_DEFAULT_INGRESS_NAMESPACE)
 
 
 def get_port_mode(
@@ -242,7 +257,7 @@ def ingress_controller_exists(context: Optional[str],
 
 def get_ingress_external_ip_and_ports(
     context: Optional[str],
-    namespace: str = 'ingress-nginx'
+    namespace: str = _DEFAULT_INGRESS_NAMESPACE,
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api(context)

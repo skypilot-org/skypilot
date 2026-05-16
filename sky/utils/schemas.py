@@ -1487,6 +1487,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesPortMode
         ],
     },
+    'ingress_namespace': {
+        'type': 'string',
+    },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',

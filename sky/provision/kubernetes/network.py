@@ -293,7 +293,9 @@ def _query_ports_for_ingress(
 ) -> Dict[int, List[common.Endpoint]]:
     context = provider_config.get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
-    ingress_details = network_utils.get_ingress_external_ip_and_ports(context)
+    ingress_namespace = network_utils.get_ingress_namespace(context)
+    ingress_details = network_utils.get_ingress_external_ip_and_ports(
+        context, namespace=ingress_namespace)
     external_ip, external_ports = ingress_details
     if external_ip is None:
         return {}
