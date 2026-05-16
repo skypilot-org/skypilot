@@ -1414,8 +1414,8 @@ Tails a per-event lifecycle-hook log on the cluster.
 
 **Args:**
     cluster_name: name of the cluster.
-    event: one of ``autostop``, ``preemption``, ``down``. When
-        None, auto-selects whichever log exists on the cluster.
+    event: one of ``stop``, ``preemption``, ``down``. When None,
+        auto-selects whichever log exists on the cluster.
     follow: whether to follow the logs.
     tail: number of lines to display from the end of the log file.
 

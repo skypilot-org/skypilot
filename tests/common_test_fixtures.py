@@ -682,6 +682,17 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # The remote-api-version ContextVar gets set as a side effect of
+    # any test that exercises the auth / SetAutostop / hook-firing
+    # paths (real or via decorators like @check_server_healthy_or_start
+    # in sky.client.sdk). Without an explicit reset, leftover values
+    # — sometimes a Mock object planted by a fellow test in the same
+    # xdist worker — break subsequent tests that read
+    # ``versions.get_remote_api_version()`` expecting either None or
+    # an int (e.g. test_sky/server/test_sdk.py::test_api_login_*).
+    from sky.server import versions as _versions
+    _versions.set_remote_api_version(None)
+    _versions.set_remote_version('unknown')
     # Reload config from default paths to reset any in-memory config changes
     # from previous tests that might have modified the config.
     _safe_reload_config()
@@ -690,5 +701,8 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # Same ContextVar reset as the pre-yield branch.
+    _versions.set_remote_api_version(None)
+    _versions.set_remote_version('unknown')
     # Reload config again to reset any changes made by this test
     _safe_reload_config()
