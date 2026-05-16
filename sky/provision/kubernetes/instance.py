@@ -1300,11 +1300,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         logger.info(f'Found {len(stale_pods)} pods in Failed/Succeeded '
                     f'phase: {list(stale_pods.keys())}. Deleting them.')
         for pod_name in stale_pods:
-            kubernetes.core_api(context).delete_namespaced_pod(
-                pod_name,
-                namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT,
-                grace_period_seconds=0)
+            # pylint: disable=cell-var-from-loop
+            kubernetes_utils.delete_k8s_resource_with_retry(
+                delete_func=lambda name=pod_name: kubernetes.core_api(
+                    context).delete_namespaced_pod(name,
+                                                   namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT,
+                                                   grace_period_seconds=0),
+                resource_type='pod',
+                resource_name=pod_name)
 
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
