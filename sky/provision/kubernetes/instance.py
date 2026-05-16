@@ -1291,6 +1291,21 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 _request_timeout=config_lib.DELETION_TIMEOUT,
                 grace_period_seconds=0)
 
+    # Clean up pods in Failed/Succeeded phase from previous runs.
+    # These are invisible to the Pending/Running filter below but still
+    # block pod creation with the same name (409 AlreadyExists).
+    stale_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                              ['Failed', 'Succeeded'])
+    if stale_pods:
+        logger.info(f'Found {len(stale_pods)} pods in Failed/Succeeded '
+                    f'phase: {list(stale_pods.keys())}. Deleting them.')
+        for pod_name in stale_pods:
+            kubernetes.core_api(context).delete_namespaced_pod(
+                pod_name,
+                namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT,
+                grace_period_seconds=0)
+
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
