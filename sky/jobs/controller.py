@@ -50,6 +50,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
+from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
@@ -2105,6 +2106,18 @@ class ControllerManager:
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
+        # Per-job timeline tracing (opt-in via marker file dropped at
+        # submit when the launching client had
+        # SKYPILOT_TIMELINE_FILE_PATH set). Scoped to this coroutine via
+        # contextvars — @context.contextual_async wraps us in
+        # copy_context().run, so init_request_timeline only affects this
+        # job's task even though many run concurrently in one process.
+        if os.path.exists(
+                jobs_constants.jobs_timeline_marker_path(job_id)):
+            timeline.init_request_timeline(
+                request_id=str(job_id),
+                save_path=jobs_constants.jobs_timeline_file_path(job_id))
+
         job_rank = None
         env_content = file_content_utils.get_job_env_content(job_id)
         if env_content:
@@ -2244,6 +2257,11 @@ class ControllerManager:
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
+            # Snapshot the timeline now, before post-job cleanup
+            # (cluster teardown, etc.). The client-side fetch still
+            # polls in case it races us, but the early flush shrinks
+            # that window so most calls land on the first try.
+            timeline.save_timeline(clear=False)
             try:
                 await self._cleanup(job_id,
                                     pool=pool,
@@ -2306,6 +2324,17 @@ class ControllerManager:
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
                     del self.job_tasks[job_id]
+
+            # Flush this job's timeline (no-op when tracing wasn't enabled
+            # for this job). Marker file is cleaned up too so it can't
+            # leak into a future job id reuse.
+            timeline.save_timeline()
+            marker = jobs_constants.jobs_timeline_marker_path(job_id)
+            if os.path.exists(marker):
+                try:
+                    os.remove(marker)
+                except OSError:
+                    pass
 
     async def start_job(
         self,

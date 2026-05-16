@@ -14,6 +14,21 @@ JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
+# Timeline traces produced by the jobs controller for each managed job
+# (opt-in: only when the launching client had SKYPILOT_TIMELINE_FILE_PATH
+# set). The marker file signals the controller to enable per-job tracing.
+JOBS_TIMELINE_DIR = '~/sky_logs/jobs_controller/timelines'
+
+
+def jobs_timeline_marker_path(job_id: int) -> str:
+    return os.path.expanduser(
+        os.path.join(JOBS_TIMELINE_DIR, f'{job_id}.enabled'))
+
+
+def jobs_timeline_file_path(job_id: int) -> str:
+    return os.path.expanduser(
+        os.path.join(JOBS_TIMELINE_DIR, f'{job_id}.timeline.json'))
+
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 

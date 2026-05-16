@@ -1,7 +1,9 @@
 """SDK functions for managed jobs."""
 import json
+import os
 import pathlib
 import threading
+import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import zlib
@@ -26,6 +28,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     import io
@@ -35,6 +38,46 @@ if typing.TYPE_CHECKING:
     from sky.serve import serve_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _try_fetch_jobs_controller_timeline(job_id: int) -> None:
+    """Best-effort fetch of controller-side timeline events for *job_id*.
+
+    Called when the client streamed a managed job to completion with
+    SKYPILOT_TIMELINE_FILE_PATH set, so the controller-side trace gets
+    merged into the local trace file alongside the client and API
+    server events.
+
+    The controller writes its timeline at the end of its run_job_loop
+    finally block, *after* the job status becomes terminal — but the
+    log stream the client follows ends the moment the status is
+    terminal. That means the client typically arrives a few seconds
+    before the file exists, so we poll briefly.
+    """
+    if not os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+        return
+    deadline = time.time() + 30
+    backoff = 0.5
+    while True:
+        try:
+            response = server_common.make_authenticated_request(
+                'GET', f'/jobs/timeline?job_id={job_id}')
+            if response.ok:
+                data = response.json()
+                events = data.get('traceEvents', [])
+                for e in events:
+                    # Tag with the job id so concurrent jobs land on
+                    # separate Perfetto rows.
+                    e['pid'] = f'jobs-controller-{job_id}'
+                timeline.add_events(events)
+                return
+            if response.status_code != 404 or time.time() >= deadline:
+                return
+        except Exception:  # pylint: disable=broad-except
+            if time.time() >= deadline:
+                return
+        time.sleep(backoff)
+        backoff = min(backoff * 1.5, 3)
 
 
 @context.contextual
@@ -478,11 +521,16 @@ def tail_logs(name: Optional[str] = None,
         response)
     # Log request is idempotent when tail is None or 0 (both stream from
     # the beginning), thus can resume previous streaming point on retry.
-    return sdk.stream_response(request_id=request_id,
-                               response=response,
-                               output_stream=output_stream,
-                               resumable=(tail is None or tail == 0),
-                               get_result=follow)
+    result = sdk.stream_response(request_id=request_id,
+                                 response=response,
+                                 output_stream=output_stream,
+                                 resumable=(tail is None or tail == 0),
+                                 get_result=follow)
+    # When the user followed logs to completion, the controller is done
+    # processing this job and its timeline file is final — merge it.
+    if follow and job_id is not None:
+        _try_fetch_jobs_controller_timeline(job_id)
+    return result
 
 
 @context.contextual
