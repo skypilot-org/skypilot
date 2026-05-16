@@ -47,6 +47,7 @@ ALLOWED_TERMS = {
     'Autopilot',
     'Pods',
     'Samsung',
+    'Windows',
     'Google',
     'Amazon',
     'Okta',
