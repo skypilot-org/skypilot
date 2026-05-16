@@ -43,6 +43,7 @@ Stdlib-only so it stays importable on both the client and the API server
 without pulling in heavy dependencies.
 """
 import dataclasses
+import functools
 import hashlib
 import re
 from typing import Any, Dict, Optional, Tuple
@@ -107,6 +108,12 @@ def is_host_network(pod_config: Optional[Dict[str, Any]]) -> bool:
     return bool(spec.get('hostNetwork', False))
 
 
+# Cached: the digest is a pure function of the name, and the derivation
+# helpers each recompute it (port_base, node_ip_prefix, derive_ports,
+# derive_node_ip), so a single build() or a get_cluster_info() loop over N
+# pods would otherwise rehash the same name 4N times. Bounded so a long-lived
+# API server process can't grow it without limit.
+@functools.lru_cache(maxsize=1024)
 def _cluster_digest(cluster_name_on_cloud: str) -> bytes:
     return hashlib.sha256(cluster_name_on_cloud.encode('utf-8')).digest()
 
