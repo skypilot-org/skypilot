@@ -35,7 +35,7 @@ jest.mock('@/components/infra', () => ({
 let infraPage;
 beforeAll(async () => {
   // Defer require until after window mock setup
-  infraPage = (await import('../infra')).default;
+  infraPage = (await import('../pages/infra')).default;
 });
 
 beforeEach(() => {
