@@ -149,7 +149,7 @@ def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     if func is None:
         raise AttributeError(
             '"{obj}" object has no {func} or begin_{func} attribute'.format(
-                obj={client.__name__}, func=function_name))
+                obj=client.__name__, func=function_name))
     return func
 
 
