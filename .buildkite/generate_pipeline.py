@@ -207,7 +207,8 @@ def _parse_args(args: Optional[str] = None):
         space = ' ' if parsed_args.dependency else ''
         extra_args.append(f'--dependency{space}{parsed_args.dependency}')
 
-    return default_clouds_to_run, parsed_args.k, extra_args, parsed_args.concurrency
+    return (default_clouds_to_run, parsed_args.k, extra_args,
+            parsed_args.concurrency, parsed_args.env_file is not None)
 
 
 def _extract_marked_tests(
@@ -330,17 +331,17 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    default_clouds_to_run, k_value, extra_args, concurrency = _parse_args(args)
-    # Strip --concurrency from args before passing to pytest --collect-only
-    pytest_args = re.sub(r'--concurrency\s+\d+', '', args).strip()
-    function_cloud_map = _extract_marked_tests(test_file, pytest_args,
+    (default_clouds_to_run, k_value, extra_args, concurrency,
+     has_env_file) = _parse_args(args)
+    function_cloud_map = _extract_marked_tests(test_file, args,
                                                default_clouds_to_run, k_value,
                                                extra_args)
-    if '--env-file' in args:
+    concurrency_limit = None
+    build_id = None
+    if has_env_file:
         concurrency_limit = (concurrency if concurrency is not None else
                              DEFAULT_ENV_FILE_CONCURRENCY_LIMIT)
-    else:
-        concurrency_limit = None
+        build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param, extra_args, no_auto_retry in zip(
                 *clouds_queues_param):
@@ -368,9 +369,8 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                 }
             }
             if concurrency_limit is not None:
-                build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
                 step['concurrency'] = concurrency_limit
-                step['concurrency_group'] = (f'env-file-smoke-test-{build_id}')
+                step['concurrency_group'] = f'env-file-smoke-test-{build_id}'
             if no_auto_retry:
                 # Disable automatic retries but allow manual retries.
                 step['retry'] = {
