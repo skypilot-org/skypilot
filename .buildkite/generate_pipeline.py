@@ -331,7 +331,9 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     steps = []
     generated_steps_set = set()
     default_clouds_to_run, k_value, extra_args, concurrency = _parse_args(args)
-    function_cloud_map = _extract_marked_tests(test_file, args,
+    # Strip --concurrency from args before passing to pytest --collect-only
+    pytest_args = re.sub(r'--concurrency\s+\d+', '', args).strip()
+    function_cloud_map = _extract_marked_tests(test_file, pytest_args,
                                                default_clouds_to_run, k_value,
                                                extra_args)
     if '--env-file' in args:
