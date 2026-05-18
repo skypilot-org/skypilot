@@ -72,6 +72,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`namespace <config-yaml-kubernetes-namespace>`: my-namespace
     :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
       names:
         - gpu-node-01
@@ -1610,6 +1611,41 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+
+.. _config-yaml-kubernetes-namespace:
+
+``kubernetes.namespace``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kubernetes namespace SkyPilot pods are launched into (optional).
+
+If unset, SkyPilot uses the namespace from the active kubeconfig context (or
+``default``), preserving the historical behavior. Setting this value lets you
+target a specific namespace without modifying your kubeconfig.
+
+.. code-block:: yaml
+
+  kubernetes:
+    namespace: my-namespace
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        namespace: prod-workloads
+      dev-cluster:
+        namespace: dev-workloads
+
+When set, the namespace is used for both pod creation and resource discovery
+(e.g., listing pods to count used resources), so quotas and visibility line up
+with the chosen namespace.
+
+For per-workspace overrides — e.g. sharing a single cluster context across
+teams, with each team scoped to its own namespace — see
+:ref:`Workspaces <workspaces>`.
 
 .. _config-yaml-kubernetes-allowed-nodes:
 
