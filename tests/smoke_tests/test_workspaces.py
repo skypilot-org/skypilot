@@ -409,15 +409,31 @@ def test_kubernetes_workspace_remote_identity():
             f"[ \"$sa\" = \"{expected_sa}\" ]")
 
     # The test only inspects the pod's `spec.serviceAccountName`, so we ask
-    # for the smallest pod the kind cluster will schedule — leaves headroom
-    # on tight CI nodes.
-    tiny_resource_args = '--cpus 1 --memory 1'
+    # for the smallest pod the kind cluster will schedule. Matches the
+    # smallest size used elsewhere in K8s smoke tests
+    # (tests/smoke_tests/test_basic.py::test_kubernetes_allowed_nodes).
+    tiny_resource_args = '--cpus 0.5 --memory 1'
+
+    # Print node + pod state so failures on a constrained CI agent are easy
+    # to diagnose from the build log.
+    diag_cmd = ("echo '=== nodes ===' && "
+                "kubectl get nodes -o wide && "
+                "echo '=== node capacity / allocatable ===' && "
+                "kubectl get nodes -o "
+                "jsonpath='{range .items[*]}{.metadata.name}{\"\\n  cap: \"}"
+                "{.status.capacity}{\"\\n  alloc: \"}{.status.allocatable}"
+                "{\"\\n\"}{end}' && "
+                "echo '=== running pods (all ns) ===' && "
+                "kubectl get pods --all-namespaces "
+                "-o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,"
+                "STATUS:.status.phase,NODE:.spec.nodeName")
 
     test = smoke_tests_utils.Test(
         'test_kubernetes_workspace_remote_identity',
         [
             create_sa_cmd(sa1),
             create_sa_cmd(sa2),
+            diag_cmd,
             # Apply the workspace config and restart the API server.
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
             f'{smoke_tests_utils.SKY_API_RESTART}',
