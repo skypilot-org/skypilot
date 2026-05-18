@@ -3028,6 +3028,8 @@ def test_kubernetes_stale_pod_cleanup():
             f'if [ "$phase" = "Failed" ]; then break; fi; '
             f'sleep 2; done && '
             f'test "$phase" = "Failed"',
+            # Refresh state so the API server records the cluster as INIT.
+            f'sky status {name} -r',
             # sky start should clean up the Failed pod and succeed.
             f'sky start -y {name}',
         ],
