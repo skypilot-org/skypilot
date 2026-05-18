@@ -836,14 +836,25 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
         if pool:
-            # Get pool-level jobs (e.g. batch coordinators) that use
-            # all workers — they have pool set but no cluster_name.
-            pool_level_job_ids = (
-                managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, cluster_name=None))
+            # Fetch all nonterminal job ids in the pool in a single query,
+            # grouped by current_cluster_name. Avoids the N+1 pattern of
+            # (1 + len(replicas)) per-pool queries against a job_info table
+            # that may contain tens of thousands of finished rows.
+            jobs_by_cluster = (
+                managed_job_state.get_nonterminal_job_ids_by_pool_grouped(
+                    service_name))
+            # Pool-level jobs (e.g. batch coordinators) span every worker.
+            # They have pool set but no cluster_name, so they live under the
+            # None bucket of the grouped result. Note: the prior per-call
+            # implementation passed cluster_name=None to a function that
+            # treated None as "no filter" rather than "IS NULL", so it
+            # accidentally returned every nonterminal job in the pool and
+            # surfaced unrelated replicas' jobs as `used_by` on each READY
+            # worker. The grouped query lets us implement the intended
+            # semantic exactly.
+            pool_level_job_ids = list(jobs_by_cluster.get(None, []))
             for replica_info in record['replica_info']:
-                job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, replica_info['name'])
+                job_ids = list(jobs_by_cluster.get(replica_info['name'], []))
                 # Show pool-level jobs on READY workers only.
                 if (replica_info.get('status') ==
                         serve_state.ReplicaStatus.READY):

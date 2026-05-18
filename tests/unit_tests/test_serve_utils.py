@@ -462,6 +462,118 @@ class TestTerminateShuttingDownPurge:
             mock_purge.assert_not_called()
 
 
+class TestPoolStatusBatchedQuery:
+    """`_get_service_status(pool=True)` must batch its per-replica job lookups
+    into a single grouped query. The previous per-replica fan-out scaled with
+    pool replica count and ran a full scan over the job_info table
+    each iteration.
+    """
+
+    def _replica(self, name, status):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        info = mock.Mock()
+        info.to_info_dict.return_value = {
+            'name': name,
+            'status': (status if isinstance(status, serve_state.ReplicaStatus)
+                       else serve_state.ReplicaStatus[status]),
+        }
+        return info
+
+    def _patch_environment(self, replicas, grouped_jobs):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        record = {
+            'name': 'pool-a',
+            'pool': True,
+            'version': 1,
+            'controller_port': 20001,
+        }
+        return (
+            mock.patch(
+                'sky.serve.serve_utils.serve_state.get_service_from_name',
+                return_value=record),
+            mock.patch('sky.serve.serve_utils.serve_state.get_replica_infos',
+                       return_value=replicas),
+            mock.patch('sky.serve.serve_utils._get_to_controller_with_retry',
+                       side_effect=requests_exceptions.RequestException()),
+            mock.patch('sky.serve.serve_utils.get_yaml_content',
+                       side_effect=Exception('skip yaml')),
+            mock.patch(
+                'sky.serve.serve_utils.managed_job_state.'
+                'get_nonterminal_job_ids_by_pool_grouped',
+                return_value=grouped_jobs),
+            mock.patch('sky.serve.serve_utils.managed_job_state.'
+                       'get_nonterminal_job_ids_by_pool'),
+            serve_state,  # returned for callers to use as needed
+        )
+
+    def test_pool_status_uses_grouped_query_once(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('replica-1', serve_state.ReplicaStatus.READY),
+            self._replica('replica-2', serve_state.ReplicaStatus.READY),
+            self._replica('replica-3', serve_state.ReplicaStatus.PROVISIONING),
+        ]
+        # job 10: batch coordinator (no cluster_name) — should appear on all
+        # READY replicas.
+        # jobs 20, 21: bound to replica-1 — must not leak to replica-2.
+        # job 30: bound to replica-2 — must not leak to replica-1.
+        grouped_jobs = {
+            None: [10],
+            'replica-1': [20, 21],
+            'replica-2': [30],
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, _) = self._patch_environment(replicas, grouped_jobs)
+        with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+             grouped_patch as mock_grouped, legacy_patch as mock_legacy:
+            record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        # Exactly one DB round-trip — no N+1.
+        mock_grouped.assert_called_once_with('pool-a')
+        mock_legacy.assert_not_called()
+
+        used_by = {r['name']: r['used_by'] for r in record['replica_info']}
+        # READY workers see (pool-level coordinator jobs) + (their own slice).
+        # They must NOT see jobs bound to other replicas: that was a latent
+        # bug in master where every READY worker reported every nonterminal
+        # job in the pool.
+        assert used_by['replica-1'] == [10, 20, 21]
+        assert used_by['replica-2'] == [10, 30]
+        # Non-READY workers only see jobs assigned to them; replica-3 has none.
+        assert used_by['replica-3'] == []
+
+    def test_pool_status_non_ready_only_sees_own_jobs(self):
+        """A non-READY replica with assigned jobs sees only those, not the
+        rest of the pool."""
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('replica-init',
+                          serve_state.ReplicaStatus.PROVISIONING),
+        ]
+        grouped_jobs = {
+            None: [1],
+            'replica-init': [2, 3],
+            'replica-other': [4],
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, _) = self._patch_environment(replicas, grouped_jobs)
+        with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+             grouped_patch, legacy_patch:
+            record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        used_by = {r['name']: r['used_by'] for r in record['replica_info']}
+        assert used_by['replica-init'] == [2, 3]
+
+
 class TestTerminalStatuses:
     """`terminal_statuses` includes SHUTTING_DOWN so that callers like
     apply() can refuse to update a row that's either dying or already
