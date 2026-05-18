@@ -23,15 +23,17 @@ class TestFormatSlurmDuration:
 class TestValidateSbatchTime:
     """Test validate_sbatch_time()."""
 
-    @pytest.mark.parametrize('value', [
-        '5',           # m (bare minutes)
-        '1:30',        # m:s
-        '4:00:00',     # h:m:s
-        '1-0',         # d-h
-        '1-12',        # d-h (multi-digit hour)
-        '2-23:59',     # d-h:m
-        '7-00:00:00',  # d-h:m:s
-    ])
+    @pytest.mark.parametrize(
+        'value',
+        [
+            '5',  # m (bare minutes)
+            '1:30',  # m:s
+            '4:00:00',  # h:m:s
+            '1-0',  # d-h
+            '1-12',  # d-h (multi-digit hour)
+            '2-23:59',  # d-h:m
+            '7-00:00:00',  # d-h:m:s
+        ])
     def test_accepted_formats(self, value):
         # Should not raise. One sample per grammatical form.
         utils.validate_sbatch_time(value)

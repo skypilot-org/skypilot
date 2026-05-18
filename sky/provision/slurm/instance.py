@@ -129,9 +129,9 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
     (3) friendlier to the backfill scheduler; (4) less surprising for
     admins who explicitly configured DefaultTime.
 
-    Returns the directive ending with a newline, or empty string when
-    no auto-generated directive should be emitted (user supplied their
-    own, or DefaultTime path, or warn path).
+    Returns the directive line (no trailing newline), or empty string
+    when no auto-generated directive should be emitted (user supplied
+    their own, or DefaultTime path, or warn path).
     """
     user_supplied_time = (sbatch_options.get('time') is not None or
                           sbatch_options.get('t') is not None)
@@ -141,7 +141,7 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
     # MaxTime is set.
     if partition_info.maxtime is not None:
         max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
-        return f'#SBATCH --time={max_time}\n'
+        return f'#SBATCH --time={max_time}'
     # MaxTime is UNLIMITED / NONE. Fall back to DefaultTime (the #9370
     # fix path) so Slurm doesn't see --time=UNLIMITED.
     if partition_info.default_time is not None:
@@ -152,6 +152,24 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
         'maintenance reservations. Set slurm.sbatch_options.time in your '
         'task YAML or in ~/.sky/config.yaml.')
     return ''
+
+
+def _build_sbatch_directives(sbatch_options: Dict[str, Any],
+                             partition_info: 'slurm.SlurmPartition',
+                             partition: str) -> str:
+    """Combine auto-generated and user-supplied ``#SBATCH`` directives.
+
+    Returns a string with a leading newline so it slots into the sbatch
+    script f-string after the pre-existing directives, or empty string
+    when nothing to emit.
+    """
+    user_block = _build_custom_sbatch_directives(sbatch_options)
+    auto_time = _compute_time_directive(sbatch_options, partition_info,
+                                        partition)
+    if not auto_time:
+        return user_block
+    # user_block is either '' or '\n#SBATCH ...' (leading \n, no trailing).
+    return '\n' + auto_time + user_block
 
 
 def _wait_for_job_nodes(
@@ -494,11 +512,12 @@ def _create_virtual_instance(
                     container_image = f'{maybe_domain}#{maybe_path}'
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
-    # Build custom sbatch directives from user config.
+    # Build the appended sbatch directive block (auto-generated --time
+    # + user-supplied options from sbatch_options).
     sbatch_options = resources.get('sbatch_options', {}) or {}
-    custom_sbatch_directives = _build_custom_sbatch_directives(sbatch_options)
-    time_directive = _compute_time_directive(sbatch_options, partition_info,
-                                             partition)
+    extra_sbatch_directives = _build_sbatch_directives(sbatch_options,
+                                                       partition_info,
+                                                       partition)
 
     # Build the sbatch script
     gpu_directive = ''
@@ -610,11 +629,11 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --output={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --error={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --nodes={num_nodes}
-{time_directive}#SBATCH --wait-all-nodes=1
+#SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={int(resources["cpus"])}
-{mem_directive}{gpu_directive}{custom_sbatch_directives}
+{mem_directive}{gpu_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
