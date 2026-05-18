@@ -583,8 +583,9 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc in ('A100-80GB', 'L4', 'B200'):
-                    # A100-80GB and L4 have a different name pattern.
+                if acc in ('A100-80GB', 'L4', 'B200', 'RTX-PRO-6000'):
+                    # A100-80GB, L4, B200, and RTX PRO 6000 use the
+                    # `nvidia-<acc>` form rather than `nvidia-tesla-<acc>`.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
                 elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
@@ -1221,8 +1222,10 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4'):
-            # a3-ultragpu, n4, and a4 instances only support hyperdisk-balanced.
+        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4',
+                                                                 'g4'):
+            # a3-ultragpu, n4, a4, and g4 instances only support
+            # hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling
