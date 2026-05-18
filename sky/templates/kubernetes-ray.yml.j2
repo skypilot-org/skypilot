@@ -413,8 +413,10 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% set _affinity_node = (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% if _affinity_node or k8s_host_network %}
         affinity:
+          {% if _affinity_node %}
           nodeAffinity:
             {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
             requiredDuringSchedulingIgnoredDuringExecution:
@@ -449,6 +451,27 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+          {% endif %}
+          {% endif %}
+          {% if k8s_host_network %}
+          # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
+          # shares the node's net namespace, so two pods of the SAME SkyPilot
+          # cluster on one node would (a) collide on host ports and (b)
+          # register both raylets under the same host IP -- Ray's client-side
+          # resolver then collapses the two NodeIDs onto one gRPC endpoint and
+          # hangs pg.ready(). Forcing one pod per node makes every pod's host
+          # IP unique and routable, which is also exactly what lets a
+          # hostNetwork cluster span multiple K8s nodes. requiredDuring (not
+          # preferred): the guarantee must be hard -- a multi-pod hostNetwork
+          # cluster that cannot get a node per pod fails to schedule loudly
+          # rather than silently racing. The selector is per-cluster
+          # (skypilot-cluster), so unrelated clusters can still co-locate.
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  skypilot-cluster: {{cluster_name_on_cloud}}
+              topologyKey: kubernetes.io/hostname
           {% endif %}
         {% endif %}
         {% if k8s_spot_label_key is not none %}
