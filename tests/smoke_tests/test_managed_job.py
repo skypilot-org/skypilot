@@ -576,20 +576,26 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    # Match pods by the `skypilot-cluster-name` annotation, which holds the
-    # full untruncated cluster name. Filtering by pod name alone is not
-    # reliable: when the user hash is long (e.g. 19 chars for service
-    # accounts), the cloud-cmd cluster's name (`<test>-cloud-cmd`) gets
-    # truncated past the 42-char K8s limit and the `-cloud-cmd` suffix
-    # disappears from the pod name — but the annotation always preserves
-    # it, so `grep -v -- "-cloud-cmd"` against the annotation column is
-    # reliable. Excluding cloud-cmd is critical: the kubectl command runs
-    # from inside the cloud-cmd pod via `sky exec`, so a stray match would
-    # self-kill the helper pod and fail the test with exit code 137.
+    # Match a short stable prefix of the test cluster name against the
+    # `skypilot-cluster-name` annotation column (which always holds the full
+    # untruncated cluster name). Two reasons:
+    #   1. The annotation always preserves the full name, so the
+    #      `-cloud-cmd` exclusion below is reliable even when the user hash
+    #      is long enough (e.g. 19 chars for service accounts) that
+    #      `<test>-cloud-cmd` gets truncated past the 42-char K8s limit and
+    #      the `-cloud-cmd` suffix disappears from the pod name.
+    #   2. A short prefix is robust against provisioning backends that
+    #      rewrite the cluster name with their own truncation rule, where
+    #      `name_on_cloud` (computed with the local truncation rule) is no
+    #      longer a prefix of the actual cluster name.
+    # Excluding cloud-cmd is critical: the kubectl command runs from inside
+    # the cloud-cmd pod via `sky exec`, so a stray match would self-kill the
+    # helper pod and fail the test with exit code 137.
+    stable_prefix = name_on_cloud[:15]
     _get_job_pods = (
         'kubectl get pods -l skypilot-cluster-name --no-headers -o custom-columns='
         '"NAME:.metadata.name,CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
-        f'grep -- "{name_on_cloud}" | grep -v -- "-cloud-cmd" | '
+        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
         'awk \'{print $1}\' | sort')
     terminate_head_cmd = f'{_get_job_pods} | head -1 | xargs kubectl delete pod'
     terminate_worker_cmd = (
