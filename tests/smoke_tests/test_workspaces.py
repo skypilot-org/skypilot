@@ -408,6 +408,11 @@ def test_kubernetes_workspace_remote_identity():
             f"echo \"{cluster_name} pod SA: $sa (expected {expected_sa})\" && "
             f"[ \"$sa\" = \"{expected_sa}\" ]")
 
+    # The test only inspects the pod's `spec.serviceAccountName`, so we ask
+    # for the smallest pod the kind cluster will schedule — leaves headroom
+    # on tight CI nodes.
+    tiny_resource_args = '--cpus 1 --memory 1'
+
     test = smoke_tests_utils.Test(
         'test_kubernetes_workspace_remote_identity',
         [
@@ -422,16 +427,17 @@ def test_kubernetes_workspace_remote_identity():
             'sky check kubernetes 2>&1 | tee /tmp/sky_check_out.log; '
             'grep -q "Found unsupported field" /tmp/sky_check_out.log && '
             'exit 1 || true',
-            # Two launches, one per workspace.
+            # Launch into workspace A, verify its pod SA, then down so the
+            # cluster slot is free for workspace B (kind CI agents are tight
+            # on capacity).
             f'sky launch -y -c {name}-a --infra kubernetes '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'{tiny_resource_args} '
             f'--config active_workspace={ws1} echo from-a',
-            f'sky launch -y -c {name}-b --infra kubernetes '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'--config active_workspace={ws2} echo from-b',
-            # Each pod must run as the workspace-scoped SA, not the global
-            # default.
             assert_pod_sa_cmd(f'{name}-a', sa1),
+            f'sky down -y --config active_workspace={ws1} {name}-a',
+            f'sky launch -y -c {name}-b --infra kubernetes '
+            f'{tiny_resource_args} '
+            f'--config active_workspace={ws2} echo from-b',
             assert_pod_sa_cmd(f'{name}-b', sa2),
         ],
         teardown=(f'sky down -y --config active_workspace={ws1} {name}-a || '
