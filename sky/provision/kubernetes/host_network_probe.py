@@ -116,7 +116,8 @@ def _probe_ports(
     return held, ports
 
 
-def _write_env_file(ports: Dict[str, int], path: str,
+def _write_env_file(ports: Dict[str, int],
+                    path: str,
                     extra: Optional[Dict[str, str]] = None) -> None:
     lines = [
         f'export {_ENV_VAR_FOR_PORT[name]}={port}'
@@ -268,8 +269,8 @@ def _publish_configmap(name: str, namespace: str, ports: Dict[str, int],
     # API — $HOSTNAME is the host node's name under hostNetwork.
     owner_pod_name = os.environ['SKYPILOT_POD_NAME']
     owner_pod_uid = os.environ['SKYPILOT_POD_UID']
-    body = _build_configmap_body(name, namespace, ports, extra,
-                                 owner_pod_name, owner_pod_uid)
+    body = _build_configmap_body(name, namespace, ports, extra, owner_pod_name,
+                                 owner_pod_uid)
     base = f'/api/v1/namespaces/{namespace}/configmaps'
     status, resp = _k8s_api_request('POST', base, body)
     if status == 409:
@@ -355,7 +356,9 @@ def _run_head(env_file: str, configmap_name: str,
     node_ip = loopback_ip_for_pod(os.environ['SKYPILOT_POD_NAME'])
     # Publish before writing the env file so a failed publish prevents
     # ray start from binding ports the workers will never discover.
-    _publish_configmap(configmap_name, configmap_namespace, ports,
+    _publish_configmap(configmap_name,
+                       configmap_namespace,
+                       ports,
                        extra={HEAD_NODE_IP_KEY: node_ip})
     _write_env_file(ports, env_file, extra={'SKYPILOT_RAY_NODE_IP': node_ip})
     del held  # release the held sockets just before this process exits

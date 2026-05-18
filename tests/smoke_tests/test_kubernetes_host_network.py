@@ -121,7 +121,7 @@ def test_kubernetes_host_network_coexistence():
 
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
-def test_kubernetes_host_network_multi_node():
+def test_kubernetes_host_network_multi_node_same_node():
     """A 2-node SkyPilot cluster, both pods on one K8s node, hostNetwork on.
 
     Head and worker pods are created in parallel by SkyPilot's K8s
@@ -184,7 +184,7 @@ def test_kubernetes_host_network_multi_node():
         f'EOF')
 
     test = smoke_tests_utils.Test(
-        'kubernetes_host_network_multi_node',
+        'kubernetes_host_network_multi_node_same_node',
         [
             write_cfg_anchor,
             write_cfg_multi,

@@ -258,6 +258,7 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-fuse`
 * :ref:`kubernetes-setup-proxy`
+* :ref:`kubernetes-setup-hostnetwork`
 
 .. _kubernetes-setup-volumes:
 
@@ -382,6 +383,27 @@ To resolve this, you can configure proxy settings for SkyPilot pods by adding en
 Replace ``proxy-host:3128`` with your actual proxy server address and port.
 
 Both uppercase and lowercase versions of the proxy environment variables are included for maximum compatibility across different tools and libraries.
+
+.. _kubernetes-setup-hostnetwork:
+
+Set up host networking
+^^^^^^^^^^^^^^^^^^^^^^
+
+For workloads that need the node's network stack directly — for example, RDMA/InfiniBand for multi-node training, or to avoid CNI overhead for latency-sensitive jobs — you can run SkyPilot pods with host networking by setting ``hostNetwork: true`` in the pod spec:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          hostNetwork: true
+
+With ``hostNetwork: true``, a pod shares the node's network namespace instead of getting its own. Normally this would cause two SkyPilot pods scheduled to the same node to collide on Ray's default ports and on the node's SSH port. SkyPilot handles this automatically: before Ray starts, each pod probes a free port set on the node, the head publishes its chosen ports to a ``<cluster>-ray-ports`` ConfigMap for workers to discover, and each pod's in-container SSH server is rebound to a probed port. **No additional configuration beyond** ``hostNetwork: true`` **is required**, and multiple SkyPilot clusters can safely share a node.
+
+.. note::
+
+    The ConfigMap is created in the same namespace as the SkyPilot pods and is owned by the head pod, so it is garbage-collected by Kubernetes on ``sky down``. The SkyPilot service account must be able to create, get, and update ConfigMaps in that namespace (already covered by the :ref:`minimal permissions <cloud-permissions-kubernetes>`).
 
 .. _kubernetes-observability:
 

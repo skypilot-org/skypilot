@@ -173,6 +173,7 @@ class TestConfigMapBody:
                 'gcs': 6380,
                 'dashboard': 8266
             },
+            extra={},
             owner_pod_name='cluster-xyz-head-abc',
             owner_pod_uid='11111111-2222-3333-4444-555555555555',
         )
@@ -198,6 +199,7 @@ class TestConfigMapBody:
                 'gcs': 6380,
                 'dashboard': 8266
             },
+            extra={},
             owner_pod_name='c-head-xx',
             owner_pod_uid='uid-1',
         )
@@ -212,6 +214,7 @@ class TestConfigMapBody:
                 'gcs': 6380,
                 'sshd': 33445
             },
+            extra={},
             owner_pod_name='c-head-xx',
             owner_pod_uid='uid-1',
         )
