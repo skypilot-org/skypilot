@@ -7,6 +7,15 @@ landing on the same node would collide on Ray's default ports
 SkyPilot's host_network_probe picks a free Ray port set per pod
 and rebinds the pod's sshd to a probed port; these tests prove
 both work end-to-end.
+
+SkyPilot also injects a required, per-cluster ``podAntiAffinity``
+for every hostNetwork pod (mode b: one cluster pod per K8s node),
+so a single cluster's pods never share a node -- which both removes
+the same-node raylet-identity collapse and lets a hostNetwork
+cluster span multiple K8s nodes. ``coexistence`` covers two
+*different* clusters sharing a node (still allowed -- the
+anti-affinity is per-cluster); ``multi_node`` covers one cluster
+spread across nodes.
 """
 import uuid
 
@@ -122,104 +131,78 @@ def test_kubernetes_host_network_coexistence():
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_host_network_multi_node_same_node():
-    """A 2-node SkyPilot cluster, both pods on one K8s node, hostNetwork on.
+    """A 2-node SkyPilot cluster, spread across two K8s nodes, hostNetwork on.
 
-    Head and worker pods are created in parallel by SkyPilot's K8s
-    provisioner, so a self-referential podAffinity would deadlock
-    (neither pod can satisfy the other's required-during-scheduling
-    constraint until one is running). To force co-location anyway, an
-    anchor SkyPilot cluster is launched first with a unique label;
-    the 2-node target cluster's pod_config then sets podAffinity onto
-    that label, which both pods can independently satisfy.
+    With mode b (the required, per-cluster ``podAntiAffinity`` SkyPilot
+    injects for every hostNetwork pod) the head and worker of one
+    cluster *cannot* land on the same K8s node, so this exercises
+    cross-K8s-node hostNetwork end to end with no anchor / podAffinity
+    needed — the injected rule does the spreading.
+
+    Requires the test K8s cluster to have >=2 schedulable nodes (that
+    is the scenario under test; on a single-node cluster the required
+    anti-affinity correctly leaves the worker Pending and the launch
+    fails loudly rather than silently racing on the shared host).
 
     Verifies:
 
-    1. Both target pods land on the anchor's K8s node (otherwise the
-       second pod would Pending forever, failing the launch step).
-    2. Ray cluster works: ``sky exec`` runs on the cluster (which
-       implies head + worker have joined the Ray cluster — the worker
-       reading the head's probed GCS port from the ConfigMap).
-    3. SSH to the head works.
-    4. SSH to the worker works — exercises the per-pod sshd port
-       rebind on the worker pod and the SkyPilot SSH config writer's
-       use of ``pod_sshd_ports[worker_pod_name]``.
+    1. The 2-node launch succeeds — under the required per-cluster
+       anti-affinity, success means the two pods are on *different* K8s
+       nodes (a same-node placement would leave the worker Pending and
+       fail this step).
+    2. Ray works across nodes: ``sky exec`` runs on the cluster, which
+       implies the worker (on a different K8s node) joined the head's
+       Ray cluster over the head's routable host IP + probed GCS port.
+    3. SSH to the head works (per-pod sshd port rebind + SkyPilot SSH
+       config writer using the probed port).
+    4. SSH to the worker works — its separately probed sshd port, on a
+       different K8s node from the head.
     """
-    anchor_key = 'skypilot-multinode-anchor'
-    anchor_val = uuid.uuid4().hex[:12]
+    name = smoke_tests_utils.get_cluster_name()
+    cfg = f'/tmp/sky-hostnet-multinode-{uuid.uuid4().hex[:12]}.yaml'
 
-    base = smoke_tests_utils.get_cluster_name()
-    name_anchor = f'{base}-anchor'
-    name_multi = f'{base}-multi'
-
-    cfg_anchor = f'/tmp/sky-multinode-{anchor_val}-anchor.yaml'
-    cfg_multi = f'/tmp/sky-multinode-{anchor_val}-multi.yaml'
-
-    # Anchor: hostNetwork + unique label, no affinity.
-    write_cfg_anchor = (f'cat > {cfg_anchor} <<EOF\n'
-                        f'kubernetes:\n'
-                        f'  pod_config:\n'
-                        f'    metadata:\n'
-                        f'      labels:\n'
-                        f'        {anchor_key}: "{anchor_val}"\n'
-                        f'    spec:\n'
-                        f'      hostNetwork: true\n'
-                        f'EOF')
-
-    # 2-node target: hostNetwork + podAffinity onto anchor's node.
-    # Both head and worker pods inherit this pod_config and so each
-    # can independently match against the anchor pod.
-    write_cfg_multi = (
-        f'cat > {cfg_multi} <<EOF\n'
-        f'kubernetes:\n'
-        f'  pod_config:\n'
-        f'    spec:\n'
-        f'      hostNetwork: true\n'
-        f'      affinity:\n'
-        f'        podAffinity:\n'
-        f'          requiredDuringSchedulingIgnoredDuringExecution:\n'
-        f'          - labelSelector:\n'
-        f'              matchLabels:\n'
-        f'                {anchor_key}: "{anchor_val}"\n'
-        f'            topologyKey: kubernetes.io/hostname\n'
-        f'EOF')
+    # hostNetwork only — no podAffinity / anchor. SkyPilot's injected
+    # per-cluster podAntiAffinity (mode b) spreads the head and worker
+    # onto separate K8s nodes by itself.
+    write_cfg = (f'cat > {cfg} <<EOF\n'
+                 f'kubernetes:\n'
+                 f'  pod_config:\n'
+                 f'    spec:\n'
+                 f'      hostNetwork: true\n'
+                 f'EOF')
 
     test = smoke_tests_utils.Test(
         'kubernetes_host_network_multi_node_same_node',
         [
-            write_cfg_anchor,
-            write_cfg_multi,
+            write_cfg,
 
-            # 1. Launch anchor (1 pod), then the 2-node target. If the
-            # target launch returns success, both pods scheduled — i.e.
-            # both landed on the anchor's node. 1 CPU / 2 GB per pod
-            # leaves Ray driver enough headroom (under tighter CPU
-            # the first job submission flakes with FAILED_DRIVER) and
-            # still fits 3 pods on a 4-CPU/8-GB node.
-            f'sky launch -y -c {name_anchor} --infra kubernetes '
-            f'--config {cfg_anchor} --cpus 1 --memory 2',
-            f'sky launch -y -c {name_multi} --infra kubernetes '
-            f'--config {cfg_multi} --num-nodes 2 --cpus 1 --memory 2',
+            # 1. 2-node launch. Under the required per-cluster
+            # anti-affinity a successful launch *is* the proof the two
+            # pods are on different K8s nodes (a same-node placement
+            # would leave the worker Pending and fail this step). 1 CPU
+            # / 2 GB per pod keeps Ray's first job submission off the
+            # FAILED_DRIVER edge.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
 
-            # 2. Ray cluster must work end-to-end. `sky exec` runs the
-            # task through Ray on the head, which means the head <->
-            # worker join happened (worker read head's probed GCS port
-            # from the ConfigMap).
-            f'sky exec {name_multi} -- echo "job_ok"',
-            f'sky logs {name_multi} 1 --status',
+            # 2. Ray must work across the two nodes. `sky exec` runs the
+            # task through Ray on the head, which means the worker (on a
+            # different K8s node) joined the head over its routable host
+            # IP + probed GCS port.
+            f'sky exec {name} -- echo "job_ok"',
+            f'sky logs {name} 1 --status',
 
-            # 3. SSH to head — exercises per-pod sshd port rebind on
-            # the head + SkyPilot SSH config using the probed port.
-            f's=$(ssh -o StrictHostKeyChecking=no {name_multi} '
+            # 3. SSH to head — per-pod sshd port rebind + SkyPilot SSH
+            # config using the probed port.
+            f's=$(ssh -o StrictHostKeyChecking=no {name} '
             f'"echo ssh_head_ok" 2>&1) && echo "$s" | grep ssh_head_ok',
 
-            # 4. SSH to worker — same path as the head but uses the
-            # worker pod's separately probed sshd port (read from the
-            # ConfigMap's sshd_<podname> entry into InstanceInfo.ssh_port).
-            f's=$(ssh -o StrictHostKeyChecking=no {name_multi}-worker1 '
+            # 4. SSH to the worker — its separately probed sshd port, on
+            # a different K8s node from the head.
+            f's=$(ssh -o StrictHostKeyChecking=no {name}-worker1 '
             f'"echo ssh_worker_ok" 2>&1) && echo "$s" | grep ssh_worker_ok',
         ],
-        teardown=(f'sky down -y {name_anchor}; sky down -y {name_multi}; '
-                  f'rm -f {cfg_anchor} {cfg_multi}'),
+        teardown=f'sky down -y {name}; rm -f {cfg}',
         timeout=5 * 60,
     )
     smoke_tests_utils.run_one_test(test)
