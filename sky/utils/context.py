@@ -5,12 +5,14 @@ from collections.abc import Mapping
 import contextvars
 import copy
 import functools
+import logging
 import os
 import pathlib
 import subprocess
 import sys
-from typing import (Any, Callable, Coroutine, Dict, Iterator, MutableMapping,
-                    Optional, TextIO, TYPE_CHECKING, TypeVar)
+import threading
+from typing import (Any, Callable, Coroutine, Dict, Iterator, List,
+                    MutableMapping, Optional, TextIO, TYPE_CHECKING, TypeVar)
 
 from typing_extensions import ParamSpec
 
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
 
 _PROCESS_GLOBAL_VARS = {}
+
+_logger = logging.getLogger(__name__)
 
 
 class SkyPilotContext(object):
@@ -69,14 +73,58 @@ class SkyPilotContext(object):
         self.config_context = None
         self.request_context = None
         self.vars = {}
+        # Callbacks invoked exactly once when cancel() is called. Used to
+        # propagate cancellation into blocking sync work that cannot poll
+        # is_canceled() — e.g. a gRPC streaming iterator stuck in
+        # threading.Condition.wait() inside __next__.
+        self._cancel_callbacks: List[Callable[[], None]] = []
+        self._cancel_callbacks_lock = threading.Lock()
 
     def cancel(self):
-        """Cancel the context."""
-        self._canceled.set()
+        """Cancel the context. Idempotent."""
+        with self._cancel_callbacks_lock:
+            if self._canceled.is_set():
+                return
+            self._canceled.set()
+            callbacks = self._cancel_callbacks
+            self._cancel_callbacks = []
+        for cb in callbacks:
+            try:
+                cb()
+            except Exception:  # pylint: disable=broad-except
+                _logger.debug('cancel callback raised', exc_info=True)
 
     def is_canceled(self):
         """Check if the context is canceled."""
         return self._canceled.is_set()
+
+    def register_cancel_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback fired when ``cancel()`` is called.
+
+        Callbacks run on whatever thread invokes ``cancel()`` — they must be
+        thread-safe and non-blocking (e.g. ``grpc_call.cancel()``).
+
+        Closes the cancel-before-register race: if the context is already
+        cancelled when ``register_cancel_callback`` is called, the callback
+        is invoked synchronously here.
+        """
+        with self._cancel_callbacks_lock:
+            if not self._canceled.is_set():
+                self._cancel_callbacks.append(callback)
+                return
+        # Already cancelled — fire immediately, outside the lock.
+        try:
+            callback()
+        except Exception:  # pylint: disable=broad-except
+            _logger.debug('cancel callback raised', exc_info=True)
+
+    def unregister_cancel_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a previously registered cancel callback (best effort)."""
+        with self._cancel_callbacks_lock:
+            try:
+                self._cancel_callbacks.remove(callback)
+            except ValueError:
+                pass
 
     def redirect_log(
             self, log_file: Optional[pathlib.Path]) -> Optional[pathlib.Path]:
