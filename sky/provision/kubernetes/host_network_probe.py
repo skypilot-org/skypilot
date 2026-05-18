@@ -60,6 +60,12 @@ _WORKER_PORT_NAMES: List[str] = [
 # can read the same key when assembling InstanceInfo.ssh_port.
 SSHD_KEY_PREFIX = 'sshd_'
 
+
+def ray_ports_configmap_name(cluster_name_on_cloud: str) -> str:
+    """Name of the per-cluster ConfigMap the head publishes Ray ports to."""
+    return f'{cluster_name_on_cloud}-ray-ports'
+
+
 _SA_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token'
 _SA_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
 

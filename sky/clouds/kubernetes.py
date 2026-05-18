@@ -19,6 +19,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -27,7 +28,6 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
@@ -796,29 +796,20 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
-        # Detect hostNetwork to wire the probe env vars into deploy_vars
-        # before the template is rendered. The same merge happens again
-        # later in combine_pod_config_fields when the user's pod_config
-        # is folded into the rendered YAML.
-        merged_pod_config = skypilot_config.get_effective_region_config(
-            cloud=cloud_config_str,
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=resources.cluster_config_overrides,
-            cloud=cloud_config_str,
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        config_utils.merge_k8s_configs(merged_pod_config, override_pod_config)
+        # Detect hostNetwork before the template is rendered so the probe
+        # env vars can be wired into deploy_vars. Resolved through the same
+        # helper combine_pod_config_fields() uses, so this agrees with the
+        # pod_config that is actually folded into the rendered YAML.
+        merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
+            resources.cluster_config_overrides, self, context)
         k8s_host_network = bool(
             merged_pod_config.get('spec', {}).get('hostNetwork', False))
         if k8s_host_network:
             cluster_name_on_cloud = cluster_name.name_on_cloud
             k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
             k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'] = (
-                f'{cluster_name_on_cloud}-ray-ports')
+                host_network_probe.ray_ports_configmap_name(
+                    cluster_name_on_cloud))
             k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'] = namespace
 
         deploy_vars = {

@@ -1818,7 +1818,7 @@ def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
     """
     if not expected_pods:
         return {}
-    name = f'{cluster_name_on_cloud}-ray-ports'
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
     expected = set(expected_pods)
     deadline = time.monotonic() + _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
     while True:

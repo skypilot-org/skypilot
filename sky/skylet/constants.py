@@ -38,10 +38,10 @@ SKY_REMOTE_RAY_PORT = 6380
 SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
 # Note we can not use json.dumps which will add a space between ":" and its
 # value which causes the yaml parser to fail.
-# Reads SKYPILOT_RAY_PORT / SKYPILOT_RAY_DASHBOARD_PORT from the env (set by
-# sky.provision.kubernetes.host_network_probe in the hostNetwork: true K8s
-# path), falling back to the SkyPilot defaults so non-hostNetwork clusters
-# write the same ports to ~/.sky/ray_port.json as before.
+# The os.environ.get(...) calls stay unevaluated here on purpose: this
+# string is executed remotely on the pod, where the hostNetwork probe
+# (sky.provision.kubernetes.host_network_probe) may have set the port env
+# vars. It falls back to the SkyPilot defaults otherwise.
 SKY_REMOTE_RAY_PORT_DICT_STR = (
     '{'
     f'"ray_port":int(os.environ.get("SKYPILOT_RAY_PORT",'

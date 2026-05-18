@@ -55,7 +55,11 @@ _HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
 
 
-def _read_host_network_probe_b64() -> str:
+@functools.lru_cache(maxsize=1)
+def _host_network_probe_b64() -> str:
+    # Cached, not module-level: instance_setup is imported on every `import
+    # sky`, but the probe payload is only needed when actually building a
+    # launch command, so the read/minify/gzip cost stays off the CLI path.
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'kubernetes', 'host_network_probe.py')
     with open(path, 'r', encoding='utf-8') as f:
@@ -65,9 +69,6 @@ def _read_host_network_probe_b64() -> str:
     compile(minified, path, 'exec')
     compressed = gzip.compress(minified.encode('utf-8'))
     return base64.b64encode(compressed).decode('ascii')
-
-
-_HOST_NETWORK_PROBE_B64 = _read_host_network_probe_b64()
 
 
 def _host_network_probe_cmd(mode: str) -> str:
@@ -97,7 +98,7 @@ def _host_network_probe_cmd(mode: str) -> str:
     return (
         'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
         '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
-        f'echo \'{_HOST_NETWORK_PROBE_B64}\' | base64 -d | gunzip > '
+        f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
         f'{_HOST_NETWORK_PROBE_TARGET}; '
         f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
         f'--mode {mode} '
@@ -373,13 +374,27 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
+# Ray port flags shared by the head and worker start commands. The
+# ${VAR:-default} forms take the probed value when the hostNetwork probe
+# ran and the original constant otherwise; the ${VAR:+--flag=...} forms
+# vanish when unset, so non-hostNetwork bootstraps defer to Ray's own
+# defaults. Kept in one place so the head/worker flag sets can't drift.
+_SHARED_RAY_PORT_FLAGS = (
+    '--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076} '
+    '${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
+    '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT} '
+    '${SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT:+'
+    '--dashboard-agent-listen-port='
+    '$SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT} '
+    '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
+    '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
+    '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
+    '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
+
+
 def ray_head_start_command(custom_resource: Optional[str],
                            custom_ray_options: Optional[Dict[str, Any]]) -> str:
     """Returns the command to start Ray on the head node."""
-    # Existing port flags use ${VAR:-default} (probed value when the
-    # hostNetwork probe ran, original constant otherwise). New flags
-    # use ${VAR:+--flag=...} so they vanish when unset, deferring to
-    # Ray's own defaults for non-hostNetwork bootstraps.
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
@@ -387,18 +402,10 @@ def ray_head_start_command(custom_resource: Optional[str],
         f'--dashboard-port=${{SKYPILOT_RAY_DASHBOARD_PORT:-'
         f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}}} '
         f'--min-worker-port 11002 '
-        f'--object-manager-port=${{SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076}} '
-        '${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
-        '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT} '
+        f'{_SHARED_RAY_PORT_FLAGS} '
+        # Head-only: workers don't run the Ray Client server.
         '${SKYPILOT_RAY_CLIENT_SERVER_PORT:+'
         '--ray-client-server-port=$SKYPILOT_RAY_CLIENT_SERVER_PORT} '
-        '${SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT:+'
-        '--dashboard-agent-listen-port='
-        '$SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT} '
-        '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
-        '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
-        '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
-        '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT} '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -439,18 +446,8 @@ def ray_worker_start_command(custom_resource: Optional[str],
     # SKYPILOT_RAY_PORT is the head's GCS port — exported as a constant
     # by the K8s template's worker bootstrap, or as the probed value
     # (read from the head's ConfigMap) by the hostNetwork worker probe.
-    ray_options = (
-        '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
-        '--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076} '
-        '${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
-        '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT} '
-        '${SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT:+'
-        '--dashboard-agent-listen-port='
-        '$SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT} '
-        '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
-        '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
-        '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
-        '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
+    ray_options = ('--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+                   f'{_SHARED_RAY_PORT_FLAGS}')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
