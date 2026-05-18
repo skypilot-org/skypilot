@@ -627,7 +627,10 @@ class Kubernetes(clouds.Cloud):
                 avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None, context)
 
-        remote_identity = skypilot_config.get_effective_region_config(
+        # Workspace-aware: a workspace's remote_identity overrides the global
+        # default, enabling per-workspace pod identity isolation (the OIDC
+        # story for GKE Workload Identity, IRSA, AKS Workload Identity).
+        remote_identity = skypilot_config.get_effective_workspace_region_config(
             # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,

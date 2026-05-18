@@ -2372,6 +2372,12 @@ def get_config_schema():
                                 },
                             },
                         },
+                        # Workspace-scoped ServiceAccount for pods. A string
+                        # applies to every context in this workspace; a
+                        # {ctx: sa} dict selects per-context. Unlocks
+                        # per-workspace identity isolation (OIDC / GKE WI /
+                        # IRSA / AKS WI).
+                        **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                         'context_configs': {
                             'type': 'object',
                             'required': [],
@@ -2412,6 +2418,7 @@ def get_config_schema():
                                             },
                                         },
                                     },
+                                    **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                                     **_extra_kubernetes_properties,
                                 },
                             },

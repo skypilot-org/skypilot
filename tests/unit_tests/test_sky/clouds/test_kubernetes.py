@@ -915,15 +915,17 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
     @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_remote_identity_with_cluster_overrides(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_cloud_config_value,
-            mock_is_exec_auth, mock_get_accelerator_label_keys,
-            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
         """Test that remote_identity override from task config is passed correctly."""
 
         # Setup mocks
@@ -938,15 +940,17 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)
 
-        # Track calls to get_effective_region_config
-        config_calls = []
+        # Track calls to the workspace-aware resolver (remote_identity now
+        # flows through get_effective_workspace_region_config).
+        workspace_calls = []
 
-        def config_side_effect(cloud,
-                               keys,
-                               region,
-                               default_value=None,
-                               override_configs=None):
-            config_calls.append({
+        def workspace_side_effect(cloud,
+                                  keys,
+                                  region=None,
+                                  default_value=None,
+                                  workspace=None,
+                                  override_configs=None):
+            workspace_calls.append({
                 'cloud': cloud,
                 'keys': keys,
                 'region': region,
@@ -958,12 +962,20 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
                         'kubernetes', {}).get('remote_identity') == 'NO_UPLOAD':
                     return 'NO_UPLOAD'
                 return 'SERVICE_ACCOUNT'
-            elif keys == ('provision_timeout',):
+            return default_value
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if keys == ('provision_timeout',):
                 return 3600
             elif keys == ('high_availability', 'storage_class_name'):
                 return None
             return default_value
 
+        mock_get_workspace_region_config.side_effect = workspace_side_effect
         mock_get_cloud_config_value.side_effect = config_side_effect
 
         # Mock networking
@@ -1006,20 +1018,178 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
 
         # Find the call for remote_identity
         remote_identity_calls = [
-            c for c in config_calls if c['keys'] == ('remote_identity',)
+            c for c in workspace_calls if c['keys'] == ('remote_identity',)
         ]
         self.assertTrue(
             len(remote_identity_calls) > 0,
             "remote_identity config should be fetched")
 
-        # Verify override_configs was passed
+        # Verify override_configs was passed through the workspace-aware
+        # resolver.
         remote_identity_call = remote_identity_calls[0]
         self.assertEqual(
             remote_identity_call['override_configs'],
             {'kubernetes': {
                 'remote_identity': 'NO_UPLOAD'
-            }},
-            "override_configs should be passed to get_effective_region_config")
+            }}, "override_configs should be passed to "
+            "get_effective_workspace_region_config")
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_workspace_remote_identity_string_is_respected(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A workspace-scoped string `remote_identity` should win over the
+        global default when building the pod spec."""
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = "my-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Workspace returns 'team-a-sa'; global default is
+        # 'skypilot-service-account'. The pod spec should pick the workspace
+        # value via get_effective_workspace_region_config.
+        def workspace_side_effect(cloud,
+                                  keys,
+                                  region=None,
+                                  default_value=None,
+                                  workspace=None,
+                                  override_configs=None):
+            if keys == ('remote_identity',):
+                return 'team-a-sa'
+            return default_value
+
+        def global_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if keys == ('remote_identity',):
+                return 'skypilot-service-account'
+            elif keys == ('provision_timeout',):
+                return 600
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_workspace_region_config.side_effect = workspace_side_effect
+        mock_get_cloud_config_value.side_effect = global_side_effect
+
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(
+            deploy_vars['k8s_service_account_name'], 'team-a-sa',
+            "Pod must run as the workspace-scoped ServiceAccount, not the "
+            "global default. Today the call site at kubernetes.py reads "
+            "remote_identity via get_effective_region_config (not workspace-"
+            "aware), which silently returns the global SA — this is the bug.")
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_effective_workspace_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_workspace_remote_identity_dict_is_respected(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_workspace_region_config,
+            mock_get_cloud_config_value, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """A workspace-scoped dict `remote_identity: {ctx: sa}` should be
+        looked up by the active context."""
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = "my-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        def workspace_side_effect(cloud,
+                                  keys,
+                                  region=None,
+                                  default_value=None,
+                                  workspace=None,
+                                  override_configs=None):
+            if keys == ('remote_identity',):
+                return {'my-k8s-cluster': 'team-a-sa-on-cluster-1'}
+            return default_value
+
+        def global_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if keys == ('remote_identity',):
+                return 'skypilot-service-account'
+            elif keys == ('provision_timeout',):
+                return 600
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_workspace_region_config.side_effect = workspace_side_effect
+        mock_get_cloud_config_value.side_effect = global_side_effect
+
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['k8s_service_account_name'],
+                         'team-a-sa-on-cluster-1')
 
     def _setup_mocks_for_pod_resource_limits_test(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,

@@ -2665,7 +2665,7 @@ def is_kubeconfig_exec_auth(
     user_details = next(
         user for user in user_details if user['name'] == target_username)
 
-    remote_identity = skypilot_config.get_effective_region_config(
+    remote_identity = skypilot_config.get_effective_workspace_region_config(
         cloud='kubernetes',
         region=context,
         keys=('remote_identity',),

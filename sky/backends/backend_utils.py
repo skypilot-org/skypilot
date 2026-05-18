@@ -607,11 +607,12 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
-                context_remote_identity = skypilot_config.get_effective_region_config(
-                    cloud='kubernetes',
-                    region=context,
-                    keys=('remote_identity',),
-                    default_value=None)
+                context_remote_identity = (
+                    skypilot_config.get_effective_workspace_region_config(
+                        cloud='kubernetes',
+                        region=context,
+                        keys=('remote_identity',),
+                        default_value=None))
                 if context_remote_identity is not None:
                     if remote_identities is None:
                         remote_identities = []
@@ -623,11 +624,12 @@ def get_expirable_clouds(
                         assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
-                region=None,
-                keys=('remote_identity',),
-                default_value=None)
+            global_remote_identity = (
+                skypilot_config.get_effective_workspace_region_config(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('remote_identity',),
+                    default_value=None))
             if global_remote_identity is not None:
                 if remote_identities is None:
                     remote_identities = []
@@ -753,12 +755,16 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_region_config(
-        cloud=str(cloud).lower(),
-        region=region.name,
-        keys=('remote_identity',),
-        default_value=None,
-        override_configs=to_provision.cluster_config_overrides)
+    # Workspace-aware: respect a workspace's `remote_identity: NO_UPLOAD` so
+    # the kubeconfig isn't bundled into the pod when the workspace is using
+    # in-cluster OIDC.
+    remote_identity_config = (
+        skypilot_config.get_effective_workspace_region_config(
+            cloud=str(cloud).lower(),
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None,
+            override_configs=to_provision.cluster_config_overrides))
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
