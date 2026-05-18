@@ -1124,8 +1124,8 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""
 
     def test_invalid_regex_raises_value_error(self):
-        from sky import (
-            skypilot_config)  # pylint: disable=import-outside-toplevel
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
         config = {
             'dashboard': {
                 'external_links': [{
@@ -1140,8 +1140,8 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
         self.assertIn('dashboard.external_links[0].regex', str(ctx.exception))
 
     def test_valid_regex_passes(self):
-        from sky import (
-            skypilot_config)  # pylint: disable=import-outside-toplevel
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
         config = {
             'dashboard': {
                 'external_links': [{
