@@ -435,6 +435,95 @@ class TestWorkspaceSchema(unittest.TestCase):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
+    def test_workspace_kubernetes_context_configs_allows_namespace(self):
+        """`workspaces.<ws>.kubernetes.context_configs.<ctx>.namespace` validates."""
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a',
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_context_configs_preserves_kueue_quota(self):
+        """Backward-compat: `kueue` and `quota` still validate alongside `namespace`."""
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a',
+                            'kueue': {
+                                'local_queue_name': 'team-a-queue',
+                            },
+                            'quota': {
+                                'queue': 'team-a-quota',
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_namespace_shorthand_rejected(self):
+        """`workspaces.<ws>.kubernetes.namespace` (no context) is rejected.
+
+        Design choice: only the per-context spelling is supported.
+        """
+        invalid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'namespace': 'team-a',
+                },
+            },
+        }
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=invalid_config,
+                                schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_context_configs_namespace_must_be_string(
+            self):
+        """Non-string `namespace` is rejected at the workspace level too."""
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'context_configs': {
+                            'shared-context': {
+                                'namespace': 123,
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'context_configs': {
+                            'shared-context': {
+                                'namespace': ['team-a'],
+                            },
+                        },
+                    },
+                },
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Invalid workspace namespace {config!r} should be '
+                    'rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
 
 class TestKubernetesSchema(unittest.TestCase):
     """Tests for the kubernetes schema in schemas.py."""
@@ -453,6 +542,64 @@ class TestKubernetesSchema(unittest.TestCase):
             }
         }
         jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
+
+    def test_global_namespace_field(self):
+        """`kubernetes.namespace` validates as a string."""
+        jsonschema.validate(instance={'namespace': 'team-a'},
+                            schema=self.k8s_schema)
+
+    def test_context_configs_allows_namespace(self):
+        """`kubernetes.context_configs.<ctx>.namespace` validates."""
+        jsonschema.validate(
+            instance={
+                'context_configs': {
+                    'my-context': {
+                        'namespace': 'team-a'
+                    }
+                }
+            },
+            schema=self.k8s_schema,
+        )
+
+    def test_namespace_must_be_string(self):
+        """Non-string `namespace` values are rejected."""
+        invalid_instances = [
+            {
+                'namespace': 123
+            },
+            {
+                'namespace': ['team-a']
+            },
+            {
+                'namespace': True
+            },
+            {
+                'context_configs': {
+                    'my-context': {
+                        'namespace': 123
+                    }
+                }
+            },
+        ]
+        for instance in invalid_instances:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Invalid namespace {instance!r} should be rejected'):
+                jsonschema.validate(instance=instance, schema=self.k8s_schema)
+
+    def test_global_namespace_coexists_with_context_override(self):
+        """Global `namespace` plus a per-context override both validate."""
+        jsonschema.validate(
+            instance={
+                'namespace': 'default-team',
+                'context_configs': {
+                    'override-context': {
+                        'namespace': 'override-team',
+                    },
+                },
+            },
+            schema=self.k8s_schema,
+        )
 
 
 class TestSSHSchema(unittest.TestCase):

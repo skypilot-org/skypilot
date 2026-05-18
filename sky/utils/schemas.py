@@ -1557,6 +1557,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'namespace': {
+        'type': 'string',
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -2475,6 +2478,9 @@ def get_config_schema():
                                 'additionalProperties':
                                     _allow_additional_properties(),
                                 'properties': {
+                                    'namespace': {
+                                        'type': 'string',
+                                    },
                                     'kueue': {
                                         'type': 'object',
                                         'required': [],
