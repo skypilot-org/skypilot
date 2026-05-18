@@ -4251,3 +4251,69 @@ class TestAdjustResourcesToAllocatable:
         ]
         result = utils.adjust_resources_to_allocatable(4.0, 16.0, 'ctx')
         assert result == (4.0, 16.0)
+
+
+class TestGetNamespace:
+    """Tests for `get_namespace`: config resolution + kubeconfig fallback."""
+
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.skypilot_config'
+           '.get_effective_namespace')
+    def test_returns_config_value_when_set(self, mock_effective,
+                                           mock_kubeconfig):
+        """When config has a value, kubeconfig fallback is not consulted."""
+        mock_effective.return_value = 'team-a'
+        result = utils.get_namespace(context='shared-ctx',
+                                     workspace='workspaceA')
+        assert result == 'team-a'
+        mock_effective.assert_called_once_with(
+            cloud='kubernetes',
+            region='shared-ctx',
+            workspace='workspaceA',
+            override_configs=None,
+        )
+        mock_kubeconfig.assert_not_called()
+
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.skypilot_config'
+           '.get_effective_namespace')
+    def test_falls_back_to_kubeconfig_when_unset(self, mock_effective,
+                                                 mock_kubeconfig):
+        """No config value → kubeconfig context's default namespace."""
+        mock_effective.return_value = None
+        mock_kubeconfig.return_value = 'kubeconfig-default-ns'
+        result = utils.get_namespace(context='shared-ctx')
+        assert result == 'kubeconfig-default-ns'
+        mock_kubeconfig.assert_called_once_with('shared-ctx')
+
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.skypilot_config'
+           '.get_effective_namespace')
+    def test_passes_override_configs_through(self, mock_effective,
+                                             mock_kubeconfig):
+        """`override_configs` are forwarded to the resolver verbatim."""
+        mock_effective.return_value = 'override-ns'
+        overrides = {'kubernetes': {'namespace': 'override-ns'}}
+        result = utils.get_namespace(context='shared-ctx',
+                                     workspace='workspaceA',
+                                     override_configs=overrides)
+        assert result == 'override-ns'
+        mock_effective.assert_called_once_with(
+            cloud='kubernetes',
+            region='shared-ctx',
+            workspace='workspaceA',
+            override_configs=overrides,
+        )
+        mock_kubeconfig.assert_not_called()
+
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.skypilot_config'
+           '.get_effective_namespace')
+    def test_context_none_propagates_to_kubeconfig_fallback(
+            self, mock_effective, mock_kubeconfig):
+        """`context=None` propagates to the kubeconfig current-context fallback."""
+        mock_effective.return_value = None
+        mock_kubeconfig.return_value = 'current-ctx-default'
+        result = utils.get_namespace()
+        assert result == 'current-ctx-default'
+        mock_kubeconfig.assert_called_once_with(None)

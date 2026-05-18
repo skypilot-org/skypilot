@@ -2892,6 +2892,29 @@ def get_kube_config_context_namespace(
         return DEFAULT_NAMESPACE
 
 
+def get_namespace(context: Optional[str] = None,
+                  workspace: Optional[str] = None,
+                  override_configs: Optional[Dict[str, Any]] = None) -> str:
+    """Resolve the Kubernetes namespace for ``context``, with fallback.
+
+    Calls ``skypilot_config.get_effective_namespace`` to resolve the
+    namespace from config; on miss, falls back to
+    ``get_kube_config_context_namespace(context)`` (then ``"default"``).
+
+    Drop-in replacement for ``get_kube_config_context_namespace`` at
+    sites that have a workspace in scope.
+    """
+    config_namespace = skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        region=context,
+        workspace=workspace,
+        override_configs=override_configs,
+    )
+    if config_namespace is not None:
+        return config_namespace
+    return get_kube_config_context_namespace(context)
+
+
 def parse_cpu_or_gpu_resource_to_float(resource_str: str) -> float:
     if not resource_str:
         return 0.0
