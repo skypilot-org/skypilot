@@ -401,6 +401,12 @@ For workloads that need the node's network stack directly — for example, RDMA/
 
 With ``hostNetwork: true``, a pod shares the node's network namespace instead of getting its own. Normally this would cause two SkyPilot pods scheduled to the same node to collide on Ray's default ports and on the node's SSH port. SkyPilot handles this automatically: before Ray starts, each pod probes a free port set on the node, the head publishes its chosen ports to a ``<cluster>-ray-ports`` ConfigMap for workers to discover, and each pod's in-container SSH server is rebound to a probed port. **No additional configuration beyond** ``hostNetwork: true`` **is required**, and multiple SkyPilot clusters can safely share a node.
 
+For a multi-node cluster, SkyPilot additionally enforces that **every pod of the same cluster is placed on a distinct Kubernetes node**. This is implemented as a required pod anti-affinity (per-cluster label selector, topology key ``kubernetes.io/hostname``) injected into every ``hostNetwork`` pod. One pod per node guarantees each pod has a unique, routable host IP — which is also exactly what lets a ``hostNetwork`` cluster span multiple Kubernetes nodes. The selector is scoped per cluster, so pods of *different* clusters can still co-locate on a node (their cross-cluster port collisions are resolved by the free-port probe described above).
+
+.. warning::
+
+    Because this anti-affinity is a *hard* scheduling constraint (``requiredDuringSchedulingIgnoredDuringExecution``), a multi-node ``hostNetwork`` cluster needs at least as many schedulable Kubernetes nodes as it has pods. If enough distinct nodes are not available, the cluster fails to schedule with a clear error rather than silently co-locating pods of the same cluster and racing on the shared host network.
+
 .. note::
 
     The ConfigMap is created in the same namespace as the SkyPilot pods and is owned by the head pod, so it is garbage-collected by Kubernetes on ``sky down``. The SkyPilot service account must be able to create, get, and update ConfigMaps in that namespace (already covered by the :ref:`minimal permissions <cloud-permissions-kubernetes>`).
