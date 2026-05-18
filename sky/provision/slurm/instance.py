@@ -114,34 +114,43 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
                             partition: str) -> str:
     """Compute the auto-generated ``#SBATCH --time=...`` directive.
 
-    Priority: user-supplied > partition DefaultTime > partition MaxTime >
-    none (with warning). Omitting ``--time`` when DefaultTime is set lets
-    Slurm apply the partition default, which matches what an admin who
-    configured DefaultTime intended. Capping at MaxTime preserves today's
-    behavior for clusters without DefaultTime. When neither is set we warn
-    instead of silently picking a value, because a fixed default would
-    silently kill long-running jobs.
+    Priority: user-supplied > partition MaxTime > partition DefaultTime >
+    warn-and-omit. The MaxTime-before-DefaultTime ordering preserves
+    longstanding behavior (pre-existing code always emitted
+    ``--time={MaxTime}`` and ignored ``DefaultTime``). DefaultTime is
+    only consulted when MaxTime is UNLIMITED — emitting
+    ``--time=UNLIMITED`` is the #9370 footgun (backfill scheduler
+    refuses to schedule ahead of maintenance reservations).
 
-    Returns the directive ending with a newline (so it can be inserted
-    into the sbatch script f-string), or the empty string when no
-    auto-generated directive should be emitted. The user-supplied case
-    returns empty because ``_build_custom_sbatch_directives`` emits the
-    user's ``--time`` from sbatch_options instead.
+    TODO(dev): consider preferring DefaultTime over MaxTime. Arguments:
+    (1) matches Slurm's own default-resolution order; (2) DefaultTime
+    is the more intentional admin signal — MaxTime is usually the
+    ceiling, DefaultTime is "what a typical job should get";
+    (3) friendlier to the backfill scheduler; (4) less surprising for
+    admins who explicitly configured DefaultTime.
+
+    Returns the directive ending with a newline, or empty string when
+    no auto-generated directive should be emitted (user supplied their
+    own, or DefaultTime path, or warn path).
     """
     user_supplied_time = (sbatch_options.get('time') is not None or
                           sbatch_options.get('t') is not None)
     if user_supplied_time:
         return ''
-    if partition_info.default_time is not None:
-        return ''
+    # MaxTime first: preserve pre-existing behavior for partitions where
+    # MaxTime is set.
     if partition_info.maxtime is not None:
         max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
         return f'#SBATCH --time={max_time}\n'
+    # MaxTime is UNLIMITED / NONE. Fall back to DefaultTime (the #9370
+    # fix path) so Slurm doesn't see --time=UNLIMITED.
+    if partition_info.default_time is not None:
+        return ''
     logger.warning(
         f'Partition {partition!r} has no MaxTime or DefaultTime configured. '
         'Submitting without --time may cause the job to hang behind '
         'maintenance reservations. Set slurm.sbatch_options.time in your '
-        "task YAML or in ~/.sky/config.yaml.")
+        'task YAML or in ~/.sky/config.yaml.')
     return ''
 
 

@@ -210,12 +210,27 @@ class TestComputeTimeDirective:
         result = _compute_time_directive({'t': '5'}, partition, 'cpu')
         assert result == ''
 
-    def test_default_time_skips_auto_directive(self):
-        """Partition has DefaultTime; omit --time so Slurm applies it."""
-        # MaxTime=UNLIMITED, DefaultTime=01:00:00 — the bug scenario in #9370.
+    def test_default_time_used_only_when_maxtime_unset(self):
+        """Partition has DefaultTime but no MaxTime; omit --time so Slurm applies it.
+
+        This is the #9370 fix: pre-existing code would emit
+        --time=UNLIMITED here, which the backfill scheduler refuses to
+        schedule ahead of maintenance reservations.
+        """
         partition = self._partition(maxtime=None, default_time='01:00:00')
         result = _compute_time_directive({}, partition, 'cpu')
         assert result == ''
+
+    def test_maxtime_wins_when_both_set(self):
+        """When both MaxTime and DefaultTime are set, MaxTime wins.
+
+        Preserves SkyPilot's longstanding behavior of always emitting
+        --time=MaxTime (Hyrum's law - some users rely on this).
+        """
+        partition = self._partition(maxtime=3600, default_time='00:15:00')
+        result = _compute_time_directive({}, partition, 'cpu')
+        # MaxTime (1h), not DefaultTime (15min).
+        assert result == '#SBATCH --time=0-01:00:00\n'
 
     def test_falls_back_to_maxtime(self):
         """No DefaultTime, MaxTime set — emit --time=MaxTime (today's behavior)."""
