@@ -122,7 +122,7 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
     ``--time=UNLIMITED`` is the #9370 footgun (backfill scheduler
     refuses to schedule ahead of maintenance reservations).
 
-    TODO(dev): consider preferring DefaultTime over MaxTime. Arguments:
+    TODO(kevin): consider preferring DefaultTime over MaxTime. Arguments:
     (1) matches Slurm's own default-resolution order; (2) DefaultTime
     is the more intentional admin signal — MaxTime is usually the
     ceiling, DefaultTime is "what a typical job should get";
