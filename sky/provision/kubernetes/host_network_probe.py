@@ -147,8 +147,8 @@ def _k8s_api_request(
         return e.code, e.read()
 
 
-def _configmap_data_for_ports(podname: str,
-                              ports: Dict[str, int]) -> Dict[str, str]:
+def _configmap_data_for_ports(podname: str, ports: Dict[str,
+                                                        int]) -> Dict[str, str]:
     """Translate probe port names into ConfigMap data keys.
 
     The 'sshd' port is rewritten to ``sshd_<podname>`` because every pod
@@ -210,8 +210,8 @@ def _get_configmap(name: str, namespace: str) -> Dict[str, Any]:
     return json.loads(resp)
 
 
-def _publish_configmap(name: str, namespace: str,
-                       ports: Dict[str, int]) -> None:
+def _publish_configmap(name: str, namespace: str, ports: Dict[str,
+                                                              int]) -> None:
     """Create or update a ConfigMap with the head's chosen ports.
 
     Idempotent: on 409 we GET, lift the resourceVersion, and PUT — which
