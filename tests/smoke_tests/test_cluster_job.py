@@ -3017,7 +3017,7 @@ def test_kubernetes_stale_pod_cleanup():
             # Launch a cluster with memory limits (2GB is enough to boot
             # but tight enough to OOM on a large allocation).
             f'sky launch -y -c {name} --infra kubernetes --cpus 1 --memory 2 '
-            f'--config kubernetes.set_pod_resource_limits=true -- echo ready',
+            f'--config kubernetes.set_pod_resource_limits=true',
             # OOM the pod by writing 4GB to tmpfs, exceeding the 2GB limit.
             f'sky exec {name} -- dd if=/dev/zero of=/dev/shm/oom bs=1M count=4096 || true',
             # Wait for the pod to enter Failed phase.
