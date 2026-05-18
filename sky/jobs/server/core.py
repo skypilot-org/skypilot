@@ -387,7 +387,24 @@ def _consolidated_launch(
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
-    backend.run_on_head(local_handle, run_script, log_path=log_path)
+    # Surface the script's exit code so that a failure here marks the
+    # `jobs.launch` request as FAILED. Without this, a non-zero exit from the
+    # scheduler script (e.g. unreachable controller DB, interpreter mismatch,
+    # OOM mid-`scheduler_set_waiting`) is silently dropped — leaving a
+    # PENDING+INACTIVE job row while the user is told the launch succeeded.
+    returncode = backend.run_on_head(local_handle,
+                                     run_script,
+                                     log_path=log_path)
+    if returncode != 0:
+        raise exceptions.CommandError(
+            returncode=returncode,
+            command=f'sky.jobs.scheduler[job_ids={job_ids_str}]',
+            error_msg=(
+                f'Managed job submission script failed '
+                f'(returncode={returncode}). The job row is in an incomplete '
+                f'state; cancel it with `sky jobs cancel {job_ids_str}` '
+                f'before retrying. Script log: {log_path}'),
+            detailed_reason=None)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
 
