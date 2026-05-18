@@ -2998,6 +2998,46 @@ def test_kubernetes_recovery():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_stale_pod_cleanup():
+    """Test that sky start cleans up Failed pods before re-creating them.
+
+    When a pod OOMKills, it enters the Failed phase but remains in the K8s
+    API server. A subsequent sky start must delete the stale pod before
+    creating a new one, otherwise it hits a 409 AlreadyExists error.
+
+    Regression test for #9627.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head_pod = f'{name_on_cloud}-head'
+    test = smoke_tests_utils.Test(
+        'kubernetes_stale_pod_cleanup',
+        [
+            # Launch a cluster with memory limits (2GB is enough to boot
+            # but tight enough to OOM on a large allocation).
+            f'sky launch -y -c {name} --infra kubernetes --cpus 1 --memory 2 '
+            f'--config kubernetes.set_pod_resource_limits=true -- echo ready',
+            # OOM the pod by writing 4GB to tmpfs, exceeding the 2GB limit.
+            f'sky exec {name} -- dd if=/dev/zero of=/dev/shm/oom bs=1M count=4096 || true',
+            # Wait for the pod to enter Failed phase.
+            f'for i in $(seq 1 30); do '
+            f'phase=$(kubectl get pod {head_pod} '
+            f'-o jsonpath=\'{{.status.phase}}\'); '
+            f'echo "attempt $i: phase=$phase"; '
+            f'if [ "$phase" = "Failed" ]; then break; fi; '
+            f'sleep 2; done && '
+            f'test "$phase" = "Failed"',
+            # sky start should clean up the Failed pod and succeed.
+            f'sky start -y {name}',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_sigterm_keepalive():
     """Test that worker pods survive SIGTERM (node drain) via keep-alive fix."""
     name = smoke_tests_utils.get_cluster_name()
