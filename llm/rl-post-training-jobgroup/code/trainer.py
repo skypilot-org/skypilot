@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 from dataclasses import dataclass
 import time
 from typing import List, Optional
@@ -58,6 +59,8 @@ class TrainingConfig:
     policy_sync_path: Optional[str] = None
     policy_sync_interval: int = 10
     policy_sync_servers: Optional[List[str]] = None
+    policy_sync_max_attempts: int = 30
+    policy_sync_retry_interval: int = 10
 
 
 class RLHFTrainer:
@@ -92,6 +95,14 @@ class RLHFTrainer:
         # Statistics
         self.total_steps = 0
         self.total_rewards = 0.0
+
+    def save_static_policy_sync_assets(self):
+        """Save static policy files used by later weight syncs."""
+        if not self.config.policy_sync_path:
+            return
+        if not self.accelerator.is_main_process:
+            return
+        self.tokenizer.save_pretrained(self.config.policy_sync_path)
 
     def wait_for_services(self,
                           max_retries: int = 30,
@@ -309,33 +320,58 @@ class RLHFTrainer:
         unwrapped = self.accelerator.unwrap_model(self.model)
         unwrapped.save_pretrained(self.config.policy_sync_path,
                                   safe_serialization=True)
-        self.tokenizer.save_pretrained(self.config.policy_sync_path)
 
         # 2. Tell rollout backend(s) to load the new weights and flush KV cache.
         sync_servers = self.config.policy_sync_servers or [
             self.config.rollout_server
         ]
         errors = []
-        for server in sync_servers:
-            base_url = self._base_url(server)
-            try:
-                r = self.http_client.post(
-                    f"{base_url}/update_weights_from_disk",
-                    json={"model_path": self.config.policy_sync_path},
-                    timeout=300.0)
-                r.raise_for_status()
-                r = self.http_client.post(f"{base_url}/flush_cache",
-                                          timeout=30.0)
-                r.raise_for_status()
-                print(f"[policy-sync] step {self.total_steps}: pushed "
-                      f"weights to {server}")
-            except Exception as e:
-                errors.append(f"{server}: {e}")
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=len(sync_servers)) as executor:
+            future_to_server = {
+                executor.submit(self._sync_policy_to_server, server): server
+                for server in sync_servers
+            }
+            for future in concurrent.futures.as_completed(future_to_server):
+                server = future_to_server[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    errors.append(f"{server}: {e}")
 
         if errors:
             raise RuntimeError(
                 "Failed to sync policy weights to rollout backend(s): " +
                 "; ".join(errors))
+
+    def _sync_policy_to_server(self, server: str):
+        base_url = self._base_url(server)
+        last_error: Optional[Exception] = None
+        max_attempts = max(1, self.config.policy_sync_max_attempts)
+        retry_interval = max(0, self.config.policy_sync_retry_interval)
+        with httpx.Client() as client:
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    r = client.post(
+                        f"{base_url}/update_weights_from_disk",
+                        json={"model_path": self.config.policy_sync_path},
+                        timeout=300.0)
+                    r.raise_for_status()
+                    r = client.post(f"{base_url}/flush_cache", timeout=30.0)
+                    r.raise_for_status()
+                    print(f"[policy-sync] step {self.total_steps}: pushed "
+                          f"weights to {server}")
+                    return
+                except Exception as e:
+                    last_error = e
+                    if attempt == max_attempts:
+                        break
+                    print(f"[policy-sync] step {self.total_steps}: waiting "
+                          f"for {server} to recover after attempt "
+                          f"{attempt}/{max_attempts}: {e}")
+                    time.sleep(retry_interval)
+
+        raise RuntimeError(last_error)
 
     @staticmethod
     def _base_url(server: str) -> str:
@@ -416,6 +452,7 @@ class RLHFTrainer:
 
         # Wait for services
         self.wait_for_services()
+        self.save_static_policy_sync_assets()
 
         # Training loop
         for epoch in range(self.config.num_epochs):
@@ -525,6 +562,16 @@ def main():
                         default=None,
                         help="Comma-separated rollout backend addresses for "
                         "policy reloads.")
+    parser.add_argument("--policy-sync-max-attempts",
+                        type=int,
+                        default=30,
+                        help="Maximum policy sync attempts per rollout "
+                        "backend before failing.")
+    parser.add_argument("--policy-sync-retry-interval",
+                        type=int,
+                        default=10,
+                        help="Seconds to wait between policy sync retry "
+                        "attempts.")
     args = parser.parse_args()
     policy_sync_servers = None
     if args.policy_sync_servers:
@@ -547,6 +594,8 @@ def main():
         policy_sync_path=args.policy_sync_path,
         policy_sync_interval=args.policy_sync_interval,
         policy_sync_servers=policy_sync_servers,
+        policy_sync_max_attempts=args.policy_sync_max_attempts,
+        policy_sync_retry_interval=args.policy_sync_retry_interval,
     )
 
     trainer = RLHFTrainer(config)

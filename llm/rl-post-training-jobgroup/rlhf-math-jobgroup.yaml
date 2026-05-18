@@ -191,6 +191,8 @@ envs:
   STEPS_PER_EPOCH: 100
   BATCH_SIZE: 4
   POLICY_SYNC_INTERVAL: 10
+  POLICY_SYNC_MAX_ATTEMPTS: 30
+  POLICY_SYNC_RETRY_INTERVAL: 10
   ROLLOUT_SERVER_NUM_NODES: 2
 
 file_mounts:
@@ -251,6 +253,8 @@ run: |
       --steps-per-epoch ${STEPS_PER_EPOCH} \
       --policy-sync-path /shared/policy/latest \
       --policy-sync-interval ${POLICY_SYNC_INTERVAL} \
+      --policy-sync-max-attempts ${POLICY_SYNC_MAX_ATTEMPTS} \
+      --policy-sync-retry-interval ${POLICY_SYNC_RETRY_INTERVAL} \
       --policy-sync-servers "${ROLLOUT_SYNC_SERVERS}"
     TRAIN_EXIT=$?
     touch "${DONE_MARKER}"
