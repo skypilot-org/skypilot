@@ -532,7 +532,7 @@ available_node_types:
         {% endif %}
         containers:
         - name: ray-node
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           image: {{image_id}}
           env:
             - name: SKYPILOT_POD_NODE_TYPE
