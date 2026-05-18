@@ -1893,16 +1893,11 @@ def get_cluster_info(
     cpu_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
-        # every pod on a given K8s node shares one pod_ip (the host IP).
-        # That collapses cluster_ips_to_node_id in task_codegen and makes
-        # Ray's get_node_ip_address() (which returns the raylet's
-        # --node-ip-address, our per-pod loopback) disagree with the
-        # SkyPilot-side IP list. Use the same loopback derivation here so
-        # both views line up. Same mapping as in host_network_probe.
-        if pod.spec.host_network:
-            internal_ip = host_network_probe.loopback_ip_for_pod(pod_name)
-        else:
-            internal_ip = pod.status.pod_ip
+        # pod_ip is the K8s node's host IP. SkyPilot injects a required
+        # per-cluster podAntiAffinity for hostNetwork clusters, so every
+        # pod of a cluster is on its own node and thus has a distinct,
+        # routable host IP — no per-pod loopback disambiguation needed.
+        internal_ip = pod.status.pod_ip
         # Get the k8s node name the pod is running on (for dashboard display)
         k8s_node_name = getattr(pod.spec, 'node_name', None)
         pods[pod_name] = [

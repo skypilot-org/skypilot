@@ -399,10 +399,6 @@ def ray_head_start_command(custom_resource: Optional[str],
         '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
         '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
         '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT} '
-        # Distinct per-pod loopback IP under hostNetwork; absent unless
-        # the probe ran. Disambiguates (NodeID -> endpoint) routing in
-        # Ray's client cache when two raylets share the host's IP.
-        '${SKYPILOT_RAY_NODE_IP:+--node-ip-address=$SKYPILOT_RAY_NODE_IP} '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -454,9 +450,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
         '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
         '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
         '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
-        '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT} '
-        # See ray_head_start_command for the rationale on --node-ip-address.
-        '${SKYPILOT_RAY_NODE_IP:+--node-ip-address=$SKYPILOT_RAY_NODE_IP}')
+        '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''

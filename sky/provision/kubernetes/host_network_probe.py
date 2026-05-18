@@ -8,19 +8,17 @@ them (head) to a ``<cluster>-ray-ports`` ConfigMap or reads the head's
 port from that ConfigMap (worker). Stdlib-only so it can run during the
 window when the pod's skypilot install is in flux.
 
-It also assigns each pod a deterministic 127.X.Y.Z loopback IP derived
-from its pod name and exports it as ``SKYPILOT_RAY_NODE_IP``. Ray binds
-its raylet on that IP, which disambiguates the (NodeID -> endpoint)
-lookup when two raylets are otherwise co-located on the same host IP.
-Without this, Ray's gRPC client cache can collapse both NodeIDs onto a
-single endpoint and route every lease request to the wrong raylet.
+Same-cluster pods never share a K8s node (SkyPilot injects a required
+per-cluster ``podAntiAffinity`` for hostNetwork clusters), so each
+pod's host IP is unique and routable. The worker dials the head over
+the headless Service DNS (``SKYPILOT_RAY_HEAD_IP``, set by the pod
+template) plus the head's probed GCS port from the ConfigMap — no
+loopback-IP disambiguation is needed.
 """
 import argparse
 import functools
-import hashlib
 import json
 import os
-import re
 import socket
 import ssl
 import sys
@@ -61,10 +59,6 @@ _WORKER_PORT_NAMES: List[str] = [
 # Public so the SkyPilot client (sky/provision/kubernetes/instance.py)
 # can read the same key when assembling InstanceInfo.ssh_port.
 SSHD_KEY_PREFIX = 'sshd_'
-
-# ConfigMap key carrying the head pod's loopback IP. Workers read it to
-# dial the head's GCS over the shared loopback (same K8s node only).
-HEAD_NODE_IP_KEY = 'head_node_ip'
 
 _SA_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token'
 _SA_CA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
@@ -116,51 +110,13 @@ def _probe_ports(
     return held, ports
 
 
-def _write_env_file(ports: Dict[str, int],
-                    path: str,
-                    extra: Optional[Dict[str, str]] = None) -> None:
+def _write_env_file(ports: Dict[str, int], path: str) -> None:
     lines = [
         f'export {_ENV_VAR_FOR_PORT[name]}={port}'
         for name, port in ports.items()
     ]
-    for key, value in (extra or {}).items():
-        lines.append(f'export {key}={value}')
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
-
-
-_POD_NAME_RANK_RE = re.compile(r'^(.*)-(head|worker(\d+))$')
-
-
-def loopback_ip_for_pod(pod_name: str) -> str:
-    """Deterministic 127.X.Y.Z address per pod for ``--node-ip-address``.
-
-    127.0.0.0/8 is wholly routed to ``lo`` by the Linux kernel, so the
-    address is bindable with no CAP_NET_ADMIN and reachable from any
-    process sharing the netns (i.e. any other pod on the same K8s node
-    under hostNetwork).
-
-    Layout: ``127.<H1>.<H2>.<rank>`` where (H1, H2) come from a SHA-256
-    of the cluster prefix (pod name minus the ``-head`` / ``-workerN``
-    suffix) and ``rank`` is 0 for the head, N for ``-workerN``. Putting
-    rank in the last byte makes IPs immediately readable in debug
-    output ('head is .0, worker1 is .1'); the cluster-id bytes keep
-    two concurrent SkyPilot clusters on the same K8s node from
-    colliding. H1 is OR'd with 0x80 to stay out of the conventionally
-    special 127.0.x.x range (in particular 127.0.0.1).
-    """
-    match = _POD_NAME_RANK_RE.match(pod_name)
-    if match:
-        cluster = match.group(1)
-        rank = 0 if match.group(2) == 'head' else int(match.group(3))
-    else:
-        # Pod-name shape we don't recognize: hash the whole name as a
-        # fallback. Better to stay deterministically distinct than to
-        # fail provisioning.
-        cluster = pod_name
-        rank = 0
-    digest = hashlib.sha256(cluster.encode('utf-8')).digest()
-    return f'127.{digest[0] | 0x80}.{digest[1]}.{rank % 256}'
 
 
 def _k8s_api_request(
@@ -191,27 +147,24 @@ def _k8s_api_request(
         return e.code, e.read()
 
 
-def _configmap_data_for_ports(podname: str, ports: Dict[str, int],
-                              extra: Dict[str, str]) -> Dict[str, str]:
+def _configmap_data_for_ports(podname: str,
+                              ports: Dict[str, int]) -> Dict[str, str]:
     """Translate probe port names into ConfigMap data keys.
 
     The 'sshd' port is rewritten to ``sshd_<podname>`` because every pod
     (head + each worker) publishes its own sshd port into the same
     ConfigMap. Other keys are head-owned Ray ports and stay flat so the
     worker probe can look up the head's GCS by the bare key 'gcs'.
-    Non-port head-owned values (e.g. the head's loopback IP) are passed
-    in via ``extra`` and written through as-is.
     """
     out: Dict[str, str] = {}
     for name, port in ports.items():
         key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
         out[key] = str(port)
-    out.update(extra)
     return out
 
 
 def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
-                          extra: Dict[str, str], owner_pod_name: str,
+                          owner_pod_name: str,
                           owner_pod_uid: str) -> Dict[str, Any]:
     """Build the ConfigMap body, including the ownerReference that ties its
     lifetime to the head pod so K8s garbage-collects it on `sky down`."""
@@ -236,7 +189,7 @@ def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
                 'blockOwnerDeletion': False,
             }],
         },
-        'data': _configmap_data_for_ports(owner_pod_name, ports, extra),
+        'data': _configmap_data_for_ports(owner_pod_name, ports),
     }
 
 
@@ -257,8 +210,8 @@ def _get_configmap(name: str, namespace: str) -> Dict[str, Any]:
     return json.loads(resp)
 
 
-def _publish_configmap(name: str, namespace: str, ports: Dict[str, int],
-                       extra: Dict[str, str]) -> None:
+def _publish_configmap(name: str, namespace: str,
+                       ports: Dict[str, int]) -> None:
     """Create or update a ConfigMap with the head's chosen ports.
 
     Idempotent: on 409 we GET, lift the resourceVersion, and PUT — which
@@ -269,7 +222,7 @@ def _publish_configmap(name: str, namespace: str, ports: Dict[str, int],
     # API — $HOSTNAME is the host node's name under hostNetwork.
     owner_pod_name = os.environ['SKYPILOT_POD_NAME']
     owner_pod_uid = os.environ['SKYPILOT_POD_UID']
-    body = _build_configmap_body(name, namespace, ports, extra, owner_pod_name,
+    body = _build_configmap_body(name, namespace, ports, owner_pod_name,
                                  owner_pod_uid)
     base = f'/api/v1/namespaces/{namespace}/configmaps'
     status, resp = _k8s_api_request('POST', base, body)
@@ -353,14 +306,10 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
 def _run_head(env_file: str, configmap_name: str,
               configmap_namespace: str) -> None:
     held, ports = _probe_ports(_HEAD_PORT_NAMES)
-    node_ip = loopback_ip_for_pod(os.environ['SKYPILOT_POD_NAME'])
     # Publish before writing the env file so a failed publish prevents
     # ray start from binding ports the workers will never discover.
-    _publish_configmap(configmap_name,
-                       configmap_namespace,
-                       ports,
-                       extra={HEAD_NODE_IP_KEY: node_ip})
-    _write_env_file(ports, env_file, extra={'SKYPILOT_RAY_NODE_IP': node_ip})
+    _publish_configmap(configmap_name, configmap_namespace, ports)
+    _write_env_file(ports, env_file)
     del held  # release the held sockets just before this process exits
 
 
@@ -379,20 +328,12 @@ def _run_worker(env_file: str, configmap_name: str,
     _merge_sshd_port(configmap_name, configmap_namespace, podname,
                      ports['sshd'])
     ports['gcs'] = int(head_gcs)
-    extra = {'SKYPILOT_RAY_NODE_IP': loopback_ip_for_pod(podname)}
-    # Override SKYPILOT_RAY_HEAD_IP to the head's loopback so the worker
-    # raylet's --address dials the head over 127.16.X.Y. Requires the
-    # worker to be on the same K8s node as the head (the only case where
-    # the IP-collision bug bites; cross-node hostNetwork pods have
-    # naturally distinct host IPs).
-    head_node_ip = head_data.get(HEAD_NODE_IP_KEY)
-    if head_node_ip:
-        extra['SKYPILOT_RAY_HEAD_IP'] = head_node_ip
-    _write_env_file(ports, env_file, extra=extra)
+    _write_env_file(ports, env_file)
     del held
-    # Prefer the loopback IP we just decided to dial; fall back to
-    # whatever SKYPILOT_RAY_HEAD_IP was set to before the probe ran.
-    head_ip = head_node_ip or os.environ.get('SKYPILOT_RAY_HEAD_IP')
+    # The pod template points SKYPILOT_RAY_HEAD_IP at the head's headless
+    # Service DNS. Same-cluster pods never share a K8s node (per-cluster
+    # podAntiAffinity), so that resolves to the head's routable host IP.
+    head_ip = os.environ.get('SKYPILOT_RAY_HEAD_IP')
     if head_ip:
         _wait_head_gcs_tcp(head_ip, int(head_gcs))
 
