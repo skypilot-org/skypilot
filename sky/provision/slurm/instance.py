@@ -133,8 +133,13 @@ def _compute_time_directive(sbatch_options: Dict[str, Any],
     when no auto-generated directive should be emitted (user supplied
     their own, or DefaultTime path, or warn path).
     """
-    user_supplied_time = (sbatch_options.get('time') is not None or
-                          sbatch_options.get('t') is not None)
+    # Match _build_custom_sbatch_directives' emit criteria: None and False
+    # are skipped there (the convention for boolean-shaped options like
+    # `exclusive: false`), so we treat them the same way here. Otherwise
+    # `time: false` would suppress both the user's directive AND the auto
+    # fallback, silently bypassing the safety net.
+    user_supplied_time = any(
+        sbatch_options.get(k) not in (None, False) for k in ('time', 't'))
     if user_supplied_time:
         return ''
     # MaxTime first: preserve pre-existing behavior for partitions where

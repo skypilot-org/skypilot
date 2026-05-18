@@ -245,6 +245,17 @@ class TestComputeTimeDirective:
         # MaxTime fallback kicks in because user did not actually supply time.
         assert result == '#SBATCH --time=0-01:00:00'
 
+    def test_false_time_falls_through_to_auto(self):
+        """sbatch_options.time=False is equivalent to not setting the key.
+
+        Mirrors _build_custom_sbatch_directives, which skips None/False
+        values. Without this alignment, `time: false` would silently
+        bypass both the user directive and the auto fallback.
+        """
+        partition = self._partition(maxtime=3600)
+        result = _compute_time_directive({'time': False}, partition, 'cpu')
+        assert result == '#SBATCH --time=0-01:00:00'
+
 
 class TestBuildSbatchDirectives:
     """Test _build_sbatch_directives() combines auto --time + user options."""
