@@ -926,6 +926,53 @@ def get_effective_queue_name(
     return None
 
 
+def get_effective_namespace(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kubernetes namespace from config.
+
+    Resolution precedence, most specific first:
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.namespace``
+    2. ``workspaces.<workspace>.<cloud>.namespace``
+    3. ``<cloud>.context_configs.<region>.namespace``
+    4. ``<cloud>.namespace``
+    5. ``None`` — caller is responsible for the kubeconfig-default fallback.
+    """
+    if workspace is None:
+        workspace = get_active_workspace()
+
+    def _lookup(scope: Dict[str, Any]) -> Optional[str]:
+        # Within a scope: per-context wins over cloud-level.
+        cfg = config_utils.Config(scope)
+        if override_configs is not None:
+            cfg = config_utils.Config(
+                cfg.get_nested(keys=(),
+                               default_value={},
+                               override_configs=override_configs))
+        if region is not None:
+            value = cfg.get_nested(keys=(cloud, 'context_configs', region,
+                                         'namespace'),
+                                   default_value=None)
+            if value is not None:
+                return value
+        return cfg.get_nested(keys=(cloud, 'namespace'), default_value=None)
+
+    # Workspace scope wins over global.
+    if workspace is not None:
+        ws_config = get_nested(keys=('workspaces', workspace),
+                               default_value=None)
+        if ws_config is not None:
+            value = _lookup(ws_config)
+            if value is not None:
+                return value
+
+    # Fall back to global scope.
+    return _lookup(_get_loaded_config())
+
+
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
     """Register a new queue name key to be removed from the config.
 
