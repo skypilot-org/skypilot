@@ -40,7 +40,7 @@ def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
         context = config.region
     namespace = config.config.get('namespace')
     if namespace is None:
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        namespace = kubernetes_utils.get_namespace(context=context)
         config.config['namespace'] = namespace
     return context, namespace
 
