@@ -393,6 +393,7 @@ available_node_types:
         # network namespace; pods must share host networking to reach the
         # RDMA fabric. ClusterFirstWithHostNet still routes .svc.cluster.local
         # lookups to CoreDNS so inter-node Ray comms work.
+        # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}

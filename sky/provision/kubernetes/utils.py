@@ -151,6 +151,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             # NCCL reference manifests. Per-shape exact HCA lists give
             # marginally better perf; the broad 'mlx5' prefix match here
             # works on all shapes. Users can override via task `envs:`.
+            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
             return {
                 'NCCL_IB_HCA': 'mlx5',
                 # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
