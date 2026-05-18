@@ -2547,6 +2547,32 @@ def get_config_schema():
         },
     }
 
+    dashboard_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'external_links': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['label', 'regex'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'label': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                        'regex': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -2575,6 +2601,7 @@ def get_config_schema():
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
+            'dashboard': dashboard_schema,
             **cloud_configs,
             # For plugin-specific config.
             'plugins': {

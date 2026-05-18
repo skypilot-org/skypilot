@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -22,6 +22,11 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import {
+  extractLinksFromLogs,
+  normalizeUrl,
+  useCustomUrlPatterns,
+} from '@/utils/externalLinks';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -128,6 +133,34 @@ export function JobDetailPage() {
     refreshTrigger: logsRefreshToken,
     onError: handleStreamError,
   });
+
+  // Scan streamed logs against built-in plus admin-configured URL patterns
+  // and surface matches in the Details card as an External Links row.
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+  const [extractedLinks, setExtractedLinks] = useState({});
+  useEffect(() => {
+    if (!displayLines || displayLines.length === 0) return;
+    const next = extractLinksFromLogs(
+      displayLines,
+      urlPatterns,
+      extractedLinksRef.current
+    );
+    extractedLinksRef.current = next;
+    if (Object.keys(next).length > 0) {
+      setExtractedLinks((prev) => {
+        const merged = { ...prev };
+        let changed = false;
+        for (const [label, url] of Object.entries(next)) {
+          if (merged[label] !== url) {
+            merged[label] = url;
+            changed = true;
+          }
+        }
+        return changed ? merged : prev;
+      });
+    }
+  }, [displayLines, urlPatterns]);
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
@@ -305,6 +338,33 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
+                    {Object.keys(extractedLinks).length > 0 && (
+                      <div className="col-span-2">
+                        <div className="text-gray-600 font-medium text-base">
+                          External Links
+                        </div>
+                        <div className="text-base mt-1">
+                          <div className="flex flex-wrap gap-4">
+                            {Object.entries(extractedLinks).map(
+                              ([label, url]) => {
+                                const normalizedUrl = normalizeUrl(url);
+                                return (
+                                  <a
+                                    key={label}
+                                    href={normalizedUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                                  >
+                                    {label}
+                                  </a>
+                                );
+                              }
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>
