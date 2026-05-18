@@ -25,6 +25,10 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 # Matches MaxTime=<time> and captures the time
 _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 
+# Regex pattern to extract DefaultTime from scontrol output
+# Matches DefaultTime=<value> and captures until the next whitespace
+_DEFAULT_TIME_REGEX = re.compile(r'DefaultTime=(\S+)')
+
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
 hostlist = common.LazyImport('hostlist',
@@ -40,6 +44,10 @@ class SlurmPartition(NamedTuple):
     # The maximum time a job can run in seconds.
     # None if the maximum time is unlimited.
     maxtime: Optional[int]
+    # The raw Slurm time string the partition assigns when --time is omitted
+    # (e.g. '01:00:00', '2-00:00:00'). None if the partition has no
+    # DefaultTime configured (NONE/UNLIMITED).
+    default_time: Optional[str] = None
 
 
 # TODO(kevin): Add more API types for other client functions.
@@ -74,6 +82,22 @@ def _parse_maxtime(line: str) -> Optional[int]:
 
     h, m, s = map(int, time_part.split(':'))
     return days * 86400 + h * 3600 + m * 60 + s
+
+
+def _parse_default_time(line: str) -> Optional[str]:
+    """Parse the DefaultTime a partition uses from the scontrol output.
+
+    Returns the raw Slurm time string (e.g. '01:00:00', '2-00:00:00') so it
+    can be passed straight through to ``--time``. Returns None when the
+    partition has no DefaultTime configured (``NONE``/``UNLIMITED``).
+    """
+    match = _DEFAULT_TIME_REGEX.search(line)
+    if not match:
+        return None
+    raw = match.group(1)
+    if raw in ('NONE', 'UNLIMITED'):
+        return None
+    return raw
 
 
 class SlurmClient:
@@ -595,13 +619,15 @@ class SlurmClient:
             if 'Default=YES' in line:
                 is_default = True
             maxtime = _parse_maxtime(line)
+            default_time = _parse_default_time(line)
             if match:
                 partition = match.group(1).strip()
                 if partition:
                     partitions.append(
                         SlurmPartition(name=partition,
                                        is_default=is_default,
-                                       maxtime=maxtime))
+                                       maxtime=maxtime,
+                                       default_time=default_time))
         return partitions
 
     def get_default_partition(self) -> Optional[str]:

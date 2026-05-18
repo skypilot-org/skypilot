@@ -47,7 +47,6 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'output',
     'error',
     'nodes',
-    'time',
     'wait-all-nodes',
     'no-requeue',
     'cpus-per-task',
@@ -97,6 +96,8 @@ def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
             raise ValueError(
                 f'Newline characters are not allowed in sbatch options: '
                 f'{key!r}={str_value!r}')
+        if key in ('time', 't'):
+            slurm_utils.validate_sbatch_time(str_value)
         if value is True:
             lines.append(f'#SBATCH --{key}')
         else:
@@ -106,6 +107,42 @@ def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
     # Prefix with newline so it slots in after other directives
     # in the provision script f-string.
     return '\n' + '\n'.join(lines)
+
+
+def _compute_time_directive(sbatch_options: Dict[str, Any],
+                            partition_info: 'slurm.SlurmPartition',
+                            partition: str) -> str:
+    """Compute the auto-generated ``#SBATCH --time=...`` directive.
+
+    Priority: user-supplied > partition DefaultTime > partition MaxTime >
+    none (with warning). Omitting ``--time`` when DefaultTime is set lets
+    Slurm apply the partition default, which matches what an admin who
+    configured DefaultTime intended. Capping at MaxTime preserves today's
+    behavior for clusters without DefaultTime. When neither is set we warn
+    instead of silently picking a value, because a fixed default would
+    silently kill long-running jobs.
+
+    Returns the directive ending with a newline (so it can be inserted
+    into the sbatch script f-string), or the empty string when no
+    auto-generated directive should be emitted. The user-supplied case
+    returns empty because ``_build_custom_sbatch_directives`` emits the
+    user's ``--time`` from sbatch_options instead.
+    """
+    user_supplied_time = (sbatch_options.get('time') is not None or
+                          sbatch_options.get('t') is not None)
+    if user_supplied_time:
+        return ''
+    if partition_info.default_time is not None:
+        return ''
+    if partition_info.maxtime is not None:
+        max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
+        return f'#SBATCH --time={max_time}\n'
+    logger.warning(
+        f'Partition {partition!r} has no MaxTime or DefaultTime configured. '
+        'Submitting without --time may cause the job to hang behind '
+        'maintenance reservations. Set slurm.sbatch_options.time in your '
+        "task YAML or in ~/.sky/config.yaml.")
+    return ''
 
 
 def _wait_for_job_nodes(
@@ -273,7 +310,6 @@ def _create_virtual_instance(
     if partition_info is None:
         raise ValueError(f'Partition info for {partition} not found '
                          f'for SLURM cluster {slurm_cluster}')
-    max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
 
     # COMPLETING state occurs when a job is being terminated - during this
     # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
@@ -450,8 +486,10 @@ def _create_virtual_instance(
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
     # Build custom sbatch directives from user config.
-    custom_sbatch_directives = _build_custom_sbatch_directives(
-        resources.get('sbatch_options', {}))
+    sbatch_options = resources.get('sbatch_options', {}) or {}
+    custom_sbatch_directives = _build_custom_sbatch_directives(sbatch_options)
+    time_directive = _compute_time_directive(sbatch_options, partition_info,
+                                             partition)
 
     # Build the sbatch script
     gpu_directive = ''
@@ -563,8 +601,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --output={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --error={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --nodes={num_nodes}
-#SBATCH --time={max_time}
-#SBATCH --wait-all-nodes=1
+{time_directive}#SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={int(resources["cpus"])}

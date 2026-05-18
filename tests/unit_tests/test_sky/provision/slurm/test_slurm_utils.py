@@ -20,6 +20,47 @@ class TestFormatSlurmDuration:
         assert result == expected
 
 
+class TestValidateSbatchTime:
+    """Test validate_sbatch_time()."""
+
+    @pytest.mark.parametrize('value', [
+        '0',
+        '5',
+        '60',
+        '1:30',
+        '12:30',
+        '0:00:00',
+        '4:00:00',
+        '23:59:59',
+        '1-0',
+        '1-12',
+        '2-23:59',
+        '7-00:00:00',
+    ])
+    def test_accepted_formats(self, value):
+        # Should not raise.
+        utils.validate_sbatch_time(value)
+
+    @pytest.mark.parametrize('value', [
+        '',
+        'garbage',
+        '1h',
+        '1m30s',
+        '1:2:3:4',
+        '1.5',
+        '-1',
+        '1-2-3',
+        ':30',
+        '1:',
+        ' 5',
+        '5 ',
+        '5\n',
+    ])
+    def test_invalid_formats_raise(self, value):
+        with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
+            utils.validate_sbatch_time(value)
+
+
 class TestGetIdentityFile:
     """Test get_identity_file() helper function."""
 
