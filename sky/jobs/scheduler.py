@@ -323,7 +323,29 @@ def submit_jobs(job_ids: List[int],
     state.scheduler_set_waiting(job_ids, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
                                 config_file_content, priority, priority_class)
-    maybe_start_controllers(from_scheduler=True)
+    # `maybe_start_controllers` is an eager optimization; the periodic
+    # managed-job-status-refresh-daemon also calls it. If it raises here
+    # — after `scheduler_set_waiting` has already committed — the row is
+    # WAITING and the next recovery pass will spawn the controller and
+    # run the job anyway. Letting this exception propagate would make
+    # the caller (`_consolidated_launch`) mark the user's request FAILED
+    # while the job will still run, prompting the user to retry and
+    # double-launch. Swallow the error so the script's exit code tracks
+    # whether the job was successfully queued (= `scheduler_set_waiting`
+    # committed), not whether the eager controller spawn succeeded.
+    try:
+        maybe_start_controllers(from_scheduler=True)
+    except Exception as e:  # pylint: disable=broad-except
+        # Loud — this should not normally happen; if it does, a real bug
+        # is likely lurking in maybe_start_controllers. Log with full
+        # traceback at ERROR so it shows up in any reasonable log
+        # configuration. The job itself is not lost (recovery will retry).
+        logger.error(
+            f'maybe_start_controllers raised after scheduler_set_waiting '
+            f'committed for jobs {job_ids}; swallowing so the script '
+            f'exit code stays 0 (the row is WAITING and the next recovery '
+            f'pass will retry the controller spawn). Error: {e}',
+            exc_info=True)
 
 
 @contextlib.asynccontextmanager

@@ -81,8 +81,8 @@ def test_zero_returncode_succeeds(monkeypatch):
     task = _make_controller_task()
 
     job_ids, handle = jobs_core._consolidated_launch(controller,
-                                                    task,
-                                                    job_ids=[7])
+                                                     task,
+                                                     job_ids=[7])
     assert job_ids == [7]
     assert handle is not None
 
