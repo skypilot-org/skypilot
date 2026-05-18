@@ -47,7 +47,7 @@ class SlurmPartition(NamedTuple):
     # The raw Slurm time string the partition assigns when --time is omitted
     # (e.g. '01:00:00', '2-00:00:00'). None if the partition has no
     # DefaultTime configured (NONE/UNLIMITED).
-    default_time: Optional[str] = None
+    default_time: Optional[str]
 
 
 # TODO(kevin): Add more API types for other client functions.
