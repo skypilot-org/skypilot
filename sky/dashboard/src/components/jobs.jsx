@@ -614,7 +614,16 @@ export function ManagedJobsTable({
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            // Controller is reachable: clear any stale banner state from a
+            // previous fetch and skip the cluster-status lookup below.
+            setControllerStopped(false);
+            setControllerLaunching(false);
           }
+
+          // Render the table as soon as the queue data is in. Any optional
+          // controller-status banner is resolved below without blocking the
+          // table.
+          setIsInitialLoad(false);
 
           // Prefetch next page in background
           if (response.hasNext) {
@@ -622,8 +631,16 @@ export function ManagedJobsTable({
           }
         }
 
-        // Check controller status from clusters
-        if (includeStatus) {
+        // Check controller status from clusters — only needed when the
+        // queue response indicated the controller wasn't reachable. The
+        // queue endpoint catches ClusterNotUpError and returns
+        // controllerStopped=true for both STOPPED and INIT-without-head_ip
+        // (i.e. LAUNCHING). We then call /status to disambiguate so the
+        // right banner is shown. When the controller is reachable
+        // (controllerStopped === false) there is no banner to show, so we
+        // skip /status entirely — saving ~hundreds of ms on every page
+        // load and on every 5-second periodic refresh.
+        if (includeStatus && response.controllerStopped) {
           try {
             const clustersData = await dashboardCache.get(getClusters);
 
@@ -637,11 +654,7 @@ export function ManagedJobsTable({
               const jobControllerClusterStatus = jobControllerCluster
                 ? jobControllerCluster.status
                 : 'NOT_FOUND';
-              // Check both cluster status and API response
-              if (
-                jobControllerClusterStatus === 'STOPPED' &&
-                response.controllerStopped
-              ) {
+              if (jobControllerClusterStatus === 'STOPPED') {
                 isControllerStopped = true;
               }
               if (jobControllerClusterStatus === 'LAUNCHING') {
@@ -656,10 +669,6 @@ export function ManagedJobsTable({
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
-        }
-
-        if (version === requestSeqRef.current) {
-          setIsInitialLoad(false);
         }
       } catch (err) {
         console.error('Error fetching data:', err);
