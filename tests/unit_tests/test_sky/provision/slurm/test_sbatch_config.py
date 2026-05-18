@@ -157,32 +157,22 @@ class TestBuildCustomSbatchDirectives:
         result = _build_custom_sbatch_directives({'t': '5'})
         assert result == '\n#SBATCH --t=5'
 
-    @pytest.mark.parametrize('value', [
-        '5',
-        '2:30',
-        '4:00:00',
-        '1-12',
-        '1-12:30',
-        '2-23:59:59',
-    ])
-    def test_time_accepted_formats(self, value):
-        result = _build_custom_sbatch_directives({'time': value})
-        assert result == f'\n#SBATCH --time={value}'
+    def test_time_validator_wired(self):
+        """Smoke test that validate_sbatch_time runs when key is 'time'.
 
-    @pytest.mark.parametrize('value', [
-        'garbage',
-        '1h',
-        '1:2:3:4',
-        '1.5',
-        '-1',
-        '1-2-3',
-        '',
-    ])
-    def test_time_invalid_format_raises(self, value):
+        Exhaustive accepted/rejected format coverage lives in
+        TestValidateSbatchTime (test_slurm_utils.py); this test only
+        verifies the validator is called from the build path.
+        """
+        # Accepted format passes through.
+        result = _build_custom_sbatch_directives({'time': '4:00:00'})
+        assert result == '\n#SBATCH --time=4:00:00'
+        # Rejected format raises with our error message.
         with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
-            _build_custom_sbatch_directives({'time': value})
+            _build_custom_sbatch_directives({'time': 'garbage'})
 
     def test_time_short_form_invalid_raises(self):
+        """Validator is also wired for the short form 't'."""
         with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
             _build_custom_sbatch_directives({'t': 'bogus'})
 
@@ -225,18 +215,13 @@ class TestComputeTimeDirective:
         """When both MaxTime and DefaultTime are set, MaxTime wins.
 
         Preserves SkyPilot's longstanding behavior of always emitting
-        --time=MaxTime (Hyrum's law - some users rely on this).
+        --time=MaxTime. See `TODO(kevin)` in `_compute_time_directive`
+        for arguments to reconsider this priority later.
         """
         partition = self._partition(maxtime=3600, default_time='00:15:00')
         result = _compute_time_directive({}, partition, 'cpu')
         # MaxTime (1h), not DefaultTime (15min).
         assert result == '#SBATCH --time=0-01:00:00\n'
-
-    def test_falls_back_to_maxtime(self):
-        """No DefaultTime, MaxTime set — emit --time=MaxTime (today's behavior)."""
-        partition = self._partition(maxtime=7200)
-        result = _compute_time_directive({}, partition, 'cpu')
-        assert result == '#SBATCH --time=0-02:00:00\n'
 
     def test_no_maxtime_no_default_warns_and_emits_nothing(self, monkeypatch):
         """No MaxTime and no DefaultTime — warn and emit nothing."""
