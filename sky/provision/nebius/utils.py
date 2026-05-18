@@ -47,17 +47,15 @@ def retry(func):
 
 
 def get_project_by_region(region: str) -> str:
+    project_id = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=region, keys=('project_id',), default_value=None)
+    if project_id is not None:
+        return project_id
     service = nebius.iam().ProjectServiceClient(nebius.sdk())
     projects = nebius.sync_call(
         service.list(
             nebius.iam().ListProjectsRequest(parent_id=nebius.get_tenant_id()),
             timeout=nebius.READ_TIMEOUT))
-
-    #  Check is there project if in config
-    project_id = skypilot_config.get_effective_region_config(
-        cloud='nebius', region=region, keys=('project_id',), default_value=None)
-    if project_id is not None:
-        return project_id
     for project in projects.items:
         if project.status.region == region:
             return project.metadata.id
@@ -401,9 +399,12 @@ def delete_security_group(sg_id: str) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def delete_cluster(name: str, region: str) -> None:
+def delete_cluster(name: str,
+                   region: str,
+                   project_id: Optional[str] = None) -> None:
     """Delete a GPU cluster."""
-    project_id = get_project_by_region(region)
+    if project_id is None:
+        project_id = get_project_by_region(region)
     service = nebius.compute().GpuClusterServiceClient(nebius.sdk())
     try:
         cluster = nebius.sync_call(

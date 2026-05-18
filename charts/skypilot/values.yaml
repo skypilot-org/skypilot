@@ -69,6 +69,10 @@ apiService:
   # The default value is 60 seconds.
   terminationGracePeriodSeconds: 60
 
+  # Dev mode: do not start and probe the server automatically
+  devMode:
+    enabled: false
+
   # Liveness and readiness probe configuration for the API server container.
   # @schema type: [object, null]
   livenessProbe:

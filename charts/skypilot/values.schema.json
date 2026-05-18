@@ -38,6 +38,14 @@
                         "null"
                     ]
                 },
+                "devMode": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "enableServiceAccounts": {
                     "type": "boolean"
                 },

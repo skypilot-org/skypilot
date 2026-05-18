@@ -1,24 +1,18 @@
 .. _job-groups:
 
-Job Groups
-==========
-
-.. warning::
-
-  **This is an experimental feature.** The interface may change in future versions.
+Job Groups for RL
+=================
 
 Job Groups allow you to run multiple related tasks in parallel as a single managed unit.
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
-.. figure:: ../images/job-groups-dashboard.png
+.. figure:: ../images/job-groups-rl-architecture.svg
    :width: 100%
    :align: center
-   :alt: Job Groups in SkyPilot Dashboard
+   :alt: SkyPilot Job Group: five tasks running in parallel for RL post-training — rollout-server and ppo-trainer on GPU; data-server, reward-server, and replay-buffer on CPU. Samples flow rollout → reward → buffer → trainer; policy weights loop back to rollout every step.
 
-   A Job Group with 4 tasks (data-server, rollout-server, reward-server, ppo-trainer)
-   running in parallel on Kubernetes. Each task has different resource requirements
-   and can be monitored independently through the dashboard.
+   A **SkyPilot Job Group** for RL post-training. Five heterogeneous tasks run side by side: samples flow rollout → reward → buffer → trainer, and new policy weights loop back to the rollout server every step.
 
 Overview
 --------
@@ -203,7 +197,7 @@ Parallel train-eval with shared storage
 This example runs training and evaluation in parallel, sharing checkpoints via
 a Kubernetes PVC volume:
 
-.. figure:: ../images/job-groups-train-eval-architecture.png
+.. figure:: ../images/job-groups-train-eval-architecture.svg
    :width: 80%
    :align: center
    :alt: Parallel Train-Eval Architecture with Job Groups
@@ -238,7 +232,7 @@ See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates a distributed RL post-training architecture with 5 tasks:
+This example demonstrates a distributed RL post-training architecture with 5 tasks (see the hero diagram at the top of the page):
 
 .. code-block:: yaml
 
@@ -281,6 +275,14 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
         --data-server data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000 \
         --rollout-server rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001 \
         --reward-server reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
+
+.. figure:: ../images/job-groups-dashboard.png
+   :width: 100%
+   :align: center
+   :alt: Job Groups in SkyPilot Dashboard
+
+   The same Job Group running in production, viewed from the SkyPilot dashboard.
+   Each task has independent resources and can be monitored separately.
 
 See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in the SkyPilot repository.
 

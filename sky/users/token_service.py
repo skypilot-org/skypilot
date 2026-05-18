@@ -6,6 +6,7 @@ import hashlib
 import os
 import secrets
 import threading
+import time
 from typing import Any, Dict, Generator, Optional
 
 import filelock
@@ -126,13 +127,19 @@ class TokenService:
             'y': 'sa',  # Type: service account (shortened from 'type')
         }
 
-        # Add expiration if specified
+        # Add expiration if specified. Write both 'e' (legacy short name)
+        # and the RFC 7519 standard 'exp' so PyJWT's automatic
+        # ExpiredSignatureError path enforces it without our manual check.
+        # The manual 'e' check in verify_token stays for backward compat
+        # with tokens issued before this change; once those have expired
+        # the manual check can be deleted.
         expires_at = None
         if expires_in_days:
             exp_time = now + datetime.timedelta(days=expires_in_days)
-            payload['e'] = int(
-                exp_time.timestamp())  # Expiration (shortened from 'exp')
-            expires_at = int(exp_time.timestamp())
+            exp_ts = int(exp_time.timestamp())
+            payload['e'] = exp_ts
+            payload['exp'] = exp_ts
+            expires_at = exp_ts
 
         # Generate JWT
         jwt_token = jwt.encode(payload,
@@ -177,6 +184,17 @@ class TokenService:
             payload = jwt.decode(jwt_token,
                                  self.secret_key,
                                  algorithms=[JWT_ALGORITHM])
+
+            # Manually verify expiration for tokens issued before we
+            # started writing the standard 'exp' claim alongside 'e'.
+            # New tokens carry both, and PyJWT's jwt.decode above will
+            # have already raised ExpiredSignatureError on 'exp'. This
+            # branch only matters for legacy tokens with 'e' only; it
+            # can be removed once those have all expired.
+            exp = payload.get('e')
+            if exp is not None and exp < int(time.time()):
+                logger.warning('Token has expired')
+                return None
 
             # Manually verify issuer using our shortened field name
             token_issuer = payload.get('i')

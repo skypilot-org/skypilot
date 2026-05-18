@@ -280,6 +280,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
+   For Frontier AI <../frontier-ai>
 
 .. toctree::
    :hidden:
@@ -303,7 +304,7 @@ Follow updates:
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
    Batch Inference <../examples/batch/index>
-   Job Groups <../examples/job-groups>
+   Job Groups for RL <../examples/job-groups>
 
 .. toctree::
    :hidden:

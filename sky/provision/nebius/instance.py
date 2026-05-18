@@ -22,8 +22,10 @@ logger = sky_logging.init_logger(__name__)
 def _filter_instances(region: str,
                       cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
-                      head_only: bool = False) -> Dict[str, Any]:
-    project_id = utils.get_project_by_region(region)
+                      head_only: bool = False,
+                      project_id: Optional[str] = None) -> Dict[str, Any]:
+    if project_id is None:
+        project_id = utils.get_project_by_region(region)
     instances = utils.list_instances(project_id)
     filtered_instances = {}
     for instance_id, instance in instances.items():
@@ -49,11 +51,14 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def _wait_until_no_pending(region: str, cluster_name_on_cloud: str) -> None:
+def _wait_until_no_pending(region: str, cluster_name_on_cloud: str,
+                           project_id: str) -> None:
     retry_count = 0
     while retry_count < MAX_RETRIES_TO_LAUNCH:
-        instances = _filter_instances(region, cluster_name_on_cloud,
-                                      PENDING_STATUS)
+        instances = _filter_instances(region,
+                                      cluster_name_on_cloud,
+                                      PENDING_STATUS,
+                                      project_id=project_id)
         if not instances:
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready '
@@ -72,9 +77,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     del cluster_name  # unused
-    _wait_until_no_pending(region, cluster_name_on_cloud)
-    running_instances = _filter_instances(region, cluster_name_on_cloud,
-                                          ['RUNNING'])
+    project_id = config.provider_config.get('project_id')
+    if project_id is None:
+        project_id = utils.get_project_by_region(region)
+    _wait_until_no_pending(region, cluster_name_on_cloud, project_id=project_id)
+    running_instances = _filter_instances(region,
+                                          cluster_name_on_cloud, ['RUNNING'],
+                                          project_id=project_id)
     head_instance_id = _get_head_instance_id(running_instances)
     to_start_count = config.count - len(running_instances)
     if to_start_count < 0:
@@ -97,8 +106,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     created_instance_ids = []
     resumed_instance_ids = []
-    stopped_instances = _filter_instances(region, cluster_name_on_cloud,
-                                          ['STOPPED'])
+    stopped_instances = _filter_instances(region,
+                                          cluster_name_on_cloud, ['STOPPED'],
+                                          project_id=project_id)
     if config.resume_stopped_nodes and len(stopped_instances) > to_start_count:
 
         raise RuntimeError(
@@ -189,18 +199,23 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    _wait_until_no_pending(region, cluster_name_on_cloud)
+    project_id = utils.get_project_by_region(region)
+    _wait_until_no_pending(region, cluster_name_on_cloud, project_id=project_id)
     if state is not None:
         if state == status_lib.ClusterStatus.UP:
-            stopped_instances = _filter_instances(region, cluster_name_on_cloud,
-                                                  ['STOPPED'])
+            stopped_instances = _filter_instances(region,
+                                                  cluster_name_on_cloud,
+                                                  ['STOPPED'],
+                                                  project_id=project_id)
             if stopped_instances:
                 raise RuntimeError(
                     f'Cluster {cluster_name_on_cloud} is in UP state, but '
                     f'{len(stopped_instances)} instances are stopped.')
         if state == status_lib.ClusterStatus.STOPPED:
-            running_instances = _filter_instances(region, cluster_name_on_cloud,
-                                                  ['RUNNING'])
+            running_instances = _filter_instances(region,
+                                                  cluster_name_on_cloud,
+                                                  ['RUNNING'],
+                                                  project_id=project_id)
 
             if running_instances:
                 raise RuntimeError(
@@ -214,8 +229,10 @@ def stop_instances(
     worker_only: bool = False,
 ) -> None:
     assert provider_config is not None
-    exist_instances = _filter_instances(provider_config['region'],
-                                        cluster_name_on_cloud, ['RUNNING'])
+    exist_instances = _filter_instances(
+        provider_config['region'],
+        cluster_name_on_cloud, ['RUNNING'],
+        project_id=provider_config.get('project_id'))
     for instance_id, instance in exist_instances.items():
         if worker_only and instance['name'].endswith('-head'):
             continue
@@ -230,9 +247,13 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
 
     assert provider_config is not None
+    project_id = provider_config.get('project_id')
+    if project_id is None:
+        project_id = utils.get_project_by_region(provider_config['region'])
     instances = _filter_instances(provider_config['region'],
                                   cluster_name_on_cloud,
-                                  status_filters=None)
+                                  status_filters=None,
+                                  project_id=project_id)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -246,7 +267,9 @@ def terminate_instances(
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
     if not worker_only:
-        utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
+        utils.delete_cluster(cluster_name_on_cloud,
+                             provider_config['region'],
+                             project_id=project_id)
 
     # Delete the cluster's SkyPilot-managed security group. Only when fully
     # tearing down (worker_only=False) — partial scale-downs leave the SG
@@ -264,7 +287,6 @@ def terminate_instances(
         sg_block = provider_config.get('security_group') or {}
         managed = bool(sg_block.get('ManagedBySkyPilot', True))
         if managed:
-            project_id = utils.get_project_by_region(provider_config['region'])
             sg_name = sg_block.get(
                 'GroupName',
                 nebius_constants.SECURITY_GROUP_TEMPLATE.format(
@@ -278,9 +300,13 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    _wait_until_no_pending(region, cluster_name_on_cloud)
-    running_instances = _filter_instances(region, cluster_name_on_cloud,
-                                          ['RUNNING'])
+    project_id = (provider_config or {}).get('project_id')
+    if project_id is None:
+        project_id = utils.get_project_by_region(region)
+    _wait_until_no_pending(region, cluster_name_on_cloud, project_id=project_id)
+    running_instances = _filter_instances(region,
+                                          cluster_name_on_cloud, ['RUNNING'],
+                                          project_id=project_id)
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
@@ -315,7 +341,9 @@ def query_instances(
     del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(provider_config['region'],
-                                  cluster_name_on_cloud, None)
+                                  cluster_name_on_cloud,
+                                  None,
+                                  project_id=provider_config.get('project_id'))
 
     status_map = {
         'STARTING': status_lib.ClusterStatus.INIT,
@@ -353,7 +381,9 @@ def open_ports(
             f'a user-managed (BYO) security group is configured. Add the '
             f'ingress rules for {ports} to the security group manually.')
         return
-    project_id = utils.get_project_by_region(provider_config['region'])
+    project_id = provider_config.get('project_id')
+    if project_id is None:
+        project_id = utils.get_project_by_region(provider_config['region'])
     # Read the SG name from provider_config (set by bootstrap_instances).
     # Fall back to the template for legacy clusters whose Ray YAML
     # predates this PR — they may not have the security_group block.

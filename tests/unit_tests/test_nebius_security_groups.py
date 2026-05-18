@@ -242,6 +242,8 @@ def test_terminate_instances_skips_sg_delete_for_worker_only():
     with mock.patch.object(nebius_instance, '_filter_instances',
                            return_value={}), \
          mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
          mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
         nebius_instance.terminate_instances(
@@ -392,6 +394,8 @@ def test_terminate_skips_sg_delete_when_byo_bool_false():
     with mock.patch.object(nebius_instance, '_filter_instances',
                            return_value={}), \
          mock.patch.object(nebius_utils, 'delete_cluster'), \
+         mock.patch.object(nebius_utils, 'get_project_by_region',
+                           return_value='proj-abc'), \
          mock.patch.object(nebius_utils, 'get_security_group_by_name') as mock_lookup, \
          mock.patch.object(nebius_utils, 'delete_security_group') as mock_del:
         nebius_instance.terminate_instances(
