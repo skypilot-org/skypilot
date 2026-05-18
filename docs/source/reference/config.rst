@@ -72,6 +72,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`all_includes_in_cluster <config-yaml-kubernetes-all-includes-in-cluster>`: true
     :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
       names:
         - gpu-node-01
@@ -1610,6 +1611,35 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+
+.. _config-yaml-kubernetes-all-includes-in-cluster:
+
+``kubernetes.all_includes_in_cluster``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether ``allowed_contexts: all`` (or the ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS``
+env var) should include the API server's own in-cluster context (optional, default ``true``).
+
+When the SkyPilot API server runs inside Kubernetes, the pod's own host cluster is
+discoverable as an ``in-cluster`` context. By default it is included in the
+``allowed_contexts: all`` expansion (backward compatible). Set this to ``false`` to
+exclude it — useful on deployments where the API server's host cluster
+should not be a user-facing compute target. Explicitly listing ``in-cluster`` in
+``allowed_contexts`` always keeps it, regardless of this flag.
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts: all
+    all_includes_in_cluster: false
+
+You can also set the ``SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER``
+environment variable on the API server pod. The env var takes precedence over
+the config field — useful for operators of the deployments to enforce a
+value that admins editing SkyPilot config cannot override.
+
+Resolution order (highest first): env var, workspace config, global config,
+default ``true``.
 
 .. _config-yaml-kubernetes-allowed-nodes:
 
