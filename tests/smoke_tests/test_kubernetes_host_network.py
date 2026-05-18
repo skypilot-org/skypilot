@@ -14,8 +14,11 @@ so a single cluster's pods never share a node -- which both removes
 the same-node raylet-identity collapse and lets a hostNetwork
 cluster span multiple K8s nodes. ``coexistence`` covers two
 *different* clusters sharing a node (still allowed -- the
-anti-affinity is per-cluster); ``multi_node`` covers one cluster
-spread across nodes.
+anti-affinity is per-cluster); ``multi_node`` asserts the
+fail-loud guarantee: on a single-node K8s cluster a 2-node
+hostNetwork cluster must fail to schedule (the required
+anti-affinity refuses to pack the worker onto the head's node)
+rather than silently racing on the shared host.
 """
 import uuid
 
@@ -131,39 +134,37 @@ def test_kubernetes_host_network_coexistence():
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_host_network_multi_node():
-    """A 2-node hostNetwork SkyPilot cluster spread across two K8s nodes.
+    """A 2-node hostNetwork cluster correctly *fails* on single-node K8s.
 
-    With mode b (the required, per-cluster ``podAntiAffinity`` SkyPilot
-    injects for every hostNetwork pod) the head and worker of one
-    cluster *cannot* land on the same K8s node, so this exercises
-    cross-K8s-node hostNetwork end to end with no anchor / podAffinity
-    needed — the injected rule does the spreading.
+    This asserts mode b's fail-loud guarantee on the infra the smoke
+    suite actually runs against (single-node K8s clusters). The required,
+    per-cluster ``podAntiAffinity`` SkyPilot injects for every hostNetwork
+    pod forbids the head and worker of one cluster from sharing a node;
+    with only one node available the worker cannot be scheduled, so the
+    launch must fail with the scheduler's pod-anti-affinity error rather
+    than silently packing both pods onto one host (which is exactly the
+    raylet-collapse / port-collision race mode b exists to prevent).
 
-    Requires the test K8s cluster to have >=2 schedulable nodes (that
-    is the scenario under test; on a single-node cluster the required
-    anti-affinity correctly leaves the worker Pending and the launch
-    fails loudly rather than silently racing on the shared host).
+    On a >=2-node K8s cluster this same config would instead succeed and
+    spread one pod per node (the cross-node capability mode b unlocks);
+    that path is not exercised here because the smoke clusters are
+    single-node.
 
     Verifies:
 
-    1. The 2-node launch succeeds — under the required per-cluster
-       anti-affinity, success means the two pods are on *different* K8s
-       nodes (a same-node placement would leave the worker Pending and
-       fail this step).
-    2. Ray works across nodes: ``sky exec`` runs on the cluster, which
-       implies the worker (on a different K8s node) joined the head's
-       Ray cluster over the head's routable host IP + probed GCS port.
-    3. SSH to the head works (per-pod sshd port rebind + SkyPilot SSH
-       config writer using the probed port).
-    4. SSH to the worker works — its separately probed sshd port, on a
-       different K8s node from the head.
+    1. ``sky launch --num-nodes 2`` returns non-zero (it must not
+       succeed by co-locating the pods).
+    2. The failure is specifically the pod-anti-affinity scheduling
+       rejection (SkyPilot surfaces the verbatim kube-scheduler
+       ``FailedScheduling`` message, which contains "anti-affinity"),
+       not some unrelated error.
     """
     name = smoke_tests_utils.get_cluster_name()
     cfg = f'/tmp/sky-hostnet-multinode-{uuid.uuid4().hex[:12]}.yaml'
 
-    # hostNetwork only — no podAffinity / anchor. SkyPilot's injected
-    # per-cluster podAntiAffinity (mode b) spreads the head and worker
-    # onto separate K8s nodes by itself.
+    # hostNetwork only. SkyPilot injects the per-cluster podAntiAffinity
+    # (mode b); on a single-node cluster that leaves the 2nd pod
+    # unschedulable.
     write_cfg = (f'cat > {cfg} <<EOF\n'
                  f'kubernetes:\n'
                  f'  pod_config:\n'
@@ -171,38 +172,36 @@ def test_kubernetes_host_network_multi_node():
                  f'      hostNetwork: true\n'
                  f'EOF')
 
+    # One self-contained command: capture the launch, assert it failed,
+    # and assert it failed *for the anti-affinity reason* (so an
+    # unrelated failure — image pull, quota — doesn't spuriously pass).
+    # grep -iE "anti-?affinity" matches the kube-scheduler phrasings
+    # ("...didn't match pod anti-affinity rules", "antiaffinity").
+    expect_fail = (
+        f'set +e; '
+        f'OUT=$(sky launch -y -c {name} --infra kubernetes '
+        f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2 2>&1); '
+        f'RC=$?; set -e; '
+        f'echo "$OUT"; '
+        f'if [ $RC -eq 0 ]; then '
+        f'echo "FAIL: 2-node hostNetwork launch unexpectedly SUCCEEDED on '
+        f'single-node K8s; mode-b anti-affinity should have blocked it"; '
+        f'exit 1; fi; '
+        f'echo "$OUT" | grep -qiE "anti-?affinity" || {{ '
+        f'echo "FAIL: launch failed but NOT via the pod anti-affinity '
+        f'scheduling rule (unexpected failure reason)"; exit 1; }}; '
+        f'echo "OK: mode-b anti-affinity correctly rejected the 2-node '
+        f'hostNetwork cluster on single-node K8s"')
+
     test = smoke_tests_utils.Test(
         'kubernetes_host_network_multi_node',
         [
             write_cfg,
-
-            # 1. 2-node launch. Under the required per-cluster
-            # anti-affinity a successful launch *is* the proof the two
-            # pods are on different K8s nodes (a same-node placement
-            # would leave the worker Pending and fail this step). 1 CPU
-            # / 2 GB per pod keeps Ray's first job submission off the
-            # FAILED_DRIVER edge.
-            f'sky launch -y -c {name} --infra kubernetes '
-            f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2',
-
-            # 2. Ray must work across the two nodes. `sky exec` runs the
-            # task through Ray on the head, which means the worker (on a
-            # different K8s node) joined the head over its routable host
-            # IP + probed GCS port.
-            f'sky exec {name} -- echo "job_ok"',
-            f'sky logs {name} 1 --status',
-
-            # 3. SSH to head — per-pod sshd port rebind + SkyPilot SSH
-            # config using the probed port.
-            f's=$(ssh -o StrictHostKeyChecking=no {name} '
-            f'"echo ssh_head_ok" 2>&1) && echo "$s" | grep ssh_head_ok',
-
-            # 4. SSH to the worker — its separately probed sshd port, on
-            # a different K8s node from the head.
-            f's=$(ssh -o StrictHostKeyChecking=no {name}-worker1 '
-            f'"echo ssh_worker_ok" 2>&1) && echo "$s" | grep ssh_worker_ok',
+            expect_fail,
         ],
+        # Best-effort cleanup: a failed launch still leaves a cluster
+        # record (and the head pod that did schedule).
         teardown=f'sky down -y {name}; rm -f {cfg}',
-        timeout=5 * 60,
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
