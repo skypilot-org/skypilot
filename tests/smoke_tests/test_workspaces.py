@@ -329,3 +329,122 @@ def test_workspace_multiple_aws_profiles():
         os.unlink(server_config_path)
         if os.path.exists(temp_credentials_path):
             os.unlink(temp_credentials_path)
+
+
+# ---------- Test per-workspace Kubernetes remote_identity ----------
+@pytest.mark.no_remote_server
+@pytest.mark.kubernetes
+def test_kubernetes_workspace_remote_identity():
+    """Per-workspace `kubernetes.remote_identity` selects the pod's
+    ServiceAccount.
+
+    Two workspaces, each declaring a different `remote_identity`, must end up
+    with pods whose `.spec.serviceAccountName` matches the workspace-scoped
+    SA — proving per-team identity isolation works (the foundation for the
+    OIDC passwordless-cloud-auth story: GKE Workload Identity / IRSA / AKS
+    Workload Identity).
+
+    Regression for https://github.com/skypilot-org/skypilot/pull/9635 —
+    before that fix the schema rejected the workspace field, and even if it
+    didn't, the pod always ran as the cluster-wide default SA.
+    """
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'This test restarts the API server, which is not supported when '
+            'the API server endpoint is set in the environment file.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    ws1 = 'sky-test-ws-a'
+    ws2 = 'sky-test-ws-b'
+    # SAs prefixed with the unique test name so concurrent runs don't collide.
+    sa1 = f'{name}-sa-a'
+    sa2 = f'{name}-sa-b'
+
+    server_config_content = textwrap.dedent(f"""\
+        workspaces:
+            {ws1}:
+                kubernetes:
+                    remote_identity: {sa1}
+            {ws2}:
+                kubernetes:
+                    remote_identity: {sa2}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_ws_ri_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    # Create the two ServiceAccounts and bind them to the same Cluster/Role as
+    # the default `skypilot-service-account` so pods can actually run. These
+    # roles are created by `sky local up` and by the prototype dev clusters.
+    def create_sa_cmd(sa: str) -> str:
+        return (f'kubectl create sa {sa} -n default && '
+                f'kubectl create clusterrolebinding {sa}-cluster-binding '
+                f'--clusterrole=skypilot-service-account-cluster-role '
+                f'--serviceaccount=default:{sa} && '
+                f'kubectl create rolebinding {sa}-default-binding '
+                f'--role=skypilot-service-account-role '
+                f'--serviceaccount=default:{sa} -n default')
+
+    def cleanup_sa_cmd(sa: str) -> str:
+        return (f'kubectl delete clusterrolebinding {sa}-cluster-binding '
+                f'--ignore-not-found; '
+                f'kubectl delete rolebinding {sa}-default-binding -n default '
+                f'--ignore-not-found; '
+                f'kubectl delete sa {sa} -n default --ignore-not-found')
+
+    # Grep the pod by cluster-name annotation, then read serviceAccountName.
+    # Mirrors the pattern used elsewhere in tests/smoke_tests/test_cluster_job.py.
+    def assert_pod_sa_cmd(cluster_name: str, expected_sa: str) -> str:
+        return (
+            f"pod=$(kubectl get pods -o "
+            f"custom-columns=NAME:.metadata.name,"
+            f"ANN:.metadata.annotations.skypilot-cluster-name "
+            f"--no-headers | awk -v n=\"{cluster_name}\" "
+            f"'$NF==n{{print $1}}' | sed -n 1p) && "
+            f"sa=$(kubectl get pod $pod -o "
+            f"jsonpath='{{.spec.serviceAccountName}}') && "
+            f"echo \"{cluster_name} pod SA: $sa (expected {expected_sa})\" && "
+            f"[ \"$sa\" = \"{expected_sa}\" ]")
+
+    test = smoke_tests_utils.Test(
+        'test_kubernetes_workspace_remote_identity',
+        [
+            create_sa_cmd(sa1),
+            create_sa_cmd(sa2),
+            # Apply the workspace config and restart the API server.
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
+            f'{smoke_tests_utils.SKY_API_RESTART}',
+            # `sky check` exercises the schema; if remote_identity is rejected
+            # under workspaces.<n>.kubernetes the test fails here before any
+            # launch.
+            'sky check kubernetes 2>&1 | tee /tmp/sky_check_out.log; '
+            'grep -q "Found unsupported field" /tmp/sky_check_out.log && '
+            'exit 1 || true',
+            # Two launches, one per workspace.
+            f'sky launch -y -c {name}-a --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={ws1} echo from-a',
+            f'sky launch -y -c {name}-b --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={ws2} echo from-b',
+            # Each pod must run as the workspace-scoped SA, not the global
+            # default.
+            assert_pod_sa_cmd(f'{name}-a', sa1),
+            assert_pod_sa_cmd(f'{name}-b', sa2),
+        ],
+        teardown=(f'sky down -y --config active_workspace={ws1} {name}-a || '
+                  f'sky down -y --purge {name}-a || true; '
+                  f'sky down -y --config active_workspace={ws2} {name}-b || '
+                  f'sky down -y --purge {name}-b || true; '
+                  f'{cleanup_sa_cmd(sa1)}; '
+                  f'{cleanup_sa_cmd(sa2)}; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=20 * 60,
+    )
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)
