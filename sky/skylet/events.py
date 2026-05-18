@@ -132,6 +132,11 @@ class ManagedJobEvent(SkyletEvent):
 
         logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
+        # Reap orphan rows that were created but never had
+        # `scheduler_set_waiting` run for them — e.g. the API server
+        # worker died between `set_pending` and the scheduler script.
+        # No-op outside consolidation mode (see the function docstring).
+        managed_job_utils.prune_stuck_inactive_jobs()
         scheduler.maybe_start_controllers()
 
 

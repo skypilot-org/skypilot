@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 50  # bundle credentials with launch response
+API_VERSION = 51  # add FAILED_PRESUBMIT managed-job status
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -49,6 +49,12 @@ MIN_BATCH_API_VERSION = 49
 # launch response. Lets the CLI skip the follow-up /status round-trip that
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
+
+# Minimum API version that understands the FAILED_PRESUBMIT managed-job
+# status. Clients older than this would raise on enum parse — the server
+# converts FAILED_PRESUBMIT to FAILED_CONTROLLER in responses for them
+# (lossy but compatible). See `_downgrade_managed_job_status_for_client`.
+MIN_FAILED_PRESUBMIT_STATUS_API_VERSION = 51
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3

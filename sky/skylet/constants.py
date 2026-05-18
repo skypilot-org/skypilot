@@ -149,7 +149,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '37'  # log_lib.tail_logs supports tail_offset.
+SKYLET_VERSION = '38'  # set_pending stamps spot.submitted_at; orphan prune.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.

@@ -448,6 +448,13 @@ class ManagedJobStatus(enum.Enum):
     # FAILED_CONTROLLER: The job is finished with failure because of unexpected
     # error in the controller process.
     FAILED_CONTROLLER = 'FAILED_CONTROLLER'
+    # FAILED_PRESUBMIT: The managed-job row was created but the scheduler
+    # never picked it up — typically because the API server worker
+    # initiating the launch died after `set_job_info_without_job_id` /
+    # `set_pending` committed but before `scheduler_set_waiting` ran. No
+    # controller process was ever spawned for this job. Detected and
+    # transitioned by `prune_stuck_inactive_jobs` (sky/jobs/utils.py).
+    FAILED_PRESUBMIT = 'FAILED_PRESUBMIT'
 
     def is_terminal(self) -> bool:
         return self in self.terminal_statuses()
@@ -472,6 +479,7 @@ class ManagedJobStatus(enum.Enum):
             cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER,
+            cls.FAILED_PRESUBMIT,
             cls.CANCELLED,
         ]
 
@@ -479,7 +487,7 @@ class ManagedJobStatus(enum.Enum):
     def failure_statuses(cls) -> List['ManagedJobStatus']:
         return [
             cls.FAILED, cls.FAILED_SETUP, cls.FAILED_PRECHECKS,
-            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
+            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER, cls.FAILED_PRESUBMIT
         ]
 
     @classmethod
@@ -520,6 +528,8 @@ class ManagedJobStatus(enum.Enum):
                 cls.FAILED_NO_RESOURCE,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN:
                 cls.WINDING_DOWN,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRESUBMIT:
+                cls.FAILED_PRESUBMIT,
         }
 
         if protobuf_value not in protobuf_to_enum:
@@ -559,6 +569,8 @@ class ManagedJobStatus(enum.Enum):
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
             ManagedJobStatus.WINDING_DOWN:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN,
+            ManagedJobStatus.FAILED_PRESUBMIT:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRESUBMIT,
         }
 
         if self not in enum_to_protobuf:
@@ -579,6 +591,7 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.FAILED_SETUP: colorama.Fore.RED,
     ManagedJobStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    ManagedJobStatus.FAILED_PRESUBMIT: colorama.Fore.RED,
     ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
     ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
     # TODO(cooperc): backwards compatibility, remove this in v0.12.0
@@ -769,7 +782,19 @@ def set_pending(
     metadata: str,
     is_primary_in_job_group: Optional[bool] = None,
 ):
-    """Set the task to pending state."""
+    """Set the task to pending state.
+
+    Note: `submitted_at` is stamped to ``time.time()`` here so that the
+    orphan-prune (`sky/jobs/utils.py:prune_stuck_inactive_jobs`) can
+    age a row that gets stuck in PENDING+INACTIVE. For rows that
+    successfully transition past PENDING, `set_starting_async`
+    overwrites `submitted_at` with the controller-start timestamp —
+    preserving the prior semantics for running/completed jobs. So the
+    column's value is:
+      - PENDING rows: the time `set_pending` was called.
+      - STARTING/RUNNING/etc.: the time the controller began running
+        (unchanged from prior behaviour).
+    """
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
@@ -783,6 +808,7 @@ def set_pending(
                 resources=resources_str,
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
+                submitted_at=time.time(),
                 is_primary_in_job_group=is_primary_in_job_group,
             ))
         session.commit()
@@ -2129,6 +2155,124 @@ async def scheduler_set_alive_async(job_id: int) -> None:
         changes = result.rowcount
         await session.commit()
         assert changes == 1, (job_id, changes)
+
+
+def find_stuck_inactive_jobs(cutoff_ts: float) -> List[int]:
+    """Return job_ids matching the orphan signature.
+
+    The orphan signature is the precise state left behind when the API
+    server worker dies after `set_job_info_without_job_id` /
+    `set_pending` but before `scheduler_set_waiting` has a chance to
+    run: schedule_state=INACTIVE, no controller_pid, no dag_yaml_content,
+    spot rows still PENDING (no user cancel), and at least one spot
+    row's submitted_at is older than `cutoff_ts`.
+
+    `submitted_at` for PENDING rows is the wall-clock time `set_pending`
+    was called; for STARTING+ rows it's the controller-start time
+    (overwritten by `set_starting_async`). Since we filter on rows that
+    are still PENDING + still INACTIVE, only the former applies here.
+
+    Note: rows that have a `job_info` entry but no `spot` row are *not*
+    pruneable by this query (we can't age them). That edge case is the
+    micro-window between `set_job_info_without_job_id` and the first
+    `set_pending` commit — sub-millisecond. Such rows are invisible to
+    `sky jobs queue` (which joins through spot) and will simply not be
+    pruned. Acceptable in practice.
+
+    Caller (prune_stuck_inactive_jobs) must still re-check the signature
+    inside an atomic UPDATE before transitioning the row — see
+    `fail_if_still_stuck_inactive`.
+
+    Args:
+        cutoff_ts: spot rows with submitted_at >= this timestamp are
+            excluded from candidates.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # A row counts as a candidate iff:
+        #   - at least one PENDING spot row exists with submitted_at
+        #     < cutoff_ts
+        #   - no spot row for the job has status != PENDING (preserves
+        #     user-cancelled jobs)
+        # Both conditions use correlated EXISTS / NOT EXISTS subqueries
+        # rather than a materialised `IN (subquery)`. EXISTS lets the
+        # planner short-circuit via the spot_job_id index, and is
+        # NULL-safe (a `NOT IN` over a column that could contain NULLs
+        # returns the empty set under SQL three-valued logic).
+        old_enough_exists = sqlalchemy.exists().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.submitted_at.is_not(None),
+                spot_table.c.submitted_at < cutoff_ts,
+            ))
+        any_non_pending_exists = sqlalchemy.exists().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                spot_table.c.status != ManagedJobStatus.PENDING.value,
+            ))
+        rows = session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.INACTIVE.value,
+                    job_info_table.c.controller_pid.is_(None),
+                    job_info_table.c.dag_yaml_content.is_(None),
+                    old_enough_exists,
+                    ~any_non_pending_exists,
+                ))).fetchall()
+        return [r[0] for r in rows]
+
+
+def fail_if_still_stuck_inactive(job_id: int, failure_reason: str,
+                                 end_time: float) -> bool:
+    """Atomically mark an orphan as FAILED_PRESUBMIT + DONE.
+
+    Both UPDATEs (job_info -> schedule_state=DONE; spot -> status=
+    FAILED_PRESUBMIT) are guarded by the orphan-signature precondition
+    on job_info, so a legitimate launch that just committed
+    `scheduler_set_waiting` between candidate selection and this UPDATE
+    will leave us a no-op rather than bulldozing real state.
+
+    The two UPDATEs run in a single transaction. The spot UPDATE filters
+    on `spot.status = PENDING AND end_at IS NULL` so a user
+    `sky jobs cancel` that landed concurrently is preserved.
+
+    Returns True iff the row was transitioned.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # 1) Flip schedule_state INACTIVE -> DONE, guarded on the full
+        #    orphan signature. If the row has moved on, this UPDATE
+        #    affects 0 rows and we abort.
+        ji_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.INACTIVE.value,
+                job_info_table.c.controller_pid.is_(None),
+                job_info_table.c.dag_yaml_content.is_(None),
+            )).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.DONE.value,
+            })
+        if ji_count == 0:
+            session.rollback()
+            return False
+        # 2) Flip the spot rows to FAILED_PRESUBMIT, preserving any
+        #    cancel that landed in the same window.
+        session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.status: ManagedJobStatus.FAILED_PRESUBMIT.value,
+                spot_table.c.failure_reason: failure_reason,
+                spot_table.c.end_at: end_time,
+            })
+        session.commit()
+        return True
 
 
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:

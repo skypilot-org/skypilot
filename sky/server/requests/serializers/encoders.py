@@ -12,6 +12,7 @@ from sky import models
 from sky.catalog import common
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
+from sky.server import versions
 from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
@@ -151,10 +152,32 @@ def encode_status_kubernetes(
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
+def _downgrade_managed_job_status_for_client(status_value: str) -> str:
+    """Translate `FAILED_PRESUBMIT` to a value old clients understand.
+
+    `FAILED_PRESUBMIT` was added at server API_VERSION 51. Older clients
+    raise `ValueError` parsing the unknown enum string and bubble that up
+    to user-visible commands (`sky jobs queue`, dashboards, etc.). Mask
+    it as `FAILED_CONTROLLER` — the closest pre-existing terminal-failure
+    status — for clients that don't know the new value yet. This is
+    lossy (the user loses the distinction between "submission was
+    interrupted before the controller ran" and "controller crashed
+    later"), but a clean no-op upgrade story trumps the labelling
+    fidelity for the brief window before clients catch up.
+    """
+    client_version = versions.get_remote_api_version()
+    if (client_version is not None and client_version <
+            server_constants.MIN_FAILED_PRESUBMIT_STATUS_API_VERSION):
+        if status_value == 'FAILED_PRESUBMIT':
+            return 'FAILED_CONTROLLER'
+    return status_value
+
+
 @register_encoder('jobs.queue')
 def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
-        job['status'] = getattr(job['status'], 'value', job['status'])
+        status_value = getattr(job['status'], 'value', job['status'])
+        job['status'] = _downgrade_managed_job_status_for_client(status_value)
     return jobs
 
 
@@ -176,14 +199,22 @@ def encode_jobs_queue_v2(
         total = None
     jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
     for job in jobs_dict:
-        job['status'] = job['status'].value
+        job['status'] = _downgrade_managed_job_status_for_client(
+            job['status'].value)
     if total is None:
         return jobs_dict
+    # Status-counts also include the raw status string — rewrite for old
+    # clients so a `FAILED_PRESUBMIT` bucket gets merged into
+    # `FAILED_CONTROLLER`.
+    downgraded_counts: Dict[str, int] = {}
+    for status_value, count in status_counts.items():
+        key = _downgrade_managed_job_status_for_client(status_value)
+        downgraded_counts[key] = downgraded_counts.get(key, 0) + count
     return {
         'jobs': jobs_dict,
         'total': total,
         'total_no_filter': total_no_filter,
-        'status_counts': status_counts
+        'status_counts': downgraded_counts,
     }
 
 

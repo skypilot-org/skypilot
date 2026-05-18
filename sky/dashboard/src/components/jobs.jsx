@@ -110,6 +110,7 @@ const STATUS_PRIORITY = {
   FAILED_NO_RESOURCE: 10,
   FAILED: 11,
   FAILED_CONTROLLER: 12,
+  FAILED_PRESUBMIT: 13,
 };
 
 // Helper function to aggregate status for a job group

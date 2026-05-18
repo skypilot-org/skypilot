@@ -342,7 +342,11 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # `submitted_at` is now stamped by `set_pending` (so the
+        # orphan-prune can age stuck PENDING rows); see
+        # `sky/jobs/state.py::set_pending`.
+        assert target_job.HasField('submitted_at')
+        assert target_job.submitted_at > 0
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -404,7 +408,11 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # `submitted_at` is now stamped by `set_pending` (so the
+        # orphan-prune can age stuck PENDING rows); see
+        # `sky/jobs/state.py::set_pending`.
+        assert target_job.HasField('submitted_at')
+        assert target_job.submitted_at > 0
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -454,9 +462,12 @@ class TestGetJobTable:
 
         job_data = {job.job_id: job for job in response.jobs}
 
-        # STARTING, RUNNING, SUCCEEDED jobs should have submitted_at > 0
-        # PENDING job should have submitted_at = 0.0
-        assert job_data[self.job_ids['job_id1']].submitted_at == 0.0
+        # All jobs (including PENDING) should now have submitted_at > 0:
+        # `set_pending` stamps the column at INSERT so the orphan-prune
+        # (sky/jobs/utils.py::prune_stuck_inactive_jobs) can age stuck
+        # PENDING rows. `set_starting_async` still overwrites it with
+        # the controller-start time for STARTING+ rows.
+        assert job_data[self.job_ids['job_id1']].submitted_at > 0
         assert job_data[self.job_ids['job_id2']].submitted_at > 0
         assert job_data[self.job_ids['job_id3']].submitted_at > 0
         assert job_data[self.job_ids['job_id4']].submitted_at > 0

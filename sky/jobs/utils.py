@@ -387,6 +387,83 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
+# Threshold for the orphan prune.
+#
+# The window we are sizing against is "row created in PENDING" →
+# "`scheduler_set_waiting` commits". In *both* modes this is normally
+# sub-minute:
+#   - Consolidation mode: sub-second to seconds. The script runs locally
+#     in the same process as the API server worker.
+#   - Non-consolidation mode: seconds. The controller cluster has
+#     already been provisioned by `_ensure_controller_up` *before*
+#     `set_pending` runs — cluster bring-up is NOT in this window. What
+#     remains is the gRPC + yaml staging on the API server, the ray-job
+#     submission to the already-up controller, and the script running on
+#     the controller's skylet — all measured in seconds on a healthy
+#     deployment.
+# The pathological case is a controller pod mid-rollout (k8s eviction +
+# reschedule), up to a few minutes while the new pod re-picks up ray
+# jobs. 10 minutes is comfortable headroom; the 5-minute event cadence
+# means a stuck row is reaped within `threshold + 5min`.
+STUCK_INACTIVE_PRUNE_THRESHOLD_SECONDS = 10 * 60
+
+
+def prune_stuck_inactive_jobs() -> None:
+    """Mark long-stuck-INACTIVE orphan jobs as FAILED_PRESUBMIT + DONE.
+
+    A managed-job row whose creator died between
+    `set_job_info_without_job_id` / `set_pending` and
+    `scheduler_set_waiting` is stuck in the orphan signature forever.
+    Both recovery paths (`ha_recovery_for_consolidation_mode` and
+    `update_managed_jobs_statuses`) deliberately skip INACTIVE rows, so
+    without this prune the row sits as PENDING in `sky jobs queue`
+    indefinitely.
+
+    Runs in both consolidation and non-consolidation modes — the orphan
+    signature is identical; only the typical healthy-launch dwell-time
+    differs (sub-second vs minutes). The threshold is sized to be
+    safe for both — see STUCK_INACTIVE_PRUNE_THRESHOLD_SECONDS.
+
+    The orphan signature requires *all* of:
+        - job_info.schedule_state = INACTIVE
+        - job_info.controller_pid IS NULL
+        - job_info.dag_yaml_content IS NULL  (scheduler_set_waiting
+          never ran for this row — it is the sole writer of this column)
+        - spot.submitted_at < now() - threshold (for at least one task)
+        - No spot row for this job is in a non-PENDING status (preserves
+          any concurrent user cancel).
+
+    Transitions are atomic per row via `fail_if_still_stuck_inactive`:
+    if `scheduler_set_waiting` commits between the candidate scan and
+    the per-row UPDATE, the UPDATE no-ops and we yield to the legit
+    launch path.
+    """
+    cutoff_ts = time.time() - STUCK_INACTIVE_PRUNE_THRESHOLD_SECONDS
+    candidate_ids = managed_job_state.find_stuck_inactive_jobs(cutoff_ts)
+    if not candidate_ids:
+        return
+    logger.info(f'prune_stuck_inactive_jobs: considering {len(candidate_ids)} '
+                f'job(s) with INACTIVE + null-pid + null-yaml older than '
+                f'{STUCK_INACTIVE_PRUNE_THRESHOLD_SECONDS}s: {candidate_ids}')
+    failure_reason = (
+        'Managed job submission was interrupted before the scheduler '
+        'could pick up the job — typically because the API server worker '
+        'initiating the launch died mid-submission. No controller '
+        'process was ever spawned for this job. Please relaunch.')
+    pruned = 0
+    for job_id in candidate_ids:
+        if managed_job_state.fail_if_still_stuck_inactive(
+                job_id, failure_reason=failure_reason, end_time=time.time()):
+            pruned += 1
+            logger.warning(f'Pruned stuck-INACTIVE job {job_id}: marked '
+                           f'FAILED_PRESUBMIT.')
+    if pruned and pruned != len(candidate_ids):
+        logger.info(
+            f'prune_stuck_inactive_jobs: {pruned}/{len(candidate_ids)} '
+            f'pruned; the rest transitioned out of INACTIVE between scan '
+            f'and update.')
+
+
 async def get_job_status(
     backend: 'backends.CloudVmRayBackend', cluster_name: str,
     job_id: Optional[int]

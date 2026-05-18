@@ -72,3 +72,8 @@ protobuf==5.29.6
 # pydantic<2.12 avoids pulling pydantic-core 2.41.x. Revisit once upstream
 # resolves the import or we align versions accordingly.
 pydantic<2.12
+
+# For tests that exercise PG-specific SQL semantics (e.g. the orphan
+# prune in sky/jobs/utils.py). Auto-skipped at runtime if Docker is
+# unavailable, so this is a soft dependency for local dev.
+testcontainers[postgres]
