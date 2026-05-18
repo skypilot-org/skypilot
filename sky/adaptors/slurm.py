@@ -26,8 +26,9 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 
 # Regex pattern to extract DefaultTime from scontrol output
-# Matches DefaultTime=<value> and captures until the next whitespace
-_DEFAULT_TIME_REGEX = re.compile(r'DefaultTime=(\S+)')
+# Matches DefaultTime=<time>, DefaultTime=UNLIMITED, or DefaultTime=NONE.
+_DEFAULT_TIME_REGEX = re.compile(
+    r'DefaultTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED|NONE)')
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
