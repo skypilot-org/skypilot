@@ -5689,7 +5689,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
                     hook_timeout)
                 returncode, _, stderr = self.run_on_head(
-                    handle, code, require_outputs=True, stream_logs=stream_logs)
+                    handle,
+                    code,
+                    require_outputs=True,
+                    stream_logs=stream_logs,
+                    target_skylet_env=True)
                 subprocess_utils.handle_returncode(returncode,
                                                    code,
                                                    'Failed to set autostop',
@@ -5739,7 +5743,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
-                handle, code, require_outputs=True, stream_logs=stream_logs)
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=stream_logs,
+                target_skylet_env=True)
             if returncode == 0:
                 is_autostopping = message_utils.decode_payload(stdout)
             else:
@@ -5769,6 +5777,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
+        target_skylet_env: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
@@ -5797,6 +5806,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             source_bashrc: Whether to source bashrc when running on the command
                 on the VM. If it is a user-related commands, it would always be
                 good to source bashrc to make sure the env vars are set.
+            target_skylet_env: Whether the command should run in the same
+                environment as the skylet (e.g., inside the container on Slurm
+                container clusters). When False (default), uses the driver
+                environment which on Slurm runs on the host so that commands
+                spawning srun do not hit srun-in-srun limits. Set True for
+                commands that manipulate skylet-local state (e.g., the
+                ``skylet_config.db`` written by ``set_autostop``), which must
+                reach the same path the skylet reads.
 
         Returns:
             returncode
@@ -5814,7 +5831,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
-        return head_runner.run_driver(
+        runner_method = (head_runner.run
+                         if target_skylet_env else head_runner.run_driver)
+        return runner_method(
             cmd,
             port_forward=port_forward,
             log_path=log_path,
