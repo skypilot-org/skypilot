@@ -131,6 +131,10 @@ export async function getClusters({ clusterNames = null } = {}) {
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
         node_names: cluster.node_names || null,
+        // Persisted external links from the cluster row (currently
+        // populated with cloud-provider instance console URLs at launch
+        // time). Shape: {label: url}.
+        links: cluster.links || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -253,6 +257,7 @@ export async function streamClusterJobLogs({
   onNewLog,
   workspace,
   signal,
+  tail = DEFAULT_TAIL_LINES,
 }) {
   try {
     await apiClient.stream(
@@ -261,7 +266,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
-        tail: DEFAULT_TAIL_LINES,
+        tail,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },

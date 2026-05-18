@@ -64,6 +64,7 @@ import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
   extractLinksFromLogs,
+  normalizeUrl,
   useCustomUrlPatterns,
 } from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
@@ -1530,12 +1531,7 @@ function JobDetailsContent({
           {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
             <div className="flex flex-wrap gap-4">
               {Object.entries(combinedLinks).map(([label, url]) => {
-                // Normalize URL - add https:// if no protocol specified
-                const normalizedUrl =
-                  url.startsWith('http://') || url.startsWith('https://')
-                    ? url
-                    : `https://${url}`;
-
+                const normalizedUrl = normalizeUrl(url);
                 return (
                   <a
                     key={label}

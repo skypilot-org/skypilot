@@ -126,6 +126,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # External links for dashboard display, e.g. cloud-provider instance
+    # console URLs generated at launch time. Same shape as the `links` field
+    # on managed-job rows: a JSON object mapping {label: url}.
+    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -665,12 +669,33 @@ def add_or_update_cluster(cluster_name: str,
             region = str(lr.region) if getattr(lr, 'region', None) else None
             zone = str(lr.zone) if getattr(lr, 'zone', None) else None
 
-    # Extract node_names from cached_cluster_info and merge with lineage
+    # Extract node_names from cached_cluster_info and merge with lineage.
+    # Also opportunistically compute cloud-provider instance console URLs for
+    # the dashboard's External Links section (mirrors the managed-job flow in
+    # sky/jobs/recovery_strategy.py).
     current_names = None
+    instance_links: Optional[Dict[str, str]] = None
     if hasattr(cluster_handle, 'cached_cluster_info'):
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
             current_names = ci.get_node_names()
+            if ready:
+                # Lazy import: sky.utils.instance_links pulls in
+                # sky.provision.common which transitively imports
+                # sky.global_user_state during cold start, so a top-level
+                # import here would deadlock.
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import instance_links as instance_links_utils
+                try:
+                    generated = instance_links_utils.generate_instance_links(
+                        ci, cluster_name)
+                    if generated:
+                        instance_links = generated
+                except Exception as e:  # pylint: disable=broad-except
+                    # Never fail a launch because instance-link generation
+                    # tripped over a missing field on the cluster info.
+                    logger.debug(f'Failed to generate instance links for '
+                                 f'cluster {cluster_name}: {e}')
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -700,7 +725,7 @@ def add_or_update_cluster(cluster_name: str,
     history_workspace = active_workspace
     history_hash = user_hash
 
-    conditional_values = {}
+    conditional_values: Dict[str, Any] = {}
     if is_launch:
         conditional_values.update({
             'launched_at': cluster_launched_at,
@@ -752,6 +777,19 @@ def add_or_update_cluster(cluster_name: str,
         if provision_log_path is not None:
             conditional_values.update({
                 'provision_log_path': provision_log_path,
+            })
+
+        # Merge newly generated instance links with any existing links so
+        # repeated launches (e.g., post-stop start) don't clobber prior entries.
+        if instance_links:
+            existing_links = (cluster_row.links
+                              if cluster_row is not None else None) or {}
+            merged_links: Dict[str, str] = {}
+            if isinstance(existing_links, dict):
+                merged_links.update(existing_links)
+            merged_links.update(instance_links)
+            conditional_values.update({
+                'links': merged_links,
             })
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -1911,6 +1949,7 @@ def get_clusters(
             cluster_table.c.metadata,
             cluster_table.c.last_use,
             cluster_table.c.status_updated_at,
+            cluster_table.c.links,
         ])
     if not exclude_managed_clusters:
         query_fields.append(cluster_table.c.is_managed)
@@ -2014,6 +2053,7 @@ def get_clusters(
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
             record['config_hash'] = row.config_hash
+            record['links'] = row.links if isinstance(row.links, dict) else {}
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
             record['last_use'] = row.last_use

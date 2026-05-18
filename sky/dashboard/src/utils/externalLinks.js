@@ -118,3 +118,19 @@ export const useCustomUrlPatterns = () => {
 
   return patterns;
 };
+
+/**
+ * Normalize a URL by ensuring it has an http(s):// protocol prefix.
+ *
+ * Centralized so cluster, cluster-job, and managed-job pages all render
+ * the same href for a given extracted URL.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export const normalizeUrl = (url) => {
+  if (!url) return '';
+  return url.startsWith('http://') || url.startsWith('https://')
+    ? url
+    : `https://${url}`;
+};

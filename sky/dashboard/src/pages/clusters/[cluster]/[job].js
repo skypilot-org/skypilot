@@ -24,6 +24,7 @@ import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
 import {
   extractLinksFromLogs,
+  normalizeUrl,
   useCustomUrlPatterns,
 } from '@/utils/externalLinks';
 
@@ -346,11 +347,7 @@ export function JobDetailPage() {
                           <div className="flex flex-wrap gap-4">
                             {Object.entries(extractedLinks).map(
                               ([label, url]) => {
-                                const normalizedUrl =
-                                  url.startsWith('http://') ||
-                                  url.startsWith('https://')
-                                    ? url
-                                    : `https://${url}`;
+                                const normalizedUrl = normalizeUrl(url);
                                 return (
                                   <a
                                     key={label}

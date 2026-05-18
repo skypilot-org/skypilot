@@ -38,6 +38,7 @@ import {
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
   extractLinksFromLogs,
+  normalizeUrl,
   useCustomUrlPatterns,
 } from '@/utils/externalLinks';
 import {
@@ -319,6 +320,20 @@ function ActiveTab({
     });
   }, []);
 
+  // Persisted DB-backed links take priority over the live-scanned ones, same
+  // merge semantics the managed-job page uses (sky/dashboard/src/pages/jobs/
+  // [job].js: combinedLinks). DB links currently come from
+  // instance_links.generate_instance_links() at launch time.
+  const combinedClusterLinks = useMemo(() => {
+    const combined = { ...(clusterData?.links || {}) };
+    for (const [label, url] of Object.entries(clusterExtractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
+    }
+    return combined;
+  }, [clusterData?.links, clusterExtractedLinks]);
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
@@ -561,25 +576,22 @@ function ActiveTab({
                 </div>
               )}
 
-              {/* External Links section - full width row.
-                  Populated from provision-log regex matches against the
-                  admin-configured `dashboard.external_links` allowlist plus
-                  built-in patterns (e.g., W&B). Only renders once at least
-                  one link has been matched. */}
-              {Object.keys(clusterExtractedLinks).length > 0 && (
+              {/* External Links section: persisted DB links (e.g., cloud
+                  instance console URLs from
+                  instance_links.generate_instance_links() at launch time)
+                  plus live regex matches against the admin-configured
+                  `dashboard.external_links` allowlist and built-in patterns
+                  (e.g., W&B). Only renders once at least one link is known. */}
+              {Object.keys(combinedClusterLinks).length > 0 && (
                 <div className="col-span-2">
                   <div className="text-gray-600 font-medium text-base">
                     External Links
                   </div>
                   <div className="text-base mt-1">
                     <div className="flex flex-wrap gap-4">
-                      {Object.entries(clusterExtractedLinks).map(
+                      {Object.entries(combinedClusterLinks).map(
                         ([label, url]) => {
-                          const normalizedUrl =
-                            url.startsWith('http://') ||
-                            url.startsWith('https://')
-                              ? url
-                              : `https://${url}`;
+                          const normalizedUrl = normalizeUrl(url);
                           return (
                             <a
                               key={label}
@@ -1012,12 +1024,16 @@ function LatestJobLogLinkScanner({
 
     (async () => {
       try {
+        // Match the bound that streamManagedJobLogs uses for its log viewer
+        // (sky/dashboard/src/data/connectors/jobs.jsx) so the cluster page's
+        // proactive scan sees the same window the managed-job page sees.
         await streamClusterJobLogs({
           clusterName,
           jobId: latestJobId,
           workspace,
           onNewLog,
           signal: controller.signal,
+          tail: 5000,
         });
       } catch (error) {
         if (error?.name !== 'AbortError') {
