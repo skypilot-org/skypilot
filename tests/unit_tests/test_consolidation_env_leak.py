@@ -19,14 +19,10 @@ These tests pin both layers.
 # pylint: disable=invalid-name,protected-access
 import os
 import subprocess
-import sys
 import tempfile
 from unittest import mock
 
-import pytest
-
 from sky.jobs import recovery_strategy
-from sky.server import common as server_common
 from sky.server.requests import executor as request_executor
 from sky.skylet import constants
 
@@ -94,7 +90,9 @@ class TestPopenEnvOverrideMechanism:
         try:
             result = subprocess.run(
                 ['bash', '-c', 'echo "$SKY_TEST_LEAK_DEFAULT"'],
-                capture_output=True, text=True, check=True)
+                capture_output=True,
+                text=True,
+                check=True)
             assert result.stdout.strip() == 'leaked'
         finally:
             os.environ.pop('SKY_TEST_LEAK_DEFAULT', None)
@@ -102,14 +100,19 @@ class TestPopenEnvOverrideMechanism:
     def test_popen_with_explicit_env_does_not_inherit(self):
         os.environ['SKY_TEST_LEAK_EXPLICIT'] = 'leaked'
         try:
-            clean = {k: v for k, v in os.environ.items()
-                     if k != 'SKY_TEST_LEAK_EXPLICIT'}
+            clean = {
+                k: v
+                for k, v in os.environ.items()
+                if k != 'SKY_TEST_LEAK_EXPLICIT'
+            }
             # Ensure PATH is preserved so bash itself can run.
             assert 'PATH' in clean
             result = subprocess.run(
-                ['bash', '-c',
-                 'echo "${SKY_TEST_LEAK_EXPLICIT:-<unset>}"'],
-                env=clean, capture_output=True, text=True, check=True)
+                ['bash', '-c', 'echo "${SKY_TEST_LEAK_EXPLICIT:-<unset>}"'],
+                env=clean,
+                capture_output=True,
+                text=True,
+                check=True)
             assert result.stdout.strip() == '<unset>'
         finally:
             os.environ.pop('SKY_TEST_LEAK_EXPLICIT', None)
@@ -119,13 +122,14 @@ class TestRecoveryStrategyBeltAndSuspenders:
     """Layer 1: ENV_VARS_TO_CLEAR includes the endpoint var."""
 
     def test_endpoint_env_var_is_cleared_before_api_start(self):
-        assert (constants.SKY_API_SERVER_URL_ENV_VAR
-                in recovery_strategy.ENV_VARS_TO_CLEAR), (
-            'SKY_API_SERVER_URL_ENV_VAR must be in ENV_VARS_TO_CLEAR so '
-            'already-leaked controllers can call sdk.api_start() and have '
-            'get_server_url() resolve to the local default. This is the '
-            'one-line escape hatch for controllers that were spawned with '
-            'a polluted env before the plumbing fix landed.')
+        assert (
+            constants.SKY_API_SERVER_URL_ENV_VAR
+            in recovery_strategy.ENV_VARS_TO_CLEAR), (
+                'SKY_API_SERVER_URL_ENV_VAR must be in ENV_VARS_TO_CLEAR so '
+                'already-leaked controllers can call sdk.api_start() and have '
+                'get_server_url() resolve to the local default. This is the '
+                'one-line escape hatch for controllers that were spawned with '
+                'a polluted env before the plumbing fix landed.')
 
 
 class TestRunOnHeadForwardsEnvKwarg:
@@ -146,8 +150,11 @@ class TestRunOnHeadForwardsEnvKwarg:
             # not inherit it when we pass env=clean.
             os.environ['SKY_TEST_RUN_LEAK'] = 'should_not_appear'
             try:
-                clean = {k: v for k, v in os.environ.items()
-                         if k != 'SKY_TEST_RUN_LEAK'}
+                clean = {
+                    k: v
+                    for k, v in os.environ.items()
+                    if k != 'SKY_TEST_RUN_LEAK'
+                }
                 # Use stream_logs=True / process_stream=False so output
                 # lands in the log file via tee.
                 rc = runner.run(
@@ -163,8 +170,7 @@ class TestRunOnHeadForwardsEnvKwarg:
                 if os.path.exists(leak_path):
                     with open(leak_path, encoding='utf-8') as f:
                         body = f.read().strip()
-                    assert body == '', (
-                        f'Subprocess saw leaked env: {body!r}')
+                    assert body == '', (f'Subprocess saw leaked env: {body!r}')
             finally:
                 os.environ.pop('SKY_TEST_RUN_LEAK', None)
 
@@ -177,7 +183,8 @@ class TestConsolidatedLaunchPassesCleanEnv:
     def test_consolidated_launch_forwards_clean_env(self):
         # Capture a known-clean snapshot.
         request_executor._clean_server_env = {  # pylint: disable=protected-access
-            'PATH': '/usr/bin', 'CLEAN_MARKER': '1'
+            'PATH': '/usr/bin',
+            'CLEAN_MARKER': '1'
         }
         # Now simulate per-request pollution in os.environ.
         os.environ['SKY_TEST_POLLUTION'] = 'polluted'
@@ -190,6 +197,7 @@ class TestConsolidatedLaunchPassesCleanEnv:
                 captured['env'] = kwargs.get('env')
                 captured['kwargs_keys'] = list(kwargs.keys())
                 return None
+
             fake_backend.run_on_head.side_effect = record_env
             fake_backend.sync_file_mounts.return_value = None
             from sky import backends as _backends
@@ -214,10 +222,9 @@ class TestConsolidatedLaunchPassesCleanEnv:
                 controller_task.storage_mounts = []
 
                 from sky.jobs.server import core as jobs_core
-                jobs_core._consolidated_launch(
-                    controller=mock.MagicMock(),
-                    controller_task=controller_task,
-                    job_ids=[1])
+                jobs_core._consolidated_launch(controller=mock.MagicMock(),
+                                               controller_task=controller_task,
+                                               job_ids=[1])
 
             assert captured.get('env') is not None, (
                 'run_on_head was called without env=; the plumbing fix is '
