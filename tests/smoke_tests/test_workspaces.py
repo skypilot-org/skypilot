@@ -415,25 +415,44 @@ def test_kubernetes_workspace_remote_identity():
     tiny_resource_args = '--cpus 0.5 --memory 1'
 
     # Print node + pod state so failures on a constrained CI agent are easy
-    # to diagnose from the build log.
+    # to diagnose from the build log. Includes taints + labels — single-node
+    # kind clusters in CI may carry taints/labels that filter our pod out
+    # before any K8s API call.
     diag_cmd = ("echo '=== nodes ===' && "
                 "kubectl get nodes -o wide && "
-                "echo '=== node capacity / allocatable ===' && "
+                "echo '=== node capacity / allocatable / taints ===' && "
                 "kubectl get nodes -o "
                 "jsonpath='{range .items[*]}{.metadata.name}{\"\\n  cap: \"}"
                 "{.status.capacity}{\"\\n  alloc: \"}{.status.allocatable}"
-                "{\"\\n\"}{end}' && "
+                "{\"\\n  taints: \"}{.spec.taints}{\"\\n\"}{end}' && "
+                "echo '=== node labels ===' && "
+                "kubectl get nodes -o "
+                "jsonpath='{range .items[*]}{.metadata.name}{\"\\n  \"}"
+                "{.metadata.labels}{\"\\n\"}{end}' && "
                 "echo '=== running pods (all ns) ===' && "
                 "kubectl get pods --all-namespaces "
                 "-o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,"
                 "STATUS:.status.phase,NODE:.spec.nodeName")
 
+    # Decisive sanity probe: launch a vanilla pod with the same resource
+    # shape but NO workspace and NO custom SA — before any workspace setup.
+    # If this also fails, the kind cluster itself rejects our shape; if it
+    # passes, the workspace/SA plumbing is the suspect.
+    sanity_cluster = f'{name}-sanity'
+    sanity_cmd = (
+        f'sky launch -y -c {sanity_cluster} --infra kubernetes '
+        f'{tiny_resource_args} -- echo sanity-from-kind || '
+        f'(echo "==== SANITY LAUNCH FAILED — see api server log ====" && '
+        f'tail -300 ~/.sky/api_server/server.log; exit 1)')
+
     test = smoke_tests_utils.Test(
         'test_kubernetes_workspace_remote_identity',
         [
+            diag_cmd,
+            sanity_cmd,
+            f'sky down -y {sanity_cluster} || true',
             create_sa_cmd(sa1),
             create_sa_cmd(sa2),
-            diag_cmd,
             # Apply the workspace config and restart the API server.
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
             f'{smoke_tests_utils.SKY_API_RESTART}',
@@ -456,7 +475,8 @@ def test_kubernetes_workspace_remote_identity():
             f'--config active_workspace={ws2} echo from-b',
             assert_pod_sa_cmd(f'{name}-b', sa2),
         ],
-        teardown=(f'sky down -y --config active_workspace={ws1} {name}-a || '
+        teardown=(f'sky down -y --purge {sanity_cluster} || true; '
+                  f'sky down -y --config active_workspace={ws1} {name}-a || '
                   f'sky down -y --purge {name}-a || true; '
                   f'sky down -y --config active_workspace={ws2} {name}-b || '
                   f'sky down -y --purge {name}-b || true; '
