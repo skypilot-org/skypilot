@@ -548,16 +548,25 @@ messages = _MessagesProxy()
 # hook below gives them a brief window to flush.
 _loki_executor_lock = threading.Lock()
 _loki_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_loki_session: Optional['requests.Session'] = None
 _loki_pending_lock = threading.Lock()
 _loki_pending: 'List[concurrent.futures.Future]' = []
 _LOKI_FLUSH_TIMEOUT_S = 0.3
+# Prune completed futures from _loki_pending only when the list grows past
+# this threshold, instead of scanning the whole list on every send.
+_LOKI_PENDING_PRUNE_THRESHOLD = 64
 
 
 def _get_loki_executor() -> concurrent.futures.ThreadPoolExecutor:
-    global _loki_executor
+    global _loki_executor, _loki_session
     if _loki_executor is None:
         with _loki_executor_lock:
             if _loki_executor is None:
+                # Shared Session so background POSTs reuse the TCP+TLS
+                # connection to Loki instead of paying a fresh handshake
+                # on every send. requests.Session is thread-safe for the
+                # plain post() usage we do here.
+                _loki_session = requests.Session()
                 _loki_executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=4, thread_name_prefix='loki-send')
                 atexit.register(_flush_pending_loki_sends)
@@ -582,10 +591,11 @@ def _flush_pending_loki_sends() -> None:
 
 def _post_to_loki(payload: str, headers: Dict[str, str]) -> None:
     try:
-        response = requests.post(constants.LOG_URL,
-                                 data=payload,
-                                 headers=headers,
-                                 timeout=0.5)
+        assert _loki_session is not None
+        response = _loki_session.post(constants.LOG_URL,
+                                      data=payload,
+                                      headers=headers,
+                                      timeout=0.5)
         if response.status_code != 204:
             logger.debug(f'Grafana Loki failed with response: '
                          f'{response.text}\n{payload}')
@@ -643,7 +653,9 @@ def _send_to_loki(message_type: MessageType):
     # window to complete when the process exits.
     future = _get_loki_executor().submit(_post_to_loki, payload, headers)
     with _loki_pending_lock:
-        _loki_pending[:] = [f for f in _loki_pending if not f.done()] + [future]
+        _loki_pending.append(future)
+        if len(_loki_pending) > _LOKI_PENDING_PRUNE_THRESHOLD:
+            _loki_pending[:] = [f for f in _loki_pending if not f.done()]
     messages.reset(message_type)
 
 
