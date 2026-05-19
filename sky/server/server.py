@@ -986,8 +986,10 @@ app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # auth user.
 app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-disable_basic_auth_middleware = os.environ.get(
-    constants.SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE, 'false')
+disable_basic_auth_middleware = constants.getenv_server_with_legacy(
+    constants.SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE_ENV_VAR,
+    constants.LEGACY_SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE_ENV_VAR,
+    default='false')
 if (str(enable_basic_auth).lower() == 'true' and
         str(disable_basic_auth_middleware).lower() != 'true'):
     app.add_middleware(BasicAuthMiddleware)
@@ -2726,9 +2728,10 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
             constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
             'false').lower() == 'true'),
         # Whether basic auth on ingress is enabled
-        ingress_basic_auth_enabled=os.environ.get(
-            constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
-            'false').lower() == 'true',
+        ingress_basic_auth_enabled=(constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED_ENV_VAR,
+            constants.LEGACY_SKYPILOT_INGRESS_BASIC_AUTH_ENABLED_ENV_VAR,
+            default='false') or 'false').lower() == 'true',
         # Whether external proxy auth is enabled (from server.yaml config)
         external_proxy_auth_enabled=server_config.load_external_proxy_config().
         enabled,

@@ -144,7 +144,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_APISERVER_UUID
+            name: SKYPILOT_SERVER_APISERVER_UUID
             valueFrom:
               fieldRef:
                 fieldPath: metadata.uid
@@ -186,7 +186,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_APISERVER_UUID
+            name: SKYPILOT_SERVER_APISERVER_UUID
             valueFrom:
               fieldRef:
                 fieldPath: metadata.uid
@@ -383,7 +383,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_RELEASE_NAME
+            name: SKYPILOT_SERVER_RELEASE_NAME
             value: custom-fullname
 
   # Test cases for dbConnectionSecretName configuration
@@ -785,8 +785,8 @@ tests:
             name: setup-coreweave-credentials
             image: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
 
-  # Test cases for SKYPILOT_INITIAL_BASIC_AUTH environment variable
-  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthSecret
+  # Test cases for SKYPILOT_SERVER_INITIAL_BASIC_AUTH environment variable
+  - it: should set SKYPILOT_SERVER_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthSecret
     set:
       apiService.enableUserManagement: true
       apiService.initialBasicAuthSecret: my-auth-secret
@@ -794,13 +794,13 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INITIAL_BASIC_AUTH
+            name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
             valueFrom:
               secretKeyRef:
                 name: my-auth-secret
                 key: auth
 
-  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthCredentials
+  - it: should set SKYPILOT_SERVER_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthCredentials
     set:
       apiService.enableUserManagement: true
       apiService.initialBasicAuthCredentials: "user:password"
@@ -808,13 +808,13 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INITIAL_BASIC_AUTH
+            name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
             valueFrom:
               secretKeyRef:
                 name: RELEASE-NAME-initial-basic-auth
                 key: auth
 
-  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled but no initial credentials
+  - it: should not set SKYPILOT_SERVER_INITIAL_BASIC_AUTH when basic auth enabled but no initial credentials
     set:
       apiService.enableUserManagement: true
       # Neither initialBasicAuthSecret nor initialBasicAuthCredentials set
@@ -822,9 +822,9 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INITIAL_BASIC_AUTH
+            name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
 
-  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth disabled
+  - it: should not set SKYPILOT_SERVER_INITIAL_BASIC_AUTH when basic auth disabled
     set:
       apiService.enableUserManagement: false
       apiService.initialBasicAuthSecret: my-auth-secret
@@ -832,9 +832,9 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INITIAL_BASIC_AUTH
+            name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
 
-  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when oauth2-proxy is enabled
+  - it: should not set SKYPILOT_SERVER_INITIAL_BASIC_AUTH when oauth2-proxy is enabled
     set:
       ingress.oauth2-proxy.enabled: true
       apiService.enableUserManagement: true
@@ -843,37 +843,37 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INITIAL_BASIC_AUTH
+            name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
 
-  # Test cases for SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE environment variable
-  - it: should set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is true
+  # Test cases for SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE environment variable
+  - it: should set SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is true
     set:
       auth.disableBasicAuthMiddleware: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            name: SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE
             value: "true"
 
-  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is false
+  - it: should not set SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is false
     set:
       auth.disableBasicAuthMiddleware: false
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            name: SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE
 
-  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE by default
+  - it: should not set SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE by default
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            name: SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE
 
-  # Test cases for SKYPILOT_INGRESS_BASIC_AUTH_ENABLED environment variable
-  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authSecret
+  # Test cases for SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED environment variable
+  - it: should set SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authSecret
     set:
       ingress.enabled: true
       ingress.authSecret: my-auth-secret
@@ -881,10 +881,10 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
             value: "true"
 
-  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authCredentials
+  - it: should set SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authCredentials
     set:
       ingress.enabled: true
       ingress.authCredentials: "user:password"
@@ -892,19 +892,19 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
             value: "true"
 
-  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress is enabled but no auth configured
+  - it: should not set SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED when ingress is enabled but no auth configured
     set:
       ingress.enabled: true
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
 
-  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress is disabled even with authSecret
+  - it: should not set SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED when ingress is disabled even with authSecret
     set:
       ingress.enabled: false
       ingress.authSecret: my-auth-secret
@@ -912,14 +912,14 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
 
-  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED by default
+  - it: should not set SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED by default
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
 
   - it: should mount slurm config when slurmCredentials.config is provided
     set:

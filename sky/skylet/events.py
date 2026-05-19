@@ -80,13 +80,17 @@ class ManagedJobEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def start(self):
-        cpus_env_var = os.environ.get('SKYPILOT_POD_CPU_CORE_LIMIT')
+        cpus_env_var = constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_POD_CPU_CORE_LIMIT_ENV_VAR,
+            constants.LEGACY_SKYPILOT_POD_CPU_CORE_LIMIT_ENV_VAR)
         if cpus_env_var is not None:
             with open(os.path.expanduser(constants.CONTROLLER_K8S_CPU_FILE),
                       'w',
                       encoding='utf-8') as f:
                 f.write(cpus_env_var)
-        memory_env_var = os.environ.get('SKYPILOT_POD_MEMORY_GB_LIMIT')
+        memory_env_var = constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_POD_MEMORY_GB_LIMIT_ENV_VAR,
+            constants.LEGACY_SKYPILOT_POD_MEMORY_GB_LIMIT_ENV_VAR)
         if memory_env_var is not None:
             with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
                       'w',

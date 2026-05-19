@@ -106,14 +106,19 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     server pod and will be lost during a rolling update.
     """
     # If rolling update is not enabled, don't warn.
-    if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
+    if skylet_constants.getenv_server_with_legacy(
+            skylet_constants.SKYPILOT_SERVER_ROLLING_UPDATE_ENABLED_ENV_VAR,
+            skylet_constants.LEGACY_SKYPILOT_ROLLING_UPDATE_ENABLED_ENV_VAR
+    ) is None:
         return
 
     # If persistent storage is enabled (via Helm storage.enabled=true or by
     # default for local deployments), file mounts are persisted and will
     # survive rolling updates. Default to True if not explicitly set to False.
-    storage_enabled_str = os.environ.get(
-        skylet_constants.SKYPILOT_API_SERVER_STORAGE_ENABLED, 'true')
+    storage_enabled_str = skylet_constants.getenv_server_with_legacy(
+        skylet_constants.SKYPILOT_SERVER_API_SERVER_STORAGE_ENABLED_ENV_VAR,
+        skylet_constants.LEGACY_SKYPILOT_API_SERVER_STORAGE_ENABLED_ENV_VAR,
+        default='true')
     if storage_enabled_str.lower() == 'true':
         return
 

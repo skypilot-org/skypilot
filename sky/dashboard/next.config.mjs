@@ -7,7 +7,10 @@ const nextConfig = {
   },
   env: {
     SKYPILOT_API_SERVER_ENDPOINT: process.env.SKYPILOT_API_SERVER_ENDPOINT,
-    SKYPILOT_RELEASE_NAME: process.env.SKYPILOT_RELEASE_NAME,
+    // Prefer the new SKYPILOT_SERVER_RELEASE_NAME (server-only prefix);
+    // fall back to the legacy SKYPILOT_RELEASE_NAME for older charts.
+    SKYPILOT_RELEASE_NAME: (process.env.SKYPILOT_SERVER_RELEASE_NAME ||
+      process.env.SKYPILOT_RELEASE_NAME),
     INFRA_CACHE_DURATION_MINUTES:
       process.env.INFRA_CACHE_DURATION_MINUTES || '10',
     INFRA_CACHE_DEBUG: process.env.INFRA_CACHE_DEBUG || 'false',

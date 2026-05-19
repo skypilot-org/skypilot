@@ -178,15 +178,20 @@ class Kubernetes(clouds.Cloud):
         """Resolve whether 'all' should include the in-cluster context.
 
         Precedence (highest first):
-          1. SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER env var
-             (operator-level, set on the API server pod;
-             not overridable by admin via config).
+          1. SKYPILOT_SERVER_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER env
+             var (operator-level, set on the API server pod;
+             not overridable by admin via config). The legacy
+             SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER name is
+             still honored.
           2. `kubernetes.all_includes_in_cluster` config field (workspace
              beats global).
           3. Default: True (backward compatible).
         """
-        env_val = (env_options.Options.
-                   ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.get_optional())
+        env_val = constants.getenv_server_with_legacy_bool(
+            constants.
+            SKYPILOT_SERVER_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER_ENV_VAR,
+            constants.
+            LEGACY_SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER_ENV_VAR)
         if env_val is not None:
             return env_val
         return skypilot_config.get_effective_workspace_region_config(

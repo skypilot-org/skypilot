@@ -115,7 +115,9 @@ class PermissionService:
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
-        basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
+        basic_auth = constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_INITIAL_BASIC_AUTH_ENV_VAR,
+            constants.LEGACY_SKYPILOT_INITIAL_BASIC_AUTH_ENV_VAR)
         if not basic_auth:
             return
         username, password = basic_auth.split(':', 1)

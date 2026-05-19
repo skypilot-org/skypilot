@@ -44,7 +44,10 @@ _WAIT_REQUESTS_INTERVAL_SECONDS = 5
 # Timeout for waiting for on-going requests to finish.
 try:
     _WAIT_REQUESTS_TIMEOUT_SECONDS = int(
-        os.environ.get(constants.GRACE_PERIOD_SECONDS_ENV_VAR, '60'))
+        constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_GRACE_PERIOD_SECONDS_ENV_VAR,
+            constants.LEGACY_SKYPILOT_GRACE_PERIOD_SECONDS_ENV_VAR,
+            default='60'))
 except ValueError:
     _WAIT_REQUESTS_TIMEOUT_SECONDS = 60
 

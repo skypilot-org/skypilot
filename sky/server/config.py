@@ -360,9 +360,12 @@ def load_external_proxy_config() -> ExternalProxyConfig:
         # - Otherwise we enable it since user should have at least one ingress
         # auth scheme set in this case.
         enabled = True
+        oauth2_proxy_enabled = constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR,
+            constants.LEGACY_SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR,
+            default='false')
         if (os.getenv(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false') == 'true' or
-            (os.getenv(server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false')
-             == 'true')):
+                oauth2_proxy_enabled == 'true'):
             enabled = False
     if not enabled:
         return ExternalProxyConfig(enabled=False)
@@ -376,16 +379,20 @@ def load_external_proxy_config() -> ExternalProxyConfig:
         _DEFAULT_IDENTITY_CLAIM)
 
     # Check for legacy env var
-    legacy_header = os.getenv(constants.ENV_VAR_SERVER_AUTH_USER_HEADER)
+    legacy_header = constants.getenv_server_with_legacy(
+        constants.SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR,
+        constants.LEGACY_SKYPILOT_AUTH_USER_HEADER_ENV_VAR)
     if legacy_header:
         if header_format == 'jwt':
             raise ValueError(
                 'Configuration error: Environment variable '
-                f'{constants.ENV_VAR_SERVER_AUTH_USER_HEADER} is set but '
-                'header_format is "jwt". The legacy header environment '
-                'variable only supports plaintext format. Please either:\n'
-                f'  1. Remove the {constants.ENV_VAR_SERVER_AUTH_USER_HEADER} '
-                'environment variable, OR\n'
+                f'{constants.SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR} '
+                '(or its deprecated alias '
+                f'{constants.LEGACY_SKYPILOT_AUTH_USER_HEADER_ENV_VAR}) '
+                'is set but header_format is "jwt". The legacy header '
+                'environment variable only supports plaintext format. '
+                'Please either:\n'
+                '  1. Remove the env variable, OR\n'
                 '  2. Set header_format to "plaintext" in server.yaml')
         # Legacy env var overrides header_name from config
         header_name = legacy_header

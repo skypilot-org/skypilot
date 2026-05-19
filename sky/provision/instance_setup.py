@@ -622,9 +622,12 @@ def start_skylet_on_head_node(
             vcpus, mem = resources.cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
             if vcpus is not None:
-                env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = str(vcpus)
+                env_vars[
+                    constants.SKYPILOT_SERVER_POD_CPU_CORE_LIMIT_ENV_VAR] = str(
+                        vcpus)
             if mem is not None:
-                env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = str(mem)
+                env_vars[constants.
+                         SKYPILOT_SERVER_POD_MEMORY_GB_LIMIT_ENV_VAR] = str(mem)
 
         # Cluster placement, accelerator, and provenance context for
         # skylet's heartbeat event (sky/skylet/events.py:

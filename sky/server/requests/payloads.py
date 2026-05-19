@@ -24,6 +24,7 @@ Also refer to sky.server.constants.MIN_COMPATIBLE_API_VERSION and the
 sky.server.versions module for more details.
 """
 import os
+import re
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -72,13 +73,36 @@ EXTERNAL_LOCAL_ENV_VARS = [
     'KUBECONFIG',
 ]
 
+# Kubernetes injects service-link env vars for every Service in the pod's
+# namespace: <SVCNAME_UPPER>_SERVICE_HOST, <SVCNAME_UPPER>_SERVICE_PORT,
+# <SVCNAME_UPPER>_PORT, <SVCNAME_UPPER>_PORT_<n>_TCP[_PROTO|_PORT|_ADDR].
+# SkyPilot-managed Services in the same namespace as a SkyPilot client (e.g.
+# user-cluster head-ssh services for in-cluster orchestration) therefore
+# inject env vars under the SKYPILOT_ prefix that match the K8s service-link
+# suffix pattern. These are stale on the next request and useless to forward,
+# so deny-list them here.
+#
+# The pattern is conservative: only matches env names whose suffix is a
+# recognized K8s service-link form. Plugin-defined SKYPILOT_AGENT_* vars
+# without a service-link suffix (e.g. SKYPILOT_AGENT_ID, SKYPILOT_AGENT_JWT_SECRET)
+# are NOT matched.
+_K8S_SERVICE_LINK_ENV_RE = re.compile(
+    r'^SKYPILOT_[A-Z0-9_]+_'
+    r'(SERVICE_HOST|SERVICE_PORT(_[A-Z0-9_]+)?|'
+    r'PORT|PORT_\d+_TCP(_PROTO|_PORT|_ADDR)?)$')
+
+
+def _is_k8s_service_link_env(env_var: str) -> bool:
+    """Whether env_var looks like a K8s downward-API service-link injection."""
+    return bool(_K8S_SERVICE_LINK_ENV_RE.match(env_var))
+
 
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
         if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
-                not env_var.startswith(
-                    constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
+                not env_var.startswith(constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)
+                and not _is_k8s_service_link_env(env_var)):
             env_vars[env_var] = os.environ[env_var]
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
