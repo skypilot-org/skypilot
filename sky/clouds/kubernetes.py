@@ -199,13 +199,8 @@ class Kubernetes(clouds.Cloud):
                    ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.get_optional())
         if env_val is not None:
             return env_val
-        workspace_val = skypilot_config.get_workspace_cloud('kubernetes').get(
-            'all_includes_in_cluster', None)
-        if workspace_val is not None:
-            return workspace_val
-        return skypilot_config.get_effective_region_config(
+        return skypilot_config.get_effective_workspace_region_config(
             cloud='kubernetes',
-            region=None,
             keys=('all_includes_in_cluster',),
             default_value=True)
 
