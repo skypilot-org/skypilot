@@ -391,6 +391,15 @@ available_node_types:
         {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
         terminationGracePeriodSeconds: {{ preemption_hook_timeout }}
         {% endif %}
+        {% if k8s_enable_oci_roce %}
+        # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
+        # network namespace; pods must share host networking to reach the
+        # RDMA fabric. ClusterFirstWithHostNet still routes .svc.cluster.local
+        # lookups to CoreDNS so inter-node Ray comms work.
+        # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
+        hostNetwork: true
+        dnsPolicy: ClusterFirstWithHostNet
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -463,6 +472,12 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        {% if k8s_enable_oci_roce %}
+        - name: devinf
+          hostPath:
+            path: /dev/infiniband
+            type: Directory
+        {% endif %}
         {% if k8s_fuse_device_required %}
         - name: fusermount-shared-dir
           hostPath:
@@ -1364,6 +1379,10 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
+          {% if k8s_enable_oci_roce %}
+          - mountPath: /dev/infiniband
+            name: devinf
+          {% endif %}
           {% if k8s_enable_gpudirect_tcpx %}
           - name: tcpx-socket
             mountPath: /tmp
@@ -1454,8 +1473,14 @@ available_node_types:
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
-          {% if k8s_ipc_lock_capability %}
+          {% if k8s_ipc_lock_capability or k8s_enable_oci_roce %}
           securityContext:
+            {% if k8s_enable_oci_roce %}
+            # OCI OKE bare-metal GPU shapes have no RDMA device plugin;
+            # pods must mount /dev/infiniband from the host and run
+            # privileged to access the RoCE NICs.
+            privileged: true
+            {% endif %}
             capabilities:
               add:
                 - IPC_LOCK

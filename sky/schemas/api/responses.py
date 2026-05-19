@@ -139,6 +139,10 @@ class StatusResponse(ResponseBaseModel):
     node_names: Optional[str] = None
     priority: Optional[int] = None
     priority_class: Optional[str] = None
+    # External links surfaced on the dashboard's cluster detail page.
+    # Currently populated with cloud-provider instance console URLs at launch
+    # time (mirrors ManagedJobRecord.links). Shape: {label: url}.
+    links: Optional[Dict[str, str]] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):

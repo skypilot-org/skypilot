@@ -165,6 +165,23 @@ Use high-performance networking
 
         See `Together AI with InfiniBand example <https://docs.skypilot.co/en/latest/examples/performance/together_infiniband.html>`_ for more details.
 
+    .. tab-item:: OCI OKE RoCE
+        :sync: oci-oke-roce-tab
+
+        Oracle OKE clusters on bare-metal GPU shapes (e.g. ``BM.GPU.B200.8``, ``BM.GPU.H100.8``) support RoCEv2 for high-performance GPU communication.
+
+        Use ``resources.network_tier: best`` to automatically enable RoCE on OKE clusters provisioned with dedicated RDMA capacity pools.
+
+        .. code-block:: yaml
+          :emphasize-lines: 4
+
+          resources:
+            infra: k8s
+            accelerators: B200:8
+            network_tier: best
+
+          num_nodes: 2
+
 
 Using Ray with SkyPilot
 ~~~~~~~~~~~~~~~~~~~~~~~

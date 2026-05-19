@@ -19,7 +19,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union)
+                    Sequence, Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -2394,6 +2394,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # The task YAMLs can be large, so the default
             # max_receive_message_length of 4MB might not be enough.
             ('grpc.max_receive_message_length', -1),
+            # Keepalive so half-dead TCP connections (cloud LB / proxy /
+            # NAT silently dropping a connection mid-stream) get failed by
+            # gRPC instead of stalling a worker thread inside __next__.
+            ('grpc.keepalive_time_ms', 30_000),
+            ('grpc.keepalive_timeout_ms', 10_000),
+            ('grpc.keepalive_permit_without_calls', 1),
         ]
         # It's fine to not grab the lock here, as we're only reading,
         # and writes are very rare.
@@ -2841,14 +2847,49 @@ class LocalResourcesHandle(CloudVmRayResourceHandle):
         return [command_runner.LocalProcessCommandRunner()]
 
 
+class _CancelAwareStub:
+    """Proxy that makes a gRPC stub honor the current SkyPilotContext cancel.
+
+    Each method becomes cancellable: when the active context is cancelled
+    (e.g. on client disconnect), the in-flight RPC is aborted instead of
+    leaving the worker thread blocked in gRPC's ``Condition.wait()``.
+
+    Methods listed in ``streaming_methods`` go through
+    ``invoke_grpc_streaming``; everything else uses ``invoke_grpc_unary``.
+    """
+
+    def __init__(self, stub: Any, streaming_methods: Sequence[str] = ()):
+        self._stub = stub
+        self._streaming = frozenset(streaming_methods)
+
+    def __getattr__(self, name: str):
+        method = getattr(self._stub, name)
+        if name in self._streaming:
+
+            def wrapped_streaming(*args, **kwargs):
+                return backend_utils.invoke_grpc_streaming(
+                    method, *args, **kwargs)
+
+            return wrapped_streaming
+
+        def wrapped_unary(*args, **kwargs):
+            return backend_utils.invoke_grpc_unary(method, *args, **kwargs)
+
+        return wrapped_unary
+
+
 class SkyletClient:
     """The client to interact with a remote cluster through Skylet."""
 
     def __init__(self, channel: 'grpc.Channel'):
-        self._autostop_stub = autostopv1_pb2_grpc.AutostopServiceStub(channel)
-        self._jobs_stub = jobsv1_pb2_grpc.JobsServiceStub(channel)
-        self._serve_stub = servev1_pb2_grpc.ServeServiceStub(channel)
-        self._managed_jobs_stub = (
+        self._autostop_stub = _CancelAwareStub(
+            autostopv1_pb2_grpc.AutostopServiceStub(channel))
+        self._jobs_stub = _CancelAwareStub(
+            jobsv1_pb2_grpc.JobsServiceStub(channel),
+            streaming_methods=('TailLogs',))
+        self._serve_stub = _CancelAwareStub(
+            servev1_pb2_grpc.ServeServiceStub(channel))
+        self._managed_jobs_stub = _CancelAwareStub(
             managed_jobsv1_pb2_grpc.ManagedJobsServiceStub(channel))
 
     def set_autostop(

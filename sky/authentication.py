@@ -29,6 +29,7 @@ import uuid
 
 import colorama
 import filelock
+import requests
 
 from sky import clouds
 from sky import exceptions
@@ -348,10 +349,19 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
-        # Only add an ssh key if it hasn't already been added
-        if not any(x['public_key'] == public_key for x in current_key_list):
-            vast.vast().create_ssh_key(ssh_key=public_key)
+        try:
+            current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
+            # Only add an ssh key if it hasn't already been added
+            if not any(x['public_key'] == public_key for x in current_key_list):
+                vast.vast().create_ssh_key(ssh_key=public_key)
+        except requests.HTTPError as e:
+            # Team-scoped Vast keys can't register account SSH keys;
+            # onstart_cmd injection in vast/utils.py handles SSH access.
+            body = e.response.text if e.response is not None else ''
+            if 'team_ssh_keys_not_supported' not in body:
+                raise
+            logger.debug('Skipping Vast account SSH key registration: '
+                         'team API key context.')
 
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

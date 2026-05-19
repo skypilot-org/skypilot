@@ -50,6 +50,7 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -2615,6 +2616,28 @@ async def api_status(
             for request_task in request_tasks:
                 encoded_request_tasks.append(request_task.readable_encode())
         return encoded_request_tasks
+
+
+@app.get('/dashboard_config', response_class=fastapi_responses.ORJSONResponse)
+async def dashboard_config() -> Dict[str, Any]:
+    """Returns admin-configured dashboard settings consumed by the UI.
+
+    Currently exposes the optional `external_links` allowlist that the dashboard
+    matches against streamed logs to render labeled external links on cluster
+    and job detail pages.
+    """
+    external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
+                                                [])
+    sanitized: List[Dict[str, str]] = []
+    if isinstance(external_links, list):
+        for entry in external_links:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get('label')
+            regex = entry.get('regex')
+            if isinstance(label, str) and isinstance(regex, str):
+                sanitized.append({'label': label, 'regex': regex})
+    return {'external_links': sanitized}
 
 
 @app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)

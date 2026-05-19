@@ -126,6 +126,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # External links for dashboard display, e.g. cloud-provider instance
+    # console URLs generated at launch time. Same shape as the `links` field
+    # on managed-job rows: a JSON object mapping {label: url}.
+    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -667,12 +671,33 @@ def add_or_update_cluster(cluster_name: str,
             region = str(lr.region) if getattr(lr, 'region', None) else None
             zone = str(lr.zone) if getattr(lr, 'zone', None) else None
 
-    # Extract node_names from cached_cluster_info and merge with lineage
+    # Extract node_names from cached_cluster_info and merge with lineage.
+    # Also opportunistically compute cloud-provider instance console URLs for
+    # the dashboard's External Links section (mirrors the managed-job flow in
+    # sky/jobs/recovery_strategy.py).
     current_names = None
+    instance_links: Optional[Dict[str, str]] = None
     if hasattr(cluster_handle, 'cached_cluster_info'):
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
             current_names = ci.get_node_names()
+            if ready:
+                # Lazy import: sky.utils.instance_links pulls in
+                # sky.provision.common which transitively imports
+                # sky.global_user_state during cold start, so a top-level
+                # import here would deadlock.
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import instance_links as instance_links_utils
+                try:
+                    generated = instance_links_utils.generate_instance_links(
+                        ci, cluster_name)
+                    if generated:
+                        instance_links = generated
+                except Exception as e:  # pylint: disable=broad-except
+                    # Never fail a launch because instance-link generation
+                    # tripped over a missing field on the cluster info.
+                    logger.debug(f'Failed to generate instance links for '
+                                 f'cluster {cluster_name}: {e}')
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -702,7 +727,7 @@ def add_or_update_cluster(cluster_name: str,
     history_workspace = active_workspace
     history_hash = user_hash
 
-    conditional_values = {}
+    conditional_values: Dict[str, Any] = {}
     if is_launch:
         conditional_values.update({
             'launched_at': cluster_launched_at,
@@ -754,6 +779,19 @@ def add_or_update_cluster(cluster_name: str,
         if provision_log_path is not None:
             conditional_values.update({
                 'provision_log_path': provision_log_path,
+            })
+
+        # Merge newly generated instance links with any existing links so
+        # repeated launches (e.g., post-stop start) don't clobber prior entries.
+        if instance_links:
+            existing_links = (cluster_row.links
+                              if cluster_row is not None else None) or {}
+            merged_links: Dict[str, str] = {}
+            if isinstance(existing_links, dict):
+                merged_links.update(existing_links)
+            merged_links.update(instance_links)
+            conditional_values.update({
+                'links': merged_links,
             })
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -1336,15 +1374,24 @@ def get_handle_from_cluster_name(
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
+    # Chunk the IN list to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
+    # (default 999 on sqlite < 3.32) and avoid huge IN-clause planning on
+    # PostgreSQL. See _CLUSTER_IN_QUERY_CHUNK_SIZE for the rationale.
+    result: Dict[str, Optional['backends.ResourceHandle']] = {}
+    if not cluster_names:
+        return result
     engine = _db_manager.get_engine()
+    names_list = list(cluster_names)
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name,
-                             cluster_table.c.handle).filter(
-                                 cluster_table.c.name.in_(cluster_names)).all()
-        return {
-            row.name: pickle.loads(row.handle) if row is not None else None
-            for row in rows
-        }
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(cluster_table.c.name,
+                                 cluster_table.c.handle).filter(
+                                     cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                result[row.name] = (pickle.loads(row.handle)
+                                    if row is not None else None)
+    return result
 
 
 @metrics_lib.time_me
@@ -1853,6 +1900,96 @@ def get_cluster_from_name(
     return record
 
 
+# Bound the IN list per query so we stay under SQLite's
+# SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on newer
+# builds) and avoid pathological IN-clause planning on PostgreSQL. 500 is
+# comfortably under both ceilings.
+# Module-level so tests can monkeypatch.
+_CLUSTER_IN_QUERY_CHUNK_SIZE = 500
+
+
+@metrics_lib.time_me
+def get_clusters_from_names(
+    cluster_names: List[str],
+    *,
+    include_user_info: bool = False,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Batched ``get_cluster_from_name`` for many cluster names at once.
+
+    Returns records in the same shape as
+    ``get_cluster_from_name(summary_response=True)``. The verbose
+    ``summary_response=False`` mode is intentionally not exposed here: it
+    would also require batching ``get_terminal_or_last_status_change_event``
+    (another per-row DB call), which is out of scope for the callers that
+    motivated this helper. Use ``get_cluster_from_name`` for those fields.
+
+    Args:
+        cluster_names: List of cluster names to look up.
+        include_user_info: If True, per-row resolve user_hash → user. This
+            re-introduces a per-row DB lookup, so it's off by default.
+
+    Returns:
+        Dict mapping ``cluster_name`` to its record, or to ``None`` for
+        names that don't exist in the cluster table.
+    """
+    result: Dict[str,
+                 Optional[Dict[str,
+                               Any]]] = {name: None for name in cluster_names}
+    if not cluster_names:
+        return result
+    engine = _db_manager.get_engine()
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    with orm.Session(engine) as session:
+        for offset in range(0, len(cluster_names),
+                            _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(*query_fields).filter(
+                cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                record: Dict[str, Any] = {
+                    'name': row.name,
+                    'launched_at': row.launched_at,
+                    'handle': pickle.loads(row.handle),
+                    'last_use': row.last_use,
+                    'status': status_lib.ClusterStatus[row.status],
+                    'autostop': row.autostop,
+                    'to_down': bool(row.to_down),
+                    'owner': _load_owner(row.owner),
+                    'metadata': json.loads(row.metadata),
+                    'cluster_hash': row.cluster_hash,
+                    'cluster_ever_up': bool(row.cluster_ever_up),
+                    'status_updated_at': row.status_updated_at,
+                    'workspace': row.workspace,
+                    'is_managed': bool(row.is_managed),
+                    'config_hash': row.config_hash,
+                }
+                if include_user_info:
+                    user_hash = _get_user_hash_or_current_user(row.user_hash)
+                    user = get_user(user_hash)
+                    record['user_hash'] = user_hash
+                    record['user_name'] = (user.name
+                                           if user is not None else None)
+                result[row.name] = record
+    return result
+
+
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def cluster_with_name_exists(cluster_name: str) -> bool:
@@ -1913,6 +2050,7 @@ def get_clusters(
             cluster_table.c.metadata,
             cluster_table.c.last_use,
             cluster_table.c.status_updated_at,
+            cluster_table.c.links,
         ])
     if not exclude_managed_clusters:
         query_fields.append(cluster_table.c.is_managed)
@@ -2016,6 +2154,7 @@ def get_clusters(
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
             record['config_hash'] = row.config_hash
+            record['links'] = row.links if isinstance(row.links, dict) else {}
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
             record['last_use'] = row.last_use

@@ -413,3 +413,89 @@ def test_get_active_file_mounts_blob_ids(_mock_managed_jobs_db_conn):
 
     blob_ids = state.get_active_file_mounts_blob_ids()
     assert blob_ids == {'blob-active', 'blob-queued', 'blob-recovering'}
+
+
+def _new_pool_job(engine,
+                  *,
+                  pool: str,
+                  status: ManagedJobStatus,
+                  cluster_name=None) -> int:
+    """Create a managed job in `pool` with optional `current_cluster_name`."""
+    job_id = state.set_job_info_without_job_id(
+        name=f'job-{pool}',
+        workspace='ws',
+        entrypoint='entry',
+        pool=pool,
+        pool_hash=None,
+        user_hash='u',
+    )
+    _insert_task(engine, job_id, 0, status=status)
+    if cluster_name is not None:
+        state.set_current_cluster_name(job_id, cluster_name)
+    return job_id
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped(_mock_managed_jobs_db_conn):
+    """Verify the batched grouped query matches the per-call helper."""
+    engine = state._db_manager.get_engine()
+
+    # Pool A: unassigned job, two replicas with one nonterminal job each,
+    # one job on a replica that is already SUCCEEDED (should be excluded).
+    unassigned_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.PENDING)
+    r1_running_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.RUNNING,
+                                 cluster_name='replica-1')
+    r1_recovering_a = _new_pool_job(engine,
+                                    pool='pool-a',
+                                    status=ManagedJobStatus.RECOVERING,
+                                    cluster_name='replica-1')
+    r2_running_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.RUNNING,
+                                 cluster_name='replica-2')
+    _new_pool_job(engine,
+                  pool='pool-a',
+                  status=ManagedJobStatus.SUCCEEDED,
+                  cluster_name='replica-1')  # terminal -> filtered
+
+    # Pool B: separate pool to ensure the filter is scoped correctly.
+    _new_pool_job(engine, pool='pool-b', status=ManagedJobStatus.RUNNING)
+
+    grouped = state.get_nonterminal_job_ids_by_pool_grouped('pool-a')
+
+    assert set(grouped.keys()) == {None, 'replica-1', 'replica-2'}
+    assert grouped[None] == [unassigned_a]
+    assert grouped['replica-1'] == sorted([r1_running_a, r1_recovering_a])
+    assert grouped['replica-2'] == [r2_running_a]
+
+    # Grouped result must agree with the legacy per-call helper.
+    assert sorted(grouped['replica-1']) == sorted(
+        state.get_nonterminal_job_ids_by_pool('pool-a',
+                                              cluster_name='replica-1'))
+    assert sorted(grouped['replica-2']) == sorted(
+        state.get_nonterminal_job_ids_by_pool('pool-a',
+                                              cluster_name='replica-2'))
+    all_jobs_a = sorted(state.get_nonterminal_job_ids_by_pool('pool-a'))
+    flattened = sorted(j for ids in grouped.values() for j in ids)
+    assert flattened == all_jobs_a
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped_empty(
+        _mock_managed_jobs_db_conn):
+    """No jobs in pool -> empty dict (not raise)."""
+    assert not state.get_nonterminal_job_ids_by_pool_grouped('nope')
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped_all_terminal(
+        _mock_managed_jobs_db_conn):
+    """Pool with only finished jobs should also yield an empty grouping."""
+    engine = state._db_manager.get_engine()
+    _new_pool_job(engine,
+                  pool='pool-done',
+                  status=ManagedJobStatus.SUCCEEDED,
+                  cluster_name='replica-x')
+    _new_pool_job(engine, pool='pool-done', status=ManagedJobStatus.FAILED)
+    assert not state.get_nonterminal_job_ids_by_pool_grouped('pool-done')
