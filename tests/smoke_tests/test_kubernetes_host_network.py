@@ -225,9 +225,18 @@ def test_kubernetes_host_network_head_restart_reuses_ports():
     cannot make kubelet truly restart the container. Instead we re-run
     the inlined probe (``/tmp/sky_host_network_probe.py --mode head``)
     against the surviving ConfigMap, in the *same* pod-identity env the
-    real bootstrap uses (pulled from PID 1's environ via the Downward
-    API vars), which is exactly what the head bootstrap re-executes on
-    restart. Verifies:
+    real bootstrap uses. An SSH session does **not** inherit the pod
+    container's Downward-API env, and a Kubernetes container cannot
+    read ``/proc/1/environ`` even via ``sudo`` (no ``CAP_SYS_PTRACE``
+    in the default capability set, and the node's
+    ``yama.ptrace_scope`` blocks reading an ancestor's environ). So
+    rather than scraping PID 1, we recover the pod identity from the
+    pod's own *bound* ServiceAccount-token JWT (its
+    ``kubernetes.io.{namespace,pod.name,pod.uid}`` claims) and locate
+    the ``<cluster>-ray-ports`` ConfigMap by its ``ownerReference`` to
+    that UID. On a real container restart the Pod object is unchanged,
+    so its name/UID are exactly what the Downward API would re-inject
+    — these claims are equivalent. Verifies:
 
     1. The ConfigMap survived (the reuse path requires it to exist and
        to be owned by this pod's UID — both encoded in the assertion).
@@ -247,41 +256,88 @@ def test_kubernetes_host_network_head_restart_reuses_ports():
                  f'      hostNetwork: true\n'
                  f'EOF')
 
-    # Runs on the head pod. Re-invokes the head probe exactly as the
-    # bootstrap would after a container restart: same pod-identity env
-    # (Downward API vars + in-cluster API host), same ConfigMap. The
-    # probe's _existing_head_ports_to_reuse() only reuses when the
-    # ConfigMap exists AND is owned by this pod UID, so an unchanged
-    # port set proves both (and that the reuse codepath fired); a
-    # deleted ConfigMap or a regressed re-probe makes BEFORE != AFTER.
-    # Raw string: \0 / \n must reach `tr` literally. Only double quotes
-    # inside so the whole script can be single-quoted to ssh (no local
-    # $VAR expansion). No {} so it is f-string/heredoc safe.
+    # Discovery script run *on the head pod*. An SSH session has
+    # neither the pod container's Downward-API env nor a readable
+    # /proc/1/environ (see the docstring), so we reconstruct the
+    # pod-identity env the head probe needs from authoritative on-pod
+    # sources: the bound ServiceAccount-token JWT (this pod's
+    # name/uid/namespace claims) and the surviving ray-ports ConfigMap
+    # selected by ownerReference == our pod UID. Selecting by our UID
+    # (not just the skypilot-ray-ports label) keeps this correct when
+    # other concurrent hostNetwork tests share the namespace. Stdlib
+    # only; no single quotes (the whole script is single-quoted to
+    # ssh) and no f-string/{} so it is heredoc/format safe.
+    discover = (
+        'import base64, json, ssl, sys, urllib.request\n'
+        'b = "/var/run/secrets/kubernetes.io/serviceaccount/"\n'
+        'tok = open(b + "token").read().strip()\n'
+        'ctx = ssl.create_default_context(cafile=b + "ca.crt")\n'
+        'seg = tok.split(".")[1]\n'
+        'seg += "=" * (-len(seg) % 4)\n'
+        'kio = json.loads(base64.urlsafe_b64decode(seg))["kubernetes.io"]\n'
+        'ns = kio["namespace"]\n'
+        'uid = kio["pod"]["uid"]\n'
+        'pname = kio["pod"]["name"]\n'
+        'u = ("https://kubernetes.default.svc:443/api/v1/namespaces/"\n'
+        '     + ns + "/configmaps"\n'
+        '     "?labelSelector=skypilot-ray-ports%3Dtrue")\n'
+        'r = urllib.request.Request(u)\n'
+        'r.add_header("Authorization", "Bearer " + tok)\n'
+        'data = urllib.request.urlopen(r, context=ctx, timeout=10).read()\n'
+        'items = json.loads(data)["items"]\n'
+        'mine = [c for c in items\n'
+        '        if any(o.get("uid") == uid\n'
+        '               for o in (c["metadata"].get("ownerReferences")\n'
+        '                          or []))]\n'
+        'if len(mine) != 1:\n'
+        '    sys.exit("want exactly 1 ray-ports ConfigMap owned by pod "\n'
+        '             + uid + ", got " + str(len(mine)) + " of "\n'
+        '             + str(len(items)) + " labeled")\n'
+        'm = mine[0]["metadata"]\n'
+        'print("export SKYPILOT_RAY_PORTS_CONFIGMAP_NAME=" + m["name"])\n'
+        'print("export SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE=" + ns)\n'
+        'print("export SKYPILOT_POD_NAME=" + pname)\n'
+        'print("export SKYPILOT_POD_UID=" + uid)\n')
+
+    # The probe is run under ``sudo`` (production parity: the bootstrap
+    # runs it as root, and root reliably reads the SA token regardless
+    # of its file mode), with the recovered identity passed explicitly
+    # via ``env``. ``<<\PYEOF`` is a literal heredoc so the shell does
+    # not touch the embedded Python. ``set -e``: any failed step (an
+    # unreadable token, a deleted ConfigMap, a regressed re-probe)
+    # fails the test loudly. BEFORE != AFTER means the head re-probed
+    # instead of reusing the published ports.
     remote = (
-        r'set -e; '
-        r'PROBE=/tmp/sky_host_network_probe.py; '
-        r'ENVF=/tmp/sky_host_network_ports.env; '
-        r'test -s "$ENVF"; test -s "$PROBE"; '
-        r'eval "$(sudo cat /proc/1/environ | tr "\0" "\n" | '
-        r'grep -E "^(KUBERNETES_SERVICE_HOST|KUBERNETES_SERVICE_PORT|'
-        r'SKYPILOT_POD_NAME|SKYPILOT_POD_UID|'
-        r'SKYPILOT_RAY_PORTS_CONFIGMAP_NAME|'
-        r'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE)=" | '
-        r'sed "s/^/export /")"; '
-        r'test -n "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME"; '
-        r'test -n "$SKYPILOT_POD_UID"; '
-        r'BEFORE=$(sort "$ENVF"); '
-        r'python3 "$PROBE" --mode head '
-        r'--env-file /tmp/sky_restart_check.env '
-        r'--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
-        r'--configmap-namespace "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE"; '
-        r'AFTER=$(sort /tmp/sky_restart_check.env); '
-        r'echo "BEFORE=[$BEFORE]"; echo "AFTER=[$AFTER]"; '
-        r'if [ -z "$BEFORE" ]; then echo "FAIL: empty env file"; exit 1; fi; '
-        r'if [ "$BEFORE" != "$AFTER" ]; then '
-        r'echo "FAIL: head re-run did NOT reuse the published ports '
-        r'(ConfigMap deleted or re-probed instead of reused)"; exit 1; fi; '
-        r'echo HEAD_RESTART_REUSED_PORTS')
+        'set -e; '
+        'PROBE=/tmp/sky_host_network_probe.py; '
+        'ENVF=/tmp/sky_host_network_ports.env; '
+        'test -s "$ENVF"; test -s "$PROBE"; '
+        'cat > /tmp/sky_cm_discover.py <<\\PYEOF\n' + discover + 'PYEOF\n'
+        'if ! OUT="$(sudo python3 /tmp/sky_cm_discover.py '
+        '2>/tmp/sky_cm_discover.err)"; then '
+        'echo "FAIL: ray-ports ConfigMap discovery failed:"; '
+        'cat /tmp/sky_cm_discover.err; exit 1; fi; '
+        'eval "$OUT"; '
+        'export KUBERNETES_SERVICE_HOST=kubernetes.default.svc; '
+        'export KUBERNETES_SERVICE_PORT=443; '
+        'test -n "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME"; '
+        'test -n "$SKYPILOT_POD_UID"; '
+        'BEFORE=$(sort "$ENVF"); '
+        'sudo env KUBERNETES_SERVICE_HOST="$KUBERNETES_SERVICE_HOST" '
+        'KUBERNETES_SERVICE_PORT="$KUBERNETES_SERVICE_PORT" '
+        'SKYPILOT_POD_NAME="$SKYPILOT_POD_NAME" '
+        'SKYPILOT_POD_UID="$SKYPILOT_POD_UID" '
+        'python3 "$PROBE" --mode head '
+        '--env-file /tmp/sky_restart_check.env '
+        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
+        '--configmap-namespace "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE"; '
+        'AFTER=$(sort /tmp/sky_restart_check.env); '
+        'echo "BEFORE=[$BEFORE]"; echo "AFTER=[$AFTER]"; '
+        'if [ -z "$BEFORE" ]; then echo "FAIL: empty env file"; exit 1; fi; '
+        'if [ "$BEFORE" != "$AFTER" ]; then '
+        'echo "FAIL: head re-run did NOT reuse the published ports '
+        '(ConfigMap deleted or re-probed instead of reused)"; exit 1; fi; '
+        'echo HEAD_RESTART_REUSED_PORTS')
 
     test = smoke_tests_utils.Test(
         'kubernetes_host_network_head_restart_reuses_ports',
