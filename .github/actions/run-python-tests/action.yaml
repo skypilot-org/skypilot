@@ -47,7 +47,7 @@ runs:
           echo "branch=$HEAD_REF" >> $GITHUB_OUTPUT
           {
             echo "message<<EOF"
-            echo "$PR_TITLE"
+            printf '%s\n' "$PR_TITLE"
             echo "EOF"
           } >> $GITHUB_OUTPUT
         else
@@ -57,9 +57,9 @@ runs:
           {
             echo "message<<EOF"
             if [ "${{ github.event_name }}" == "merge_group" ]; then
-              echo "$MERGE_GROUP_HEAD_COMMIT_MESSAGE"
+              printf '%s\n' "$MERGE_GROUP_HEAD_COMMIT_MESSAGE"
             else
-              echo "$HEAD_COMMIT_MESSAGE"
+              printf '%s\n' "$HEAD_COMMIT_MESSAGE"
             fi
             echo "EOF"
           } >> $GITHUB_OUTPUT
