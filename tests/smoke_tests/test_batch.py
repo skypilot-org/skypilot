@@ -26,6 +26,9 @@ from sky import skypilot_config
 # option to not allow shared env tests.
 
 
+_CLOUD_TO_STORE = {'gcp': 'gs', 'nebius': 'nebius'}
+
+
 def _storage_cmds(generic_cloud: str, bucket: str):
     """Return cloud-specific storage command fragments for batch tests.
 
@@ -38,6 +41,17 @@ def _storage_cmds(generic_cloud: str, bucket: str):
         url = f'gs://{bucket}'
         return (url, f'gsutil mb {url}', f'gsutil rm -r {url}', 'gsutil cp',
                 'gsutil rm', 'gsutil ls', lambda p: f'gsutil rm -r {p}')
+    if generic_cloud == 'nebius':
+        # Nebius uses S3-compatible storage but requires --profile=nebius
+        from sky.adaptors import nebius
+        profile = f'--profile={nebius.NEBIUS_PROFILE_NAME}'
+        url = f's3://{bucket}'
+        return (url,
+                f'aws s3 mb {url} {profile}',
+                f'aws s3 rb {url} {profile} --force',
+                f'aws s3 cp {profile}', f'aws s3 rm {profile}',
+                f'aws s3 ls {profile}',
+                lambda p: f'aws s3 rm {p} {profile} --recursive')
     # Default to AWS
     url = f's3://{bucket}'
     return (url,
@@ -55,7 +69,7 @@ def test_batch_simple(generic_cloud: str):
     pool_name = f'batch-smpl-pool-{name}'
     url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
         generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
+    store = _CLOUD_TO_STORE.get(generic_cloud, 's3')
 
     test = smoke_tests_utils.Test(
         'batch_simple',
@@ -171,7 +185,7 @@ def test_batch_diffusion(generic_cloud: str, accelerator: Dict[str, str]):
     pool_name = 'diffusion-pool'
     url, create_bkt, delete_bkt, cp, rm, ls, rm_r = _storage_cmds(
         generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
+    store = _CLOUD_TO_STORE.get(generic_cloud, 's3')
 
     test = smoke_tests_utils.Test(
         'batch_diffusion',
@@ -256,7 +270,7 @@ def test_batch_custom_formats(generic_cloud: str):
     pool_name = 'custom-fmt-pool'
     url, create_bkt, delete_bkt, cp, _, ls, rm_r = _storage_cmds(
         generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
+    store = _CLOUD_TO_STORE.get(generic_cloud, 's3')
 
     test = smoke_tests_utils.Test(
         'batch_custom_formats',
@@ -335,7 +349,7 @@ def test_batch_cancel(generic_cloud: str):
     pool_name = f'batch-cncl-pool-{name}'
     url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
         generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
+    store = _CLOUD_TO_STORE.get(generic_cloud, 's3')
 
     test = smoke_tests_utils.Test(
         'batch_cancel',
@@ -426,7 +440,7 @@ def test_batch_ha_kill_running(generic_cloud: str):
     pool_name = 'test-batch-pool'
     url, create_bkt, delete_bkt, cp, rm, _, rm_r = _storage_cmds(
         generic_cloud, bucket)
-    store = 'gs' if generic_cloud == 'gcp' else 's3'
+    store = _CLOUD_TO_STORE.get(generic_cloud, 's3')
 
     # HA config: run the jobs controller on k8s with high_availability.
     skypilot_config_path = 'tests/test_yamls/managed_jobs_ha_config.yaml'
