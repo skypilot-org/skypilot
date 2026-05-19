@@ -173,17 +173,6 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    @annotations.lru_cache(scope='global', maxsize=1)
-    def _log_in_cluster_excluded_from_all_once(cls,
-                                               in_cluster_name: str) -> None:
-        """Log once when in-cluster is excluded from the 'all' expansion."""
-        logger.debug(
-            f'Excluding Kubernetes in-cluster context {in_cluster_name!r} '
-            'from `allowed_contexts: all` because `all_includes_in_cluster` '
-            'is set to false (config or '
-            'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER env).')
-
-    @classmethod
     def _resolve_all_includes_in_cluster(cls) -> bool:
         """Resolve whether 'all' should include the in-cluster context.
 
@@ -247,8 +236,6 @@ class Kubernetes(clouds.Cloud):
                 allowed_contexts = [
                     c for c in all_contexts if c != in_cluster_name
                 ]
-                if not silent and in_cluster_name in all_contexts:
-                    cls._log_in_cluster_excluded_from_all_once(in_cluster_name)
 
         if allowed_contexts is None:
             # Try kubeconfig if present

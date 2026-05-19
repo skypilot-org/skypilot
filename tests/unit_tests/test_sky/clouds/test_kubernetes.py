@@ -376,8 +376,6 @@ class TestKubernetesAllIncludesInCluster(unittest.TestCase):
 
     def setUp(self):
         kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
-        kubernetes.Kubernetes._log_in_cluster_excluded_from_all_once \
-            .cache_clear()
         # Ensure env var leaks from other tests don't influence assertions.
         self._original_env = os.environ.pop(self.ENV_VAR, None)
 
