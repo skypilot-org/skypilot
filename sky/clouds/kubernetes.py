@@ -177,7 +177,7 @@ class Kubernetes(clouds.Cloud):
     def _log_in_cluster_excluded_from_all_once(cls,
                                                in_cluster_name: str) -> None:
         """Log once when in-cluster is excluded from the 'all' expansion."""
-        logger.info(
+        logger.debug(
             f'Excluding Kubernetes in-cluster context {in_cluster_name!r} '
             'from `allowed_contexts: all` because `all_includes_in_cluster` '
             'is set to false (config or '
