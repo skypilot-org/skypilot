@@ -92,6 +92,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
       high-throughput, low-latency networking
     - AWS_EFA: AWS EKS/HyperPod clusters with Elastic Fabric Adapter (EFA)
       support for high-performance inter-node communication
+    - OCI_ROCE: Oracle OKE clusters on bare-metal GPU shapes
+      (BM.GPU.*.8) with RoCEv2 over Mellanox ConnectX, provisioned via
+      dedicated RDMA capacity pools
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -100,6 +103,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
       sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
     - Nebius settings match the InfiniBand configuration used in Nebius VMs
     - AWS EFA settings match the EFA configuration used in AWS VMs
+    - OCI settings match the RoCE configuration used in OCI bare-metal
+      GPU shapes (per oracle-quickstart/oci-hpc-oke reference manifests)
     """
 
     GCP_TCPX = 'gcp_tcpx'
@@ -109,6 +114,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     COREWEAVE = 'coreweave'
     TOGETHER = 'together'
     AWS_EFA = 'aws_efa'
+    OCI_ROCE = 'oci_roce'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
@@ -138,6 +144,25 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         elif self == KubernetesHighPerformanceNetworkType.AWS_EFA:
             return {
                 'FI_PROVIDER': 'efa',
+            }
+        elif self == KubernetesHighPerformanceNetworkType.OCI_ROCE:
+            # OCI bare-metal GPU shapes (BM.GPU.*.8) use RoCEv2 over
+            # Mellanox ConnectX. Values per oracle-quickstart/oci-hpc-oke
+            # NCCL reference manifests. Per-shape exact HCA lists give
+            # marginally better perf; the broad 'mlx5' prefix match here
+            # works on all shapes. Users can override via task `envs:`.
+            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
+                'NCCL_IB_GID_INDEX': '3',
+                # DSCP for OCI's lossless RoCE fabric (PFC class).
+                'NCCL_IB_TC': '41',
+                # OCI BM.GPU shapes use legacy eth* naming; primary NIC
+                # is eth0 even under hostNetwork: true.
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
