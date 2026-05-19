@@ -110,16 +110,30 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
 
-    with mock.patch.object(common.get_api_server_status_response,
-                           'cache_clear',
-                           wraps=common.get_api_server_status_response.
-                           cache_clear) as mock_cache_clear:
-        common.check_server_healthy_or_start_fn()
+    try:
+        with mock.patch.object(common.get_api_server_status_response,
+                               'cache_clear',
+                               wraps=common.get_api_server_status_response.
+                               cache_clear) as mock_cache_clear:
+            common.check_server_healthy_or_start_fn()
 
-    assert mock_cache_clear.call_count == 1
-    assert mock_make_request.call_count == 2
-    mock_start_server.assert_not_called()
-    common.get_api_server_status_response.cache_clear()
+        assert mock_cache_clear.call_count == 1
+        assert mock_make_request.call_count == 2
+        mock_start_server.assert_not_called()
+        common.get_api_server_status_response.cache_clear()
+    finally:
+        # check_server_healthy() calls versions.set_remote_api_version() and
+        # set_remote_version() based on the value returned from
+        # check_compatibility_at_client. The mock above returns a bare
+        # mock.Mock, so the call propagates a Mock object into the
+        # _remote_api_version / _remote_version ContextVars, which then
+        # leaks into any later test running on the same xdist worker —
+        # e.g. test_sdk.py tests that call api_login() and compare
+        # `remote_api_version >= 30`. Reset the ContextVars to their
+        # defaults to keep tests isolated.
+        from sky.server import versions
+        versions.set_remote_api_version(None)
+        versions.set_remote_version('unknown')
 
 
 @mock.patch('sky.server.common.get_api_server_status')
