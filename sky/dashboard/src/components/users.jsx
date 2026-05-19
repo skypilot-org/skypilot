@@ -1402,8 +1402,8 @@ function UsersTable({
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [sortConfig, setSortConfig] = useState({
-    key: 'username',
-    direction: 'ascending',
+    key: 'default',
+    direction: 'descending',
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
@@ -1992,6 +1992,24 @@ function UsersTable({
       filtered = Object.values(deduped);
     }
 
+    if (sortConfig.key === 'default') {
+      // Default sort: GPUs desc, then Joined (most recent first), then Name asc.
+      const cmpStr = (a, b) => {
+        const sa = (a ?? '').toString().toLowerCase();
+        const sb = (b ?? '').toString().toLowerCase();
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return 0;
+      };
+      const cmpNum = (a, b) => (a ?? 0) - (b ?? 0);
+      return [...filtered].sort((a, b) => {
+        const byGpu = cmpNum(b.gpuCount, a.gpuCount);
+        if (byGpu !== 0) return byGpu;
+        const byJoined = cmpNum(b.created_at, a.created_at);
+        if (byJoined !== 0) return byJoined;
+        return cmpStr(a.usernameDisplay, b.usernameDisplay);
+      });
+    }
     return sortData(filtered, sortConfig.key, sortConfig.direction);
   }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
