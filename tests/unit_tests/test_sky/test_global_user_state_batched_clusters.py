@@ -60,9 +60,11 @@ def test_get_clusters_from_names_returns_record_per_name(tmp_path, monkeypatch):
     assert result['alive-2'] is not None
     assert result['alive-1']['name'] == 'alive-1'
     assert result['alive-2']['name'] == 'alive-2'
-    # summary_response defaults to True, so these extra fields are absent.
+    # The batched helper intentionally only supports the summary shape, so
+    # the verbose-only fields are never present.
     assert 'last_creation_yaml' not in result['alive-1']
     assert 'last_creation_command' not in result['alive-1']
+    assert 'last_event' not in result['alive-1']
 
 
 def test_get_clusters_from_names_missing_names_become_none(
@@ -79,20 +81,6 @@ def test_get_clusters_from_names_missing_names_become_none(
     assert result['alive-1'] is not None
     assert result['gone-1'] is None
     assert result['gone-2'] is None
-
-
-def test_get_clusters_from_names_summary_false_includes_extras(
-        tmp_path, monkeypatch):
-    """summary_response=False mirrors the single-name path and surfaces
-    the extra last_creation_* columns."""
-    _fresh_db(tmp_path, monkeypatch)
-    _add_cluster('alive-1')
-
-    result = global_user_state.get_clusters_from_names(['alive-1'],
-                                                       summary_response=False)
-
-    assert 'last_creation_yaml' in result['alive-1']
-    assert 'last_creation_command' in result['alive-1']
 
 
 def test_get_handles_from_cluster_names_chunks_large_input(
@@ -140,13 +128,13 @@ def test_get_clusters_from_names_chunks_large_input(tmp_path, monkeypatch):
 
 def test_get_clusters_from_names_matches_single_helper(tmp_path, monkeypatch):
     """Batched record for an existing cluster must match the single-name
-    helper field-for-field (modulo summary_response/include_user_info-only
-    keys), so callers can swap one for the other without subtle diffs."""
+    helper field-for-field in summary mode, so callers can swap one for the
+    other without subtle diffs."""
     _fresh_db(tmp_path, monkeypatch)
     _add_cluster('alive-1')
 
     batched = global_user_state.get_clusters_from_names(
-        ['alive-1'], include_user_info=False, summary_response=True)['alive-1']
+        ['alive-1'], include_user_info=False)['alive-1']
     single = global_user_state.get_cluster_from_name('alive-1',
                                                      include_user_info=False,
                                                      summary_response=True)

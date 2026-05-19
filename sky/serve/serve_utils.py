@@ -837,10 +837,7 @@ def _get_service_status(
         # history this was an N+1.
         cluster_names = [info.cluster_name for info in replica_infos]
         cluster_records = global_user_state.get_clusters_from_names(
-            cluster_names,
-            include_user_info=False,
-            summary_response=True,
-        )
+            cluster_names)
         record['replica_info'] = [
             info.to_info_dict(
                 with_handle=True,

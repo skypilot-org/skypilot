@@ -1913,23 +1913,24 @@ def get_clusters_from_names(
     cluster_names: List[str],
     *,
     include_user_info: bool = False,
-    summary_response: bool = True,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """Batched ``get_cluster_from_name`` for many cluster names at once.
+
+    Returns records in the same shape as
+    ``get_cluster_from_name(summary_response=True)``. The verbose
+    ``summary_response=False`` mode is intentionally not exposed here: it
+    would also require batching ``get_terminal_or_last_status_change_event``
+    (another per-row DB call), which is out of scope for the callers that
+    motivated this helper. Use ``get_cluster_from_name`` for those fields.
 
     Args:
         cluster_names: List of cluster names to look up.
         include_user_info: If True, per-row resolve user_hash → user. This
             re-introduces a per-row DB lookup, so it's off by default.
-        summary_response: If True, skip the last_creation_yaml /
-            last_creation_command / last_event fields. Matches the existing
-            ``get_cluster_from_name(summary_response=True)`` defaults used by
-            ``to_info_dict``.
 
     Returns:
-        Dict mapping ``cluster_name`` to its record (same shape as
-        ``get_cluster_from_name`` returns), or to ``None`` for names that
-        don't exist in the cluster table.
+        Dict mapping ``cluster_name`` to its record, or to ``None`` for
+        names that don't exist in the cluster table.
     """
     result: Dict[str,
                  Optional[Dict[str,
@@ -1955,11 +1956,6 @@ def get_clusters_from_names(
         cluster_table.c.workspace,
         cluster_table.c.is_managed,
     ]
-    if not summary_response:
-        query_fields.extend([
-            cluster_table.c.last_creation_yaml,
-            cluster_table.c.last_creation_command,
-        ])
     with orm.Session(engine) as session:
         for offset in range(0, len(cluster_names),
                             _CLUSTER_IN_QUERY_CHUNK_SIZE):
@@ -1984,12 +1980,6 @@ def get_clusters_from_names(
                     'is_managed': bool(row.is_managed),
                     'config_hash': row.config_hash,
                 }
-                if not summary_response:
-                    record['last_creation_yaml'] = row.last_creation_yaml
-                    record['last_creation_command'] = row.last_creation_command
-                    # last_event would be per-row DB work; not supported in
-                    # the batched path. Callers needing it should use
-                    # get_cluster_from_name.
                 if include_user_info:
                     user_hash = _get_user_hash_or_current_user(row.user_hash)
                     user = get_user(user_hash)
