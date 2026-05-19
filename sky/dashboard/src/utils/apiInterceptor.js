@@ -79,18 +79,24 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
       //   - Single flap: real upgrades produce a sustained stream
       //     of failures, so require two within a short window.
       try {
-        const now = Date.now();
         const tabHidden =
-          typeof document !== 'undefined' && document.visibilityState === 'hidden';
-        const sustained = now - _lastFetchErrorAt < FLAP_WINDOW_MS;
-        _lastFetchErrorAt = now;
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'hidden';
+        // Only "qualifying" errors prime the flap window — benign
+        // throws (AbortError, static asset, hidden tab) are ignored
+        // entirely so they can't team up with a later real error to
+        // satisfy the two-failures rule.
         if (
           !isAbortError(error) &&
           !isStaticAssetRequest(input) &&
-          !tabHidden &&
-          sustained
+          !tabHidden
         ) {
-          reportUpgrade();
+          const now = Date.now();
+          const sustained = now - _lastFetchErrorAt < FLAP_WINDOW_MS;
+          _lastFetchErrorAt = now;
+          if (sustained) {
+            reportUpgrade();
+          }
         }
       } catch (e) {
         console.error('Error in upgrade detection interceptor:', e);
