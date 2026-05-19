@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
+import { useUrlState } from '@/hooks/useUrlState';
 import {
   getWorkspaces,
   getEnabledCloudsBatch,
@@ -268,8 +269,8 @@ export function Workspaces() {
     direction: 'asc',
   });
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
+  // Search state — synced to `?q=` so a filtered view can be shared.
+  const [searchQuery, setSearchQuery] = useUrlState('q', '');
 
   // Modal states
   const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =

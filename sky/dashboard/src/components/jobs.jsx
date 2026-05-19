@@ -72,6 +72,7 @@ import {
   buildFilterUrl,
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
+import { useUrlState, parseEnum, parseStringList } from '@/hooks/useUrlState';
 import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 
 // Define status groups for active and finished jobs
@@ -462,13 +463,21 @@ export function ManagedJobsTable({
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
-  const [selectedStatuses, setSelectedStatuses] = useState([]);
+  const [selectedStatuses, setSelectedStatuses] = useUrlState('status', [], {
+    parse: parseStringList([...statusGroups.active, ...statusGroups.finished]),
+  });
   const [statusCounts, setStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [activeTab, setActiveTab] = useState('all');
-  const [showAllMode, setShowAllMode] = useState(true);
+  const [activeTab, setActiveTab] = useUrlState('jobTab', 'all', {
+    parse: parseEnum(['all', 'active', 'finished'], 'all'),
+  });
+  // "Show all" means no specific status pills are selected and the user is
+  // viewing every job in the current tab. Derived from selectedStatuses so
+  // that URL-hydrated selections stay consistent with the highlight state
+  // without an extra reconciling effect.
+  const showAllMode = selectedStatuses.length === 0;
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -804,12 +813,6 @@ export function ManagedJobsTable({
     setCurrentPage(1);
   }, [sortConfig]);
 
-  // Reset status filter when activeTab changes
-  useEffect(() => {
-    setSelectedStatuses([]);
-    setShowAllMode(true); // Default to show all mode when changing tabs
-  }, [activeTab]);
-
   // Populate valueList for filter dropdown
   useEffect(() => {
     if (!setValueList) {
@@ -1075,26 +1078,12 @@ export function ManagedJobsTable({
 
   // Handle status selection
   const handleStatusClick = (status) => {
-    // Toggle the clicked status without affecting others
+    // Toggle the clicked status without affecting others. showAllMode is
+    // derived from selectedStatuses.length so no separate update is needed.
     if (selectedStatuses.includes(status)) {
-      // If the status is already selected, unselect it
-      const newSelectedStatuses = selectedStatuses.filter((s) => s !== status);
-
-      if (newSelectedStatuses.length === 0) {
-        // When deselecting the last selected status, go back to "show all" mode
-        // for the current active tab (active/finished)
-        setShowAllMode(true);
-        setSelectedStatuses([]);
-      } else {
-        setSelectedStatuses(newSelectedStatuses);
-        // We're not in "show all" mode if there are specific statuses selected
-        setShowAllMode(false);
-      }
+      setSelectedStatuses(selectedStatuses.filter((s) => s !== status));
     } else {
-      // Add the clicked status to the selected statuses
       setSelectedStatuses([...selectedStatuses, status]);
-      // We're not in "show all" mode if there are specific statuses selected
-      setShowAllMode(false);
     }
 
     // Reset to first page when changing status filters
@@ -1751,12 +1740,11 @@ export function ManagedJobsTable({
                   <span className="text-gray-500">(</span>
                   <button
                     onClick={() => {
-                      // When showing all jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
+                      // When showing all jobs, clear all selected statuses.
+                      // showAllMode is derived from selectedStatuses.length.
                       React.startTransition(() => {
                         setActiveTab('all');
                         setSelectedStatuses([]);
-                        setShowAllMode(true);
                         setCurrentPage(1);
                       });
                     }}
@@ -1771,12 +1759,11 @@ export function ManagedJobsTable({
                   <span className="text-gray-500 mx-1">|</span>
                   <button
                     onClick={() => {
-                      // When showing all active jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
+                      // When showing all active jobs, clear all selected
+                      // statuses. showAllMode is derived.
                       React.startTransition(() => {
                         setActiveTab('active');
                         setSelectedStatuses([]);
-                        setShowAllMode(true);
                         setCurrentPage(1);
                       });
                     }}
@@ -1791,12 +1778,11 @@ export function ManagedJobsTable({
                   <span className="text-gray-500 mx-1">|</span>
                   <button
                     onClick={() => {
-                      // When showing all finished jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
+                      // When showing all finished jobs, clear all selected
+                      // statuses. showAllMode is derived.
                       React.startTransition(() => {
                         setActiveTab('finished');
                         setSelectedStatuses([]);
-                        setShowAllMode(true);
                         setCurrentPage(1);
                       });
                     }}

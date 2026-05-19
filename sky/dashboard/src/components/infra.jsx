@@ -4,6 +4,7 @@
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { useUrlState } from '@/hooks/useUrlState';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -2020,7 +2021,11 @@ export function GPUs() {
 
   // Workspace-aware infrastructure state
   const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
-  const [selectedWorkspace, setSelectedWorkspace] = useState('all');
+  // `?workspace=` makes the selector shareable. Default 'all' stays out of URL.
+  const [selectedWorkspace, setSelectedWorkspace] = useUrlState(
+    'workspace',
+    'all'
+  );
   const [availableWorkspaces, setAvailableWorkspaces] = useState([]);
 
   // SSH Node Pool state
