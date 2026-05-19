@@ -1374,15 +1374,24 @@ def get_handle_from_cluster_name(
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
+    # Chunk the IN list to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
+    # (default 999 on sqlite < 3.32) and avoid huge IN-clause planning on
+    # PostgreSQL. See _CLUSTER_IN_QUERY_CHUNK_SIZE for the rationale.
+    result: Dict[str, Optional['backends.ResourceHandle']] = {}
+    if not cluster_names:
+        return result
     engine = _db_manager.get_engine()
+    names_list = list(cluster_names)
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name,
-                             cluster_table.c.handle).filter(
-                                 cluster_table.c.name.in_(cluster_names)).all()
-        return {
-            row.name: pickle.loads(row.handle) if row is not None else None
-            for row in rows
-        }
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(cluster_table.c.name,
+                                 cluster_table.c.handle).filter(
+                                     cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                result[row.name] = (pickle.loads(row.handle)
+                                    if row is not None else None)
+    return result
 
 
 @metrics_lib.time_me
@@ -1889,6 +1898,96 @@ def get_cluster_from_name(
         record['user_name'] = user_name
 
     return record
+
+
+# Bound the IN list per query so we stay under SQLite's
+# SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on newer
+# builds) and avoid pathological IN-clause planning on PostgreSQL. 500 is
+# comfortably under both ceilings.
+# Module-level so tests can monkeypatch.
+_CLUSTER_IN_QUERY_CHUNK_SIZE = 500
+
+
+@metrics_lib.time_me
+def get_clusters_from_names(
+    cluster_names: List[str],
+    *,
+    include_user_info: bool = False,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Batched ``get_cluster_from_name`` for many cluster names at once.
+
+    Returns records in the same shape as
+    ``get_cluster_from_name(summary_response=True)``. The verbose
+    ``summary_response=False`` mode is intentionally not exposed here: it
+    would also require batching ``get_terminal_or_last_status_change_event``
+    (another per-row DB call), which is out of scope for the callers that
+    motivated this helper. Use ``get_cluster_from_name`` for those fields.
+
+    Args:
+        cluster_names: List of cluster names to look up.
+        include_user_info: If True, per-row resolve user_hash → user. This
+            re-introduces a per-row DB lookup, so it's off by default.
+
+    Returns:
+        Dict mapping ``cluster_name`` to its record, or to ``None`` for
+        names that don't exist in the cluster table.
+    """
+    result: Dict[str,
+                 Optional[Dict[str,
+                               Any]]] = {name: None for name in cluster_names}
+    if not cluster_names:
+        return result
+    engine = _db_manager.get_engine()
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    with orm.Session(engine) as session:
+        for offset in range(0, len(cluster_names),
+                            _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(*query_fields).filter(
+                cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                record: Dict[str, Any] = {
+                    'name': row.name,
+                    'launched_at': row.launched_at,
+                    'handle': pickle.loads(row.handle),
+                    'last_use': row.last_use,
+                    'status': status_lib.ClusterStatus[row.status],
+                    'autostop': row.autostop,
+                    'to_down': bool(row.to_down),
+                    'owner': _load_owner(row.owner),
+                    'metadata': json.loads(row.metadata),
+                    'cluster_hash': row.cluster_hash,
+                    'cluster_ever_up': bool(row.cluster_ever_up),
+                    'status_updated_at': row.status_updated_at,
+                    'workspace': row.workspace,
+                    'is_managed': bool(row.is_managed),
+                    'config_hash': row.config_hash,
+                }
+                if include_user_info:
+                    user_hash = _get_user_hash_or_current_user(row.user_hash)
+                    user = get_user(user_hash)
+                    record['user_hash'] = user_hash
+                    record['user_name'] = (user.name
+                                           if user is not None else None)
+                result[row.name] = record
+    return result
 
 
 @metrics_lib.time_me

@@ -52,6 +52,13 @@ _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
 _WAIT_LAUNCH_THREAD_TIMEOUT_SECONDS = 15
 
+# Sentinel for to_info_dict's pre-fetched cluster_record
+# parameters. We can't use None because None is a legitimate value (it means
+# "no cluster row" / "no handle"). The sentinel lets callers opt in to the
+# batched fetch path while preserving the existing self-fetch behavior for
+# back-compat callers like ReplicaInfo.__repr__.
+_NOT_PROVIDED: Any = object()
+
 # TODO(tian): Backward compatibility. Remove this after 3 minor release, i.e.
 # 0.13.0. We move the ProcessStatus to common_utils.ProcessStatus in #6666, but
 # old ReplicaInfo in database will still tries to unpickle using ProcessStatus
@@ -527,9 +534,28 @@ class ReplicaInfo:
 
     def to_info_dict(self,
                      with_handle: bool,
-                     with_url: bool = True) -> Dict[str, Any]:
-        cluster_record = global_user_state.get_cluster_from_name(
-            self.cluster_name, include_user_info=False, summary_response=True)
+                     with_url: bool = True,
+                     cluster_record: Any = _NOT_PROVIDED) -> Dict[str, Any]:
+        """Build the dashboard/CLI view dict for this replica.
+
+        Args:
+            with_handle: include the (pickled) ResourceHandle and derived
+                cloud/region/resources_str fields.
+            with_url: resolve the replica endpoint via ``self.url`` (does a
+                cluster lookup itself). Off for pool views.
+            cluster_record: optional pre-fetched record from
+                ``global_user_state.get_cluster_from_name`` /
+                ``get_clusters_from_names``. Pass to avoid the per-replica
+                DB round-trip when iterating many replicas. Use
+                ``_NOT_PROVIDED`` (the default) to fall back to the
+                self-fetch path for backward compatibility (e.g. ``__repr__``
+                still works without changes).
+        """
+        if cluster_record is _NOT_PROVIDED:
+            cluster_record = global_user_state.get_cluster_from_name(
+                self.cluster_name,
+                include_user_info=False,
+                summary_response=True)
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
@@ -542,7 +568,14 @@ class ReplicaInfo:
                             if cluster_record is not None else None),
         }
         if with_handle:
-            handle = self.handle(cluster_record)
+            # When the cluster row is missing, the handle is also missing
+            # (they live in the same row). ``self.handle(None)`` would issue
+            # another DB lookup against the same row and return None
+            # anyway, so short-circuit instead.
+            if cluster_record is None:
+                handle = None
+            else:
+                handle = self.handle(cluster_record)
             info_dict['handle'] = handle
             if handle is not None:
                 info_dict['cloud'] = repr(handle.launched_resources.cloud)

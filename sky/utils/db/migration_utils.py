@@ -34,7 +34,7 @@ GLOBAL_USER_STATE_VERSION = '018'  # add cluster links column
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '019'  # add file_mounts_blob_id column to job_info
+SPOT_JOBS_VERSION = '020'  # add indexes for pool dashboard queries
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'

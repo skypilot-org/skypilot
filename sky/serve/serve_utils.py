@@ -831,19 +831,40 @@ def _get_service_status(
                      f'Traceback: {traceback.format_exc()}')
 
     if with_replica_info:
+        replica_infos = serve_state.get_replica_infos(service_name)
+        # Pre-fetch cluster records in one batched DB query instead of
+        # letting each to_info_dict() do its own. With a long failure
+        # history this was an N+1.
+        cluster_names = [info.cluster_name for info in replica_infos]
+        cluster_records = global_user_state.get_clusters_from_names(
+            cluster_names)
         record['replica_info'] = [
-            info.to_info_dict(with_handle=True, with_url=not pool)
-            for info in serve_state.get_replica_infos(service_name)
+            info.to_info_dict(
+                with_handle=True,
+                with_url=not pool,
+                cluster_record=cluster_records[info.cluster_name],
+            ) for info in replica_infos
         ]
         if pool:
-            # Get pool-level jobs (e.g. batch coordinators) that use
-            # all workers — they have pool set but no cluster_name.
-            pool_level_job_ids = (
-                managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, cluster_name=None))
+            # Fetch all nonterminal job ids in the pool in a single query,
+            # grouped by current_cluster_name. Avoids the N+1 pattern of
+            # (1 + len(replicas)) per-pool queries against a job_info table
+            # that may contain tens of thousands of finished rows.
+            jobs_by_cluster = (
+                managed_job_state.get_nonterminal_job_ids_by_pool_grouped(
+                    service_name))
+            # Pool-level jobs (e.g. batch coordinators) span every worker.
+            # They have pool set but no cluster_name, so they live under the
+            # None bucket of the grouped result. Note: the prior per-call
+            # implementation passed cluster_name=None to a function that
+            # treated None as "no filter" rather than "IS NULL", so it
+            # accidentally returned every nonterminal job in the pool and
+            # surfaced unrelated replicas' jobs as `used_by` on each READY
+            # worker. The grouped query lets us implement the intended
+            # semantic exactly.
+            pool_level_job_ids = list(jobs_by_cluster.get(None, []))
             for replica_info in record['replica_info']:
-                job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, replica_info['name'])
+                job_ids = list(jobs_by_cluster.get(replica_info['name'], []))
                 # Show pool-level jobs on READY workers only.
                 if (replica_info.get('status') ==
                         serve_state.ReplicaStatus.READY):
