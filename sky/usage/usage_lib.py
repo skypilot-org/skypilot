@@ -1,11 +1,14 @@
 """Logging events to Grafana Loki."""
 
+import atexit
+import concurrent.futures
 import contextlib
 import contextvars
 import datetime
 import enum
 import json
 import os
+import threading
 import time
 import traceback
 import typing
@@ -540,6 +543,55 @@ class _MessagesProxy:
 
 messages = _MessagesProxy()
 
+# Background executor for fire-and-forget Loki POSTs. Daemon threads so the
+# CLI/server can exit without blocking on in-flight requests; the atexit
+# hook below gives them a brief window to flush.
+_loki_executor_lock = threading.Lock()
+_loki_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_loki_pending_lock = threading.Lock()
+_loki_pending: 'List[concurrent.futures.Future]' = []
+_LOKI_FLUSH_TIMEOUT_S = 0.3
+
+
+def _get_loki_executor() -> concurrent.futures.ThreadPoolExecutor:
+    global _loki_executor
+    if _loki_executor is None:
+        with _loki_executor_lock:
+            if _loki_executor is None:
+                _loki_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=4, thread_name_prefix='loki-send')
+                atexit.register(_flush_pending_loki_sends)
+    return _loki_executor
+
+
+def _flush_pending_loki_sends() -> None:
+    """Best-effort wait for in-flight Loki sends on interpreter shutdown."""
+    with _loki_pending_lock:
+        pending = [f for f in _loki_pending if not f.done()]
+        _loki_pending.clear()
+    deadline = time.monotonic() + _LOKI_FLUSH_TIMEOUT_S
+    for f in pending:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            f.result(timeout=remaining)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+
+def _post_to_loki(payload: str, headers: Dict[str, str]) -> None:
+    try:
+        response = requests.post(constants.LOG_URL,
+                                 data=payload,
+                                 headers=headers,
+                                 timeout=0.5)
+        if response.status_code != 204:
+            logger.debug(f'Grafana Loki failed with response: '
+                         f'{response.text}\n{payload}')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Grafana Loki send raised: {type(e).__name__}: {e}')
+
 
 def _send_to_loki(message_type: MessageType):
     """Send the message to the Grafana Loki."""
@@ -584,13 +636,14 @@ def _send_to_loki(message_type: MessageType):
         }]
     }
     payload = json.dumps(payload)
-    response = requests.post(constants.LOG_URL,
-                             data=payload,
-                             headers=headers,
-                             timeout=0.5)
-    if response.status_code != 204:
-        logger.debug(
-            f'Grafana Loki failed with response: {response.text}\n{payload}')
+    # Fire-and-forget: hand the POST to a daemon thread so the caller
+    # doesn't block on Loki's response. The 0.5s request timeout inside
+    # _post_to_loki still bounds the background thread's lifetime, and
+    # atexit (_flush_pending_loki_sends) gives in-flight sends a short
+    # window to complete when the process exits.
+    future = _get_loki_executor().submit(_post_to_loki, payload, headers)
+    with _loki_pending_lock:
+        _loki_pending[:] = [f for f in _loki_pending if not f.done()] + [future]
     messages.reset(message_type)
 
 
