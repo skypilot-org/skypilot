@@ -473,6 +473,10 @@ class TestPoolStatusBatchedQuery:
         # pylint: disable=import-outside-toplevel
         from sky.serve import serve_state
         info = mock.Mock()
+        # cluster_name is what _get_service_status reads when building the
+        # batched names list. Setting it as a real attribute prevents
+        # MagicMock from returning a separate Mock per access.
+        info.cluster_name = name
         info.to_info_dict.return_value = {
             'name': name,
             'status': (status if isinstance(status, serve_state.ReplicaStatus)
@@ -480,7 +484,7 @@ class TestPoolStatusBatchedQuery:
         }
         return info
 
-    def _patch_environment(self, replicas, grouped_jobs):
+    def _patch_environment(self, replicas, grouped_jobs, cluster_records=None):
         # pylint: disable=import-outside-toplevel
         from sky.serve import serve_state
 
@@ -490,6 +494,16 @@ class TestPoolStatusBatchedQuery:
             'version': 1,
             'controller_port': 20001,
         }
+        # Default: every replica's cluster row exists. Tests that want to
+        # simulate "dead" replicas can override by passing cluster_records
+        # with explicit None values.
+        if cluster_records is None:
+            cluster_records = {
+                r.cluster_name: {
+                    'launched_at': 0,
+                    'handle': None,
+                } for r in replicas
+            }
         return (
             mock.patch(
                 'sky.serve.serve_utils.serve_state.get_service_from_name',
@@ -506,6 +520,10 @@ class TestPoolStatusBatchedQuery:
                 return_value=grouped_jobs),
             mock.patch('sky.serve.serve_utils.managed_job_state.'
                        'get_nonterminal_job_ids_by_pool'),
+            mock.patch(
+                'sky.serve.serve_utils.global_user_state.'
+                'get_clusters_from_names',
+                return_value=cluster_records),
             serve_state,  # returned for callers to use as needed
         )
 
@@ -528,9 +546,11 @@ class TestPoolStatusBatchedQuery:
             'replica-2': [30],
         }
         (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
-         legacy_patch, _) = self._patch_environment(replicas, grouped_jobs)
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, grouped_jobs)
         with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
-             grouped_patch as mock_grouped, legacy_patch as mock_legacy:
+             grouped_patch as mock_grouped, legacy_patch as mock_legacy, \
+             clusters_patch:
             record = serve_utils._get_service_status('pool-a', pool=True)
 
         assert record is not None
@@ -564,14 +584,112 @@ class TestPoolStatusBatchedQuery:
             'replica-other': [4],
         }
         (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
-         legacy_patch, _) = self._patch_environment(replicas, grouped_jobs)
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, grouped_jobs)
         with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
-             grouped_patch, legacy_patch:
+             grouped_patch, legacy_patch, clusters_patch:
             record = serve_utils._get_service_status('pool-a', pool=True)
 
         assert record is not None
         used_by = {r['name']: r['used_by'] for r in record['replica_info']}
         assert used_by['replica-init'] == [2, 3]
+
+    def test_pool_status_uses_batched_cluster_lookups(self):
+        """The per-replica `get_cluster_from_name` call inside to_info_dict
+        used to dominate pool_status latency on pools with long failure
+        history. `_get_service_status` now pre-fetches all records in one
+        batched call and passes them through to to_info_dict.
+
+        There is no separate handle-fallback round-trip: handle is just a
+        column on the same cluster_table row, so when ``cluster_record`` is
+        None the handle is also None and we skip ``self.handle()`` entirely.
+        """
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica(f'r-{i}', serve_state.ReplicaStatus.READY)
+            for i in range(5)
+        ]
+        # First three "alive" (cluster row exists), last two "dead" (cluster
+        # row gone). The dead ones must not trigger any extra DB lookups.
+        cluster_records = {
+            'r-0': {
+                'launched_at': 1,
+                'handle': None
+            },
+            'r-1': {
+                'launched_at': 2,
+                'handle': None
+            },
+            'r-2': {
+                'launched_at': 3,
+                'handle': None
+            },
+            'r-3': None,
+            'r-4': None,
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, {None: []},
+                                      cluster_records=cluster_records)
+        # No mock for get_handles_from_cluster_names — the test fails if
+        # _get_service_status reintroduces a redundant call to it.
+        with mock.patch('sky.serve.serve_utils.global_user_state.'
+                        'get_handles_from_cluster_names') as mock_handles:
+            with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+                 grouped_patch, legacy_patch, \
+                 clusters_patch as mock_clusters:
+                record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        # Batched cluster lookup happens exactly once and gets every name.
+        mock_clusters.assert_called_once()
+        passed_names = mock_clusters.call_args.args[0]
+        assert sorted(passed_names) == [f'r-{i}' for i in range(5)]
+        # Handle lookup must not be reintroduced: missing cluster_record
+        # implies missing handle, so the second batched call would be a
+        # guaranteed-empty waste.
+        mock_handles.assert_not_called()
+        # to_info_dict was called per replica with the pre-fetched record
+        # supplied, so it must not re-fetch on its own.
+        for replica_mock in replicas:
+            replica_mock.to_info_dict.assert_called_once()
+            kwargs = replica_mock.to_info_dict.call_args.kwargs
+            assert 'cluster_record' in kwargs
+
+    def test_pool_status_no_handles_lookup_call(self):
+        """All replicas alive: there should never be a fallback handle
+        batched query (deleted by design)."""
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('r-0', serve_state.ReplicaStatus.READY),
+            self._replica('r-1', serve_state.ReplicaStatus.READY),
+        ]
+        cluster_records = {
+            'r-0': {
+                'launched_at': 1,
+                'handle': None
+            },
+            'r-1': {
+                'launched_at': 2,
+                'handle': None
+            },
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, {None: []},
+                                      cluster_records=cluster_records)
+        with mock.patch('sky.serve.serve_utils.global_user_state.'
+                        'get_handles_from_cluster_names') as mock_handles:
+            with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+                 grouped_patch, legacy_patch, clusters_patch:
+                serve_utils._get_service_status('pool-a', pool=True)
+
+        # The handle-fallback batched query was removed entirely.
+        mock_handles.assert_not_called()
 
 
 class TestTerminalStatuses:
