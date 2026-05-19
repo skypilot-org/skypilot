@@ -315,11 +315,22 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
     #   on GKE.
     pod_name = config['cluster_name'] + '-head'
+    # combine_pod_config_fields_and_metadata() has already folded the
+    # user's kubernetes.pod_config (incl. spec.hostNetwork) into
+    # node_config by the time auth runs, so this is the resolved value.
+    # Pass it as a flag to the proxy script so the common path makes no
+    # extra `kubectl get pod` call per connection.
+    head_node_config = config.get('available_node_types',
+                                  {}).get('ray_head_default',
+                                          {}).get('node_config', {})
+    host_network = bool(
+        head_node_config.get('spec', {}).get('hostNetwork', False))
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
         pod_name,
         private_key_path=private_key_path,
         context=context,
-        namespace=namespace)
+        namespace=namespace,
+        host_network=host_network)
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 

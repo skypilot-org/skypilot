@@ -19,6 +19,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -557,7 +558,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones  # Unused.
+        del zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -795,6 +796,33 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
 
+        # Detect hostNetwork before the template is rendered so the probe
+        # env vars can be wired into deploy_vars. Two independent paths put
+        # a pod on the host network namespace, and both need the probe:
+        #   1. The user sets spec.hostNetwork in pod_config. Resolved through
+        #      the same helper combine_pod_config_fields() uses, so this
+        #      agrees with the pod_config folded into the rendered YAML.
+        #   2. OCI OKE RoCE: the template forces `hostNetwork: true` from
+        #      k8s_enable_oci_roce (the user never sets it in pod_config, so
+        #      path 1 wouldn't catch it). Without the probe, the OCI RoCE
+        #      pod's sshd can't bind host:22 (the K8s node's own sshd owns
+        #      it) and inter-node Ray ports collide — so OCI RoCE is treated
+        #      as host-networked here too. Keep this in sync with the
+        #      `hostNetwork: true` gate in kubernetes-ray.yml.j2.
+        oci_roce_enabled = (
+            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+        merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
+            resources.cluster_config_overrides, self, context)
+        k8s_host_network = oci_roce_enabled or bool(
+            merged_pod_config.get('spec', {}).get('hostNetwork', False))
+        if k8s_host_network:
+            cluster_name_on_cloud = cluster_name.name_on_cloud
+            k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'] = (
+                host_network_probe.ray_ports_configmap_name(
+                    cluster_name_on_cloud))
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'] = namespace
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -853,6 +881,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_network_type': network_type.value,
             'k8s_context': context,
             'k8s_namespace': namespace,
+            'k8s_host_network': k8s_host_network,
         }
 
         # Add ephemeral storage to deploy vars if specified.
@@ -905,9 +934,10 @@ class Kubernetes(clouds.Cloud):
             network_type.requires_ipc_lock_capability())
 
         # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
-        # hostPath mount of /dev/infiniband (no device plugin on OCI).
-        deploy_vars['k8s_enable_oci_roce'] = (
-            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+        # hostPath mount of /dev/infiniband (no device plugin on OCI). The
+        # hostNetwork part also feeds k8s_host_network above (see comment
+        # there), which is what activates the Ray-port probe machinery.
+        deploy_vars['k8s_enable_oci_roce'] = oci_roce_enabled
 
         # User-specified APT mirror candidates for pod package installs.
         # None means unset (template uses built-in defaults); an empty list

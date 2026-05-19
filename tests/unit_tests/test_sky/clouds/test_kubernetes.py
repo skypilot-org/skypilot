@@ -1018,6 +1018,11 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         # OCI RoCE requires hostNetwork, privileged, and /dev/infiniband.
         self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # OCI RoCE forces hostNetwork via the template, so k8s_host_network
+        # must also be True — otherwise the Ray-port/sshd probe machinery is
+        # skipped and inter-node Ray + `ssh <cluster>` break under
+        # hostNetwork (the pod's sshd can't bind host:22).
+        self.assertTrue(deploy_vars['k8s_host_network'])
         # IPC_LOCK is shared with other high-perf types and stays True.
         self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
         # Sanity: GPUDirect flags are False for OCI.
@@ -1026,6 +1031,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
 
         k8s_env_vars = deploy_vars['k8s_env_vars']
+        # The probe is runtime-gated on these env vars (see
+        # instance_setup._host_network_probe_cmd); they must be wired for
+        # OCI RoCE so the probe actually runs.
+        self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
+        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'],
+                         'test-oci-cluster-ray-ports')
+        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'],
+                         'default')
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
         self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
@@ -1107,6 +1120,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         self.assertFalse(deploy_vars['k8s_enable_oci_roce'])
         self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
+        # No OCI RoCE and no pod_config hostNetwork override -> the pod is
+        # not host-networked, so the probe machinery stays off.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        self.assertNotIn('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                         deploy_vars['k8s_env_vars'])
         self.assertNotIn('NCCL_IB_GID_INDEX', deploy_vars['k8s_env_vars'])
 
 
