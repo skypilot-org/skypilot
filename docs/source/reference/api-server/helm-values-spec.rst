@@ -66,6 +66,7 @@ Below is the available helm value keys and the default value of each key:
         cpu: "4"
         memory: "8Gi"
     :ref:`skypilotDev <helm-values-apiService-skypilotDev>`: false
+    :ref:`serveServerLog <helm-values-apiService-serveServerLog>`: true
     :ref:`metrics <helm-values-apiService-metrics>`:
       :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
       :ref:`port <helm-values-apiService-metrics-port>`: 9090
@@ -712,6 +713,20 @@ Default: ``false``
 
   apiService:
     skypilotDev: false
+
+.. _helm-values-apiService-serveServerLog:
+
+``apiService.serveServerLog``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Whether to save server logs to a file (``/root/.sky/api_server/server.log``) in addition to stdout. When ``false``, logs are only written to stdout (container logs).
+
+Default: ``true``
+
+.. code-block:: yaml
+
+  apiService:
+    serveServerLog: true
 
 .. _helm-values-apiService-metrics:
 

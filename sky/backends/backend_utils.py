@@ -42,6 +42,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
+from sky.provision.kubernetes import instance as k8s_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
@@ -84,6 +85,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.provision.kubernetes.instance import NodeHealthInfo
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -233,7 +235,33 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # the cluster exists, it will only include the zone that the cluster is
     # actually in.
     ('provider', 'availability_zone'),
+    # The security group name includes a hostname-derived hash
+    # (user_and_hostname_hash) that varies across API server restart
+    ('provider', 'security_group'),
 ]
+
+# Filenames in `file_mounts` whose content sha256 should NOT participate in the
+# cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
+# transient on-disk caches whose bytes drift across replicas / time without any
+# user-meaningful semantic change (e.g., gcloud token refreshes), and including
+# them in the hash makes `sky launch --fast` re-provision unexpectedly.
+#
+# These files are still uploaded to the cluster as part of file_mounts -- we
+# only skip them from the deterministic hash used for the --fast cache key.
+# The cluster's gcloud will tolerate a slightly-stale cache (refresh tokens
+# are long-lived; access tokens auto-refresh on use).
+_FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
+    # gcloud OAuth credentials cache (refresh tokens + token metadata).
+    'credentials.db',
+    'credentials.db-journal',
+    'credentials.db-wal',
+    'credentials.db-shm',
+    # gcloud short-lived access token cache (1 hour TTL, auto-refreshed).
+    'access_tokens.db',
+    'access_tokens.db-journal',
+    'access_tokens.db-wal',
+    'access_tokens.db-shm',
+})
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
@@ -932,6 +960,8 @@ def write_cluster_config(
 
     volume_mount_vars = []
     ephemeral_volume_mount_vars = []
+    conflict_checker = volume_utils.VolumeMountConflictChecker()
+
     if volume_mounts is not None:
         for vol in volume_mounts:
             if vol.is_ephemeral:
@@ -940,6 +970,12 @@ def write_cluster_config(
                 vol.volume_config.cloud = repr(cloud)
                 vol.volume_config.region = region.name
                 vol.volume_config.name = volume_name
+                conflict_checker.check(volume_utils.VolumeInfo(
+                    name=volume_name,
+                    path=vol.path,
+                    volume_type=volume_utils.VolumeType.PVC.value),
+                                       source='task YAML volumes (ephemeral)',
+                                       volume_desc='ephemeral volume')
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
                 volume_info = volume_utils.VolumeInfo(
@@ -948,14 +984,103 @@ def write_cluster_config(
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
                     sub_path=vol.sub_path,
+                    volume_type=vol.volume_config.type,
+                    host_path=vol.volume_config.config.get('host_path'),
                 )
+                conflict_checker.check(
+                    volume_info,
+                    source='task YAML volumes',
+                    volume_desc=f'volume {vol.volume_name!r}')
                 volume_mount_vars.append(volume_info)
+
+    # Resolve auto_mounts from config and add them to volume_mount_vars so
+    # they go through the same Jinja2 template path as user volume mounts
+    # (volume definitions, volumeMounts, and permission fixes).
+    if isinstance(cloud, clouds.Kubernetes):
+        auto_mounts_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=to_provision.region,
+            keys=('auto_mounts',),
+            default_value=None)
+        if auto_mounts_config:
+            home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
+            attached_auto_mount_volumes: Set[str] = set()
+            for entry in auto_mounts_config:
+                volume_name = entry['volume_name']
+                mount_paths = entry.get('mount_paths', [])
+                record = global_user_state.get_volume_by_name(volume_name)
+                if record is None:
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} not found in '
+                        f'SkyPilot volume DB. Skipping. '
+                        f'Create it with: sky volumes apply')
+                    continue
+                volume_config = record['handle']
+                # Only hostPath and ReadWriteMany PVC volumes support
+                # concurrent multi-pod access required by auto_mounts.
+                if (volume_config.type == volume_utils.VolumeType.PVC.value and
+                        volume_config.config.get('access_mode') !=
+                        volume_utils.VolumeAccessMode.READ_WRITE_MANY.value):
+                    logger.warning(
+                        f'Auto-mount volume {volume_name!r} has access '
+                        f'mode '
+                        f'{volume_config.config.get("access_mode")!r}, '
+                        f'which does not support concurrent multi-pod '
+                        f'access. Only hostPath volumes and '
+                        f'ReadWriteMany PVC volumes are supported for '
+                        f'auto_mounts. Skipping.')
+                    continue
+                for path in mount_paths:
+                    if path.startswith('/'):
+                        mount_path = path
+                    elif path.startswith('~/'):
+                        mount_path = f'{home_dir}/{path[2:]}'
+                    elif path == '~':
+                        mount_path = home_dir
+                    else:
+                        logger.warning(f'Malformed automount path {path}')
+                        continue
+                    vol_info = volume_utils.VolumeInfo(
+                        name=volume_name,
+                        path=mount_path,
+                        volume_name_on_cloud=volume_config.name_on_cloud,
+                        volume_id_on_cloud=volume_config.id_on_cloud,
+                        volume_type=volume_config.type,
+                        host_path=volume_config.config.get('host_path'),
+                    )
+                    conflict_checker.check(
+                        vol_info,
+                        source='auto_mounts config',
+                        volume_desc=f'auto-mount volume {volume_name!r}')
+                    volume_mount_vars.append(vol_info)
+                    attached_auto_mount_volumes.add(volume_name)
+            # Mirror the explicit `volume_mounts` path (see
+            # `VolumeMount.pre_mount`): record the attachment timestamp and
+            # IN_USE status so the Volumes dashboard surfaces the "Last
+            # Use" column correctly for auto-mounted volumes. Run this
+            # after the loop so that a conflict raised by
+            # `conflict_checker.check` leaves volume metadata untouched.
+            # Skip on dryrun so `sky launch --dryrun` does not mutate
+            # volume metadata.
+            if not dryrun and attached_auto_mount_volumes:
+                now = int(time.time())
+                for vol_name in attached_auto_mount_volumes:
+                    global_user_state.update_volume(
+                        vol_name,
+                        last_attached_at=now,
+                        status=status_lib.VolumeStatus.IN_USE)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
         keys=('post_provision_runcmd',),
         default_value=None)
+
+    # Build a list of read-write volume mount paths. The container startup
+    # script checks each path and fixes permissions if the current user cannot
+    # write to it (e.g. hostPath dirs created as root by kubelet, PVC subPath
+    # dirs created as root, or NFS volumes that ignore fsGroup).
+    volume_mount_rw_paths: List[str] = [v.path for v in volume_mount_vars]
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -993,6 +1118,12 @@ def write_cluster_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
                 keys=('vpc_name',),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
+            'subnet_names': skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('subnet_names',),
                 default_value=None,
                 override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
@@ -1071,10 +1202,14 @@ def write_cluster_config(
             # Volume mounts
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
+            'volume_mount_rw_paths': volume_mount_rw_paths,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
             'runcmd': runcmd,
+
+            # Priority class
+            'priority_class': to_provision.priority_class,
         },
     )
     if cloud_specific_failover_overrides is not None:
@@ -1371,7 +1506,9 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
         # case we hash the contents of the symlink destination.
         if os.path.isfile(expanded_src):
             config_hash.update('file'.encode('utf-8'))
-            config_hash.update(_hash_file(expanded_src))
+            if os.path.basename(expanded_src) not in (
+                    _FILE_MOUNT_BASENAMES_SKIP_HASH):
+                config_hash.update(_hash_file(expanded_src))
 
         # This can also be a symlink to a directory. os.walk will treat it as a
         # normal directory and list the contents of the symlink destination.
@@ -1401,8 +1538,14 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
                 # contents.
                 for filename in filenames:
                     config_hash.update(filename.encode('utf-8') + b'\0')
-                    config_hash.update(
-                        _hash_file(os.path.join(dirpath, filename)))
+                    # Filename is recorded above (so an add/remove of a
+                    # transient cache file is still detected); we just don't
+                    # hash the file content for the skip-list, because that
+                    # content drifts independently of any user-meaningful
+                    # change (see _FILE_MOUNT_BASENAMES_SKIP_HASH).
+                    if filename not in _FILE_MOUNT_BASENAMES_SKIP_HASH:
+                        config_hash.update(
+                            _hash_file(os.path.join(dirpath, filename)))
                 config_hash.update(b'\0')
 
         else:
@@ -1977,65 +2120,82 @@ def _check_owner_identity_with_record(cluster_name: str,
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
+    is_k8s_cloud = isinstance(cloud, clouds.Kubernetes)
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
+
     if user_identities is None:
         # Skip the check if the cloud does not support user identity.
         return
-    # The user identity can be None, if the cluster is created by an older
-    # version of SkyPilot. In that case, we set the user identity to the
-    # current active one.
-    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
-    # immediately without `sky status --refresh` first, will cause a leakage
-    # of the existing cluster. We deem this an acceptable tradeoff mainly
-    # because multi-identity is not common (at least at the moment).
-    if owner_identity is None:
-        global_user_state.set_owner_identity_for_cluster(
-            cluster_name, user_identities[0])
-    else:
-        assert isinstance(owner_identity, list)
-        # It is OK if the owner identity is shorter, which will happen when
-        # the cluster is launched before #1808. In that case, we only check
-        # the same length (zip will stop at the shorter one).
-        for identity in user_identities:
-            for i, (owner, current) in enumerate(zip(owner_identity, identity)):
-                # Clean up the owner identity for the backslash and newlines, caused
-                # by the cloud CLI output, e.g. gcloud.
-                owner = owner.replace('\n', '').replace('\\', '')
-                if owner == current:
-                    if i != 0:
-                        logger.warning(
-                            f'The cluster was owned by {owner_identity}, but '
-                            f'a new identity {identity} is activated. We still '
-                            'allow the operation as the two identities are '
-                            'likely to have the same access to the cluster. '
-                            'Please be aware that this can cause unexpected '
-                            'cluster leakage if the two identities are not '
-                            'actually equivalent (e.g., belong to the same '
-                            'person).')
-                    if i != 0 or len(owner_identity) != len(identity):
-                        # We update the owner of a cluster, when:
-                        # 1. The strictest identty (i.e. the first one) does not
-                        # match, but the latter ones match.
-                        # 2. The length of the two identities are different,
-                        # which will only happen when the cluster is launched
-                        # before #1808. Update the user identity to avoid
-                        # showing the warning above again.
-                        global_user_state.set_owner_identity_for_cluster(
-                            cluster_name, identity)
-                    return  # The user identity matches.
+
+    def _raise_identity_error():
         # Generate error message if no match found
         if len(user_identities) == 1:
             err_msg = f'the activated identity is {user_identities[0]!r}.'
         else:
             err_msg = (f'available identities are {user_identities!r}.')
-        if cloud.is_same_cloud(clouds.Kubernetes()):
+        if is_k8s_cloud:
             err_msg += (' Check your kubeconfig file and make sure the '
                         'correct context is available.')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
+
+    if owner_identity is None and is_k8s_cloud:
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
+        provider_config = config['provider']
+        context = provider_config.get('context')
+        assert isinstance(context, str)
+        try:
+            identity = clouds.Kubernetes.get_identity_from_context_name(context)
+            global_user_state.set_owner_identity_for_cluster(
+                cluster_name, identity)
+            logger.debug(f'Successfully patched {cluster_name} owner identity '
+                         f'to {identity} (launched on {context}).')
+            return
+        except exceptions.CloudUserIdentityError:
+            _raise_identity_error()
+
+    assert isinstance(owner_identity, list)
+    # It is OK if the owner identity is shorter, which will happen when
+    # the cluster is launched before #1808. In that case, we only check
+    # the same length (zip will stop at the shorter one).
+    for identity in user_identities:
+        for i, (owner, current) in enumerate(zip(owner_identity, identity)):
+            # Clean up the owner identity for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
+            if owner == current:
+                if not is_k8s_cloud:
+                    # We skip patching owner identities for Kubernetes as
+                    # we expect users to naturally have multiple clusters
+                    # in their kubeconfig. The "active" identity is
+                    # considered as the current context, but users can and
+                    # will use contexts other than their current context
+                    # intentionally.
+                    if i != 0:
+                        logger.warning(
+                            f'The cluster was owned by {owner_identity}, '
+                            f'but a new identity {identity} is activated. '
+                            'We still allow the operation as the two '
+                            'identities are likely to have the same '
+                            'access to the cluster. Please be aware that '
+                            'this can cause unexpected cluster leakage if '
+                            'the two identities are not actually equivalent '
+                            '(e.g., belong to the same person).')
+                    if i != 0 or len(owner_identity) != len(identity):
+                        # We update the owner of a cluster, when:
+                        # 1. The strictest identty (i.e. the first one)
+                        # does not match, but the latter ones match.
+                        # 2. The length of the two identities are different,
+                        # which will only happen when the cluster is launched
+                        # before #1808. Update the user identity to avoid
+                        # showing the warning above again.
+                        global_user_state.set_owner_identity_for_cluster(
+                            cluster_name, identity)
+                return  # The user identity matches.
+    _raise_identity_error()
 
 
 def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
@@ -2049,9 +2209,11 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     retry_if_missing: bool,
-) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
-    """Returns the status of the cluster as a list of tuples corresponding
-    to the node status and an optional reason string for said status.
+) -> Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]]:
+    """Returns a dict mapping instance/pod name to (status, reason).
+
+    For the new provisioner API, keys are instance IDs (e.g., pod names
+    on Kubernetes). For the legacy query_status API, keys are str(index).
 
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -2083,7 +2245,6 @@ def _query_cluster_status_via_cloud_api(
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
-            node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
@@ -2098,11 +2259,13 @@ def _query_cluster_status_via_cloud_api(
         # TODO (kyuds): refactor cloud.query_status api to include reason.
         # Currently not refactoring as this API is actually supposed to be
         # deprecated soon.
-        node_statuses = cloud.query_status(
+        statuses = cloud.query_status(
             cluster_name_on_cloud,
             tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
-        node_statuses = [(status, None) for status in node_statuses]
-    return node_statuses
+        node_status_dict = {
+            str(i): (status, None) for i, status in enumerate(statuses)
+        }
+    return node_status_dict
 
 
 def _query_cluster_info_via_cloud_api(
@@ -2312,7 +2475,7 @@ def _update_cluster_status(
         handle, retry_if_missing=retry_if_missing)
 
     all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
-                        for status in node_statuses) and
+                        for status in node_statuses.values()) and
                     len(node_statuses) == handle.launched_nodes)
 
     external_cluster_failures = ExternalFailureSource.get(
@@ -2609,7 +2772,7 @@ def _update_cluster_status(
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
-                                 for status in node_statuses)
+                                 for status in node_statuses.values())
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
     if is_abnormal and not external_cluster_failures:
@@ -2617,13 +2780,42 @@ def _update_cluster_status(
         # earlier. So if all_nodes_up is True and we are here, it means the ray
         # cluster must have been unhealthy.
         ray_cluster_unhealthy = all_nodes_up
-        status_reason = ', '.join(
-            [status[1] for status in node_statuses if status[1] is not None])
+
+        # For Kubernetes clusters with unhealthy pods, check node health
+        # to provide better diagnostics (e.g., "node X is NotReady").
+        node_health: Optional[Dict[str, 'NodeHealthInfo']] = None
+        if (ray_cluster_unhealthy and
+                isinstance(launched_resources.cloud, clouds.Kubernetes)):
+            unhealthy_pods = [
+                pod_name for pod_name, (_, reason) in node_statuses.items()
+                if reason is not None
+            ]
+            if unhealthy_pods:
+                try:
+                    ray_config = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
+                    node_health = k8s_instance.get_node_health_for_cluster(
+                        handle.cluster_name_on_cloud, ray_config['provider'],
+                        unhealthy_pods)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to get node health for '
+                                 f'{cluster_name!r}: {e}')
+
+        status_reason = _summarize_pod_reasons(node_statuses,
+                                               handle.launched_nodes,
+                                               node_health)
 
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif ray_cluster_unhealthy:
-            init_reason = f'ray cluster is unhealthy ({ray_status_details})'
+            if status_reason:
+                # K8s diagnostics explain the issue — lead with that
+                # instead of the generic "ray cluster is unhealthy" message.
+                init_reason = status_reason
+                status_reason = ''  # already incorporated
+            else:
+                init_reason = (
+                    f'ray cluster is unhealthy ({ray_status_details})')
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
@@ -3282,6 +3474,87 @@ def _get_glob_clusters(
             logger.info(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+_MAX_NAMES_IN_SUMMARY = 3
+
+
+def _summarize_pod_reasons(
+    node_statuses: Dict[str, Tuple[status_lib.ClusterStatus, Optional[str]]],
+    total_pods: int,
+    node_health: Optional[Dict[str, 'NodeHealthInfo']] = None,
+) -> str:
+    """Summarize per-pod reasons into a concise grouped message.
+
+    Groups issues by root cause:
+    1. Node-level issues (from node_health dict, deduplicated by node)
+    2. Pod-level issues (grouped by reason, pod names from dict keys)
+
+    Args:
+        node_statuses: Dict mapping instance/pod name to (status, reason)
+            as returned by _query_cluster_status_via_cloud_api.
+        total_pods: Total number of pods in the SkyPilot cluster.
+        node_health: Optional structured node health data from
+            get_node_health_for_cluster(). Maps node_name ->
+            NodeHealthInfo.
+
+    Returns:
+        A summarized string, or '' if no reasons found.
+    """
+    parts = []
+
+    # 1. Node-level summary (from structured data)
+    if node_health:
+        # Group by issue type (e.g., all NotReady together)
+        by_issue: Dict[str, List[str]] = {}
+        affected_by_issue: Dict[str, int] = {}
+        for node_name, info in node_health.items():
+            by_issue.setdefault(info.issue, []).append(node_name)
+            affected_by_issue[info.issue] = (
+                affected_by_issue.get(info.issue, 0) + len(info.pods))
+
+        for issue, nodes in by_issue.items():
+            names = sorted(nodes)
+            affected = affected_by_issue[issue]
+            if len(names) == 1:
+                part = f'node {names[0]} is {issue}'
+            else:
+                shown = names[:_MAX_NAMES_IN_SUMMARY]
+                name_list = ', '.join(shown)
+                if len(names) > _MAX_NAMES_IN_SUMMARY:
+                    name_list += (
+                        f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more')
+                part = f'{len(names)} nodes are {issue} ({name_list})'
+            part += f', affecting {affected} out of {total_pods} pods'
+            parts.append(part)
+
+    # Collect pod names that are already explained by node issues
+    node_explained_pods = set()
+    if node_health:
+        for info in node_health.values():
+            node_explained_pods.update(info.pods)
+
+    # 2. Pod-level summary (pods not already explained by node issues)
+    pod_issues: Dict[str, List[str]] = {}
+    for pod_name, (_, reason) in node_statuses.items():
+        if reason is None:
+            continue
+        if pod_name in node_explained_pods:
+            continue
+        pod_issues.setdefault(reason, []).append(pod_name)
+
+    for reason, pods in pod_issues.items():
+        names = sorted(pods)
+        if len(names) == 1:
+            parts.append(f'{names[0]} is not ready ({reason})')
+        else:
+            shown = names[:_MAX_NAMES_IN_SUMMARY]
+            name_list = ', '.join(shown)
+            if len(names) > _MAX_NAMES_IN_SUMMARY:
+                name_list += f' + {len(names) - _MAX_NAMES_IN_SUMMARY} more'
+            parts.append(f'{len(names)} pods not ready ({name_list}): {reason}')
+
+    return '; '.join(parts)
 
 
 def _refresh_cluster(
@@ -4094,7 +4367,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to invoke Skylet after {max_attempts} attempts: {last_exception}'
     ) from last_exception
 
@@ -4115,7 +4388,7 @@ def invoke_skylet_streaming_with_retries(
             last_exception = e
             _handle_grpc_error(e, backoff.current_backoff())
 
-    raise RuntimeError(
+    raise exceptions.SkyletUnavailableError(
         f'Failed to stream Skylet response after {max_attempts} attempts'
     ) from last_exception
 
@@ -4125,6 +4398,11 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
+        details = e.details() or ''
+        if 'Connection refused' in details:
+            # Skylet is not running — retrying won't help.
+            raise exceptions.SkyletUnavailableError(
+                f'Skylet is not running (connection refused): {details}') from e
         time.sleep(current_backoff)
     elif e.code() == grpc.StatusCode.UNIMPLEMENTED or e.code(
     ) == grpc.StatusCode.UNKNOWN:

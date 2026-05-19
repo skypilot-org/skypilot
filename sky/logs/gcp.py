@@ -54,10 +54,11 @@ class GCPLoggingAgent(FluentbitAgent):
         # there is NO metadata server available, the logging agent will fail to
         # authenticate and we require the user to upload a service account key
         # via logs.gcp.credentials_file in this case.
-        # Also note that we use env var instead of YAML config to specify the
-        # service account key file path in order to resolve the home directory
-        # more reliably.
-        # Ref: https://github.com/fluent/fluent-bit/issues/8804
+        # Note: fluent-bit v5.0.0 broke the stackdriver plugin's service
+        # account auth entirely (both GOOGLE_APPLICATION_CREDENTIALS env var
+        # and google_service_credentials config are ignored). We pin to v4.x
+        # in the install command (see agent.py) and rely on the env var.
+        # See: https://github.com/fluent/fluent-bit/issues/11619
         # TODO(aylei): check whether the credentials config is valid before
         # provision.
         pre_cmd = (f'export GOOGLE_APPLICATION_CREDENTIALS={credential_path}; '

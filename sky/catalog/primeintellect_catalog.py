@@ -39,15 +39,19 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[str] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier, local_disk  # no disk tiers
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
-                                                      zone)
+                                                      zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -56,24 +60,28 @@ def get_accelerators_from_instance_type(
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str,
-        acc_count: int,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        use_spot: bool = False,
-        local_disk: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
+    acc_name: str,
+    acc_count: int,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    use_spot: bool = False,
+    local_disk: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None
+) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types that have the given accelerator."""
     del local_disk  # unused
-    return common.get_instance_type_for_accelerator_impl(df=_df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return common.get_instance_type_for_accelerator_impl(
+        df=_df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

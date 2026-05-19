@@ -8,6 +8,7 @@ import {
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
+import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 // ============ Pagination Plugin Integration ============
@@ -61,7 +62,11 @@ const DEFAULT_FIELDS = [
   'execution',
   'is_primary_in_job_group',
   'links',
+  'is_batch',
+  'batch_total_batches',
+  'batch_completed_batches',
   'node_names',
+  'priority_class',
 ];
 
 /**
@@ -112,6 +117,7 @@ export async function getManagedJobs(options = {}) {
       allUsers = true,
       skipFinished = false,
       allFields = false,
+      jobIdMatch,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -135,7 +141,10 @@ export async function getManagedJobs(options = {}) {
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
-    if (jobIDs !== undefined && jobIDs.length > 0) body.job_ids = jobIDs;
+    // Support both jobIdMatch (from filter UI) and jobIDs (direct usage)
+    const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
+    if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
+      body.job_ids = resolvedJobIDs;
     if (!allFields) {
       if (fields && fields.length > 0) {
         body.fields = fields;
@@ -290,6 +299,7 @@ export async function getManagedJobs(options = {}) {
         links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
+        schedule_state: job.schedule_state,
         current_cluster_name: job.current_cluster_name,
         cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
@@ -300,6 +310,9 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         execution: job.execution,
         is_primary_in_job_group: job.is_primary_in_job_group,
+        // Batch progress
+        batch_total_batches: job.batch_total_batches,
+        batch_completed_batches: job.batch_completed_batches,
       };
     });
 
@@ -849,12 +862,14 @@ export async function downloadManagedJobLogs({
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
     const logType = controller ? 'controller-logs' : 'logs';
+    const filename = `managed-${namePart}-${logType}-${ts}.zip`;
     a.href = url;
-    a.download = `managed-${namePart}-${logType}-${ts}.zip`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+    trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');

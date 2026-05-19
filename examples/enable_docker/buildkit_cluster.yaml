@@ -1,0 +1,17 @@
+resources:
+  cpus: 2+
+  infra: kubernetes
+
+num_nodes: 1
+
+run: |
+  docker buildx ls
+  docker buildx du
+
+config:
+  kubernetes:
+    enable_docker: BUILD
+    # Or with cache volume:
+    # enable_docker:
+    #   mode: BUILD
+    #   cache_volume: my-builder-cache

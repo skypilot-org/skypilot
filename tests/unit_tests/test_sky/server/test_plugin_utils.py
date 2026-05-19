@@ -92,8 +92,11 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     assert 'another_plugin-0.0.2-py3-none-any.whl' in commands
     # Path should use ~ for shell expansion (not quoted)
     assert '~/.sky/plugins/wheels' in commands
-    # Should have && between commands
-    assert ' && ' in commands
+    # Concurrent launches must be serialized via flock, and installs must be
+    # gated on a stamp file so same-version rebuilds are skipped.
+    assert 'flock' in commands
+    assert '.installed_wheels' in commands
+    assert 'grep -Fxq' in commands
 
 
 def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):

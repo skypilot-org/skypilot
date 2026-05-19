@@ -11,10 +11,13 @@ from sky.utils import volume as volume_lib
 
 VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
+    volume_lib.VolumeType.HOSTPATH: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
 }
 CLOUD_TO_VOLUME_TYPE = {
-    clouds.Kubernetes(): [volume_lib.VolumeType.PVC],
+    clouds.Kubernetes(): [
+        volume_lib.VolumeType.PVC, volume_lib.VolumeType.HOSTPATH
+    ],
     clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
 }
 
@@ -77,6 +80,14 @@ class Volume:
                              labels=config.get('labels'),
                              use_existing=config.get('use_existing'),
                              config=config.get('config', {}))
+        if vt == volume_lib.VolumeType.HOSTPATH:
+            return HostPathVolume(name=config.get('name'),
+                                  type=vol_type_val,
+                                  infra=config.get('infra'),
+                                  size=config.get('size'),
+                                  labels=config.get('labels'),
+                                  use_existing=config.get('use_existing'),
+                                  config=config.get('config', {}))
         if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
             return RunpodNetworkVolume(name=config.get('name'),
                                        type=vol_type_val,
@@ -192,6 +203,35 @@ class Volume:
 class PVCVolume(Volume):
     """Kubernetes PVC-backed volume."""
     pass
+
+
+class HostPathVolume(Volume):
+    """Kubernetes hostPath-backed volume.
+
+    Uses node-local storage via hostPath. The host_path directory is
+    created automatically by Kubernetes with DirectoryOrCreate.
+
+    Security notes:
+    - Requires Pod Security Admission exceptions on most clusters
+    - No tenant isolation — pods on the same node share the directory
+    - No storage quotas — can fill node disk
+    - Data is local to each node (not replicated)
+    """
+
+    def validate_size(self) -> None:
+        # hostPath volumes have no size limit; skip size validation.
+        pass
+
+    def _validate_config_extra(self) -> None:
+        host_path = self.config.get('host_path')
+        if not host_path:
+            raise ValueError(
+                'host_path is required in config for k8s-hostpath volumes.')
+        if not host_path.startswith('/'):
+            raise ValueError(
+                f'host_path must be an absolute path, got: {host_path!r}')
+        if host_path == '/':
+            raise ValueError('host_path must not be the root directory \'/\'')
 
 
 class RunpodNetworkVolume(Volume):

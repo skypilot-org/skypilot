@@ -246,13 +246,15 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -268,7 +270,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     df = common.filter_with_local_disk(df, local_disk)
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -295,6 +298,7 @@ def get_instance_type_for_accelerator(
     local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
@@ -303,14 +307,16 @@ def get_instance_type_for_accelerator(
     fuzzy search.
     """
     df = common.filter_with_local_disk(_get_df(), local_disk)
-    return common.get_instance_type_for_accelerator_impl(df=df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return common.get_instance_type_for_accelerator_impl(
+        df=df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

@@ -248,8 +248,13 @@ class CommandHintType(enum.Enum):
 
 def command_hint_messages(hint_type: CommandHintType,
                           job_id: Optional[str] = None,
-                          cluster_name: Optional[str] = None) -> str:
+                          cluster_name: Optional[str] = None,
+                          dashboard_url: Optional[str] = None) -> str:
     """Gets the command hint messages for the given job id."""
+    dashboard_hint = ''
+    if dashboard_url is not None:
+        dashboard_hint = (f'\n{INDENT_SYMBOL}View on dashboard:'
+                          f'\t\t{BOLD}{dashboard_url}{RESET_BOLD}')
     if hint_type == CommandHintType.CLUSTER_JOB:
         job_hint_str = (f'\nJob ID: {job_id}'
                         f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
@@ -259,6 +264,7 @@ def command_hint_messages(hint_type: CommandHintType,
                         f'\n{INDENT_LAST_SYMBOL}To view job queue:\t\t'
                         f'{BOLD}sky queue {cluster_name}{RESET_BOLD}')
         cluster_hint_str = (f'\nCluster name: {cluster_name}'
+                            f'{dashboard_hint}'
                             f'\n{INDENT_SYMBOL}To log into the head VM:\t'
                             f'{BOLD}ssh {cluster_name}'
                             f'{RESET_BOLD}'
@@ -279,13 +285,14 @@ def command_hint_messages(hint_type: CommandHintType,
     elif hint_type == CommandHintType.MANAGED_JOB:
         return (f'\n📋 Useful Commands'
                 f'\nManaged Job ID: {job_id}'
+                f'{dashboard_hint}'
                 f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
                 f'{BOLD}sky jobs cancel {job_id}{RESET_BOLD}'
                 f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
                 f'{BOLD}sky jobs logs {job_id}{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To stream controller logs:\t\t'
+                f'\n{INDENT_SYMBOL}To stream controller logs:\t'
                 f'{BOLD}sky jobs logs --controller {job_id}{RESET_BOLD}'
-                f'\n{INDENT_LAST_SYMBOL}To view all managed jobs:\t\t'
+                f'\n{INDENT_LAST_SYMBOL}To view all managed jobs:\t'
                 f'{BOLD}sky jobs queue{RESET_BOLD}')
     else:
         raise ValueError(f'Invalid hint type: {hint_type}')

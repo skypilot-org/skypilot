@@ -126,6 +126,24 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     # pylint: disable=protected-access
     monkeypatch.setattr(rest._session, "request", mock_http_request)
 
+    # Patch schedule_prepared_request to always enqueue immediately,
+    # skipping precondition waits.  The test fixture manually executes
+    # requests via _execute_request, so background precondition tasks
+    # are unnecessary and would outlive the TestClient event loop.
+    original_schedule = executor.schedule_prepared_request
+
+    async def _schedule_no_precondition(request_task,
+                                        ignore_return_value=False,
+                                        precondition=None,
+                                        retryable=False):
+        await original_schedule(request_task,
+                                ignore_return_value,
+                                precondition=None,
+                                retryable=retryable)
+
+    monkeypatch.setattr(executor, 'schedule_prepared_request',
+                        _schedule_no_precondition)
+
 
 # Define helper functions at module level for pickleability
 def get_cached_enabled_clouds_mock(enabled_clouds, *_, **__):
@@ -392,6 +410,9 @@ def mock_queue(monkeypatch):
             request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
+        async def put_async(self, item):
+            self.put(item)
+
         def get(self, request_id):
             # Retrieve ignore_return_value for a given request_id
             return self.queue_map.get(request_id)
@@ -405,6 +426,9 @@ def mock_queue(monkeypatch):
 
     # Apply monkeypatch to replace `mp_queue.get_queue`
     monkeypatch.setattr("sky.server.requests.queues.mp_queue.get_queue",
+                        mock_get_queue)
+    # Also patch executor._get_queue which uses the factory pattern
+    monkeypatch.setattr("sky.server.requests.executor._get_queue",
                         mock_get_queue)
 
     # Return the mock_queue_instance for use in tests

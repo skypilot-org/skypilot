@@ -32,7 +32,7 @@ import logging
 import threading
 import time
 import typing
-from typing import Callable, Literal, Optional, TypeVar
+from typing import Any, Callable, Dict, Literal, Optional, TypeVar
 
 from sky import skypilot_config
 from sky.adaptors import common
@@ -225,6 +225,20 @@ def client(service_name: str, **kwargs):
     _assert_kwargs_builtin_type(kwargs)
 
     check_credentials = kwargs.pop('check_credentials', True)
+    connect_timeout: Optional[int] = kwargs.pop('connect_timeout', None)
+    read_timeout: Optional[int] = kwargs.pop('read_timeout', None)
+    total_max_attempts: Optional[int] = kwargs.pop('total_max_attempts', None)
+
+    config_kwargs: Dict[str, Any] = {}
+    if connect_timeout is not None:
+        config_kwargs['connect_timeout'] = connect_timeout
+    if read_timeout is not None:
+        config_kwargs['read_timeout'] = read_timeout
+    if total_max_attempts is not None:
+        config_kwargs['retries'] = {'total_max_attempts': total_max_attempts}
+    if config_kwargs:
+        kwargs['config'] = botocore_config().Config(**config_kwargs)
+
     profile = get_workspace_profile()
 
     # Need to use the client retrieved from the per-thread session to avoid

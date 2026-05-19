@@ -58,6 +58,7 @@ import {
 } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
+import { trackRecipeAction, trackFilterUsed } from '@/lib/analytics';
 import {
   getRecipes,
   createRecipe,
@@ -66,9 +67,14 @@ import {
 } from '@/data/connectors/recipes';
 import {
   RecipeType,
-  ALL_RECIPE_TYPES,
+  BUILTIN_RECIPE_TYPES,
   getRecipeTypeInfo,
+  getVisibleRecipeTypes,
 } from '@/data/constants/recipeTypes';
+import {
+  usePluginRoutes,
+  usePluginRecipeTypes,
+} from '@/plugins/PluginProvider';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
@@ -107,13 +113,20 @@ function UserName({ name, className = '' }) {
 
 // Recipe Card Component (for Pinned and My Recipes)
 function RecipeCard({ recipe, onPin }) {
-  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
+  const pluginRecipeTypes = usePluginRecipeTypes();
+  const typeInfo = getRecipeTypeInfo(recipe.recipe_type, pluginRecipeTypes);
   const TypeIcon = typeInfo.icon;
   const slug = generateRecipeSlug(recipe.name);
 
   return (
     <div className="relative w-[300px]">
-      <Link href={`/recipes/${slug}`} className="block">
+      <Link
+        href={`/recipes/${slug}`}
+        className="block"
+        onClick={() =>
+          trackRecipeAction('view', { recipe_type: recipe.recipe_type })
+        }
+      >
         <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
           <CardContent className="p-3">
             {/* Header with icon and name */}
@@ -234,6 +247,7 @@ function TemplateRow({
 
 // All Recipes Section with Sortable Table and Filter Bar (same as clusters page)
 function AllRecipesSection({ recipes, onPin, onDelete }) {
+  const pluginRecipeTypes = usePluginRecipeTypes();
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -308,7 +322,7 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-base text-gray-700">All Recipes</span>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-xl">
           <RecipeFilterDropdown
             propertyList={RECIPE_PROPERTY_OPTIONS}
             valueList={optionValues}
@@ -388,7 +402,10 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                 </TableRow>
               ) : (
                 sortedAndFilteredTemplates.map((recipe) => {
-                  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
+                  const typeInfo = getRecipeTypeInfo(
+                    recipe.recipe_type,
+                    pluginRecipeTypes
+                  );
                   const TypeIcon = typeInfo.icon;
                   const slug = generateRecipeSlug(recipe.name);
                   const truncatedDesc = recipe.description
@@ -665,6 +682,10 @@ const RecipeFilterDropdown = ({
   };
 
   const handleOptionSelect = (option) => {
+    trackFilterUsed('recipe', {
+      property: getPropertyLabel(propertyValue),
+      value: option,
+    });
     setFilters((prevFilters) => [
       ...prevFilters,
       {
@@ -680,6 +701,10 @@ const RecipeFilterDropdown = ({
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && value.trim() !== '') {
+      trackFilterUsed('recipe', {
+        property: getPropertyLabel(propertyValue),
+        value: value,
+      });
       setFilters((prevFilters) => [
         ...prevFilters,
         {
@@ -839,7 +864,7 @@ const RecipeFilterItem = ({ filter, onRemove }) => {
 };
 
 // Helper to generate example YAML based on type
-function getExampleRecipe(recipeType) {
+function getExampleRecipe(recipeType, pluginRecipeTypes = []) {
   switch (recipeType) {
     case RecipeType.CLUSTER:
       return `name: my-cluster
@@ -867,7 +892,12 @@ resources:
   infra: aws
   accelerators: A100:1
 `;
-    default:
+    default: {
+      // Check if a plugin provides a template for this type
+      const pluginType = pluginRecipeTypes.find((t) => t.id === recipeType);
+      if (pluginType && pluginType.template) {
+        return pluginType.template;
+      }
       return `name: my-${recipeType}
 resources:
   infra: aws
@@ -876,6 +906,7 @@ resources:
 run: |
   echo "Hello, SkyPilot!"
 `;
+    }
   }
 }
 
@@ -886,10 +917,14 @@ function CreateRecipeModal({
   onSubmit,
   initialData,
   isAuthenticated,
+  visibleRecipeTypes,
+  pluginRecipeTypes = [],
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [content, setContent] = useState(getExampleRecipe(RecipeType.CLUSTER));
+  const [content, setContent] = useState(
+    getExampleRecipe(RecipeType.CLUSTER, pluginRecipeTypes)
+  );
   const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -906,19 +941,19 @@ function CreateRecipeModal({
         setName('');
         setDescription('');
         setRecipeType(RecipeType.CLUSTER);
-        setContent(getExampleRecipe(RecipeType.CLUSTER));
+        setContent(getExampleRecipe(RecipeType.CLUSTER, pluginRecipeTypes));
       }
       setOwnerName('');
       setFormError(null);
     }
-  }, [initialData, isOpen]);
+  }, [initialData, isOpen, pluginRecipeTypes]);
 
   // Update example YAML when type changes (only if content matches previous example)
   const handleRecipeTypeChange = (newType) => {
-    const oldExample = getExampleRecipe(recipeType);
+    const oldExample = getExampleRecipe(recipeType, pluginRecipeTypes);
     // If user hasn't modified the content, update it with new example
     if (content === oldExample || content === '') {
-      setContent(getExampleRecipe(newType));
+      setContent(getExampleRecipe(newType, pluginRecipeTypes));
     }
     setRecipeType(newType);
   };
@@ -997,8 +1032,8 @@ function CreateRecipeModal({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ALL_RECIPE_TYPES.map((type) => {
-                    const info = getRecipeTypeInfo(type);
+                  {(visibleRecipeTypes || BUILTIN_RECIPE_TYPES).map((type) => {
+                    const info = getRecipeTypeInfo(type, pluginRecipeTypes);
                     const TypeIcon = info.icon;
                     return (
                       <SelectItem key={type} value={type}>
@@ -1094,6 +1129,8 @@ function CreateRecipeModal({
 // Main Hub component
 export function RecipeHub() {
   const router = useRouter();
+  const pluginRoutes = usePluginRoutes();
+  const pluginRecipeTypes = usePluginRecipeTypes();
 
   // Data state
   const [allRecipes, setAllRecipes] = useState([]);
@@ -1175,6 +1212,7 @@ export function RecipeHub() {
 
   // Handlers
   const handleCreate = async (data) => {
+    trackRecipeAction('create', { type: data.recipeType });
     await createRecipe({
       ...data,
       // If ownerName is provided, pass it to override the user_name
@@ -1195,6 +1233,7 @@ export function RecipeHub() {
   };
 
   const handlePin = async (recipeName, pinned) => {
+    trackRecipeAction('pin');
     try {
       const updated = await togglePinRecipe(recipeName, pinned);
       if (updated) {
@@ -1207,6 +1246,7 @@ export function RecipeHub() {
   };
 
   const handleDelete = async (recipeName) => {
+    trackRecipeAction('delete');
     const deleted = await deleteRecipe(recipeName);
     if (deleted) {
       showToast('Recipe deleted successfully!', 'success');
@@ -1322,6 +1362,8 @@ export function RecipeHub() {
         onSubmit={handleCreate}
         initialData={initialCreateData}
         isAuthenticated={isAuthenticated}
+        visibleRecipeTypes={getVisibleRecipeTypes(pluginRecipeTypes)}
+        pluginRecipeTypes={pluginRecipeTypes}
       />
     </div>
   );

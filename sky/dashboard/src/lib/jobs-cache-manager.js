@@ -43,6 +43,7 @@ class JobsCacheManager {
       sortBy = 'submitted_at',
       sortOrder = 'desc',
       allUsers = true,
+      jobIdMatch,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -57,6 +58,7 @@ class JobsCacheManager {
       sortBy,
       sortOrder,
       allUsers,
+      jobIdMatch: jobIdMatch || null,
       nameMatch: nameMatch || null,
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
@@ -74,6 +76,7 @@ class JobsCacheManager {
   _generateFilterKey(options) {
     const {
       allUsers = true,
+      jobIdMatch,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -83,6 +86,7 @@ class JobsCacheManager {
 
     const keyObj = {
       allUsers,
+      jobIdMatch: jobIdMatch || null,
       nameMatch: nameMatch || null,
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
@@ -364,6 +368,9 @@ class JobsCacheManager {
   _convertFiltersToPluginFormat(filterOptions) {
     const filters = [];
 
+    if (filterOptions.jobIdMatch) {
+      filters.push({ property: 'id', value: filterOptions.jobIdMatch });
+    }
     if (filterOptions.nameMatch) {
       filters.push({ property: 'name', value: filterOptions.nameMatch });
     }
@@ -585,6 +592,7 @@ class JobsCacheManager {
         const keyObj = JSON.parse(key);
         const keyFilterObj = {
           allUsers: keyObj.allUsers,
+          jobIdMatch: keyObj.jobIdMatch,
           nameMatch: keyObj.nameMatch,
           userMatch: keyObj.userMatch,
           workspaceMatch: keyObj.workspaceMatch,

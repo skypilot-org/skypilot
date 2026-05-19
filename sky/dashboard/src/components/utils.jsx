@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import Link from 'next/link';
+import { getNonce } from '@/utils/csp';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -261,6 +262,33 @@ export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
   );
 };
 
+// Helper function to format autostop information, similar to _get_autostop in
+// CLI utils. Renders the idle time as `Nh` when the value is a positive
+// multiple of 60 minutes; otherwise as `Nm`.
+export function formatAutostop(autostop, toDown) {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    if (autostop > 0 && autostop % 60 === 0) {
+      autostopStr = `${autostop / 60}h`;
+    } else {
+      autostopStr = `${autostop}m`;
+    }
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+}
+
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
   if (!durationInSeconds && durationInSeconds !== 0) return '-';
@@ -457,7 +485,7 @@ export function LogFilter({
 
   return (
     <div>
-      <style>{logStyles}</style>
+      <style nonce={getNonce()}>{logStyles}</style>
       <div
         className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-gray-900"
         aria-label="job-logs"

@@ -144,7 +144,14 @@ def _get_instance_type_offerings(region: str) -> 'pd.DataFrame':
 
 
 def _get_availability_zones(region: str) -> 'pd.DataFrame':
-    client = aws.client('ec2', region_name=region)
+    # Use a shorter timeout than the default 60s connect / 60s read to avoid
+    # blocking sky check when a region endpoint is unreachable or unresponsive.
+    # total_max_attempts=3 means 3 total attempts. Worst case ~30s per region.
+    client = aws.client('ec2',
+                        region_name=region,
+                        connect_timeout=10,
+                        read_timeout=10,
+                        total_max_attempts=3)
     zones = []
     try:
         response = client.describe_availability_zones()
@@ -169,6 +176,13 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
                     AZ_PERMISSION_DENIED) from None
         else:
             raise
+    except (aws.botocore_exceptions().ConnectionError,
+            aws.botocore_exceptions().ReadTimeoutError):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.AWSAzFetchingError(
+                region,
+                reason=exceptions.AWSAzFetchingError.Reason.
+                ENDPOINT_CONNECTION_ERROR) from None
     for resp in response['AvailabilityZones']:
         zones.append({
             'AvailabilityZoneName': resp['ZoneName'],

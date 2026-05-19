@@ -265,9 +265,12 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
         pass
 
 
-def submit_jobs(job_ids: List[int], dag_yaml_path: str,
-                original_user_yaml_path: str, env_file_path: str,
-                priority: int) -> None:
+def submit_jobs(job_ids: List[int],
+                dag_yaml_path: str,
+                original_user_yaml_path: str,
+                env_file_path: str,
+                priority: int,
+                priority_class: Optional[str] = None) -> None:
     """Submit multiple existing jobs to the scheduler.
 
     This should be called after jobs are created in the `spot` table as
@@ -319,7 +322,7 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
     # Submit all jobs
     state.scheduler_set_waiting(job_ids, dag_yaml_content,
                                 original_user_yaml_content, env_file_content,
-                                config_file_content, priority)
+                                config_file_content, priority, priority_class)
     maybe_start_controllers(from_scheduler=True)
 
 
@@ -453,7 +456,11 @@ if __name__ == '__main__':
         help=
         f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
         f' Default: {constants.DEFAULT_PRIORITY}.')
+    parser.add_argument('--priority-class',
+                        type=str,
+                        default=None,
+                        help='Named priority class for the job.')
     args = parser.parse_args()
 
     submit_jobs(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-                args.priority)
+                args.priority, args.priority_class)

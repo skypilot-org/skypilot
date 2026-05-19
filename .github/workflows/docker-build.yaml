@@ -53,7 +53,7 @@ jobs:
     steps:
       # Always checkout repository (Docker build always needs Dockerfile)
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       # Determine how this workflow was triggered
       - name: Determine trigger type
         id: trigger_type
@@ -109,7 +109,7 @@ jobs:
       # For PyPI fetch: upload artifacts for reuse
       - name: Upload artifacts
         if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: skypilot-artifacts-${{ inputs.package_name }}
           path: dist/
@@ -117,13 +117,13 @@ jobs:
       # For trigger by other file through workflow_call or PyPI fetch: download all artifacts
       - name: Download artifacts
         if: steps.install_method.outputs.install_from_source == 'false'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: skypilot-artifacts-${{ inputs.package_name }}
           path: dist/
 
       - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           version: "latest"
 
@@ -179,7 +179,7 @@ jobs:
 
       # Upload complete build context (source code + wheels) for build jobs
       - name: Upload build context
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: skypilot-build-context-${{ inputs.package_name }}
           path: .
@@ -198,16 +198,16 @@ jobs:
     steps:
       # Download complete build context (source code + wheels if applicable)
       - name: Download build context
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: skypilot-build-context-${{ inputs.package_name }}
           path: .
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -219,7 +219,7 @@ jobs:
           echo "name=$PLATFORM_NAME" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -237,10 +237,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}

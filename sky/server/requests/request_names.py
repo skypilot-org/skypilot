@@ -44,12 +44,15 @@ class RequestName(str, enum.Enum):
     # API requests
     API_CANCEL = 'api_cancel'
     ALL_CONTEXTS = 'all_contexts'
+    # Debug dump requests
+    CREATE_DEBUG_DUMP = 'create_debug_dump'
     # Managed jobs requests
     JOBS_LAUNCH = 'jobs.launch'
     JOBS_QUEUE = 'jobs.queue'
     JOBS_QUEUE_V2 = 'jobs.queue_v2'
     JOBS_CANCEL = 'jobs.cancel'
     JOBS_LOGS = 'jobs.logs'
+    JOBS_WAIT = 'jobs.wait'
     JOBS_DOWNLOAD_LOGS = 'jobs.download_logs'
     JOBS_POOL_APPLY = 'jobs.pool_apply'
     JOBS_POOL_DOWN = 'jobs.pool_down'

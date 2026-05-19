@@ -1,0 +1,23 @@
+name: streaming-logs
+
+# Emits 6 ticks spaced 5 seconds apart (~30 s total wall time) so
+# smoke tests can verify that `sky logs` streams output incrementally
+# rather than buffering it until the job completes. The job has to
+# outlive the time it takes the test script to launch sky logs against
+# it; 30 s is comfortably longer than the few seconds spent on `sky
+# exec -d` and the subsequent `sky logs` startup, so by the time the
+# client is reading, the job is still mid-flight and the receive
+# timestamps must be staggered if streaming actually works. `python3
+# -u` forces unbuffered stdout so each tick is written through the
+# kernel pipe immediately — otherwise the OS-level pipe buffer would
+# hold every tick until the script exits and the test would pass even
+# without real-time streaming.
+# Used by tests/smoke_tests/test_basic.py::test_cli_logs_streaming_realtime.
+run: |
+  python3 -u -c "
+  import time
+  for i in range(6):
+      print(f'STREAM_TICK_{i}')
+      time.sleep(5)
+  print('STREAM_DONE')
+  "

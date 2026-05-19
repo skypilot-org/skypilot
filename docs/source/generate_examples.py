@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+import functools
 import itertools
 import pathlib
 import re
@@ -11,6 +12,41 @@ from typing import Optional
 
 ROOT_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
+
+
+def _write_if_changed(path: pathlib.Path, content: str) -> None:
+    """Write ``content`` to ``path`` only if the on-disk content differs.
+
+    Avoids bumping the mtime on unchanged generated files so that Sphinx's
+    incremental build does not re-read every generated page on every run.
+    """
+    try:
+        if path.read_text() == content:
+            return
+    except (FileNotFoundError, UnicodeDecodeError):
+        pass
+    path.write_text(content)
+
+
+@functools.lru_cache(maxsize=1)
+def _git_tracked_files() -> frozenset:
+    """Return the set of git-tracked paths (relative to ROOT_DIR).
+
+    Batches the lookup into one subprocess call — calling ``git ls-files
+    --error-unmatch`` per file used to cost ~12s on this repo.
+    """
+    result = subprocess.run(
+        ['git', 'ls-files', '-z'],
+        cwd=ROOT_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        return frozenset()
+    entries = result.stdout.split(b'\x00')
+    return frozenset(e.decode() for e in entries if e)
+
 
 # Scan this subdir and its subdirs.
 EXAMPLE_DIRS = [
@@ -86,8 +122,7 @@ def preprocess_github_markdown_file(source_path: str,
         flags=re.DOTALL,
     )
 
-    with open(dest_path, 'w') as f:
-        f.write(text)
+    _write_if_changed(pathlib.Path(dest_path), text)
 
 
 @dataclasses.dataclass
@@ -149,30 +184,17 @@ class Example:
         if self.path.is_file():
             return []
 
-        # Get all files in the directory
-        all_files = [
-            file for file in self.path.rglob('*')
-            if file.is_file() and file != self.main_file
-        ]
-
-        # Filter for git-tracked files only
+        tracked = _git_tracked_files()
         git_tracked_files = []
-        for file in all_files:
-            try:
-                # Use git ls-files to check if the file is tracked
-                result = subprocess.run([
-                    'git', 'ls-files', '--error-unmatch',
-                    str(file.relative_to(ROOT_DIR))
-                ],
-                                        cwd=ROOT_DIR,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        check=False)
-                if result.returncode == 0:  # Return code 0 means file is tracked
-                    git_tracked_files.append(file)
-            except Exception:
-                # Skip files that cause errors
+        for file in self.path.rglob('*'):
+            if not file.is_file() or file == self.main_file:
                 continue
+            try:
+                rel = str(file.relative_to(ROOT_DIR))
+            except ValueError:
+                continue
+            if rel in tracked:
+                git_tracked_files.append(file)
 
         return git_tracked_files
 
@@ -230,23 +252,53 @@ class Example:
 def generate_examples(app=None, *args, **kwargs):
     EXAMPLE_DOC_DIR.mkdir(parents=True, exist_ok=True)
 
+    generated: set = set()
     for example_dir in EXAMPLE_DIRS:
-        _work(example_dir)
+        generated.update(_work(example_dir))
+
+    # Remove stale files from previous runs so that untracked remnants
+    # (e.g., examples that were since removed or never committed) do not
+    # leak into the built docs.
+    for f in EXAMPLE_DOC_DIR.glob('*.md'):
+        if f.name not in generated:
+            f.unlink()
+    markdown_contents_dir = EXAMPLE_DOC_DIR / 'markdown_contents'
+    if markdown_contents_dir.is_dir():
+        kept = {pathlib.Path(n).stem + '.md' for n in generated}
+        for f in markdown_contents_dir.glob('*.md'):
+            if f.name not in kept:
+                f.unlink()
+
+
+def _is_tracked(path: pathlib.Path) -> bool:
+    try:
+        rel = str(path.relative_to(ROOT_DIR))
+    except ValueError:
+        return False
+    return rel in _git_tracked_files()
 
 
 def _work(example_dir: pathlib.Path):
     examples = []
 
-    # Find uncategorised examples
+    # Find uncategorised examples. Skip untracked remnants so that stray
+    # local files (e.g., example directories left over from experiments) do
+    # not leak into the generated docs.
     globs = [example_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
     for path in itertools.chain(*globs):
+        if not _is_tracked(path):
+            continue
         examples.append(Example(path))
 
-    # Find examples in subdirectories (up to 3 levels deep)
+    # Find examples in subdirectories (up to 3 levels deep).
     for path in example_dir.glob("*/*.md"):
+        if not _is_tracked(path):
+            continue
         examples.append(Example(path.parent))
 
     for path in example_dir.glob("*/*/*.md"):
+        if not _is_tracked(path):
+            continue
         examples.append(Example(path.parent))
 
     # Check for stem collisions using full directory names
@@ -264,10 +316,12 @@ def _work(example_dir: pathlib.Path):
             '_', ' ').title())  # Update title accordingly
 
     # Generate the example documentation using the updated stem
+    generated = set()
     for example in sorted(examples, key=lambda e: e.path.name):
         doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
-        with open(doc_path, 'w+') as f:
-            f.write(example.generate())
+        _write_if_changed(doc_path, example.generate())
+        generated.add(doc_path.name)
+    return generated
 
 
 if __name__ == '__main__':

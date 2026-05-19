@@ -37,7 +37,7 @@ def _get_git_commit():
 
 
 __commit__ = _get_git_commit()
-__version__ = '0.10.3.post2'
+__version__ = '0.12.2'
 __root_dir__ = directory_utils.get_sky_dir()
 
 
@@ -83,6 +83,7 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
+from sky import batch  # noqa: F401 # pylint: disable=unused-import
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
@@ -98,7 +99,9 @@ from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
+from sky.client.sdk import create_debug_dump
 from sky.client.sdk import down
+from sky.client.sdk import download_debug_dump
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
@@ -237,6 +240,9 @@ __all__ = [
     'api_start',
     'api_stop',
     'api_server_logs',
+    # Debug Dump
+    'create_debug_dump',
+    'download_debug_dump',
     # Admin Policy
     'UserRequest',
     'MutatedUserRequest',
@@ -246,4 +252,6 @@ __all__ = [
     # Registry
     'CLOUD_REGISTRY',
     'JOBS_RECOVERY_STRATEGY_REGISTRY',
+    # Batch processing
+    'batch',
 ]

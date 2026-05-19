@@ -8,7 +8,7 @@
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --mem=8192M
 
 
 # Cleanup function to remove cluster dirs on job termination.

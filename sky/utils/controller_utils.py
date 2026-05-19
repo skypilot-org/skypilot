@@ -3,9 +3,10 @@ import copy
 import dataclasses
 import enum
 import os
+import pathlib
 import tempfile
 import typing
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -22,6 +23,7 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -29,6 +31,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import plugin_utils
 from sky.server import plugins
+from sky.server.blob import blob_storage as bs
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -299,9 +302,6 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
-    # add flask to the controller dependencies for dashboard
-    python_packages.add('flask')
-
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
     # the outer && chain, preventing operator precedence issues.
@@ -324,7 +324,7 @@ def _get_cloud_dependencies_installation_commands(
     k8s_and_ssh_label = ' and '.join(sorted(enabled_k8s_and_ssh))
     k8s_dependencies_installed = False
 
-    for cloud in enabled_clouds:
+    for cloud in sorted(enabled_clouds, key=repr):
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 
@@ -419,7 +419,13 @@ def _get_cloud_dependencies_installation_commands(
         if sc.lower() in constants.STORAGE_ONLY_CLOUDS:
             python_packages.update(dependencies.extras_require[sc.lower()])
 
-    packages_string = ' '.join([f'"{package}"' for package in python_packages])
+    # Pin click<8.3.0: typer>=0.25.0 requires click>=8.2.1 with no upper
+    # bound, which lets uv resolve click to 8.3.x. click 8.3.0+ breaks Ray
+    # CLI on the controller via copy.deepcopy on Click's Sentinel values.
+    # See https://github.com/ray-project/ray/issues/56747.
+    python_packages.add('click<8.3.0')
+    packages_string = ' '.join(
+        [f'"{package}"' for package in sorted(python_packages)])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
@@ -1111,7 +1117,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Hard link the files in src to a temporary directory, and upload folder.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
+    base_tmp_dir = bs.get_blob_storage().file_mounts_tmp_dir()
     os.makedirs(base_tmp_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
         local_fm_path = os.path.join(
@@ -1366,9 +1372,135 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
 
 
 def _is_consolidation_mode(pool: bool) -> bool:
+    # Note: `pool` here really means "jobs" - whether we fetch the jobs
+    # consolidation or the serve consolidation value.
+    # TODO(cooperc): rename the argument
+    if pool:
+        # For jobs, the signal file is the source of truth (managed by
+        # setup_consolidation_mode_on_startup at server start).
+        return _read_jobs_consolidation_signal()
     return skypilot_config.get_nested(
-        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
-        default_value=False)
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
+
+
+def _read_jobs_consolidation_signal() -> bool:
+    """Return whether the jobs consolidation signal file is present.
+
+    Source of truth for jobs-controller consolidation state. The file is
+    written by setup_consolidation_mode_on_startup at API server start.
+    """
+    signal_file = pathlib.Path(
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+    return signal_file.exists()
+
+
+def warn_jobs_consolidation_mode_intent(enabled: bool) -> None:
+    """Warn about leftover state that would block a consolidation-mode flip.
+
+    - enabled=True: warn if a separate jobs-controller cluster still exists.
+    - enabled=False: warn if managed jobs are still running.
+
+    Called from is_jobs_consolidation_mode (server-side) and from
+    setup_consolidation_mode_on_startup (at API server start).
+    """
+    if enabled:
+        controller_cn = (Controllers.JOBS_CONTROLLER.value.cluster_name)
+        if global_user_state.cluster_with_name_exists(controller_cn):
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
+                f'but the controller cluster {controller_cn} is still running. '
+                'Please terminate the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
+    else:
+        total_jobs = managed_job_state.get_managed_jobs_total()
+        if total_jobs > 0:
+            nonterminal_jobs = (
+                managed_job_state.get_nonterminal_job_ids_by_name(
+                    None, None, all_users=True))
+            if nonterminal_jobs:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are still {len(nonterminal_jobs)} managed jobs '
+                    'running. Please terminate those jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are {total_jobs} jobs from previous '
+                    'consolidation mode. Reset the `jobs.controller.'
+                    'consolidation_mode` to `true` and run `sky jobs queue` '
+                    'to see those jobs. Switching to normal mode will '
+                    f'lose the job history.{colorama.Style.RESET_ALL}')
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _effective_jobs_consolidation_with_warnings(
+) -> Tuple[bool, Optional[bool]]:
+    """Compute effective jobs consolidation and emit warnings once per request.
+
+    Returns (effective, intent_arg). intent_arg is None when not on the API
+    server (no guidance to emit); otherwise it is the value validators should
+    check — `config_value` when explicitly set, else `effective`.
+
+    Cached on the request scope so the jobs validator and config-vs-signal
+    warning fire at most once per request, even when both managed-jobs and
+    pool readers resolve in the same request.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # Inside the controller process. Always consolidated from its own
+        # perspective; no admin-facing guidance to emit.
+        return True, None
+    effective = _read_jobs_consolidation_signal()
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        # Not on the API server — no config to consult. See #6611.
+        return effective, None
+    config_value = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+    if config_value is not None and config_value != effective:
+        expected = 'enabled' if config_value else 'disabled'
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
+            f'is {expected} in the server config, but the API server has '
+            'not been restarted yet. Please restart the API server to '
+            f'apply the change.{colorama.Style.RESET_ALL}')
+    arg = config_value if config_value is not None else effective
+    warn_jobs_consolidation_mode_intent(arg)
+    return effective, arg
+
+
+def is_jobs_consolidation_mode(
+        extra_validator: Optional[Callable[[bool], None]] = None) -> bool:
+    """Return effective jobs-controller consolidation state.
+
+    Single source of truth for whether the jobs controller is running in
+    consolidation mode. Used by both managed-jobs and pool readers — pool
+    operations run on the jobs controller, so both callers must see the
+    same value.
+
+    Behavior:
+    - OVERRIDE_CONSOLIDATION_MODE env forces True (used inside the
+      controller process itself, which is always consolidated from its
+      own perspective).
+    - Otherwise reads the JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE, written
+      by setup_consolidation_mode_on_startup at API server start.
+    - On the API server (IS_SKYPILOT_SERVER env set): warns if the config
+      disagrees with effective state (user needs to restart), runs the
+      jobs validator against intent (config when set, effective otherwise),
+      and calls extra_validator (if supplied) with the same arg. Callers
+      may use extra_validator for domain-specific warnings (e.g. the pool
+      reader warns about leftover pools in addition to leftover jobs).
+
+    The shared/warning portion is cached per request via
+    _effective_jobs_consolidation_with_warnings so warnings fire once even
+    when multiple readers resolve in the same request. extra_validator is
+    called per invocation; callers should cache their own wrappers if
+    their extra_validator is expensive.
+    """
+    effective, arg = _effective_jobs_consolidation_with_warnings()
+    if extra_validator is not None and arg is not None:
+        extra_validator(arg)
+    return effective
 
 
 @annotations.lru_cache(scope='request')
@@ -1426,6 +1558,11 @@ def get_resources_lock_path() -> str:
 
 
 def _get_number_of_services(pool: bool) -> int:
+    # TODO(cooperc): This should divide by POOL_JOBS_RESOURCES_RATIO, not
+    # multiply. The intent is to give pools R times more memory than jobs, but
+    # _get_parallelism already applies (1 + R) to the per-unit cost. Multiplying
+    # here applies the ratio twice (quadratically), so with R != 1 services
+    # would get far fewer slots than intended. Masked by R=1 today.
     return _get_parallelism(pool=pool,
                             raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB *
                             POOL_JOBS_RESOURCES_RATIO)
@@ -1455,6 +1592,38 @@ def can_provision(pool: bool) -> bool:
 
 def can_start_new_process(pool: bool) -> bool:
     return serve_state.get_num_services() < _get_number_of_services(pool)
+
+
+def get_max_services_error_message(pool: bool) -> str:
+    """Returns a detailed error message when max services is reached."""
+    current = serve_state.get_num_services()
+    maximum = _get_number_of_services(pool)
+    consolidation = _is_consolidation_mode(pool)
+    controller_type = 'jobs' if pool else 'serve'
+
+    msg = (f'{serve_constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR}: '
+           f'{current}/{maximum} services are running.')
+    msg += ' To spin up more services, please tear down some existing ones.'
+
+    docs_link = ('https://skypilot.readthedocs.io/en/latest/serving/'
+                 'sky-serve.html#sky-serve-max-services-calculation')
+    if consolidation:
+        msg += (f'\n\nThe {controller_type} controller is running in '
+                'consolidation mode, sharing memory with the API server. '
+                'The max number of concurrent services is calculated based '
+                'on the available memory after reserving resources for the '
+                'API server workers. To increase the limit, allocate more '
+                f'memory to the API server pod. For more information, see: '
+                f'{docs_link}')
+    else:
+        msg += (f'\n\nThe max number of concurrent services is calculated '
+                f'based on the controller VM memory. To increase the limit, '
+                f'use a controller with more memory by configuring '
+                f'`{controller_type}.controller.resources` in '
+                f'~/.sky/config.yaml. For more information, see: '
+                f'{docs_link}')
+
+    return msg
 
 
 def can_terminate(pool: bool) -> bool:

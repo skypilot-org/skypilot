@@ -237,8 +237,6 @@ def test_recipe_duplicate_name():
         [
             _test_duplicate_recipe_name,
         ],
-        None,
-        timeout=30,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -293,8 +291,6 @@ def test_recipe_delete_authorization():
         [
             _test_recipe_delete_authorization,
         ],
-        None,
-        timeout=30,
     )
     smoke_tests_utils.run_one_test(test)
 

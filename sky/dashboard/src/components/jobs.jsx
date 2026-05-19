@@ -29,6 +29,7 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -52,6 +53,7 @@ import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
+import { BatchBadge } from '@/components/elements/BatchBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
@@ -70,6 +72,7 @@ import {
   buildFilterUrl,
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
+import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -147,6 +150,10 @@ export function getAggregatedStatus(tasks) {
 
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
+  {
+    label: 'ID',
+    value: 'id',
+  },
   {
     label: 'Name',
     value: 'name',
@@ -327,9 +334,15 @@ export function ManagedJobs() {
     sharedUpdateURLParams(router, filters);
   };
 
+  // Track only the newly added filter (called from FilterDropdown callbacks)
+  const trackNewFilter = (property, value) => {
+    trackFilterUsed('job', { property, value });
+  };
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
+    propertyMap.set('id', 'ID');
     propertyMap.set('status', 'Status');
     propertyMap.set('name', 'Name');
     propertyMap.set('user', 'User');
@@ -360,12 +373,13 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
+            onFilterAdd={trackNewFilter}
             placeholder="Filter jobs"
           />
         </div>
@@ -399,6 +413,29 @@ export function ManagedJobs() {
         />
       </div>
     </>
+  );
+}
+
+function BatchProgressBar({ completed, total }) {
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+  return (
+    <NonCapitalizedTooltip
+      content={`Batch progress: ${completed}/${total} (${pct}%)`}
+      className="text-sm text-muted-foreground"
+    >
+      <div className="flex items-center gap-2">
+        <div className="w-20 bg-gray-200 rounded-full h-2">
+          <div
+            className={`${barColor} h-2 rounded-full transition-all`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="text-xs text-gray-600">
+          {completed}/{total}
+        </span>
+      </div>
+    </NonCapitalizedTooltip>
   );
 }
 
@@ -542,8 +579,10 @@ export function ManagedJobsTable({
         };
 
         // Build params for jobsCacheManager
+        const jobIdFilter = getFilterValue('id');
         const params = {
           allUsers: true,
+          jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),
@@ -712,6 +751,18 @@ export function ManagedJobsTable({
     }
   }, [sortConfig, fetchData, preloadingComplete]);
 
+  // Use faster refresh when there are running batch jobs with incomplete progress
+  const hasRunningBatches = React.useMemo(() => {
+    return data.some(
+      (job) =>
+        job.batch_total_batches != null &&
+        (job.status === 'RUNNING' || job.status === 'WINDING_DOWN') &&
+        (job.batch_completed_batches || 0) < job.batch_total_batches
+    );
+  }, [data]);
+
+  const effectiveRefreshInterval = hasRunningBatches ? 1000 : refreshInterval;
+
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
     if (!preloadingComplete) {
@@ -723,16 +774,20 @@ export function ManagedJobsTable({
         fetchDataRef.current &&
         window.document.visibilityState === 'visible'
       ) {
-        fetchDataRef.current({ includeStatus: true });
+        // Invalidate cache for fast refresh so we get fresh data
+        if (hasRunningBatches) {
+          jobsCacheManager.invalidateCache();
+        }
+        fetchDataRef.current({ includeStatus: !hasRunningBatches });
       }
-    }, refreshInterval);
+    }, effectiveRefreshInterval);
 
     return () => {
       clearInterval(interval);
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval, preloadingComplete]);
+  }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
   // Reset to first page when activeTab changes
   useEffect(() => {
@@ -815,6 +870,26 @@ export function ManagedJobsTable({
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
       labels: Array.from(labels).sort(),
+    });
+
+    // Fetch full users/workspaces from cache (preloaded by cache-preloader).
+    // dashboardCache.get() returns cached data if fresh, or re-fetches if
+    // expired. Updates only user/workspace to avoid blocking other fields.
+    Promise.all([
+      dashboardCache.get(getUsers, []),
+      dashboardCache.get(getWorkspaces, []),
+    ]).then(([usersData, workspacesData]) => {
+      setValueList((prev) => ({
+        ...prev,
+        user: usersData
+          ? [
+              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
+            ].sort()
+          : prev.user,
+        workspace: workspacesData
+          ? Object.keys(workspacesData).sort()
+          : prev.workspace,
+      }));
     });
   }, [data, poolsData, setValueList]);
 
@@ -1137,6 +1212,10 @@ export function ManagedJobsTable({
           const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
             ctx || {};
 
+          // Detect batch job via is_batch field or batch_total_batches presence
+          const isBatch =
+            item.is_batch === true || item.batch_total_batches != null;
+
           if (renderMode === 'groupParent') {
             return (
               <TableCell className="whitespace-nowrap">
@@ -1144,6 +1223,7 @@ export function ManagedJobsTable({
                   <Link href={`/jobs/${jobId}`} className="text-blue-600">
                     {item.name}
                   </Link>
+                  {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
@@ -1180,9 +1260,12 @@ export function ManagedJobsTable({
           // Single task
           return (
             <TableCell className="whitespace-nowrap">
-              <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                {item.name}
-              </Link>
+              <div className="flex items-center">
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.name}
+                </Link>
+                {isBatch && <BatchBadge className="ml-2" />}
+              </div>
             </TableCell>
           );
         },
@@ -1284,6 +1367,21 @@ export function ManagedJobsTable({
                     <StatusBadge status={aggregates?.aggregatedStatus} />
                   </span>
                 </NonCapitalizedTooltip>
+              </TableCell>
+            );
+          }
+
+          // For batch jobs that are RUNNING with progress data,
+          // show the progress bar instead of the status badge.
+          const isBatchRunning =
+            item.status === 'RUNNING' && item.batch_total_batches != null;
+          if (isBatchRunning) {
+            return (
+              <TableCell>
+                <BatchProgressBar
+                  completed={item.batch_completed_batches || 0}
+                  total={item.batch_total_batches}
+                />
               </TableCell>
             );
           }
@@ -2085,6 +2183,7 @@ export function Status2Actions({
   const handleLogsClick = (e, type) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('view_logs', { jobId });
     router.push({
       pathname: `${jobParent}/${jobId}`,
       query: { tab: type },
@@ -2094,6 +2193,7 @@ export function Status2Actions({
   const handleDownloadLogs = (e, controller = false) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('download_logs', { jobId });
 
     if (managed) {
       // For managed jobs
@@ -2138,6 +2238,7 @@ export function Status2Actions({
         <button
           onClick={(e) => handleDownloadLogs(e, false)}
           className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          title="Download logs"
         >
           <Download className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Download</span>}

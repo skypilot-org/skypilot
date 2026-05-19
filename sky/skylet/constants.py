@@ -139,6 +139,9 @@ TASK_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
+# The integer managed job ID assigned by the jobs controller.
+MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
+
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
 # e.g., when we add new events to skylet, we fix a bug in skylet, or skylet
@@ -146,7 +149,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '35'  # Add fields to ManagedJobInfo proto for handle.
+SKYLET_VERSION = '36'  # Add fields to ManagedJobInfo proto for handle.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -271,6 +274,13 @@ RAY_INSTALLATION_COMMANDS = (
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
     f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
+    # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
+    # issues with Sentinel values. We force this even when ray is already
+    # installed (e.g. baked into the SkyPilot AMI), since the ray-version
+    # idempotency guard below would otherwise skip the install and leave
+    # click at whatever the AMI shipped.
+    # See: https://github.com/ray-project/ray/issues/56747
+    f'{SKY_UV_PIP_CMD} install "click<8.3.0"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -289,7 +299,9 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # pylint: disable=line-too-long
+    # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
+    # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -409,6 +421,11 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_MAX_LENGTH = 40
 
+# Workspace names: lowercase letters, numbers, dashes, and underscores.
+# Must start with a lowercase letter, end with a lowercase letter or digit.
+WORKSPACE_NAME_VALID_REGEX = r'[a-z]([-_a-z0-9]*[a-z0-9])?'
+WORKSPACE_NAME_MAX_LENGTH = 63
+
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
@@ -492,8 +509,11 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
+    ('kubernetes', 'enable_docker'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
+    ('gcp', 'vpc_name'),
+    ('gcp', 'subnet_names'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -501,6 +521,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
+    ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,

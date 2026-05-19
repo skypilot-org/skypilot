@@ -299,7 +299,7 @@ def validate_region_zone_impl(
     """
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
-        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.6)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
         if candidate_loc:
@@ -310,7 +310,7 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(
-            df['Region'].str.lower().unique().tolist())
+            df['Region'].dropna().str.lower().unique().tolist())
         return (f'\nList of supported {cloud_name} regions: '
                 f'{", ".join(all_regions)!r}')
 
@@ -323,7 +323,8 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
                 candidate_strs = _get_candidate_str(
-                    region.lower(), df['Region'].str.lower().unique())
+                    region.lower(),
+                    df['Region'].dropna().str.lower().unique().tolist())
                 if not candidate_strs:
                     if cloud_name in ('azure', 'gcp'):
                         faq_msg = (
@@ -349,7 +350,7 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid zone {zone!r}{region_str}')
                 error_msg += _get_candidate_str(
-                    zone, maybe_region_df['AvailabilityZone'].unique())
+                    zone, maybe_region_df['AvailabilityZone'].unique().tolist())
                 raise ValueError(error_msg)
         region_df = filter_df['Region'].unique()
         assert len(region_df) == 1, 'Zone should be unique across regions.'
@@ -520,8 +521,17 @@ def get_instance_type_for_cpus_mem_impl(
         cpus: Optional[str],
         memory_gb_or_ratio: Optional[str],
         region: Optional[str] = None,
-        zone: Optional[str] = None) -> Optional[str]:
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
+
+    Note: `use_spot` only takes into effect if `max_hourly_cost` is also
+    provided. This is to prevent situations in clouds where spot instances
+    are only available for GPU vms (whose spot prices are much higher
+    than on-demand compute vms). To prevent a situation where the user
+    requests a cheap spot instance and ends up with an expensive vm,
+    we only sort with spot price when there is a price ceiling set.
 
     Args:
         df: The catalog cloud catalog data frame.
@@ -535,14 +545,28 @@ def get_instance_type_for_cpus_mem_impl(
             have at least the given number of vCPUs times the given ratio.
         region: The region to filter by.
         zone: The zone to filter by.
+        use_spot: Whether to use spot instance pricing for sorting.
+        max_hourly_cost: Maximum hourly cost filter. When provided with
+            use_spot=True, sorts/filters by spot price; otherwise uses
+            on-demand price.
     """
     df = _filter_region_zone(df, region, zone)
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
-    # Sort by the price.
-    df = df.sort_values(by=['Price'], ascending=True)
+    # Sort by spot price only when both use_spot and max_hourly_cost are set.
+    # Without a cost cap, sorting by spot price could select expensive
+    # instances (e.g., GPU instances on clouds where only GPUs have spot).
+    price_str = ('SpotPrice'
+                 if use_spot and max_hourly_cost is not None else 'Price')
+    if price_str not in df.columns or pd.isna(df[price_str]).all():
+        return None
+    if max_hourly_cost is not None:
+        df = df[df[price_str] <= max_hourly_cost]
+        if df.empty:
+            return None
+    df = df.sort_values(by=[price_str], ascending=True)
     return df['InstanceType'].iloc[0]
 
 
@@ -624,6 +648,7 @@ def get_instance_type_for_accelerator_impl(
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
@@ -661,6 +686,10 @@ def get_instance_type_for_accelerator_impl(
     price_str = 'SpotPrice' if use_spot else 'Price'
     if pd.isna(result[price_str]).all():
         return ([], [])
+    if max_hourly_cost is not None:
+        result = result[result[price_str] <= max_hourly_cost]
+        if result.empty:
+            return ([], [])
     result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])

@@ -191,6 +191,25 @@ class DashboardCache {
   }
 
   /**
+   * Synchronously return cached data without triggering a fetch.
+   * Returns null on cache miss or stale data.
+   * @param {Function} fetchFunction - The function used to generate the cache key
+   * @param {Array} [args=[]] - Arguments used to generate the cache key
+   * @param {Object} [options={}] - Options
+   * @param {number} [options.ttl] - Time to live in milliseconds (default: DEFAULT_CACHE_TTL)
+   * @returns {*|null} - The cached data or null
+   */
+  getCached(fetchFunction, args = [], options = {}) {
+    const ttl = options.ttl || DEFAULT_CACHE_TTL;
+    const key = this._generateKey(fetchFunction, args);
+    const cachedItem = this.cache.get(key);
+    if (cachedItem && Date.now() - cachedItem.lastUpdated < ttl) {
+      return cachedItem.data;
+    }
+    return null;
+  }
+
+  /**
    * Get cache statistics for debugging
    */
   getStats() {

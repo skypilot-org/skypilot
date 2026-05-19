@@ -1,9 +1,11 @@
 """Load plugins for the SkyPilot API server."""
 import abc
 import dataclasses
+import enum
 import importlib
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import typing
+from typing import Any, ClassVar, Dict, FrozenSet, List, Optional, Tuple
 
 from fastapi import FastAPI
 
@@ -12,6 +14,12 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
+
+if typing.TYPE_CHECKING:
+    from sky.server.blob import blob_storage as blob_storage_mod
+    from sky.server.requests import log_provider as log_provider_mod
+    from sky.server.requests import storage as storage_mod
+    from sky.server.requests.queues import base as queue_base_mod
 
 logger = sky_logging.init_logger(__name__)
 
@@ -28,6 +36,73 @@ _REMOTE_PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
 
 
+class PluginContext(enum.Enum):
+    """The process context in which plugins are being loaded.
+
+    Used by plugins to declare via ``BasePlugin.load_contexts`` which process
+    types they want to be installed in. Plugins that don't override
+    ``load_contexts`` load in every context (backward compatible).
+    """
+    # The API server's main process (the entrypoint that runs bootstrap:
+    # DB init, request reset, RBAC pre-load, then uvicorn.run). No FastAPI
+    # ``app`` is exposed here. Use this for plugins that need to register
+    # backends BEFORE main-process bootstrap consumes them.
+    MAIN = 'main'
+    # A uvicorn worker process (or the main process when uvicorn runs
+    # in-process with ``--deploy=false`` / single worker, on the second
+    # plugin load). Has the FastAPI ``app`` available; use this for
+    # registering routes / middleware.
+    UVICORN = 'uvicorn'
+    # A request executor worker subprocess that runs sky API request bodies.
+    EXECUTOR = 'executor'
+    # A jobs/serve controller process, including the codegen prefix that runs
+    # on the remote managed-jobs controller cluster.
+    CONTROLLER = 'controller'
+
+
+# All known contexts. Used as the default for ``BasePlugin.load_contexts`` so
+# that plugins which don't opt in stay loaded in every context.
+ALL_PLUGIN_CONTEXTS: FrozenSet[PluginContext] = frozenset(PluginContext)
+
+
+class ManagedSecretsProvider(abc.ABC):
+    """Abstract provider for resolving managed secret references."""
+
+    @abc.abstractmethod
+    async def resolve(
+        self,
+        secret_refs: list,
+        user_hash: str,
+        workspace: str,
+    ) -> 'ResolvedSecrets':
+        """Resolve secret references to env vars and file mounts.
+
+        Args:
+            secret_refs: List of ManagedSecretRef from the task YAML.
+            user_hash: The user hash for scoping.
+            workspace: The workspace name for scoping.
+
+        Returns:
+            ResolvedSecrets with env_vars and file_mounts populated.
+        """
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class ResolvedFileMount:
+    """A file mount resolved from a managed secret."""
+    mount_path: str
+    content: bytes
+
+
+@dataclasses.dataclass
+class ResolvedSecrets:
+    """Result of resolving managed secret references."""
+    env_vars: Dict[str, str] = dataclasses.field(default_factory=dict)
+    file_mounts: List[ResolvedFileMount] = dataclasses.field(
+        default_factory=list)
+
+
 class ExtensionContext:
     """Context provided to plugins during installation.
 
@@ -41,9 +116,63 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, app: Optional[FastAPI] = None):
+    def __init__(
+        self,
+        # Default exists for backward compatibility.
+        context: PluginContext = PluginContext.UVICORN,
+        app: Optional[FastAPI] = None,
+    ):
+        self.context = context
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
+        self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
+
+    def register_managed_secrets_provider(
+        self,
+        provider: ManagedSecretsProvider,
+    ) -> None:
+        """Register a provider for resolving managed secrets."""
+        self._managed_secrets_provider = provider
+
+    @property
+    def managed_secrets_provider(self,) -> Optional[ManagedSecretsProvider]:
+        return self._managed_secrets_provider
+
+    def register_request_storage(
+        self,
+        backend: 'storage_mod.RequestBackend',
+    ) -> None:
+        """Register a custom request backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import storage as rs
+        rs.set_request_backend(backend)
+
+    def register_queue_backend_factory(
+        self,
+        factory: 'queue_base_mod.QueueBackendFactory',
+    ) -> None:
+        """Register a custom queue backend factory."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.queues import base as qb
+        qb.set_queue_backend_factory(factory)
+
+    def register_blob_storage(
+        self,
+        backend: 'blob_storage_mod.BlobStorage',
+    ) -> None:
+        """Register a custom blob storage backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.blob import blob_storage as bs
+        bs.set_blob_storage(backend)
+
+    def register_log_provider(
+        self,
+        log_provider: 'log_provider_mod.LogProvider',
+    ) -> None:
+        """Register a custom log provider."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import log_provider as lp
+        lp.set_log_provider(log_provider)
 
     def register_rbac_rule(self,
                            path: str,
@@ -97,6 +226,15 @@ class RBACRule:
 
 class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
+
+    # Process contexts in which this plugin should be loaded. Defaults to all
+    # known contexts so existing plugins keep loading everywhere.
+    load_contexts: ClassVar[FrozenSet[PluginContext]] = ALL_PLUGIN_CONTEXTS
+
+    @classmethod
+    def should_load(cls, context: PluginContext) -> bool:
+        """Return whether this plugin should be loaded in the given context."""
+        return context in cls.load_contexts
 
     @property
     def name(self) -> Optional[str]:
@@ -318,14 +456,26 @@ def get_remote_plugins_config_path() -> Optional[str]:
 _PLUGINS: Dict[str, BasePlugin] = {}
 _EXTENSION_CONTEXT: Optional[ExtensionContext] = None
 
+# Whether plugins have finished loading. On the server, schema validation
+# should only enforce additionalProperties: False after plugins have had
+# a chance to register their extra properties. Before that, we allow
+# additional properties so that plugin-provided fields are not rejected.
+_plugins_loaded: bool = False
+
+
+def plugins_loaded() -> bool:
+    """Return whether plugins have finished loading."""
+    return _plugins_loaded
+
 
 def load_plugins(extension_context: ExtensionContext):
     """Load and initialize plugins from the config."""
-    global _EXTENSION_CONTEXT
+    global _EXTENSION_CONTEXT, _plugins_loaded
     _EXTENSION_CONTEXT = extension_context
 
     config = _load_plugin_config()
     if not config:
+        _plugins_loaded = True
         return
 
     for plugin_config in config.get('plugins', []):
@@ -348,10 +498,16 @@ def load_plugins(extension_context: ExtensionContext):
         if not issubclass(plugin_cls, BasePlugin):
             raise TypeError(
                 f'Plugin {class_path} must inherit from BasePlugin.')
+        if not plugin_cls.should_load(extension_context.context):
+            logger.debug(f'Skipping plugin {class_path}: not enabled for '
+                         f'context {extension_context.context.value}')
+            continue
         parameters = plugin_config.get('parameters') or {}
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+
+    _plugins_loaded = True
 
 
 def get_plugins() -> List[BasePlugin]:
@@ -389,6 +545,11 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             plugin_cls = getattr(module, class_name)
             if not issubclass(plugin_cls, BasePlugin):
                 continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare rbac_rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
             parameters = plugin_config.get('parameters') or {}
             plugin = plugin_cls(**parameters)
 
@@ -424,3 +585,8 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
         }
     """
     return _PLUGIN_RBAC_RULES
+
+
+def get_extension_context() -> Optional[ExtensionContext]:
+    """Return the extension context created during plugin loading."""
+    return _EXTENSION_CONTEXT

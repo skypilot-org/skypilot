@@ -277,7 +277,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 cleanup_storage(yaml_content)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
+                        controller_utils.get_max_services_error_message(
+                            task.service.pool))
             success = serve_state.add_service(
                 service_name,
                 controller_job_id=job_id,

@@ -38,6 +38,54 @@ TimeSeries = List[Tuple[float, float]]
 Failures = List[str]
 
 
+def wait_for_stable_metrics(url: str,
+                            metric_name: str,
+                            stability_seconds: int = 15,
+                            poll_interval: int = 5,
+                            timeout: int = 120) -> None:
+    """Wait until the set of metric keys stabilizes.
+
+    Polls the metrics endpoint until no new process keys appear for
+    ``stability_seconds``, ensuring all server processes are reporting
+    before baseline collection begins.
+    """
+    last_keys: set = set()
+    last_change_time = time.time()
+    start_time = time.time()
+
+    while time.time() - last_change_time < stability_seconds:
+        if time.time() - start_time > timeout:
+            print(
+                f'  Warning: metrics did not stabilize within {timeout}s, '
+                f'proceeding with {len(last_keys)} keys',
+                file=sys.stderr,
+                flush=True)
+            break
+
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            current_metrics = parse_metrics(metric_name, response.text)
+            current_keys = set(current_metrics.keys())
+
+            if current_keys != last_keys:
+                print(f'  Process set changed, now {len(current_keys)} keys',
+                      file=sys.stderr,
+                      flush=True)
+                last_keys = current_keys
+                last_change_time = time.time()
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'  Error checking metrics stability: {e}',
+                  file=sys.stderr,
+                  flush=True)
+
+        time.sleep(poll_interval)
+
+    print(f'  Metrics stabilized with {len(last_keys)} keys',
+          file=sys.stderr,
+          flush=True)
+
+
 def collect_metrics(url: str,
                     metric_name: str,
                     duration_seconds: Optional[int] = None,

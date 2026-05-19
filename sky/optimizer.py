@@ -1767,6 +1767,13 @@ def _fill_in_launchable_resources(
                             '- Try using "+" suffix for at-least matching '
                             '(e.g., "nvme:500+"), or reduce the size '
                             f'requirement. {colorama.Style.RESET_ALL}')
+                    if resources.max_hourly_cost is not None:
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Max hourly cost limit '
+                                    f'(${resources.max_hourly_cost}/hr) may be '
+                                    'too restrictive. Try increasing the limit '
+                                    'or removing it to see available options.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
                                 f'{repr(cloud)}: {hint}'

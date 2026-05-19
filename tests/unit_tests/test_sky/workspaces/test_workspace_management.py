@@ -5,7 +5,9 @@ import tempfile
 import unittest
 from unittest import mock
 
+from sky import exceptions
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.workspaces import core
 
 
@@ -42,15 +44,13 @@ class TestWorkspaceManagement(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    @mock.patch('sky.skypilot_config.get_user_config_path')
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
     @mock.patch('sky.skypilot_config.to_dict')
-    @mock.patch('sky.utils.yaml_utils.dump_yaml')
-    @mock.patch('sky.skypilot_config.reload_config')
-    def test_internal_update_workspaces_config(self, mock_reload_config,
-                                               mock_dump_yaml, mock_to_dict,
-                                               mock_get_path):
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    def test_internal_update_workspaces_config(self, mock_update_no_lock,
+                                               mock_to_dict, mock_lock_path):
         """Test the internal helper for updating workspaces configuration."""
-        mock_get_path.return_value = self.config_path
+        mock_lock_path.return_value = self.config_path + '.lock'
         mock_to_dict.return_value = self.sample_config.copy()
 
         new_workspaces = {
@@ -70,10 +70,13 @@ class TestWorkspaceManagement(unittest.TestCase):
         result = core._update_workspaces_config(modifier_fn)
 
         # Verify the function called the right methods
-        mock_dump_yaml.assert_called_once()
         mock_to_dict.assert_called_once()
-        mock_get_path.assert_called_once()
-        mock_reload_config.assert_called_once()
+        mock_lock_path.assert_called_once()
+        mock_update_no_lock.assert_called_once()
+
+        # Verify the written config has the updated workspaces
+        written_config = mock_update_no_lock.call_args[0][0]
+        self.assertEqual(written_config['workspaces'], new_workspaces)
 
         # Verify the result
         self.assertEqual(result, new_workspaces)
@@ -645,6 +648,183 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should not call resource checker since no users were removed
         mock_check_resources.assert_not_called()
+
+
+class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
+    """Tests that existing workspaces with non-conforming names still work."""
+
+    @mock.patch('sky.skypilot_config.get_nested')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    def test_update_existing_workspace_with_nonconforming_name(
+            self, mock_update_config, mock_sky_check, mock_validate_schema,
+            mock_get_schema, mock_check_resources, mock_get_nested):
+        """Updating an existing workspace with a non-conforming name should
+        succeed because we only validate names on creation."""
+        mock_get_nested.return_value = {
+            'default': {},
+            'My_Old.Workspace': {
+                'gcp': {
+                    'project_id': 'old-project'
+                }
+            },
+        }
+        mock_check_resources.return_value = None
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_update_config.return_value = {}
+
+        new_config = {'gcp': {'project_id': 'new-project'}}
+        # Should NOT raise InvalidWorkspaceNameError
+        core.update_workspace('My_Old.Workspace', new_config)
+        mock_update_config.assert_called_once()
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    @mock.patch(
+        'sky.workspaces.core._validate_workspace_config_changes_with_lock')
+    def test_update_config_existing_nonconforming_workspaces_unchanged(
+            self, mock_validate_changes, mock_permission, mock_check_resources,
+            mock_sky_check, mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        """update_config with existing non-conforming workspace names that are
+        unchanged should succeed."""
+        existing_config = {
+            'workspaces': {
+                'default': {},
+                'Legacy.WS': {
+                    'gcp': {
+                        'project_id': 'old'
+                    }
+                },
+            }
+        }
+        mock_to_dict.return_value = existing_config.copy()
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_check_resources.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+
+        # Modify the non-conforming workspace's config so it goes through
+        # the workspace change validation path (not the early return).
+        modified_config = {
+            'workspaces': {
+                'default': {},
+                'Legacy.WS': {
+                    'gcp': {
+                        'project_id': 'new-project'
+                    }
+                },
+            }
+        }
+        # Should NOT raise InvalidWorkspaceNameError for existing workspace
+        core.update_config(modified_config)
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_update_config_adds_new_conforming_workspace(
+            self, mock_get_users, mock_permission, mock_check_resources,
+            mock_sky_check, mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        """update_config adding a new workspace with a valid name should
+        succeed."""
+        existing_config = {'workspaces': {'default': {},}}
+        mock_to_dict.return_value = existing_config.copy()
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_check_resources.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+        mock_get_users.return_value = []
+
+        new_config = {
+            'workspaces': {
+                'default': {},
+                'my-new-ws': {
+                    'gcp': {
+                        'project_id': 'test'
+                    }
+                },
+            }
+        }
+        # Should NOT raise any exception
+        core.update_config(new_config)
+
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    @mock.patch('sky.skypilot_config.to_dict')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.users.permission.permission_service')
+    def test_update_config_rejects_new_nonconforming_workspace(
+            self, mock_permission, mock_check_resources, mock_sky_check,
+            mock_validate_schema, mock_get_schema, mock_to_dict,
+            mock_update_no_lock, mock_lock_path):
+        """update_config adding a new workspace with a non-conforming name
+        should fail."""
+        existing_config = {'workspaces': {'default': {},}}
+        mock_to_dict.return_value = existing_config.copy()
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        mock_lock_path.return_value = '/tmp/test-lock'
+
+        new_config = {
+            'workspaces': {
+                'default': {},
+                'Bad.Name': {
+                    'gcp': {
+                        'project_id': 'test'
+                    }
+                },
+            }
+        }
+        with self.assertRaises(exceptions.InvalidWorkspaceNameError):
+            core.update_config(new_config)
 
 
 if __name__ == '__main__':

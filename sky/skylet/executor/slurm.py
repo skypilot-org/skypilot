@@ -19,8 +19,15 @@ from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
 
 
-def _is_proctrack_cgroup_enabled() -> bool:
-    proctrack_file = os.path.join(os.path.expanduser('~'),
+def _is_proctrack_cgroup_enabled(shared_home_dir: str) -> bool:
+    """Check if Slurm uses proctrack/cgroup.
+
+    The proctrack type file is written by the provisioner to the shared
+    filesystem home directory. Inside containers, ~ resolves to a
+    container-local path (/root/), so we must use the explicit shared
+    home directory passed from outside the container.
+    """
+    proctrack_file = os.path.join(shared_home_dir,
                                   constants.SLURM_PROCTRACK_TYPE_FILE)
     try:
         with open(proctrack_file, 'r', encoding='utf-8') as f:
@@ -88,6 +95,11 @@ def main():
         action='store_true',
         help=
         'Whether this is a setup command (affects logging prefix and filename)')
+    parser.add_argument('--cluster-home-dir',
+                        help='Shared filesystem home directory for the '
+                        'cluster. Inside containers, ~ is container-local, '
+                        'so this provides the shared path for cross-node '
+                        'coordination files.')
     parser.add_argument('--alloc-signal-file',
                         help='Path to allocation signal file')
     parser.add_argument('--setup-done-signal-file',
@@ -197,11 +209,18 @@ def main():
     # This ensures all tasks wait until every task has completed before exiting.
     # Only needed when proctrack/cgroup is enabled.
     # https://slurm.schedmd.com/cgroups.html#proctrack
-    if num_nodes > 1 and not args.is_setup and _is_proctrack_cgroup_enabled():
+    # Use the shared filesystem home for cross-node coordination.
+    # Inside containers, ~ is container-local (/root/), not on the
+    # shared filesystem, so we use the explicitly passed path.
+    shared_home = (args.cluster_home_dir
+                   if args.cluster_home_dir else os.path.expanduser('~'))
+
+    if num_nodes > 1 and not args.is_setup and _is_proctrack_cgroup_enabled(
+            shared_home):
         slurm_job_id = os.environ['SLURM_JOB_ID']
         slurm_step_id = os.environ['SLURM_STEP_ID']
-        run_done_dir = os.path.expanduser(
-            f'~/.sky_run_done_{slurm_job_id}_{slurm_step_id}')
+        run_done_dir = os.path.join(
+            shared_home, f'.sky_run_done_{slurm_job_id}_{slurm_step_id}')
         done_file = f'{run_done_dir}/{rank}'
 
         if rank == 0:

@@ -1,8 +1,11 @@
 """Unit tests for the SecurityHeadersMiddleware."""
 
+import re
+
 import fastapi
 import fastapi.testclient
 
+from sky.server import csp_utils
 from sky.server.server import SecurityHeadersMiddleware
 
 
@@ -16,8 +19,17 @@ def _make_app():
         return {'status': 'ok'}
 
     @app.get('/dashboard/index.html')
-    def dashboard_endpoint():
-        return fastapi.responses.HTMLResponse('<html></html>')
+    def dashboard_endpoint(request: fastapi.Request):
+        """Simulate a nonced HTML response like serve_dashboard()."""
+        nonce = csp_utils.generate_nonce()
+        request.state.csp_nonce = nonce
+        html = csp_utils.inject_nonce_into_html(
+            '<html><head></head><body>'
+            '<script>var x=1;</script>'
+            '</body></html>',
+            nonce,
+        )
+        return fastapi.responses.HTMLResponse(html)
 
     return app
 
@@ -34,17 +46,60 @@ class TestSecurityHeadersMiddleware:
         response = self.client.get('/test')
         assert 'Content-Security-Policy' in response.headers
 
-    def test_csp_policy_directives(self):
-        """CSP policy should contain all required directives."""
+    def test_csp_no_unsafe_inline_in_script_src(self):
+        """script-src must not allow unsafe-inline."""
         response = self.client.get('/test')
         csp = response.headers['Content-Security-Policy']
-        assert 'default-src \'self\'' in csp
-        assert 'script-src \'self\' \'unsafe-inline\'' in csp
-        assert 'style-src \'self\' \'unsafe-inline\'' in csp
-        assert 'object-src \'none\'' in csp
-        assert 'frame-ancestors \'self\'' in csp
-        assert 'img-src \'self\' data:' in csp
-        assert 'base-uri \'self\'' in csp
+        script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+        assert 'unsafe-inline' not in script_src
+        assert 'unsafe-eval' not in csp
+
+    def test_csp_strict_policy_on_non_html(self):
+        """Non-HTML responses should have a strict self-only policy."""
+        response = self.client.get('/test')
+        csp = response.headers['Content-Security-Policy']
+        assert "default-src 'self'" in csp
+        assert "script-src 'self'" in csp
+        assert "style-src 'self' 'unsafe-inline'" in csp
+        assert "object-src 'none'" in csp
+        assert "frame-ancestors 'self'" in csp
+        assert "img-src 'self' data:" in csp
+        assert "base-uri 'self'" in csp
+
+    def test_csp_nonce_on_html_response(self):
+        """HTML responses should use nonce-based CSP."""
+        response = self.client.get('/dashboard/index.html')
+        csp = response.headers['Content-Security-Policy']
+        # script-src must use nonce, not unsafe-inline.
+        script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+        assert 'unsafe-inline' not in script_src
+        # Extract the nonce from the CSP header.
+        match = re.search(r"'nonce-([A-Za-z0-9+/=]+)'", csp)
+        assert match is not None, f'No nonce found in CSP: {csp}'
+        nonce = match.group(1)
+        assert f"script-src 'self' 'nonce-{nonce}'" in csp
+        # style-src uses unsafe-inline (CSS cannot execute scripts).
+        assert "style-src 'self' 'unsafe-inline'" in csp
+
+    def test_nonce_in_html_body_matches_csp_header(self):
+        """The nonce in the HTML body should match the CSP header nonce."""
+        response = self.client.get('/dashboard/index.html')
+        csp = response.headers['Content-Security-Policy']
+        csp_nonce = re.search(r"'nonce-([A-Za-z0-9+/=]+)'", csp).group(1)
+        # Check that the HTML body contains the matching nonce.
+        body = response.text
+        assert f'<meta name="csp-nonce" content="{csp_nonce}">' in body
+        assert f'<script nonce="{csp_nonce}"' in body
+
+    def test_nonce_differs_across_requests(self):
+        """Each request should receive a unique nonce."""
+        r1 = self.client.get('/dashboard/index.html')
+        r2 = self.client.get('/dashboard/index.html')
+        n1 = re.search(r"'nonce-([A-Za-z0-9+/=]+)'",
+                       r1.headers['Content-Security-Policy']).group(1)
+        n2 = re.search(r"'nonce-([A-Za-z0-9+/=]+)'",
+                       r2.headers['Content-Security-Policy']).group(1)
+        assert n1 != n2
 
     def test_csp_allows_localhost_connect(self):
         """CSP connect-src must allow localhost for legacy auth callback."""

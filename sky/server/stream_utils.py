@@ -48,6 +48,103 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
+async def wait_for_request_to_start(
+    request_id: str,
+    plain_logs: bool = False,
+    follow: bool = True,
+    polling_interval: float = DEFAULT_POLL_INTERVAL,
+) -> AsyncGenerator[str, None]:
+    """Yield waiting-status feedback until a request reaches RUNNING.
+
+    Used as a prelude to log streaming: polls the request's status and
+    yields either rich spinner payloads (for CLI clients) or plain text
+    waiting messages (for plain-log clients) while the request is still
+    PENDING, so the HTTP stream stays warm and the user sees progress.
+
+    The behavior mirrors the wait loop in ``log_streamer`` and is the
+    source of truth for it — ``log_streamer`` delegates to this helper
+    when given a ``request_id``.
+
+    Args:
+        request_id: The request ID to wait for.
+        plain_logs: If True, yield plain-text waiting messages; otherwise
+            yield rich spinner payloads (SHORT requests stay silent until
+            stuck longer than ``_SHORT_REQUEST_SPINNER_TIMEOUT``).
+        follow: If False, return after one status check even if the
+            request is still PENDING.
+        polling_interval: Initial DB poll interval. Backs off up to 10x.
+
+    Raises:
+        fastapi.HTTPException: 404 if the request does not exist.
+    """
+    start_time = asyncio.get_event_loop().time()
+    status_msg = rich_utils.EncodedStatusMessage(
+        f'[dim]Checking request: {request_id}[/dim]')
+    request_task = await requests_lib.get_request_async(
+        request_id,
+        fields=['request_id', 'name', 'schedule_type', 'status', 'status_msg'])
+    if request_task is None:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Request {request_id} not found')
+
+    # By default, do not show the waiting spinner for SHORT requests.
+    # If the request has been stuck in pending for
+    # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
+    show_request_waiting_spinner = (not plain_logs and
+                                    request_task.schedule_type
+                                    == requests_lib.ScheduleType.LONG)
+
+    if show_request_waiting_spinner:
+        yield status_msg.init()
+        yield status_msg.start()
+    last_waiting_msg = ''
+    waiting_msg = (f'Waiting for {request_task.name!r} request to be '
+                   f'scheduled: {request_id}')
+    req_status = request_task.status
+    req_msg = request_task.status_msg
+    del request_task
+    # Slowly back off the database polling up to every 1 second, to avoid
+    # overloading the CPU and DB.
+    backoff = common_utils.Backoff(initial_backoff=polling_interval,
+                                   max_backoff_factor=10,
+                                   multiplier=1.2)
+    while req_status < requests_lib.RequestStatus.RUNNING:
+        current_time = asyncio.get_event_loop().time()
+        # Show the waiting spinner for a SHORT request if it has been stuck
+        # in pending for _SHORT_REQUEST_SPINNER_TIMEOUT seconds
+        if not show_request_waiting_spinner and (
+                current_time - start_time > _SHORT_REQUEST_SPINNER_TIMEOUT):
+            show_request_waiting_spinner = True
+            yield status_msg.init()
+            yield status_msg.start()
+        if req_msg is not None:
+            waiting_msg = req_msg
+        if show_request_waiting_spinner:
+            yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
+        elif plain_logs and waiting_msg != last_waiting_msg:
+            # Only log when waiting message changes.
+            last_waiting_msg = waiting_msg
+            # Padding forces browser rendering of the streamed chunk.
+            yield waiting_msg + ' ' * 4096 + '\n'
+        # Sleep shortly to avoid storming the DB and CPU and allow other
+        # coroutines to run.
+        # TODO(aylei): we should use a better mechanism to avoid busy
+        # polling the DB, which can be a bottleneck for high-concurrency
+        # requests.
+        await asyncio.sleep(backoff.current_backoff())
+        status_with_msg = await requests_lib.get_request_status_async(
+            request_id, include_msg=True)
+        if status_with_msg is None:
+            # Request record vanished (e.g. deleted while polling).
+            break
+        req_status = status_with_msg.status
+        req_msg = status_with_msg.status_msg
+        if not follow:
+            break
+    if show_request_waiting_spinner:
+        yield status_msg.stop()
+
+
 async def log_streamer(
     request_id: Optional[str],
     log_path: Optional[pathlib.Path] = None,
@@ -73,76 +170,12 @@ async def log_streamer(
     """
 
     if request_id is not None:
-        start_time = asyncio.get_event_loop().time()
-        status_msg = rich_utils.EncodedStatusMessage(
-            f'[dim]Checking request: {request_id}[/dim]')
-        request_task = await requests_lib.get_request_async(request_id,
-                                                            fields=[
-                                                                'request_id',
-                                                                'name',
-                                                                'schedule_type',
-                                                                'status',
-                                                                'status_msg'
-                                                            ])
-
-        if request_task is None:
-            raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
-        request_id = request_task.request_id
-
-        # By default, do not show the waiting spinner for SHORT requests.
-        # If the request has been stuck in pending for
-        # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
-        show_request_waiting_spinner = (not plain_logs and
-                                        request_task.schedule_type
-                                        == requests_lib.ScheduleType.LONG)
-
-        if show_request_waiting_spinner:
-            yield status_msg.init()
-            yield status_msg.start()
-        last_waiting_msg = ''
-        waiting_msg = (f'Waiting for {request_task.name!r} request to be '
-                       f'scheduled: {request_id}')
-        req_status = request_task.status
-        req_msg = request_task.status_msg
-        del request_task
-        # Slowly back off the database polling up to every 1 second, to avoid
-        # overloading the CPU and DB.
-        backoff = common_utils.Backoff(initial_backoff=polling_interval,
-                                       max_backoff_factor=10,
-                                       multiplier=1.2)
-        while req_status < requests_lib.RequestStatus.RUNNING:
-            current_time = asyncio.get_event_loop().time()
-            # Show the waiting spinner for a SHORT request if it has been stuck
-            # in pending for _SHORT_REQUEST_SPINNER_TIMEOUT seconds
-            if not show_request_waiting_spinner and (
-                    current_time - start_time > _SHORT_REQUEST_SPINNER_TIMEOUT):
-                show_request_waiting_spinner = True
-                yield status_msg.init()
-                yield status_msg.start()
-            if req_msg is not None:
-                waiting_msg = req_msg
-            if show_request_waiting_spinner:
-                yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
-            elif plain_logs and waiting_msg != last_waiting_msg:
-                # Only log when waiting message changes.
-                last_waiting_msg = waiting_msg
-                # Use smaller padding (1024 bytes) to force browser rendering
-                yield f'{waiting_msg}' + ' ' * 4096 + '\n'
-            # Sleep shortly to avoid storming the DB and CPU and allow other
-            # coroutines to run.
-            # TODO(aylei): we should use a better mechanism to avoid busy
-            # polling the DB, which can be a bottleneck for high-concurrency
-            # requests.
-            await asyncio.sleep(backoff.current_backoff())
-            status_with_msg = await requests_lib.get_request_status_async(
-                request_id, include_msg=True)
-            req_status = status_with_msg.status
-            req_msg = status_with_msg.status_msg
-            if not follow:
-                break
-        if show_request_waiting_spinner:
-            yield status_msg.stop()
+        async for chunk in wait_for_request_to_start(
+                request_id,
+                plain_logs=plain_logs,
+                follow=follow,
+                polling_interval=polling_interval):
+            yield chunk
 
     # worker node provision logs
     if log_path is not None and log_path.is_dir():

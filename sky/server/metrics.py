@@ -19,7 +19,10 @@ import uvicorn
 from sky import core
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.utils import annotations
 
 logger = sky_logging.init_logger(__name__)
 
@@ -93,6 +96,19 @@ try:
     prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
 except ValueError:
     pass
+
+# Collectors registered by plugins at runtime.
+_plugin_collectors: list = []
+
+
+def register_plugin_collector(collector):
+    """Register a custom Prometheus collector from a plugin."""
+    _plugin_collectors.append(collector)
+    try:
+        prom.REGISTRY.register(collector)
+    except ValueError:
+        pass
+
 
 # Cache TTL shared by all custom collectors.
 _COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
@@ -179,6 +195,11 @@ def metrics() -> fastapi.Response:
         registry.register(_BURN_RATE_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        for c in _plugin_collectors:
+            try:
+                registry.register(c)
+            except ValueError:
+                pass
         data = generate_latest(registry)
     else:
         data = generate_latest()
@@ -195,10 +216,73 @@ def metrics() -> fastapi.Response:
 # scrape target as down.
 _PER_CONTEXT_TIMEOUT_SECONDS = 8
 
+_CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
+    '/var/skypilot/credentials/kubeconfig/kubeconfig')
+
+
+@metrics_app.get('/debug-gpu-metrics')
+async def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues."""
+    kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
+    default_path = os.path.expanduser('~/.kube/config')
+
+    # Check what contexts are visible before and after cache clear
+    pre_clear_contexts = core.get_all_contexts()
+    annotations.clear_request_level_cache()
+    post_clear_contexts = core.get_all_contexts()
+
+    # Check kubeconfig file existence
+    if kubeconfig_env != 'NOT_SET':
+        kubeconfig_paths = kubeconfig_env.split(os.pathsep)
+    else:
+        kubeconfig_paths = [default_path]
+    path_info = {}
+    for p in kubeconfig_paths:
+        expanded = os.path.expanduser(p)
+        try:
+            st = os.stat(expanded)
+            path_info[p] = {'exists': True, 'size': st.st_size}
+        except OSError:
+            path_info[p] = {'exists': False, 'size': 0}
+
+    # Check credential manager kubeconfig separately
+    cred_mgr_exists = os.path.exists(_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
+    cred_mgr_contexts = []
+    if cred_mgr_exists:
+        try:
+            ctxs, _ = (
+                kubernetes_adaptor.kubernetes.config.list_kube_config_contexts(
+                    config_file=_CREDENTIAL_MANAGER_KUBECONFIG_PATH))
+            cred_mgr_contexts = [c['name'] for c in ctxs]
+        except Exception as e:  # pylint: disable=broad-except
+            cred_mgr_contexts = [f'error: {e}']
+
+    return {
+        'pid': os.getpid(),
+        'thread': threading.current_thread().name,
+        'KUBECONFIG': kubeconfig_env,
+        'kubeconfig_paths': path_info,
+        'credential_manager_kubeconfig': {
+            'path': _CREDENTIAL_MANAGER_KUBECONFIG_PATH,
+            'exists': cred_mgr_exists,
+            'contexts': cred_mgr_contexts,
+        },
+        'contexts_before_cache_clear': pre_clear_contexts,
+        'contexts_after_cache_clear': post_clear_contexts,
+    }
+
 
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    # The metrics server runs as a daemon thread, not as a normal request
+    # handler, so:
+    # 1. The global config context (allowed_contexts, etc.) is a snapshot
+    #    from startup. Reload it from the DB to pick up config changes.
+    # 2. Request-scoped caches (kubernetes API clients, context names) are
+    #    never cleared automatically. Clear them to pick up new kubeconfigs.
+    skypilot_config.reload_config()
+    annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0

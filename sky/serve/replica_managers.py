@@ -440,7 +440,7 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 2
+    _VERSION = 3
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
                  is_spot: bool, location: Optional[spot_placer.Location],
@@ -535,6 +535,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'replica_info_version': self._version,
             'endpoint': self.url if with_url else None,
             'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
@@ -672,6 +673,7 @@ class ReplicaInfo:
             self.resources_override = None
 
         self.__dict__.update(state)
+        self._version = version if version >= 0 else 0
 
 
 class ReplicaManager:

@@ -155,9 +155,11 @@ class VolumeTable(abc.ABC):
                 last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
         else:
             last_attached_at_str = '-'
-        size = row.get('size', '')
-        if size:
+        size = row.get('size')
+        if size is not None:
             size = f'{size}Gi'
+        else:
+            size = '-'
         usedby_str = '-'
         usedby_clusters = row.get('usedby_clusters')
         usedby_pods = row.get('usedby_pods')
@@ -270,6 +272,29 @@ class PVCVolumeTable(VolumeTable):
         return 'Kubernetes PVCs:\n' + str(self.table)
 
 
+class HostPathVolumeTable(VolumeTable):
+    """The Kubernetes hostPath volume table."""
+
+    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
+        """Create the hostPath volume table."""
+        columns = _BASIC_COLUMNS + ['HOST_PATH']
+        table = log_utils.create_table(columns)
+        return table
+
+    def _add_rows(self,
+                  volumes: List[responses.VolumeRecord],
+                  show_all: bool = False) -> None:
+        """Add rows to the hostPath volume table."""
+        for row in volumes:
+            table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('config', {}).get('host_path', ''))
+            self.table.add_row(table_row)
+
+    def format(self) -> str:
+        """Format the hostPath volume table for display."""
+        return 'Kubernetes HostPath Volumes:\n' + str(self.table)
+
+
 class RunPodVolumeTable(VolumeTable):
     """The RunPod volume table."""
 
@@ -336,6 +361,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         if volume_type == volume.VolumeType.PVC.value:
             pvc_table = PVCVolumeTable(volume_list, show_all)
             table_str += pvc_table.format()
+        elif volume_type == volume.VolumeType.HOSTPATH.value:
+            hostpath_table = HostPathVolumeTable(volume_list, show_all)
+            table_str += hostpath_table.format()
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()

@@ -8,7 +8,7 @@
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem=16384M
 #SBATCH --gres=gpu:A100:2
 
 # Cleanup function to remove cluster dirs on job termination.

@@ -205,8 +205,8 @@ class RequestTimestamp(RequestsAggregator):
 
 
 def get_service_filelock_path(pool: str) -> str:
-    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
-            'pool.lock').expanduser().absolute()
+    path = pathlib.Path(generate_remote_service_dir_name(pool)) / 'pool.lock'
+    path = path.expanduser().absolute()
     path.parents[0].mkdir(parents=True, exist_ok=True)
     return str(path)
 
@@ -238,17 +238,36 @@ def _validate_consolidation_mode_config(current_is_consolidation_mode: bool,
                 f'those {noun}s first.{colorama.Style.RESET_ALL}')
 
 
+def _pool_consolidation_extra_validator(arg: bool) -> None:
+    """Warn about leftover pools when switching to non-consolidated mode.
+
+    Passed as extra_validator to controller_utils.is_jobs_consolidation_mode
+    from the pool branch of is_consolidation_mode. Skipped when consolidation
+    is on because the jobs validator already warns about the shared
+    controller cluster in that case.
+    """
+    if not arg:
+        _validate_consolidation_mode_config(arg, pool=True)
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode(pool: bool = False) -> bool:
-    # Use jobs config for pool consolidation mode.
-    controller = controller_utils.get_controller_for_pool(pool).value
-    consolidation_mode = skypilot_config.get_nested(
-        (controller.controller_type, 'controller', 'consolidation_mode'),
-        default_value=False)
+    if pool:
+        # INVARIANT: pool consolidation state must match managed jobs —
+        # pool operations run on the jobs controller. Route both readers
+        # through controller_utils.is_jobs_consolidation_mode so they
+        # cannot diverge. Pool adds one extra validator (leftover pools)
+        # because the jobs validator only knows about leftover jobs.
+        return controller_utils.is_jobs_consolidation_mode(
+            extra_validator=_pool_consolidation_extra_validator)
+    # Serve (pool=False) runs on its own controller cluster, independent of
+    # the jobs controller, and keeps a config-driven consolidation flag.
     if os.environ.get(skylet_constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        # if we are in the job controller, we must always be in consolidation
-        # mode.
+        # if we are in the serve controller, we must always be in
+        # consolidation mode.
         return True
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
@@ -456,6 +475,12 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
     return os.path.join(dir_name, 'load_balancer.log')
+
+
+def generate_remote_batch_controller_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'batch_controller.log')
 
 
 def generate_replica_launch_log_file_name(service_name: str,
@@ -719,9 +744,18 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
         if pool:
+            # Get pool-level jobs (e.g. batch coordinators) that use
+            # all workers — they have pool set but no cluster_name.
+            pool_level_job_ids = (
+                managed_job_state.get_nonterminal_job_ids_by_pool(
+                    service_name, cluster_name=None))
             for replica_info in record['replica_info']:
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
+                # Show pool-level jobs on READY workers only.
+                if (replica_info.get('status') ==
+                        serve_state.ReplicaStatus.READY):
+                    job_ids = list(dict.fromkeys(pool_level_job_ids + job_ids))
                 replica_info['used_by'] = job_ids
     return record
 
@@ -1249,9 +1283,9 @@ def wait_service_registration(service_name: str, job_id: int,
                 if (constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR
                         in log_content):
                     with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError('Max number of services reached. '
-                                           'To spin up more services, please '
-                                           'tear down some existing services.')
+                        raise RuntimeError(
+                            controller_utils.get_max_services_error_message(
+                                pool))
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.

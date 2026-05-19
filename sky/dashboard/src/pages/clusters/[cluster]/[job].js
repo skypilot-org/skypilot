@@ -81,8 +81,13 @@ function JobHeader({
 export function JobDetailPage() {
   const router = useRouter();
   const { cluster, job } = router.query;
-  const { clusterData, clusterJobData, loading, refreshData } =
-    useClusterDetails({ cluster });
+  const {
+    clusterData,
+    clusterJobData,
+    loading,
+    clusterJobsLoading,
+    refreshData,
+  } = useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
@@ -96,12 +101,12 @@ export function JobDetailPage() {
     return jobData && PENDING_STATUSES.includes(jobData.status);
   }, [clusterJobData, job, PENDING_STATUSES]);
 
-  // Update isInitialLoad when data is first loaded
+  // Update isInitialLoad when both cluster and job data are first loaded
   useEffect(() => {
-    if (!loading && isInitialLoad) {
+    if (!loading && !clusterJobsLoading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading, isInitialLoad]);
+  }, [loading, clusterJobsLoading, isInitialLoad]);
 
   const logStreamArgs = useMemo(
     () => ({
@@ -184,7 +189,7 @@ export function JobDetailPage() {
           isRefreshing={isRefreshing}
           loading={loading}
         />
-        {loading && isInitialLoad ? (
+        {isInitialLoad && (loading || clusterJobsLoading) ? (
           <div className="flex items-center justify-center h-64">
             <CircularProgress size={24} className="mr-2" />
             <span>Loading...</span>
@@ -363,7 +368,7 @@ export function JobDetailPage() {
                       <span>Loading...</span>
                     </div>
                   ) : (
-                    <div className="max-h-96 overflow-y-auto">
+                    <div className="max-h-[max(200px,calc(100vh_-_572px))] overflow-y-auto">
                       <LogFilter logs={displayLines} />
                     </div>
                   )}

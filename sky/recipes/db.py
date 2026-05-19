@@ -7,7 +7,7 @@ pools, or volumes.
 """
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -15,6 +15,7 @@ from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
+from sky.recipes.utils import recipe_type_to_str
 from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
@@ -174,7 +175,7 @@ class Recipe:
         self,
         name: str,
         content: str,
-        recipe_type: RecipeType,
+        recipe_type: Union[RecipeType, str],
         user_id: str,
         description: Optional[str] = None,
         pinned: bool = False,
@@ -206,7 +207,7 @@ class Recipe:
             'name': self.name,
             'description': self.description,
             'content': self.content,
-            'recipe_type': self.recipe_type.value,
+            'recipe_type': recipe_type_to_str(self.recipe_type),
             'pinned': self.pinned,
             'user_id': self.user_id,
             'user_name': self.user_name,
@@ -246,7 +247,7 @@ class Recipe:
 def create_recipe(
     name: str,
     content: str,
-    recipe_type: RecipeType,
+    recipe_type: Union[RecipeType, str],
     user_id: str,
     user_name: Optional[str] = None,
     description: Optional[str] = None,
@@ -284,7 +285,7 @@ def create_recipe(
                 name=name,
                 description=description,
                 content=content,
-                recipe_type=recipe_type.value,
+                recipe_type=recipe_type_to_str(recipe_type),
                 pinned=0,
                 user_id=user_id,
                 user_name=user_name,
@@ -335,7 +336,7 @@ def list_recipes(
     user_id: Optional[str] = None,
     pinned_only: bool = False,
     my_recipes_only: bool = False,
-    recipe_type: Optional[RecipeType] = None,
+    recipe_type: Optional[Union[RecipeType, str]] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
 
@@ -360,7 +361,8 @@ def list_recipes(
         query = query.where(recipes_table.c.user_id == user_id)
 
     if recipe_type:
-        query = query.where(recipes_table.c.recipe_type == recipe_type.value)
+        query = query.where(
+            recipes_table.c.recipe_type == recipe_type_to_str(recipe_type))
 
     query = query.order_by(recipes_table.c.pinned.desc(),
                            recipes_table.c.name.asc())
