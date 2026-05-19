@@ -1924,7 +1924,21 @@ def stream_logs(job_id: Optional[int],
         assert job_name is not None
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
         if not job_ids:
-            return (f'No running managed job found with name {job_name!r}.',
+            # Fall back to the full job set so that a `sky jobs logs -n NAME`
+            # call landing after the job has reached a terminal state still
+            # resolves the most recent matching job. This matters in
+            # particular for the resumable retry path (tail=0): if a
+            # transient disconnect lands after the underlying job has
+            # SUCCEEDED, the retried request would otherwise return
+            # NOT_FOUND even though stream_logs_by_id can still serve the
+            # final log lines for terminal jobs.
+            jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+                name_match=job_name, fields=['job_id', 'job_name'])
+            job_ids = sorted(
+                (j['job_id'] for j in jobs if j['job_name'] == job_name),
+                reverse=True)
+        if not job_ids:
+            return (f'No managed job found with name {job_name!r}.',
                     exceptions.JobExitCode.NOT_FOUND)
         if len(job_ids) > 1:
             raise ValueError(

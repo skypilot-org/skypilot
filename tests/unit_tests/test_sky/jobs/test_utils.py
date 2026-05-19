@@ -980,3 +980,118 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+class TestStreamLogsResolvesTerminalByName:
+    """Regression: name->job_id resolution must succeed for terminal jobs.
+
+    Otherwise the chaos-proxy retry path in test_cli_auto_retry —
+    `sky jobs logs --tail 0 -n NAME` — exits with NOT_FOUND (102) when
+    the retry happens to land after the job has SUCCEEDED, even though
+    the job exists in the DB.
+    """
+
+    @pytest.fixture
+    def _managed_jobs_db(self, tmp_path, monkeypatch):
+        import contextlib
+
+        import filelock
+        from sqlalchemy import create_engine
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        db_path = tmp_path / 'managed_jobs_testing.db'
+        engine = create_engine(f'sqlite:///{db_path}')
+        async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                           connect_args={'timeout': 30})
+
+        @contextlib.contextmanager
+        def _tmp_db_lock(_section: str):
+            lock_path = tmp_path / f'.{_section}.lock'
+            with filelock.FileLock(str(lock_path), timeout=10):
+                yield
+
+        monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                            _tmp_db_lock)
+        monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+        monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                            async_engine)
+        managed_job_state.create_table(engine)
+        return engine
+
+    def _seed_succeeded_job(self, name: str) -> int:
+        import asyncio
+
+        async def mock_callback(status: str):
+            pass
+
+        async def run() -> int:
+            job_id = managed_job_state.set_job_info_without_job_id(
+                name=name,
+                workspace='default',
+                entrypoint='echo hi',
+                pool=None,
+                pool_hash=None,
+                user_hash='uhash')
+            managed_job_state.set_pending(job_id,
+                                          task_id=0,
+                                          task_name='task0',
+                                          resources_str='{}',
+                                          metadata='{}')
+            managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                    '/tmp/user.yaml',
+                                                    '/tmp/env', None, 100)
+            await managed_job_state.set_starting_async(job_id, 0, 'run_x',
+                                                       time.time(), '{}', {},
+                                                       mock_callback)
+            await managed_job_state.set_started_async(job_id, 0, time.time(),
+                                                      mock_callback)
+            await managed_job_state.set_succeeded_async(job_id, 0, time.time(),
+                                                        mock_callback)
+            managed_job_state.scheduler_set_done(job_id)
+            return job_id
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(run())
+        finally:
+            loop.close()
+
+    def test_resolves_terminal_succeeded_job_without_not_found(
+            self, _managed_jobs_db, monkeypatch):
+        name = 'terminal-by-name'
+        job_id = self._seed_succeeded_job(name)
+
+        # Pre-check: the live-only resolver returns [] (the bug surface).
+        assert managed_job_state.get_nonterminal_job_ids_by_name(name) == []
+
+        # The full-set resolver does find it — this is what the fix uses.
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+            name_match=name, fields=['job_id', 'job_name'])
+        assert any(
+            j['job_id'] == job_id and j['job_name'] == name for j in jobs)
+
+        # Stub stream_logs_by_id so the test does not need a real log file
+        # — we are only asserting the name->id resolution branch.
+        captured: Dict[str, Any] = {}
+
+        def fake_stream_logs_by_id(jid,
+                                   follow,
+                                   tail,
+                                   tail_offset=None,
+                                   task=None):
+            captured['job_id'] = jid
+            return '', exceptions.JobExitCode.SUCCEEDED
+
+        monkeypatch.setattr(jobs_utils, 'stream_logs_by_id',
+                            fake_stream_logs_by_id)
+
+        msg, code = jobs_utils.stream_logs(job_id=None,
+                                           job_name=name,
+                                           follow=False,
+                                           controller=False,
+                                           tail=0,
+                                           tail_offset=None)
+
+        # Pre-fix this returned NOT_FOUND (matches Buildkite exit 102).
+        assert code != exceptions.JobExitCode.NOT_FOUND, msg
+        assert captured.get('job_id') == job_id
