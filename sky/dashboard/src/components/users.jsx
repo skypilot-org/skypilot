@@ -2098,7 +2098,14 @@ function UsersTable({
   }
 
   return (
-    <Card>
+    <>
+      {filteredAndSortedUsers.length > 0 && (
+        <div className="text-sm text-gray-500 mb-2">
+          {filteredAndSortedUsers.length}{' '}
+          {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
+        </div>
+      )}
+      <Card>
       <div className="overflow-x-auto rounded-lg">
         <Table className="min-w-full">
           <TableHeader>
@@ -2387,6 +2394,7 @@ function UsersTable({
         </Table>
       </div>
     </Card>
+    </>
   );
 }
 
@@ -2738,6 +2746,12 @@ function ServiceAccountTokensView({
         </div>
       ) : (
         <>
+          <div className="text-sm text-gray-500 mb-2">
+            {filteredTokens.length}{' '}
+            {filteredTokens.length === 1
+              ? 'service account'
+              : 'service accounts'}
+          </div>
           <Card>
             <Table>
               <TableHeader>
