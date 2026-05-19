@@ -1144,3 +1144,208 @@ def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
         # explicitly clear the ContextVar so we never leak whatever the
         # auth path / decorator wrote into it.
         versions.set_remote_api_version(None)
+
+
+# ---------------------------------------------------------------------------
+# Wire-format back-compat — AutostopCodeGen dual-emit
+#
+# The codegen ships ONE Python one-liner to the cluster head; that script
+# runs against whatever SKYLET_LIB_VERSION the cluster's installed skylet
+# has and branches into the appropriate `autostop_lib.set_autostop(...)`
+# call. The branches:
+#   < 4:  legacy waitless single-positional
+#   < 5:  + wait_for
+#   < 7:  + hook / hook_timeout (master's pre-PR1 single-hook path)
+#   >= 7: set_autostop + set_hooks(...)   (new dual-emit path)
+#
+# The four tests below pin each non-trivial branch's emitted shape so
+# regressions to the cross-version contract surface in unit tests rather
+# than as silent "hook never fires" on a clusters launched against a
+# pre-v7 skylet image.
+# ---------------------------------------------------------------------------
+
+
+def _render_codegen(*, down: bool, hooks):
+    """Render AutostopCodeGen.set_autostop and return the embedded
+    Python payload (un-shlex-quoted) so the asserts can read literal
+    Python strings instead of shell-escaped fragments.
+    """
+    import shlex as _shlex
+
+    from sky.skylet import autostop_lib
+    rendered = autostop_lib.AutostopCodeGen.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=down,
+        hooks=hooks,
+    )
+    # _build wraps the python code in ``... -u -c <shlex.quote'd-py>``.
+    # shlex.split reverses the outer quoting; the final token is the
+    # raw python source.
+    return _shlex.split(rendered)[-1]
+
+
+def test_codegen_pre_v7_branch_flattens_stop_hook_when_autostop_false():
+    """Pre-v7 (≤6) skylets have a single-hook slot via `hook=` kwarg.
+    For an autostop launch (``down=False``), the codegen must flatten
+    a ``stop``-event hook into that slot so pre-v7 skylets fire the
+    same user script that v7+ skylets would for the ``stop`` event.
+    """
+    payload = _render_codegen(
+        down=False,
+        hooks=[{
+            'run': 'save-checkpoint.sh',
+            'events': ['stop'],
+            'timeout': 90,
+        }],
+    )
+    # The < 7 branch flattens via hook=... / hook_timeout=...
+    assert "hook='save-checkpoint.sh'" in payload, (
+        f"pre-v7 branch must flatten stop-event hook into `hook=`; got:\n"
+        f"{payload}")
+    assert 'hook_timeout=90' in payload, (
+        f"pre-v7 branch must propagate the matching timeout; got:\n{payload}")
+
+
+def test_codegen_pre_v7_branch_flattens_down_hook_when_autodown_true():
+    """Autodown (``down=True``) is the autostop-with-teardown path.
+    A pre-v7 skylet's single ``hook`` slot fires on idle-timer teardown
+    regardless of stop-vs-down distinction, so the codegen must flatten
+    the ``down``-event hook (not the ``stop`` hook) into that slot.
+    Catches the bug where the flatten lookup ignores ``autostop.down``.
+    """
+    payload = _render_codegen(
+        down=True,
+        hooks=[
+            {
+                'run': 'wrong-stop.sh',
+                'events': ['stop']
+            },
+            {
+                'run': 'right-down.sh',
+                'events': ['down'],
+                'timeout': 120
+            },
+        ],
+    )
+    assert "hook='right-down.sh'" in payload, (
+        f"autodown launch should flatten the down-event hook into "
+        f"`hook=`; got:\n{payload}")
+    assert "hook='wrong-stop.sh'" not in payload, (
+        f"autodown launch must NOT flatten the stop-event hook; got:\n"
+        f"{payload}")
+    assert 'hook_timeout=120' in payload
+
+
+def test_codegen_pre_v7_branch_no_flat_when_only_preemption_hook():
+    """A cluster declaring only ``events:[preemption]`` hooks has no
+    idle-timer-matching hook, so the pre-v7 single-hook slot stays
+    empty. (Pre-v7 master had no preemption-hook concept, so there's
+    no way to surface a preemption hook to it — the user must upgrade
+    the cluster.) The codegen must emit ``hook=None`` for this case.
+    """
+    payload = _render_codegen(
+        down=False,
+        hooks=[{
+            'run': 'on-preemption.sh',
+            'events': ['preemption'],
+        }],
+    )
+    assert 'hook=None' in payload, (
+        f"pre-v7 branch should emit hook=None when no stop/down hook "
+        f"matches; got:\n{payload}")
+
+
+def test_codegen_v7_branch_dual_emits_set_autostop_and_set_hooks():
+    """v7+ skylets get the full ``set_hooks(...)`` call alongside the
+    legacy-shape ``set_autostop(...)``. Dual-emit lets a single rendered
+    payload work on both pre-v7 and v7+ skylets — pre-v7 takes the
+    ``hook=``/``hook_timeout=`` branch, v7+ takes the ``set_hooks``
+    branch. Without dual-emit a brand-new client would NOT propagate
+    hooks to a brand-new cluster.
+    """
+    hooks = [
+        {
+            'run': 'a.sh',
+            'events': ['stop']
+        },
+        {
+            'run': 'b.sh',
+            'events': ['preemption'],
+            'timeout': 60
+        },
+    ]
+    payload = _render_codegen(down=False, hooks=hooks)
+    # The else (>= 7) branch invokes set_hooks with the full list.
+    assert 'autostop_lib.set_hooks(' in payload, (
+        f"v7+ branch must invoke set_hooks(...); got:\n{payload}")
+    # And the payload contains both hooks (the actual list literal).
+    assert "'run': 'a.sh'" in payload and "'run': 'b.sh'" in payload, (
+        f"set_hooks payload should carry every hook from the input "
+        f"list; got:\n{payload}")
+    # The skylet_lib_version dispatch wraps both branches.
+    assert 'skylet_lib_version' in payload
+    assert 'if skylet_lib_version < 7' in payload, (
+        f"Dual-emit must keep the pre-v7 branch (`< 7`) alive; got:\n"
+        f"{payload}")
+
+
+def test_set_autostop_skylet_side_routes_legacy_hook_arg_down_aware(
+        tmp_path, monkeypatch):
+    """Receive-side back-compat: a pre-v7 client calls v7+ skylet's
+    ``set_autostop`` with the legacy ``hook=`` kwarg (no ``hooks=``).
+    The skylet must translate that single hook into the new
+    ``_HOOKS_CONFIG_KEY`` sqlite storage so ``hook_executor`` finds it
+    at teardown. Routing must be **down-aware**: ``down=False`` →
+    ``events:[stop]``; ``down=True`` (autodown) → ``events:[down]``.
+    """
+    from sky.skylet import autostop_lib
+    from sky.skylet import configs
+    from sky.skylet import runtime_utils
+
+    # Redirect the skylet's sqlite to a tmp file so the test is hermetic.
+    # ``configs._DB_PATH`` is lazily set by ``init_db`` which calls
+    # ``runtime_utils.get_runtime_dir_path``; the same path then has its
+    # schema bootstrapped (CREATE TABLE). Reset ``_DB_PATH`` to None and
+    # redirect ``get_runtime_dir_path`` so the init runs against tmp.
+    monkeypatch.setattr(configs, '_DB_PATH', None)
+    db_dir = tmp_path / 'sky-config-test'
+    db_dir.mkdir()
+    monkeypatch.setattr(runtime_utils, 'get_runtime_dir_path',
+                        lambda relpath: str(db_dir / relpath.lstrip('/')))
+
+    # Case 1: down=False → legacy hook → events:[stop]
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=False,
+        hook='legacy-stop.sh',
+        hook_timeout=42,
+    )
+    stored = autostop_lib.get_hooks()
+    assert stored and len(stored) == 1, (
+        f'Skylet must store the translated legacy hook; got: {stored!r}')
+    assert stored[0]['run'] == 'legacy-stop.sh'
+    assert sorted(stored[0]['events']) == [
+        'stop'
+    ], (f"down=False must route legacy hook to events:[stop]; got: "
+        f"{stored[0]['events']!r}")
+    assert stored[0]['timeout'] == 42
+
+    # Case 2: down=True (autodown) → legacy hook → events:[down]
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hook='legacy-autodown.sh',
+    )
+    stored = autostop_lib.get_hooks()
+    assert stored and len(stored) == 1
+    assert stored[0]['run'] == 'legacy-autodown.sh'
+    assert sorted(stored[0]['events']) == [
+        'down'
+    ], (f"down=True (autodown) must route legacy hook to events:[down]; "
+        f"got: {stored[0]['events']!r}")

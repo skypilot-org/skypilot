@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from typing import Sequence
 
 import jinja2
@@ -904,3 +905,73 @@ class TestBackwardCompatibility:
             teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
             self.run_compatibility_test(f'{volume_name}-compat', commands,
                                         teardown)
+
+    def test_autostop_hook_compatibility(self, generic_cloud: str):
+        """Master's `autostop.hook` YAML works end-to-end across versions.
+
+        Exercises the lifecycle-hooks back-compat contract from PR1's
+        design doc §1.7:
+
+        BASE side (pre-PR1 SkyPilot)
+          - Launch with master's ``resources.autostop.hook`` YAML.
+          - The pre-v7 skylet stores the single hook in its
+            ``AutostopConfig`` and fires it via the legacy
+            ``execute_autostop_hook`` path at idle-timer teardown.
+          - The hook writes to ``~/.sky/autostop_hook.log`` (the
+            legacy path, before PR1 added the per-event log layout
+            under ``~/.sky/hooks/<event>.log``).
+
+        CURRENT side (this PR)
+          - Restart the now-stopped cluster.
+          - Read the hook log via ``sky logs --hook stop`` — exercises
+            the legacy-log-path fallback in
+            ``cloud_vm_ray_backend.tail_hook_logs`` (when
+            ``~/.sky/hooks/stop.log`` is absent, fall back to
+            ``~/.sky/autostop_hook.log``).
+
+        If any link in this chain regresses — pre-v7 skylet stops
+        respecting ``autostop.hook``; the legacy log path moves;
+        ``sky logs --hook stop`` drops its fallback branch — the test
+        catches it before users see "my hook stopped firing after the
+        upgrade".
+        """
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        marker = f'hook-bc-{int(time.time())}'
+        task_yaml = textwrap.dedent(f"""\
+            resources:
+              autostop:
+                idle_minutes: 1
+                hook: |
+                  echo {marker}
+                hook_timeout: 60
+            """)
+        with tempfile.NamedTemporaryFile(prefix='autostop_hook_bc_',
+                                         suffix='.yaml',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(task_yaml)
+            yaml_path = f.name
+        commands = [
+            # BASE: launch with master's autostop.hook YAML.
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --cloud {generic_cloud} -y '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} '
+            f'{yaml_path}',
+            # BASE: idle-timer fires (1 min), pre-v7 skylet runs the hook,
+            # writes ~/.sky/autostop_hook.log, cluster reaches STOPPED.
+            # ~250s budget covers the 60s idle + hook + cloud stop latency.
+            f'{self.ACTIVATE_BASE} && '
+            f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(cluster_name=cluster_name, cluster_status=[sky.ClusterStatus.STOPPED], timeout=250)}',
+            # CURRENT: restart the cluster (pre-v7 skylet still resident
+            # on disk; this exercises CURRENT-client + pre-v7-skylet).
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky start -y {cluster_name}',
+            # CURRENT: `sky logs --hook stop` falls back to the legacy log
+            # because ~/.sky/hooks/stop.log was never created on the pre-v7
+            # skylet — only ~/.sky/autostop_hook.log exists.
+            f'{self.ACTIVATE_CURRENT} && '
+            f'out=$(sky logs --hook stop {cluster_name} --no-follow) && '
+            f'echo "$out" | grep "{marker}"',
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
