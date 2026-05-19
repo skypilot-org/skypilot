@@ -20,11 +20,12 @@ def test_returns_legacy_when_only_legacy_set(monkeypatch):
     monkeypatch.setenv(_LEGACY, 'legacy-value')
     target_logger = logging.getLogger('sky.skylet.constants')
     with mock.patch.object(target_logger, 'debug') as mock_debug:
-        assert constants.getenv_server_with_legacy(
-            _NEW, _LEGACY) == 'legacy-value'
-    assert any('deprecated' in (call.args[0] if call.args else '')
-               for call in mock_debug.mock_calls), (
-                   f'no deprecated-hint log call found: {mock_debug.mock_calls}')
+        assert constants.getenv_server_with_legacy(_NEW,
+                                                   _LEGACY) == 'legacy-value'
+    assert any(
+        'deprecated' in (call.args[0] if call.args else '')
+        for call in mock_debug.mock_calls), (
+            f'no deprecated-hint log call found: {mock_debug.mock_calls}')
 
 
 def test_returns_new_when_both_set(monkeypatch):
@@ -34,8 +35,7 @@ def test_returns_new_when_both_set(monkeypatch):
     monkeypatch.setenv(_LEGACY, 'legacy-value')
     target_logger = logging.getLogger('sky.skylet.constants')
     with mock.patch.object(target_logger, 'debug') as mock_debug:
-        assert constants.getenv_server_with_legacy(_NEW,
-                                                   _LEGACY) == 'new-value'
+        assert constants.getenv_server_with_legacy(_NEW, _LEGACY) == 'new-value'
     assert any('Remove the deprecated' in (call.args[0] if call.args else '')
                for call in mock_debug.mock_calls), (
                    f'no operator-hint log call found: {mock_debug.mock_calls}')

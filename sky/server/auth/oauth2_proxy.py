@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import http
-import os
 import traceback
 from typing import Optional
 import urllib
@@ -15,7 +14,6 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.server import constants as server_constants
 from sky.server import middleware_utils
 from sky.server.auth import loopback
 from sky.skylet import constants as skylet_constants

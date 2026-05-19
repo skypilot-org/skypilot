@@ -146,8 +146,7 @@ SKYPILOT_SERVER_ENV_VAR_PREFIX = 'SKYPILOT_SERVER_'
 
 
 @typing.overload
-def getenv_server_with_legacy(new_name: str,
-                              legacy_name: str) -> Optional[str]:
+def getenv_server_with_legacy(new_name: str, legacy_name: str) -> Optional[str]:
     ...
 
 
@@ -765,8 +764,8 @@ SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
 # forwarding filter; left as-is for historical consistency.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
-# Legacy alias for AUTH_USER_HEADER. Use SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR
-# via getenv_server_with_legacy() instead.
+# Legacy alias for AUTH_USER_HEADER. Use
+# SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR via getenv_server_with_legacy().
 ENV_VAR_SERVER_AUTH_USER_HEADER = LEGACY_SKYPILOT_AUTH_USER_HEADER_ENV_VAR
 
 # Environment variable that is used as the DB connection string for the

@@ -84,8 +84,8 @@ EXTERNAL_LOCAL_ENV_VARS = [
 #
 # The pattern is conservative: only matches env names whose suffix is a
 # recognized K8s service-link form. Plugin-defined SKYPILOT_AGENT_* vars
-# without a service-link suffix (e.g. SKYPILOT_AGENT_ID, SKYPILOT_AGENT_JWT_SECRET)
-# are NOT matched.
+# without a service-link suffix (e.g. SKYPILOT_AGENT_ID, SKYPILOT_AGENT_JWT_SECRET,
+# SKYPILOT_AGENT_API_SERVER_URL) are NOT matched.
 _K8S_SERVICE_LINK_ENV_RE = re.compile(
     r'^SKYPILOT_[A-Z0-9_]+_'
     r'(SERVICE_HOST|SERVICE_PORT(_[A-Z0-9_]+)?|'
