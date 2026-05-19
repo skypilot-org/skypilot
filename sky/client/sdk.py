@@ -164,22 +164,21 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         line_count = 0
 
         for line in rich_utils.decode_rich_status(response):
+            # Report forward progress to the retry decorator for every
+            # message received from the wire, including None control
+            # messages (e.g. heartbeats). Receiving any message
+            # indicates the underlying connection is healthy, so the
+            # consecutive-failure counter should reset. Without this,
+            # resumable streams that spend a full retry window only
+            # replaying already-printed lines (or receiving only
+            # heartbeats) never advance `progress_count` and can
+            # exhaust their retry budget even though the stream is
+            # actively making progress over the network.
+            if retry_context is not None:
+                retry_context.progress_count += 1
+
             if line is not None:
                 line_count += 1
-
-                # Report forward progress to the retry decorator for every
-                # line received from the wire, even if the line is later
-                # skipped (e.g. replayed during a resumable retry) or
-                # consumed by an interactive auth handler. Receiving any
-                # line indicates the underlying connection is healthy, so
-                # the consecutive-failure counter should reset. Without
-                # this, resumable streams that spend a full retry window
-                # only replaying already-printed lines never advance
-                # `progress_count` and can exhaust their retry budget even
-                # though the stream is actively making progress over the
-                # network.
-                if retry_context is not None:
-                    retry_context.progress_count += 1
 
                 line = interactive_utils.handle_interactive_auth(line)
                 if line is None:
