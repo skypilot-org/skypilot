@@ -389,13 +389,7 @@ class TestKubernetesAllIncludesInCluster(unittest.TestCase):
 
     @staticmethod
     def _mk_allowed_contexts_side_effect(allowed_contexts_value):
-        """Side effect for `get_effective_region_config`.
-
-        After moving `all_includes_in_cluster` to
-        `get_effective_workspace_region_config`, the only key resolved via
-        `get_effective_region_config` in the existing_allowed_contexts path
-        is `allowed_contexts`.
-        """
+        """Side effect for `get_effective_region_config`."""
 
         def _side_effect(*args, **kwargs):
             keys = kwargs.get('keys') or (args[1] if len(args) > 1 else None)
