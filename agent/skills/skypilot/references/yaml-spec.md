@@ -614,6 +614,7 @@ If `'best'` is specified, use the best network tier available on the specified i
 - `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 - `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- `infra: k8s/my-oke-cluster`: Enable RoCEv2 for high-performance GPU communication across pods on Oracle OKE clusters with bare-metal GPU shapes (BM.GPU.*.8) provisioned via dedicated RDMA capacity pools.
 
 **Slurm-based:**
 
