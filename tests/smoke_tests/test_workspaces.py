@@ -375,37 +375,54 @@ def test_kubernetes_workspace_remote_identity():
         f.write(server_config_content)
         server_config_path = f.name
 
-    # Create the two ServiceAccounts and bind them to the same Cluster/Role as
-    # the default `skypilot-service-account` so pods can actually run. These
-    # roles are created by `sky local up` and by the prototype dev clusters.
+    # Create the two ServiceAccounts in the namespace SkyPilot will actually
+    # launch pods into — resolved from the current kubeconfig context. On
+    # the buildkite kind agents this is `test-namespace`, locally it's
+    # `default`. An SA created in the wrong namespace would silently cause
+    # the launch to fail because the pod's `spec.serviceAccountName` would
+    # reference a non-existent SA.
+    #
+    # Bind each to the same Cluster/Role used by the default
+    # `skypilot-service-account` so pods can actually run.
+    ns_resolve = ('NS=$(kubectl config view --minify '
+                  "-o jsonpath='{.contexts[0].context.namespace}'); "
+                  '[ -z "$NS" ] && NS=default; '
+                  'echo "Using namespace: $NS"')
+
     def create_sa_cmd(sa: str) -> str:
-        return (f'kubectl create sa {sa} -n default && '
+        return (f'{ns_resolve} && '
+                f'kubectl create sa {sa} -n "$NS" && '
                 f'kubectl create clusterrolebinding {sa}-cluster-binding '
                 f'--clusterrole=skypilot-service-account-cluster-role '
-                f'--serviceaccount=default:{sa} && '
-                f'kubectl create rolebinding {sa}-default-binding '
+                f'--serviceaccount="$NS":{sa} && '
+                f'kubectl create rolebinding {sa}-ns-binding '
                 f'--role=skypilot-service-account-role '
-                f'--serviceaccount=default:{sa} -n default')
+                f'--serviceaccount="$NS":{sa} -n "$NS"')
 
     def cleanup_sa_cmd(sa: str) -> str:
-        return (f'kubectl delete clusterrolebinding {sa}-cluster-binding '
+        return (f'{ns_resolve} && '
+                f'kubectl delete clusterrolebinding {sa}-cluster-binding '
                 f'--ignore-not-found; '
-                f'kubectl delete rolebinding {sa}-default-binding -n default '
+                f'kubectl delete rolebinding {sa}-ns-binding -n "$NS" '
                 f'--ignore-not-found; '
-                f'kubectl delete sa {sa} -n default --ignore-not-found')
+                f'kubectl delete sa {sa} -n "$NS" --ignore-not-found')
 
-    # Grep the pod by cluster-name annotation, then read serviceAccountName.
-    # Mirrors the pattern used elsewhere in tests/smoke_tests/test_cluster_job.py.
+    # Grep the pod by cluster-name annotation (across all namespaces — the
+    # pod may not live in the default namespace), then read
+    # serviceAccountName. Mirrors the pattern used elsewhere in
+    # tests/smoke_tests/test_cluster_job.py.
     def assert_pod_sa_cmd(cluster_name: str, expected_sa: str) -> str:
         return (
-            f"pod=$(kubectl get pods -o "
-            f"custom-columns=NAME:.metadata.name,"
-            f"ANN:.metadata.annotations.skypilot-cluster-name "
-            f"--no-headers | awk -v n=\"{cluster_name}\" "
-            f"'$NF==n{{print $1}}' | sed -n 1p) && "
-            f"sa=$(kubectl get pod $pod -o "
+            f"pod_ns_name=$(kubectl get pods --all-namespaces -o "
+            f"jsonpath='{{range .items[*]}}"
+            f"{{.metadata.namespace}}/{{.metadata.name}} "
+            f"{{.metadata.annotations.skypilot-cluster-name}}{{\"\\n\"}}{{end}}' "
+            f"| awk -v n=\"{cluster_name}\" '$2==n{{print $1}}' | sed -n 1p) && "
+            f"ns=${{pod_ns_name%%/*}} && pod=${{pod_ns_name##*/}} && "
+            f"sa=$(kubectl get pod $pod -n $ns -o "
             f"jsonpath='{{.spec.serviceAccountName}}') && "
-            f"echo \"{cluster_name} pod SA: $sa (expected {expected_sa})\" && "
+            f"echo \"{cluster_name} pod ($ns/$pod) SA: $sa "
+            f"(expected {expected_sa})\" && "
             f"[ \"$sa\" = \"{expected_sa}\" ]")
 
     # The test only inspects the pod's `spec.serviceAccountName`, so we ask
