@@ -333,7 +333,9 @@ def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -393,7 +395,9 @@ def test_api_login_user_hash_needs_auth_both(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
