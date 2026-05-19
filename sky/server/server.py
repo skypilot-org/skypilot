@@ -3545,6 +3545,15 @@ if __name__ == '__main__':
         global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
+        # Snapshot a clean copy of os.environ BEFORE spawning workers and
+        # before any per-request env mutation can happen. Used when
+        # spawning consolidation-mode controllers so they don't inherit
+        # the client request's env vars (e.g. SKYPILOT_API_SERVER_ENDPOINT).
+        # Workers also re-snapshot in executor_initializer; this main-
+        # process snapshot covers requests routed through the coroutine
+        # path that runs inside the API server process itself.
+        executor.capture_clean_server_env()
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')

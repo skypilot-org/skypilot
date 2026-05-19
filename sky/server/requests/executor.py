@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 
 import psutil
 import setproctitle
@@ -154,6 +154,53 @@ class RequestQueue:
 # The active queue factory, set during start().
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
+# Snapshot of os.environ taken before any request-scoped env mutation can
+# happen. Used when spawning long-lived subprocesses (consolidation-mode
+# controllers) that must NOT inherit per-request env pollution from
+# override_request_env_and_config. See get_clean_server_env() below.
+#
+# Captured in two places:
+#   1. capture_clean_server_env(): called once at API server startup, for
+#      the main process (covers coroutine-executed requests).
+#   2. executor_initializer(): called once per worker process at spawn time,
+#      AFTER worker-side plugin load — so the snapshot reflects the worker's
+#      legitimate startup env, including anything plugins set in EXECUTOR
+#      context.
+_clean_server_env: Optional[Dict[str, str]] = None
+
+
+def capture_clean_server_env() -> None:
+    """Snapshot the current process's os.environ as the clean server env.
+
+    Idempotent. Called from the API server's main process at startup so the
+    snapshot is available even when a request runs via the coroutine path
+    (which executes inside the main API server process rather than a worker
+    process). Workers call this from executor_initializer too.
+    """
+    global _clean_server_env
+    if _clean_server_env is None:
+        _clean_server_env = dict(os.environ)
+
+
+def get_clean_server_env() -> Dict[str, str]:
+    """Return a copy of the server's pre-request-pollution env.
+
+    Use this when spawning long-lived subprocesses (notably the
+    consolidation-mode jobs/serve controllers) so they don't inherit
+    per-request env mutations applied by override_request_env_and_config.
+    """
+    if _clean_server_env is None:
+        # Should not happen on the API server (both main and worker
+        # processes call capture_clean_server_env() before any request is
+        # processed). Fall back to current env so call sites still work in
+        # tests / other contexts; log so we notice if this ever fires in
+        # production.
+        logger.warning('get_clean_server_env() called before '
+                       'capture_clean_server_env(); falling back to current '
+                       'os.environ, which may carry per-request pollution.')
+        return dict(os.environ)
+    return dict(_clean_server_env)
+
 
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
@@ -161,6 +208,10 @@ def executor_initializer(proc_group: str):
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
+    # Capture the worker's clean env AFTER plugin load so the snapshot
+    # includes any env vars EXECUTOR-context plugins set, but BEFORE any
+    # request-scoped pollution can run.
+    capture_clean_server_env()
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),

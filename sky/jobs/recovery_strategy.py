@@ -55,6 +55,12 @@ ENV_VARS_TO_CLEAR = [
     constants.USER_ID_ENV_VAR,
     constants.USER_ENV_VAR,
     env_options.Options.SHOW_DEBUG_INFO.env_key,
+    # The consolidation-mode controller starts a local API server via
+    # api_start. If this env var is set (e.g. inherited from a client
+    # request that spawned the controller), get_server_url() returns a
+    # non-local URL and api_start refuses to start. Clear it so api_start
+    # always resolves to the local default; restored in the finally below.
+    constants.SKY_API_SERVER_URL_ENV_VAR,
 ]
 
 
@@ -513,6 +519,17 @@ class StrategyExecutor:
                                         env_var, None)
                                     logger.debug('Cleared env var: '
                                                  f'{env_var}')
+                                # get_server_url() and is_api_server_local()
+                                # are functools.lru_cache'd. If something
+                                # earlier in this process called them while
+                                # SKY_API_SERVER_URL_ENV_VAR was set, the
+                                # cache holds the wrong (remote) URL — and
+                                # the env-var clear above wouldn't take
+                                # effect. Invalidate so api_start re-reads.
+                                # pylint: disable=import-outside-toplevel
+                                from sky.server import common as server_common
+                                server_common.get_server_url.cache_clear()
+                                server_common.is_api_server_local.cache_clear()
                                 logger.debug('Env vars for api_start: '
                                              f'{os.environ}')
                                 await asyncio.to_thread(sdk.api_start)

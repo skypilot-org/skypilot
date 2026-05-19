@@ -39,6 +39,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server.requests import executor as request_executor
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
@@ -387,7 +388,18 @@ def _consolidated_launch(
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
-    backend.run_on_head(local_handle, run_script, log_path=log_path)
+    # Pass an explicit clean env to break the inheritance chain
+    # worker -> bash -> scheduler -> nohup -> controller. The worker's
+    # os.environ has been polluted mid-request by
+    # override_request_env_and_config (e.g. with the client's
+    # SKYPILOT_API_SERVER_ENDPOINT); without this kwarg, the long-lived
+    # controller spawned below would inherit those vars for its lifetime.
+    # controller_envs are layered back on top via explicit `export` lines
+    # already prepended to run_script above.
+    backend.run_on_head(local_handle,
+                        run_script,
+                        log_path=log_path,
+                        env=request_executor.get_clean_server_env())
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
 
