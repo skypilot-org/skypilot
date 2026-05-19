@@ -8,7 +8,9 @@ Tests cover:
 - Batch cancel: cancel a running batch job mid-flight.
 - Batch HA: kill controller mid-flight, verify resume from DB.
 """
+import re
 import tempfile
+from typing import Dict
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -140,11 +142,30 @@ def test_batch_simple(generic_cloud: str):
 # ---------- Test diffusion batch (image generation) ----------
 @pytest.mark.batch
 @pytest.mark.resource_heavy
-@pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
-@pytest.mark.no_azure  # Azure catalog has no L4 GPU (pool.yaml hardcodes L4)
-@pytest.mark.no_nebius  # Nebius catalog has no L4 GPU (offers L40S instead)
 @pytest.mark.no_remote_server  # see note 1 above
-def test_batch_diffusion(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'azure': 'T4', 'nebius': 'L40S'}])
+def test_batch_diffusion(generic_cloud: str, accelerator: Dict[str, str]):
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator_str = smoke_tests_utils.get_available_gpus(
+            infra=generic_cloud)
+        if not accelerator_str:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
+    else:
+        accelerator_str = accelerator.get(generic_cloud, 'L4')
+
+    # Rewrite pool.yaml with the resolved accelerator for this cloud
+    pool_yaml_path = 'examples/batch/diffusion/pool.yaml'
+    with open(pool_yaml_path, 'r', encoding='utf-8') as f:
+        pool_content = f.read()
+    pool_content = re.sub(r'accelerators:\s*[^\n]+',
+                          f'accelerators: {accelerator_str}:1', pool_content)
+    pool_tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                           delete=False)
+    pool_tmp.write(pool_content)
+    pool_tmp.flush()
+    pool_tmp_path = pool_tmp.name
+    pool_tmp.close()
+
     name = smoke_tests_utils.get_cluster_name()
     bucket = f'sky-batch-diff-{name}'
     pool_name = 'diffusion-pool'
@@ -160,7 +181,7 @@ def test_batch_diffusion(generic_cloud: str):
             f'sky serve down {pool_name} -y 2>/dev/null || true',
             # --- Create GPU pool with generic_cloud ---
             (f's=$(sky jobs pool apply -p {pool_name} --infra {generic_cloud}'
-             f' examples/batch/diffusion/pool.yaml -y); '
+             f' {pool_tmp_path} -y); '
              f'echo "$s"; '
              f'echo "$s" | grep "Successfully created pool"'),
             # --- Data setup (extracted from examples/batch/diffusion/) ---
@@ -215,7 +236,8 @@ def test_batch_diffusion(generic_cloud: str):
          f' sky serve down {pool_name} -y 2>/dev/null || true;'
          f' {delete_bkt};'
          f' rm -f /tmp/batch-prompts-{name}.jsonl'
-         f' /tmp/batch-manifest-{name}.jsonl'),
+         f' /tmp/batch-manifest-{name}.jsonl'
+         f' {pool_tmp_path}'),
         timeout=45 * 60,
         env={
             'SKY_BATCH_BUCKET': bucket,
