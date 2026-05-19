@@ -411,6 +411,10 @@ For a multi-node cluster, SkyPilot additionally enforces that **every pod of the
 
     The ConfigMap is created in the same namespace as the SkyPilot pods and is owned by the head pod, so it is garbage-collected by Kubernetes on ``sky down``. The SkyPilot service account must be able to create, get, and update ConfigMaps in that namespace (already covered by the :ref:`minimal permissions <cloud-permissions-kubernetes>`).
 
+.. note::
+
+    OCI OKE RoCE clusters (launched with ``network_tier: best`` on OCI bare-metal GPU shapes) require host networking to reach the RDMA fabric, so SkyPilot enables it for them automatically — you do **not** set ``hostNetwork: true`` yourself. The same probe and one-pod-per-node behavior described above (including the multi-node node-count requirement in the warning) applies to those clusters.
+
 .. _kubernetes-observability:
 
 Observability for administrators

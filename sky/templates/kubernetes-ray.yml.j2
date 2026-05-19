@@ -391,15 +391,21 @@ available_node_types:
         {% if k8s_enable_oci_roce %}
         # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
         # network namespace; pods must share host networking to reach the
-        # RDMA fabric. ClusterFirstWithHostNet still routes .svc.cluster.local
-        # lookups to CoreDNS so inter-node Ray comms work.
+        # RDMA fabric. This is the only path that sets hostNetwork from the
+        # template — the pod_config path injects it via
+        # combine_pod_config_fields(). k8s_enable_oci_roce also implies
+        # k8s_host_network on the Python side, so the dnsPolicy below and the
+        # Ray-port probe machinery apply here too.
         # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
         {% endif %}
-        {% if k8s_enable_oci_roce or k8s_host_network %}
+        {% if k8s_host_network %}
         # Under hostNetwork the default dnsPolicy silently falls back to
         # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
         # won't resolve, and the worker probe gets stuck dialing the head.
+        # k8s_host_network is the single source of truth for "this pod runs
+        # on the host network" (set for both the pod_config and OCI RoCE
+        # paths), so this covers OCI RoCE too.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
         {% if volume_mounts %}
