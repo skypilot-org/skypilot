@@ -371,7 +371,8 @@ def override_request_env_and_config(
             # time by prepare_request_async when is_skypilot_system=True,
             # so no add_or_update_user round-trip is needed per tick.
             user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
-                               name=constants.SKYPILOT_SYSTEM_USER_ID)
+                               name=constants.SKYPILOT_SYSTEM_USER_ID,
+                               user_type=models.UserType.SYSTEM.value)
             # Daemons always run in-process on the server, regardless of
             # what the persisted body recorded.
             using_remote_api_server = False
@@ -418,13 +419,10 @@ def override_request_env_and_config(
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
-            # Skip permission check for sky.workspaces.get request as it is
-            # used to determine which workspaces the user has access to.
-            # Also skip for daemons: the SkyPilot system user has admin
-            # role (see sky/users/permission.py) so this check would always
-            # pass — skipping it is a perf optimization to avoid a DB
-            # round-trip per daemon tick.
-            if not is_daemon and request_name != 'sky.workspaces.get':
+            # Skip permission check for sky.workspaces.get request
+            # as it is used to determine which workspaces the user
+            # has access to.
+            if request_name != 'sky.workspaces.get':
                 try:
                     # Reject requests that the user does not have permission
                     # to access.
