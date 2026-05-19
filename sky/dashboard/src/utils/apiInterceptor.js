@@ -37,6 +37,27 @@ function isStaticAssetRequest(input) {
   return staticPatterns.some((pattern) => url.includes(pattern));
 }
 
+// A single network hiccup shouldn't flip the banner. Real upgrades
+// produce a stream of failures, while mobile browsers occasionally
+// drop one in-flight request when the tab backgrounds or the user
+// switches apps. We require two consecutive thrown fetches within
+// this window before reporting an upgrade.
+const FLAP_WINDOW_MS = 4000;
+let _lastFetchErrorAt = 0;
+
+// AbortController.abort() and React unmount-driven cancellation both
+// throw a DOMException with name 'AbortError'. They never indicate
+// a server problem.
+function isAbortError(error) {
+  return (
+    error &&
+    (error.name === 'AbortError' ||
+      (typeof DOMException !== 'undefined' &&
+        error instanceof DOMException &&
+        error.code === DOMException.ABORT_ERR))
+  );
+}
+
 /**
  * Wraps fetch to intercept 503 responses and report upgrade status
  */
@@ -48,12 +69,27 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
     try {
       response = await originalFetch(input, init);
     } catch (error) {
-      // Network errors (e.g. connection refused) on non-static requests
-      // likely indicate the server is down during an upgrade, especially
-      // with the default Recreate deployment strategy where there is a gap
-      // between the old pod dying and the new pod starting.
+      // Filter out benign throws before flipping the banner:
+      //   - AbortError: caller cancelled (page nav, React unmount,
+      //     superseded poll). Not a server problem.
+      //   - Static assets: same rationale as the response path below.
+      //   - Tab hidden: iOS Safari aborts pending fetches as
+      //     `TypeError: Load failed` when the user switches apps.
+      //     That isn't an upgrade; the page just lost foreground.
+      //   - Single flap: real upgrades produce a sustained stream
+      //     of failures, so require two within a short window.
       try {
-        if (!isStaticAssetRequest(input)) {
+        const now = Date.now();
+        const tabHidden =
+          typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        const sustained = now - _lastFetchErrorAt < FLAP_WINDOW_MS;
+        _lastFetchErrorAt = now;
+        if (
+          !isAbortError(error) &&
+          !isStaticAssetRequest(input) &&
+          !tabHidden &&
+          sustained
+        ) {
           reportUpgrade();
         }
       } catch (e) {
@@ -83,6 +119,9 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
       ) {
         // Clear the upgrade banner when we get a successful response from API
         clearUpgrade();
+        // A successful response also breaks the flap streak so a
+        // later single failure can't team up with an old one.
+        _lastFetchErrorAt = 0;
       }
     } catch (error) {
       // If anything goes wrong with upgrade detection, just log it and continue
