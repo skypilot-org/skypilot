@@ -275,7 +275,12 @@ def _execute(
                 try:
                     preferred_store_type, preferred_region = (
                         task._get_preferred_store())  # pylint: disable=protected-access
-                except exceptions.NoCloudAccessError:
+                except (exceptions.NoCloudAccessError, ValueError):
+                    # Hint-only path: tolerate compute-only clouds (e.g.
+                    # Kubernetes, Lambda) where ``_get_preferred_store`` may
+                    # raise ``ValueError`` from ``StoreType.from_cloud``. The
+                    # real error, if any, will surface later when the storage
+                    # actually needs a default store.
                     preferred_store_type, preferred_region = None, None
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.

@@ -1660,10 +1660,12 @@ class Task:
             for storage in storage_to_construct:
                 try:
                     preferred_store_type, preferred_region = get_preferred()
-                except exceptions.NoCloudAccessError:
-                    # No storage cloud is enabled. Let ``construct()`` proceed
-                    # without a hint; if the user-specified store still needs
-                    # a cloud, the call will surface the original error.
+                except (exceptions.NoCloudAccessError, ValueError):
+                    # Hint-only path: tolerate cases where the task's compute
+                    # cloud has no associated storage (e.g. Kubernetes,
+                    # Lambda) and ``_get_preferred_store`` raises. If the
+                    # storage actually needs a default store, the lazy call
+                    # below will re-raise with the original error.
                     preferred_store_type, preferred_region = None, None
                 storage.construct(preferred_store_type=preferred_store_type,
                                   preferred_region=preferred_region)
