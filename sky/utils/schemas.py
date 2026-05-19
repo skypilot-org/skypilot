@@ -1885,6 +1885,9 @@ def get_config_schema():
                         'pattern': '^all$'
                     }]
                 },
+                'all_includes_in_cluster': {
+                    'type': 'boolean',
+                },
                 'context_configs': {
                     'type': 'object',
                     'required': [],
@@ -2345,6 +2348,9 @@ def get_config_schema():
                                 'type': 'string',
                                 'pattern': '^all$'
                             }]
+                        },
+                        'all_includes_in_cluster': {
+                            'type': 'boolean',
                         },
                         'disabled': {
                             'type': 'boolean'

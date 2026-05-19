@@ -1,7 +1,7 @@
 """Global environment options for sky."""
 import enum
 import os
-from typing import Dict
+from typing import Dict, Optional
 
 
 class Options(enum.Enum):
@@ -31,6 +31,14 @@ class Options(enum.Enum):
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
                                      False)
+    # Operator-level override for whether `allowed_contexts: 'all'` (or the
+    # env-var-triggered allow-all path) should include the API server's own
+    # in-cluster context. Unset by default; falls through to the config field
+    # `kubernetes.all_includes_in_cluster`.
+    # Read via `get_optional()` since "unset" is
+    # semantically distinct from "false".
+    ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER = (
+        'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()
@@ -44,6 +52,17 @@ class Options(enum.Enum):
         """Check if an environment variable is set to True."""
         return os.getenv(self.env_var,
                          str(self.default)).lower() in ('true', '1')
+
+    def get_optional(self) -> Optional[bool]:
+        """Parse the env var as a bool, or return None if unset.
+
+        Use when "unset" is semantically distinct from "false" (e.g. for
+        layered resolution where a config field provides the default).
+        """
+        val = os.environ.get(self.env_var)
+        if val is None:
+            return None
+        return val.lower() in ('true', '1')
 
     @property
     def env_key(self) -> str:
