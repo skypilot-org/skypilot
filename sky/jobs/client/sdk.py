@@ -415,17 +415,18 @@ def cancel(
 
 @typing.overload
 def tail_logs(
-        name: Optional[str] = None,
-        job_id: Optional[int] = None,
-        follow: bool = True,
-        controller: bool = False,
-        refresh: bool = False,
-        tail: Optional[int] = None,
-        tail_offset: Optional[int] = None,
-        output_stream: Optional['io.TextIOBase'] = None,
-        task: Optional[Union[str, int]] = None,
-        *,  # keyword only separator
-        preload_content: Literal[True] = True) -> Optional[int]:
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    follow: bool = True,
+    controller: bool = False,
+    refresh: bool = False,
+    tail: Optional[int] = None,
+    tail_offset: Optional[int] = None,
+    output_stream: Optional['io.TextIOBase'] = None,
+    task: Optional[Union[str, int]] = None,
+    *,  # keyword only separator
+    preload_content: Literal[True] = True
+) -> Optional[int]:
     ...
 
 
