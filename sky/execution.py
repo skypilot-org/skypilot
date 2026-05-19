@@ -268,9 +268,19 @@ def _execute(
             dag.pre_mount_volumes()
         for task in dag.tasks:
             if task.storage_mounts is not None:
+                # Forward the task's preferred (store_type, region) so that
+                # explicit ``store:`` entries (created during ``construct()``)
+                # land in the same region as the cluster instead of falling
+                # back to a hardcoded default. See #8504.
+                try:
+                    preferred_store_type, preferred_region = (
+                        task._get_preferred_store())  # pylint: disable=protected-access
+                except exceptions.NoCloudAccessError:
+                    preferred_store_type, preferred_region = None, None
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
-                    storage.construct()
+                    storage.construct(preferred_store_type=preferred_store_type,
+                                      preferred_region=preferred_region)
         _resolve_managed_secrets(dag)
         return _execute_dag(
             dag,

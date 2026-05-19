@@ -985,7 +985,11 @@ class Storage(object):
                                              self.mount_cached_config)
         return self.mount_cached_config
 
-    def construct(self):
+    def construct(
+        self,
+        preferred_store_type: Optional[StoreType] = None,
+        preferred_region: Optional[str] = None,
+    ) -> None:
         """Constructs the storage object.
 
         The Storage object is lazily initialized, so that when a user
@@ -1000,6 +1004,17 @@ class Storage(object):
         1. Set the stores field if not specified
         2. Create the bucket or check the existence of the bucket
         3. Sync the data from the source to the bucket if necessary
+
+        Args:
+          preferred_store_type: The preferred store type derived from the
+            owning task's compute resources (e.g. ``StoreType.AZURE`` when the
+            task runs on Azure). Only used as a hint to choose ``region`` for
+            user-specified stores whose type matches.
+          preferred_region: The region of the owning task's compute resources.
+            When the user specifies ``store: <type>`` in YAML but does not pin
+            a region, this lets us place the bucket in the same region as the
+            cluster (avoiding cross-region writes). Has no effect if it does
+            not apply to the user-specified store type.
         """
         if self._constructed:
             return
@@ -1073,27 +1088,43 @@ class Storage(object):
                 file_mount_type=self.file_mount_type,
                 mount_config=self.mount_config)
 
+            def _region_for(store_type: StoreType) -> Optional[str]:
+                # Only forward the preferred region when the task's preferred
+                # store type matches the one we are about to create. Mixing
+                # regions across clouds (e.g. passing an AWS region to Azure)
+                # would otherwise cause bucket creation to fail.
+                if (preferred_store_type is not None and
+                        preferred_store_type == store_type):
+                    return preferred_region
+                return None
+
             for store_type in input_stores:
-                self.add_store(store_type)
+                self.add_store(store_type, region=_region_for(store_type))
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
                 if isinstance(self.source, str):
                     if self.source.startswith('gs://'):
-                        self.add_store(StoreType.GCS)
+                        self.add_store(StoreType.GCS,
+                                       region=_region_for(StoreType.GCS))
                     elif data_utils.is_az_container_endpoint(self.source):
-                        self.add_store(StoreType.AZURE)
+                        self.add_store(StoreType.AZURE,
+                                       region=_region_for(StoreType.AZURE))
                     elif self.source.startswith('cos://'):
-                        self.add_store(StoreType.IBM)
+                        self.add_store(StoreType.IBM,
+                                       region=_region_for(StoreType.IBM))
                     elif self.source.startswith('oci://'):
-                        self.add_store(StoreType.OCI)
+                        self.add_store(StoreType.OCI,
+                                       region=_region_for(StoreType.OCI))
 
                     s3_compatible_store_type: Optional[StoreType] = (
                         StoreType.find_s3_compatible_config_by_prefix(
                             self.source))
                     if s3_compatible_store_type:
-                        self.add_store(s3_compatible_store_type)
+                        self.add_store(
+                            s3_compatible_store_type,
+                            region=_region_for(s3_compatible_store_type))
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -3458,11 +3489,19 @@ class AzureBlobStore(AbstractStore):
                 storage account.
         """
         try:
+            # Default to Standard_LRS (locally-redundant storage):
+            #   * SkyPilot uses the storage account as a single-region workdir
+            #     / data staging area, not as a disaster-recovery store.
+            #   * Standard_LRS is the cheapest SKU and lives in the same
+            #     region as the cluster, so reads/writes don't incur
+            #     cross-region transfer cost.
+            # Users who need cross-region replication can pre-create their
+            # own storage account and pass its name via config.yaml.
             creation_response = (
                 self.storage_client.storage_accounts.begin_create(
                     resource_group_name, storage_account_name, {
                         'sku': {
-                            'name': 'Standard_GRS'
+                            'name': 'Standard_LRS'
                         },
                         'kind': 'StorageV2',
                         'location': self.region,
