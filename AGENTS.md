@@ -82,6 +82,39 @@ export SKYPILOT_DEV=1                      # Enable development mode
 export SKYPILOT_DEBUG=1                    # Enable debug logging
 ```
 
+#### Env var naming: `SKYPILOT_` vs `SKYPILOT_SERVER_`
+
+Two prefixes, one rule:
+
+- **`SKYPILOT_*`** — client-relevant. `request_body_env_vars()`
+  (`sky/server/requests/payloads.py`) scrapes these from `os.environ` and
+  forwards them to the API server in every request body. Use for env vars
+  that meaningfully flow from a user's machine to the server: identity
+  (`SKYPILOT_USER`, `SKYPILOT_USER_ID`), per-request behavior
+  (`SKYPILOT_DEBUG`, `SKYPILOT_MINIMIZE_LOGGING`), client config
+  (`SKYPILOT_CONFIG`), and per-job identity passed into user code
+  (`SKYPILOT_TASK_ID*`, `SKYPILOT_MANAGED_JOB_ID`, `SKYPILOT_JOB_*`).
+
+- **`SKYPILOT_SERVER_*`** — server-only. The prefix filter in
+  `request_body_env_vars()` **explicitly excludes** this prefix, so the var
+  cannot leak from server → client request body → persisted PG row →
+  `os.environ.update()` on the next request. Use for anything set on the
+  API server pod via Helm downward API, `extraEnvs`, or operator config.
+
+If you add a new env var that the API server reads but should never be
+forwarded to clients or persisted in `request_body.env_vars`, give it the
+`SKYPILOT_SERVER_` prefix. Define the constant in `sky/skylet/constants.py`
+and prefer `constants.getenv_server_with_legacy(new_name, legacy_name)` at
+the read site if you're renaming an existing var (it transparently falls
+back to the legacy name during the deprecation window and logs a debug
+hint).
+
+The deny-list in `request_body_env_vars()` also filters K8s service-link
+env injection (`<SVC>_SERVICE_HOST`, `_PORT_<n>_TCP*`, etc.) under the
+`SKYPILOT_AGENT_*` prefix. The api-server pod sets `enableServiceLinks:
+false` to prevent injection at the source; the deny-list is defensive
+against pods that haven't rolled.
+
 ## Code Formatting and Linting
 
 **Always run `format.sh` before committing:**
