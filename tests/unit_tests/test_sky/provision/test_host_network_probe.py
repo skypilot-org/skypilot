@@ -15,6 +15,8 @@ import gzip
 import re
 import socket
 
+import pytest
+
 from sky.provision import instance_setup
 from sky.provision.kubernetes import host_network_probe
 from sky.skylet import constants
@@ -267,3 +269,125 @@ class TestWaitHeadGcsTcp:
             host_network_probe._wait_head_gcs_tcp('127.0.0.1', port)
         finally:
             listener.close()
+
+
+class TestHeadPortReuse:
+    """On a head *container* restart the ownerReference'd ConfigMap
+    survives (the Pod object/UID is unchanged), so the head must reuse
+    the already-published ports rather than re-probe and strand workers.
+    """
+
+    def _full_head_data(self, podname):
+        ports = {
+            n: 30000 + i
+            for i, n in enumerate(host_network_probe._HEAD_PORT_NAMES)
+        }
+        return ports, host_network_probe._configmap_data_for_ports(
+            podname, ports)
+
+    def test_round_trips_configmap_data(self):
+        ports, data = self._full_head_data('c-head-abc')
+        got = host_network_probe._head_ports_from_configmap_data(
+            data, 'c-head-abc')
+        assert got == ports
+
+    def test_partial_data_returns_none(self):
+        _, data = self._full_head_data('c-head-abc')
+        data.pop('gcs')
+        assert host_network_probe._head_ports_from_configmap_data(
+            data, 'c-head-abc') is None
+
+    def test_non_integer_value_returns_none(self):
+        _, data = self._full_head_data('c-head-abc')
+        data['gcs'] = 'not-a-port'
+        assert host_network_probe._head_ports_from_configmap_data(
+            data, 'c-head-abc') is None
+
+    def test_reuse_requires_owner_uid_match(self, monkeypatch):
+        monkeypatch.setenv('SKYPILOT_POD_NAME', 'c-head-abc')
+        monkeypatch.setenv('SKYPILOT_POD_UID', 'live-uid')
+        ports, data = self._full_head_data('c-head-abc')
+
+        def fake_get(owner_uid):
+            return {
+                'metadata': {
+                    'ownerReferences': [{
+                        'uid': owner_uid
+                    }]
+                },
+                'data': data,
+            }
+
+        # Owned by this pod (genuine container restart) -> reuse.
+        monkeypatch.setattr(host_network_probe, '_try_get_configmap',
+                            lambda *_a: fake_get('live-uid'))
+        assert host_network_probe._existing_head_ports_to_reuse('cm',
+                                                                'ns') == ports
+
+        # Owned by a different (now-deleted, GC-lagging) pod -> probe
+        # fresh; its ports may already be taken on this fresh node.
+        monkeypatch.setattr(host_network_probe, '_try_get_configmap',
+                            lambda *_a: fake_get('stale-uid'))
+        assert host_network_probe._existing_head_ports_to_reuse('cm',
+                                                                'ns') is None
+
+    def test_reuse_none_when_configmap_absent(self, monkeypatch):
+        monkeypatch.setenv('SKYPILOT_POD_NAME', 'c-head-abc')
+        monkeypatch.setenv('SKYPILOT_POD_UID', 'live-uid')
+        monkeypatch.setattr(host_network_probe, '_try_get_configmap',
+                            lambda n, ns: None)
+        assert host_network_probe._existing_head_ports_to_reuse('cm',
+                                                                'ns') is None
+
+
+class TestMergeSshdPortBackoff:
+    """Workers merge their sshd port into the one shared ConfigMap; on a
+    large cluster the 409 losers must back off with jitter so they don't
+    thunder on the API server in lockstep.
+    """
+
+    def _patch(self, monkeypatch, statuses):
+        # _get_configmap returns a minimal mergeable body.
+        monkeypatch.setattr(
+            host_network_probe, '_get_configmap', lambda n, ns: {
+                'data': {},
+                'metadata': {
+                    'resourceVersion': '1'
+                }
+            })
+        calls = iter(statuses)
+        monkeypatch.setattr(host_network_probe, '_k8s_api_request',
+                            lambda *a, **k: (next(calls), b''))
+        sleeps = []
+        monkeypatch.setattr(host_network_probe.time, 'sleep', sleeps.append)
+        # Collapse jitter to its upper bound so the ceiling is asserted
+        # deterministically.
+        monkeypatch.setattr(host_network_probe.random, 'uniform',
+                            lambda lo, hi: hi)
+        return sleeps
+
+    def test_backoff_is_exponential_and_capped(self, monkeypatch):
+        # Always 409 -> exhaust retries and raise.
+        sleeps = self._patch(monkeypatch,
+                             [409] * host_network_probe._MERGE_RETRY_LIMIT)
+        with pytest.raises(RuntimeError, match='after'):
+            host_network_probe._merge_sshd_port('cm', 'ns', 'w1', 12345)
+        # One backoff between each pair of attempts (not after the last).
+        assert len(sleeps) == host_network_probe._MERGE_RETRY_LIMIT - 1
+        # Strictly increasing until the cap, never exceeding the cap.
+        assert sleeps[0] == host_network_probe._MERGE_RETRY_BASE_DELAY_S
+        assert max(sleeps) <= host_network_probe._MERGE_RETRY_MAX_DELAY_S
+        assert sleeps == sorted(sleeps)
+
+    def test_succeeds_after_transient_conflicts(self, monkeypatch):
+        sleeps = self._patch(monkeypatch, [409, 409, 200])
+        # Returns without raising; only backed off between the conflicts.
+        host_network_probe._merge_sshd_port('cm', 'ns', 'w1', 12345)
+        assert len(sleeps) == 2
+
+    def test_non_conflict_error_does_not_retry(self, monkeypatch):
+        sleeps = self._patch(monkeypatch, [500])
+        with pytest.raises(RuntimeError):
+            host_network_probe._merge_sshd_port('cm', 'ns', 'w1', 12345)
+        # 500 is not retriable -> bail immediately, no backoff.
+        assert not sleeps

@@ -205,3 +205,106 @@ def test_kubernetes_host_network_multi_node_same_node():
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_host_network_head_restart_reuses_ports():
+    """A head *container* restart must reuse the published port set.
+
+    The probe's ``<cluster>-ray-ports`` ConfigMap carries an
+    ``ownerReference`` to the *head Pod object*. A container restart
+    (crash / OOM / ``ray stop``-then-up) keeps the Pod object — and its
+    UID — so the ConfigMap is **not** garbage-collected (only deleting
+    the Pod object triggers GC). When the head bootstrap re-runs after
+    such a restart it must therefore reuse the already-published
+    GCS/dashboard/sshd ports rather than probe a fresh ephemeral set:
+    workers and the SkyPilot SSH client are still dialing the old ports.
+
+    The smoke clusters use ``restartPolicy: Never`` (non-HA), so we
+    cannot make kubelet truly restart the container. Instead we re-run
+    the inlined probe (``/tmp/sky_host_network_probe.py --mode head``)
+    against the surviving ConfigMap, in the *same* pod-identity env the
+    real bootstrap uses (pulled from PID 1's environ via the Downward
+    API vars), which is exactly what the head bootstrap re-executes on
+    restart. Verifies:
+
+    1. The ConfigMap survived (the reuse path requires it to exist and
+       to be owned by this pod's UID — both encoded in the assertion).
+    2. The re-run reuses the *identical* published port set
+       (``/tmp/sky_host_network_ports.env`` unchanged). Pre-fix this
+       step re-probed and the port set would differ.
+    3. SSH still works afterward — the re-publish preserved the head's
+       ``sshd_<pod>`` ConfigMap entry the SSH config writer relies on.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg = f'/tmp/sky-hostnet-restart-{uuid.uuid4().hex[:12]}.yaml'
+
+    write_cfg = (f'cat > {cfg} <<EOF\n'
+                 f'kubernetes:\n'
+                 f'  pod_config:\n'
+                 f'    spec:\n'
+                 f'      hostNetwork: true\n'
+                 f'EOF')
+
+    # Runs on the head pod. Re-invokes the head probe exactly as the
+    # bootstrap would after a container restart: same pod-identity env
+    # (Downward API vars + in-cluster API host), same ConfigMap. The
+    # probe's _existing_head_ports_to_reuse() only reuses when the
+    # ConfigMap exists AND is owned by this pod UID, so an unchanged
+    # port set proves both (and that the reuse codepath fired); a
+    # deleted ConfigMap or a regressed re-probe makes BEFORE != AFTER.
+    # Raw string: \0 / \n must reach `tr` literally. Only double quotes
+    # inside so the whole script can be single-quoted to ssh (no local
+    # $VAR expansion). No {} so it is f-string/heredoc safe.
+    remote = (
+        r'set -e; '
+        r'PROBE=/tmp/sky_host_network_probe.py; '
+        r'ENVF=/tmp/sky_host_network_ports.env; '
+        r'test -s "$ENVF"; test -s "$PROBE"; '
+        r'eval "$(sudo cat /proc/1/environ | tr "\0" "\n" | '
+        r'grep -E "^(KUBERNETES_SERVICE_HOST|KUBERNETES_SERVICE_PORT|'
+        r'SKYPILOT_POD_NAME|SKYPILOT_POD_UID|'
+        r'SKYPILOT_RAY_PORTS_CONFIGMAP_NAME|'
+        r'SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE)=" | '
+        r'sed "s/^/export /")"; '
+        r'test -n "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME"; '
+        r'test -n "$SKYPILOT_POD_UID"; '
+        r'BEFORE=$(sort "$ENVF"); '
+        r'python3 "$PROBE" --mode head '
+        r'--env-file /tmp/sky_restart_check.env '
+        r'--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
+        r'--configmap-namespace "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE"; '
+        r'AFTER=$(sort /tmp/sky_restart_check.env); '
+        r'echo "BEFORE=[$BEFORE]"; echo "AFTER=[$AFTER]"; '
+        r'if [ -z "$BEFORE" ]; then echo "FAIL: empty env file"; exit 1; fi; '
+        r'if [ "$BEFORE" != "$AFTER" ]; then '
+        r'echo "FAIL: head re-run did NOT reuse the published ports '
+        r'(ConfigMap deleted or re-probed instead of reused)"; exit 1; fi; '
+        r'echo HEAD_RESTART_REUSED_PORTS')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_host_network_head_restart_reuses_ports',
+        [
+            write_cfg,
+
+            # 1 CPU / 2 GB: same headroom rationale as coexistence.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config {cfg} --cpus 1 --memory 2',
+
+            # Re-run the head probe against the surviving ConfigMap and
+            # assert the published port set is reused verbatim.
+            f's=$(ssh -o StrictHostKeyChecking=no {name} \'{remote}\' '
+            f'2>&1); echo "$s"; '
+            f'echo "$s" | grep -q HEAD_RESTART_REUSED_PORTS',
+
+            # SSH must still work after the re-publish (the head's
+            # sshd_<pod> ConfigMap entry — read by the SkyPilot SSH
+            # config writer — was preserved on the reuse path).
+            f's=$(ssh -o StrictHostKeyChecking=no {name} '
+            f'"echo head_ssh_ok" 2>&1) && echo "$s" | grep head_ssh_ok',
+        ],
+        teardown=f'sky down -y {name}; rm -f {cfg}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)

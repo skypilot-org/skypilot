@@ -19,6 +19,7 @@ import argparse
 import functools
 import json
 import os
+import random
 import socket
 import ssl
 import sys
@@ -78,21 +79,30 @@ _HEAD_GCS_TCP_WAIT_TIMEOUT_S = 600
 _HEAD_GCS_TCP_WAIT_INTERVAL_S = 1
 
 # Bound on retries when a worker's ConfigMap merge races another worker
-# (409 Conflict from stale resourceVersion).
-_MERGE_RETRY_LIMIT = 5
+# (409 Conflict from stale resourceVersion). On a many-node cluster
+# every worker contends for the one ConfigMap, so the loser of a race
+# can be bounced several times before it lands — keep this generous.
+_MERGE_RETRY_LIMIT = 8
+# Full-jitter exponential backoff between 409 retries. Without it, N
+# workers retrying in lockstep are a thundering herd that keeps losing
+# to each other; spreading them out lets a large cluster converge.
+_MERGE_RETRY_BASE_DELAY_S = 0.2
+_MERGE_RETRY_MAX_DELAY_S = 5
 
 # Per-request budget for K8s API calls. Without this, urlopen would
 # block forever on a hung API server and freeze the pod bootstrap.
 _K8S_API_TIMEOUT_S = 10
 
 
-@functools.lru_cache(maxsize=None)
+# maxsize=1: both take no arguments, so a single slot caches the only
+# possible call. (Memoizing a constant read/parse, not a keyed cache.)
+@functools.lru_cache(maxsize=1)
 def _api_auth_token() -> str:
     with open(_SA_TOKEN_PATH, encoding='utf-8') as f:
         return f.read().strip()
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=1)
 def _api_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=_SA_CA_PATH)
 
@@ -169,6 +179,27 @@ def _configmap_data_for_ports(podname: str, ports: Dict[str,
     return out
 
 
+def _head_ports_from_configmap_data(data: Dict[str, str],
+                                    podname: str) -> Optional[Dict[str, int]]:
+    """Reconstruct the head's probed ports from a ConfigMap's data.
+
+    Inverse of _configmap_data_for_ports for the head's own keys. Returns
+    None if any expected head port is missing or non-integer, so the
+    caller falls back to a fresh probe rather than reusing a partial set.
+    """
+    ports: Dict[str, int] = {}
+    for name in _HEAD_PORT_NAMES:
+        key = f'{SSHD_KEY_PREFIX}{podname}' if name == 'sshd' else name
+        raw = data.get(key)
+        if raw is None:
+            return None
+        try:
+            ports[name] = int(raw)
+        except ValueError:
+            return None
+    return ports
+
+
 def _build_configmap_body(name: str, namespace: str, ports: Dict[str, int],
                           owner_pod_name: str,
                           owner_pod_uid: str) -> Dict[str, Any]:
@@ -216,13 +247,25 @@ def _get_configmap(name: str, namespace: str) -> Dict[str, Any]:
     return json.loads(resp)
 
 
+def _try_get_configmap(name: str, namespace: str) -> Optional[Dict[str, Any]]:
+    """GET a ConfigMap, returning None if it doesn't exist (404)."""
+    base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
+    status, resp = _k8s_api_request('GET', base)
+    if status == 404:
+        return None
+    if status >= 300:
+        raise RuntimeError(
+            _format_api_error('GET', name, namespace, status, resp))
+    return json.loads(resp)
+
+
 def _publish_configmap(name: str, namespace: str, ports: Dict[str,
                                                               int]) -> None:
     """Create or update a ConfigMap with the head's chosen ports.
 
     Idempotent: on 409 we GET, lift the resourceVersion, and PUT — which
-    also re-points the ownerReference at the current head pod (relevant
-    on head-pod restart, where a stale ConfigMap may still be around).
+    also re-points the ownerReference at the current head pod (so a
+    ConfigMap left by a prior, GC-lagging head gets re-adopted).
     """
     # SKYPILOT_POD_NAME / SKYPILOT_POD_UID come from the K8s downward
     # API — $HOSTNAME is the host node's name under hostNetwork.
@@ -254,7 +297,7 @@ def _merge_sshd_port(name: str, namespace: str, podname: str,
     base = f'/api/v1/namespaces/{namespace}/configmaps/{name}'
     key = f'{SSHD_KEY_PREFIX}{podname}'
     last_err: Optional[str] = None
-    for _ in range(_MERGE_RETRY_LIMIT):
+    for attempt in range(_MERGE_RETRY_LIMIT):
         existing = _get_configmap(name, namespace)
         data = dict(existing.get('data') or {})
         data[key] = str(port)
@@ -265,6 +308,13 @@ def _merge_sshd_port(name: str, namespace: str, podname: str,
         last_err = _format_api_error('PUT', name, namespace, status, resp)
         if status != 409:
             break
+        # Lost the resourceVersion race (typically to another worker).
+        # Back off with full jitter before re-reading so a many-node
+        # cluster's workers don't keep colliding in lockstep.
+        if attempt < _MERGE_RETRY_LIMIT - 1:
+            ceiling = min(_MERGE_RETRY_MAX_DELAY_S,
+                          _MERGE_RETRY_BASE_DELAY_S * 2**attempt)
+            time.sleep(random.uniform(0, ceiling))
     raise RuntimeError(
         f'Failed to merge {key} into ConfigMap {namespace}/{name} after '
         f'{_MERGE_RETRY_LIMIT} attempts: {last_err}')
@@ -309,11 +359,50 @@ def _wait_head_gcs_tcp(host: str, port: int) -> None:
         f'{_HEAD_GCS_TCP_WAIT_TIMEOUT_S}s (last error: {last_err}).')
 
 
+def _existing_head_ports_to_reuse(name: str,
+                                  namespace: str) -> Optional[Dict[str, int]]:
+    """Ports to reuse if this head pod's ConfigMap already exists.
+
+    A *container* restart (crash, OOM, ``ray stop``-then-up) keeps the
+    Pod object — and its UID — so the ownerReference'd ConfigMap is NOT
+    garbage-collected; only deleting the Pod object triggers GC. After a
+    container restart the head must reuse the already-published ports:
+    workers and the SkyPilot SSH client are still dialing the old
+    GCS/sshd ports, so re-probing would strand them on a port nothing
+    rebinds.
+
+    Reuse only when the ConfigMap is owned by *this* pod UID. A
+    different UID means a stale ConfigMap from a prior, now-deleted head
+    whose GC simply hasn't caught up yet; its ports may already be taken
+    on this fresh node, so probe afresh (the subsequent publish, via its
+    409 PUT, re-points the ownerReference at the live pod).
+    """
+    existing = _try_get_configmap(name, namespace)
+    if existing is None:
+        return None
+    owner_uid = os.environ['SKYPILOT_POD_UID']
+    owners = existing.get('metadata', {}).get('ownerReferences') or []
+    if not any(o.get('uid') == owner_uid for o in owners):
+        return None
+    podname = os.environ['SKYPILOT_POD_NAME']
+    return _head_ports_from_configmap_data(existing.get('data') or {}, podname)
+
+
 def _run_head(env_file: str, configmap_name: str,
               configmap_namespace: str) -> None:
-    held, ports = _probe_ports(_HEAD_PORT_NAMES)
+    reused = _existing_head_ports_to_reuse(configmap_name, configmap_namespace)
+    if reused is not None:
+        # This head pod's container restarted; keep the published ports
+        # so in-flight workers / SSH stay valid. Nothing to hold — ray
+        # rebinds the same ports the dead process vacated.
+        held: List[socket.socket] = []
+        ports = reused
+    else:
+        held, ports = _probe_ports(_HEAD_PORT_NAMES)
     # Publish before writing the env file so a failed publish prevents
-    # ray start from binding ports the workers will never discover.
+    # ray start from binding ports the workers will never discover. The
+    # publish is idempotent (409 → PUT), so it harmlessly re-points the
+    # ownerReference at the current pod on the reuse path too.
     _publish_configmap(configmap_name, configmap_namespace, ports)
     _write_env_file(ports, env_file)
     del held  # release the held sockets just before this process exits

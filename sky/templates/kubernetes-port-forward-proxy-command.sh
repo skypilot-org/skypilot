@@ -3,9 +3,14 @@ set -uo pipefail
 
 KUBE_CONTEXT=""
 KUBE_NAMESPACE=""
+# Whether the target pod runs with hostNetwork: true. Passed as a flag
+# by the SkyPilot client (it is known statically at proxy-command
+# construction time) so the common non-hostNetwork path makes zero
+# extra kubectl calls — no per-connection `kubectl get pod` probe.
+HOST_NETWORK=false
 
 # Parse flags
-while getopts ":c:n:" opt; do
+while getopts ":c:n:N" opt; do
   case ${opt} in
     c)
       KUBE_CONTEXT="$OPTARG"
@@ -13,9 +18,12 @@ while getopts ":c:n:" opt; do
     n)
       KUBE_NAMESPACE="$OPTARG"
       ;;
+    N)
+      HOST_NETWORK=true
+      ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
-      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace] [-N]" >&2
       exit 1
       ;;
     :)
@@ -30,7 +38,7 @@ shift $((OPTIND -1))
 
 # Check if pod name is passed as an argument
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace] [-N]" >&2
   exit 1
 fi
 
@@ -73,10 +81,11 @@ fi
 # probe rebinds). The host_network_probe writes the probed sshd port
 # to the cluster's <cluster>-ray-ports ConfigMap under sshd_<pod>;
 # discover it here so port-forward routes to the right pod-internal
-# port. Falls back to 22 for non-hostNetwork pods (the common case).
+# port. Falls back to 22 for non-hostNetwork pods (the common case),
+# which take this branch's `false` and make no kubectl calls at all.
+# The ConfigMap is still read live (not passed as a flag) because the
+# probed port can change across a pod restart.
 POD_PORT=22
-HOST_NETWORK=$(kubectl "${KUBECTL_ARGS[@]}" get pod "${POD_NAME}" \
-    -o jsonpath='{.spec.hostNetwork}' 2>/dev/null)
 if [ "${HOST_NETWORK}" = "true" ]; then
     # SkyPilot pod names are <cluster>-head or <cluster>-worker<N>.
     CLUSTER_NAME=$(echo "${POD_NAME}" | sed -E 's/-head$//; s/-worker[0-9]+$//')
