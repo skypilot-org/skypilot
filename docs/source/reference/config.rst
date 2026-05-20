@@ -1611,15 +1611,6 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
 
-When the SkyPilot API server runs inside Kubernetes, the pod's own host cluster
-is discoverable as an ``in-cluster`` context and is included in the
-``allowed_contexts: all`` expansion by default. To exclude it — for example,
-when the API server's host cluster should not be a user-facing compute
-target — set the environment variable
-``SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER`` to ``"false"`` on the
-API server pod. Explicitly listing ``in-cluster`` in ``allowed_contexts``
-always keeps it, regardless of this env var.
-
 .. _config-yaml-kubernetes-allowed-nodes:
 
 ``kubernetes.allowed_nodes``
