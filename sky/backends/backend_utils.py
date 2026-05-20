@@ -268,6 +268,37 @@ _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
 
+def _caller_is_viewer() -> bool:
+    """Return True iff the executor worker is acting for a viewer user.
+
+    Reads the user id from USER_ID_ENV_VAR (set by the executor at
+    sky/server/requests/executor.py:377 when a worker takes a request)
+    and consults the casbin enforcer's in-memory grouping policy.
+    Returns False if the env var is unset (e.g. running outside an
+    executor worker context) or if the permission service has not
+    been initialized — both of which mean we're not on the API
+    server's authenticated request path.
+    """
+    # pylint: disable=import-outside-toplevel
+    # In-function import to avoid pulling the permission service into
+    # processes that never need it (e.g. the controller image's CLI
+    # entry point), which would also drag in casbin's import cost.
+    from sky.users import permission
+    from sky.users import rbac as rbac_mod
+    user_id = os.environ.get(constants.USER_ID_ENV_VAR)
+    if not user_id:
+        return False
+    try:
+        enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return False
+    try:
+        roles = enforcer.get_roles_for_user(user_id)
+    except Exception:  # pylint: disable=broad-except
+        return False
+    return rbac_mod.RoleName.VIEWER.value in roles
+
+
 def is_command_length_over_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
 
@@ -3718,6 +3749,20 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
     accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+
+    # Defense-in-depth: even if some caller bypasses the HTTP layer's
+    # role_filter shim and reaches here with include_credentials=True
+    # on behalf of a viewer-roled user, refuse to embed SSH key
+    # contents in the response. We resolve the caller via
+    # USER_ID_ENV_VAR which the executor propagates into the worker
+    # process (sky/server/requests/executor.py:377). Reading from the
+    # in-memory casbin enforcer state (get_roles_for_user) avoids a
+    # DB roundtrip on the hot status path.
+    if include_credentials:
+        if _caller_is_viewer():
+            logger.debug('Suppressing include_credentials for viewer caller')
+            include_credentials = False
+
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
