@@ -662,8 +662,8 @@ Kubernetes (CKS)
 
   CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
 
-Slurm
-^^^^^
+Slurm (SUNK)
+^^^^^^^^^^^^
 
 1. Install the necessary dependencies for CoreWeave with Slurm support.
 
@@ -703,7 +703,8 @@ Slurm
       # From source
       pip install -e ".[coreweave,slurm]"
 
-2. Set up SSH access to the CoreWeave Slurm login node by creating a ``~/.slurm/config`` file:
+2. Create a `SUNK cluster <https://docs.coreweave.com/products/sunk>`_ from the CoreWeave console.
+3. Set up SSH access to the CoreWeave SUNK login node by creating a ``~/.slurm/config`` file:
 
 .. code-block:: shell
 
