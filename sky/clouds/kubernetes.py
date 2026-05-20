@@ -213,8 +213,8 @@ class Kubernetes(clouds.Cloud):
             # `'all'` expansion, so the cluster running the API server is
             # not surfaced as a user-facing compute target. Default is to
             # include in-cluster (backward compatible).
-            if env_options.Options.ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER \
-                    .get():
+            if (env_options.Options.ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.
+                    get()):
                 allowed_contexts = all_contexts
             else:
                 in_cluster_name = kubernetes.in_cluster_context_name()
