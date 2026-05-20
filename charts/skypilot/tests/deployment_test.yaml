@@ -1208,11 +1208,14 @@ tests:
           content:
             name: SOME_OTHER_ENV
             value: "x"
-      # Total env count = baseline (9, with chart's POD_IP suppressed: 8) + 2
-      # user-provided = 10. A duplicate would push it to 11.
+      # Total env count = baseline (15, with chart's POD_IP suppressed: 14) +
+      # 2 user-provided = 16. A duplicate would push it to 17. (Baseline
+      # rose from 9 to 15 because each server-only var is now dual-emitted
+      # under both SKYPILOT_SERVER_* and the legacy SKYPILOT_* name for
+      # upgrade-skew safety.)
       - lengthEqual:
           path: spec.template.spec.containers[0].env
-          count: 10
+          count: 16
 
   - it: should not duplicate POD_IP env when global.extraEnvs already provides it
     set:
@@ -1222,7 +1225,7 @@ tests:
             fieldRef:
               fieldPath: status.podIP
     asserts:
-      # Baseline (9) - chart's POD_IP suppressed (8) + user's POD_IP (1) = 9.
+      # Baseline (15) - chart's POD_IP suppressed (14) + user's POD_IP (1) = 15.
       - lengthEqual:
           path: spec.template.spec.containers[0].env
-          count: 9
+          count: 15
