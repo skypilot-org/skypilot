@@ -665,7 +665,9 @@ Kubernetes (CKS)
 Slurm (SUNK)
 ^^^^^^^^^^^^
 
-1. Install the necessary dependencies for CoreWeave with Slurm support.
+`SUNK <https://docs.coreweave.com/products/sunk>`__ is CoreWeave's managed Slurm offering. To set up SkyPilot on a SUNK cluster:
+
+1. Install SkyPilot with the Slurm plugin.
 
 .. tab-set::
   .. tab-item:: uv venv
@@ -675,9 +677,9 @@ Slurm (SUNK)
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      uv pip install "skypilot[coreweave,slurm]"
+      uv pip install "skypilot[slurm]"
       # From nightly build
-      uv pip install "skypilot-nightly[coreweave,slurm]"
+      uv pip install "skypilot-nightly[slurm]"
 
   .. tab-item:: uv tool
     :sync: uv-tool-tab
@@ -686,9 +688,9 @@ Slurm (SUNK)
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      uv tool install --with pip "skypilot[coreweave,slurm]"
+      uv tool install --with pip "skypilot[slurm]"
       # From nightly build
-      uv tool install --with pip "skypilot-nightly[coreweave,slurm]"
+      uv tool install --with pip "skypilot-nightly[slurm]"
 
   .. tab-item:: pip
     :sync: pip-tab
@@ -697,29 +699,31 @@ Slurm (SUNK)
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      pip install "skypilot[coreweave,slurm]"
+      pip install "skypilot[slurm]"
       # From nightly build
-      pip install "skypilot-nightly[coreweave,slurm]"
+      pip install "skypilot-nightly[slurm]"
       # From source
-      pip install -e ".[coreweave,slurm]"
+      pip install -e ".[slurm]"
 
-2. Create a `SUNK cluster <https://docs.coreweave.com/products/sunk>`_ from the CoreWeave console.
-3. Set up SSH access to the CoreWeave SUNK login node by creating a ``~/.slurm/config`` file:
+2. Create the SkyPilot Slurm SSH configuration file and add your SUNK login node:
 
 .. code-block:: shell
 
-  # Create the Slurm config directory
   mkdir -p ~/.slurm
 
-  # Add your CoreWeave Slurm cluster configuration
-  cat > ~/.slurm/config << EOF
-  Host coreweave-slurm
-      HostName <login-node-hostname>
-      User <username>
-      IdentityFile ~/.ssh/id_rsa
-  EOF
+.. code-block:: text
+  :caption: ``~/.slurm/config``
 
-See :ref:`SkyPilot on Slurm <slurm-overview>` for more details on Slurm configuration.
+  Host <CLUSTER-NAME>
+      HostName <LOGIN-NODE-IP>
+      User <USERNAME>
+      IdentityFile ~/.ssh/id_ed25519
+
+- ``<CLUSTER-NAME>``: A name for your cluster, for example ``my-sunk-cluster``.
+- ``<LOGIN-NODE-IP>``: Your login node's external IP address. To find it, run ``kubectl get svc slurm-login -n tenant-slurm``.
+- ``<USERNAME>``: Your Slurm username.
+
+For more details, see the `SkyPilot on SUNK tutorial <https://docs.coreweave.com/products/sunk/tutorials/skypilot-on-sunk>`__ and :ref:`SkyPilot on Slurm <slurm-overview>`.
 
 .. _coreweave-caios-installation:
 
