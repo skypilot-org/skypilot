@@ -286,6 +286,15 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'path': '/upload_v2/blob',
         'method': 'GET'
     },
+    # /debug/dump_create is a diagnostic snapshot — operators (including
+    # viewers) need it to collect dumps for support. The corresponding
+    # download (`/debug/dump_download/:filename`) is intentionally NOT
+    # allowlisted: dumps can contain user-scoped data, so reads stay
+    # admin-only via the user-role blocklist semantics.
+    {
+        'path': '/debug/dump_create',
+        'method': 'POST'
+    },
     # --- Dashboard / static / auth-flow surface ---
     # These paths are usually RBAC-skipped at the middleware level
     # (`/dashboard/`, `/api/` prefix in server.py:200) but are listed
