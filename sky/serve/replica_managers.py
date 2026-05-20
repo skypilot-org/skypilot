@@ -577,7 +577,7 @@ class ReplicaInfo:
         # Always populate the small derived strings — new clients read
         # these instead of touching the handle, and the cost is just a
         # dict lookup + isinstance on a cluster_record we already have.
-        if handle is not None:
+        if handle is not None and handle.launched_resources is not None:
             info_dict['cloud'] = repr(handle.launched_resources.cloud)
             info_dict['region'] = handle.launched_resources.region
             simple, full = resources_utils.get_readable_resources_repr(

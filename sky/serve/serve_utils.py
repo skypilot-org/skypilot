@@ -1948,7 +1948,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
         if infra_pre is None or resources_pre is None:
             replica_handle: Optional[
                 'backends.CloudVmRayResourceHandle'] = record.get('handle')
-            if replica_handle is not None:
+            if (replica_handle is not None and
+                    replica_handle.launched_resources is not None):
                 if infra_pre is None:
                     infra = (
                         replica_handle.launched_resources.infra.formatted_str())
