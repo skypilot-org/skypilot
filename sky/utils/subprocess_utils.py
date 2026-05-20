@@ -1,4 +1,6 @@
 """Utility functions for subprocesses."""
+import ctypes
+import ctypes.util
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -335,6 +337,70 @@ def run_with_retries(
                 continue
         break
     return returncode, stdout, stderr
+
+
+# prctl op number for PR_SET_CHILD_SUBREAPER, from <linux/prctl.h>.
+# Available on Linux 3.4+ (2012-05-20).
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+def _load_libc() -> Optional[ctypes.CDLL]:
+    """Resolve libc once at module load.
+
+    set_child_subreaper() is called from a preexec_fn — i.e. between fork()
+    and execve() in the child. In that window only async-signal-safe code
+    is safe to run, because if the parent had multiple threads any locks
+    they held are now permanently locked in the child. ctypes.util.find_library
+    is NOT async-signal-safe: on glibc it shells out to /sbin/ldconfig via
+    subprocess.Popen, which itself can fork() / allocate / hold locks. We
+    must resolve and load libc in the parent process here, so the preexec_fn
+    only has to perform the prctl(2) syscall.
+    """
+    if sys.platform != 'linux':
+        return None
+    try:
+        libc_path = ctypes.util.find_library('c')
+        if not libc_path:
+            return None
+        return ctypes.CDLL(libc_path, use_errno=True)
+    except (OSError, TypeError):
+        return None
+
+
+_LIBC = _load_libc()
+
+
+def set_child_subreaper() -> None:
+    """Mark the calling process as a child subreaper.
+
+    When a descendant of a child subreaper becomes orphaned (its immediate
+    parent exits), the kernel reparents the orphan to the nearest living
+    ancestor subreaper instead of to PID 1. This keeps orphans inside the
+    descendant tree, so process-tree-based cleanup (e.g. the watcher in
+    subprocess_daemon) continues to find them after their original parent
+    dies.
+
+    Intended primarily as a preexec_fn for subprocess.Popen: runs in the
+    child after fork() and before execve(). The attribute is preserved
+    across execve, so the launched binary (e.g. bash) inherits subreaper
+    status. The libc handle is resolved at module import time (see
+    _load_libc) so this function only performs the prctl(2) syscall — the
+    only async-signal-safe step we can take between fork and exec.
+
+    Best-effort: silent no-op on non-Linux platforms and on Linux kernels
+    that predate PR_SET_CHILD_SUBREAPER (3.4). Never raises; the calling
+    subprocess launch must not fail just because we couldn't set the
+    attribute.
+    """
+    if _LIBC is None:
+        return
+    try:
+        _LIBC.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+    except Exception:  # pylint: disable=broad-except
+        # If prctl errors (EINVAL on an ancient kernel, etc.), fall back
+        # to the prior behavior — orphans will reparent to PID 1 and may
+        # leak resources, but the launch itself still succeeds.
+        pass
 
 
 def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:

@@ -7,7 +7,7 @@ import os
 import signal
 import sys
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import psutil
 
@@ -161,17 +161,59 @@ def main():
             pgid = get_pgid_if_leader(process.pid)
 
     if process is not None and parent_process is not None:
+        # PPID history: pid -> last observed ppid. We use this to detect
+        # descendants that get reparented to process.pid mid-run, which is
+        # the kernel's signal that their original parent died and the
+        # PR_SET_CHILD_SUBREAPER attribute on process.pid (set by
+        # subprocess_utils.set_child_subreaper via preexec_fn in
+        # log_lib.run_with_log) caused them to be adopted by us. Without
+        # the subreaper attribute these orphans would have hopped to PID
+        # 1 and we'd have no way to find them. Without this detection
+        # they'd just sit in the tree holding whatever resource (GPU
+        # context, RAM, open sockets, file locks) until the outer process
+        # finally exits.
+        ppid_history: Dict[int, int] = {}
+        proc_pid = process.pid
         # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
-            if pgid is None:
+            try:
+                tmp_children = process.children(recursive=True)
+            except psutil.NoSuchProcess:
+                tmp_children = []
+            if pgid is None and tmp_children:
                 # Refresh process tree for cleanup if process group is not
                 # available.
+                children = tmp_children
+            # Reparent detection: any descendant whose ppid just transitioned
+            # to our proc_pid was adopted via the subreaper attribute and is
+            # an orphan of a dead intermediate parent. Terminate it
+            # immediately — escalation to SIGKILL happens in the final
+            # sweep below if it doesn't honor SIGTERM.
+            for child in tmp_children:
                 try:
-                    tmp_children = process.children(recursive=True)
-                    if tmp_children:
-                        children = tmp_children
+                    new_ppid = child.ppid()
                 except psutil.NoSuchProcess:
-                    pass
+                    continue
+                old_ppid = ppid_history.get(child.pid)
+                ppid_history[child.pid] = new_ppid
+                if (old_ppid is not None and old_ppid != new_ppid and
+                        new_ppid == proc_pid):
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        continue
+            # Prune ppid_history to only the currently-alive descendants.
+            # Without this we'd accumulate entries for every PID we ever
+            # saw (memory growth on long-running jobs) and, more
+            # importantly, a stale entry could trigger a false-positive
+            # SIGTERM if the OS reuses the PID for a newly-spawned
+            # *legitimate* descendant of proc_pid.
+            active_pids = {c.pid for c in tmp_children}
+            ppid_history = {
+                pid: ppid
+                for pid, ppid in ppid_history.items()
+                if pid in active_pids
+            }
             time.sleep(1)
 
     if pgid is not None:

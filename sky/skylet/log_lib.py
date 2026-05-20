@@ -220,12 +220,34 @@ def run_with_log(
     if log_cmd:
         with open(log_path, 'a', encoding='utf-8') as f:
             print(f'Running command: {cmd}', file=f)
+    # Mark the spawned process as a child subreaper so that descendants
+    # orphaned mid-run (e.g. workers whose parent was SIGKILLed while the
+    # outer shell is still alive) reparent to it instead of to PID 1.
+    # subprocess_daemon below relies on this to find such orphans on its
+    # children-tree walk. preexec_fn runs in the child after fork() and
+    # before execve(); the PR_SET_CHILD_SUBREAPER attribute is preserved
+    # across execve, so the launched binary inherits it. set_child_subreaper
+    # is a no-op on non-Linux. If the caller supplied their own
+    # preexec_fn, chain ours before it.
+    caller_preexec = kwargs.pop('preexec_fn', None)
+
+    def preexec_chain():
+        subprocess_utils.set_child_subreaper()
+        if caller_preexec is not None:
+            caller_preexec()
+
+    # pylint: disable=subprocess-popen-preexec-fn
+    # preexec_fn is the only way to set PR_SET_CHILD_SUBREAPER on the
+    # child between fork() and execve(). We're not running in a
+    # multi-threaded process at this point (run_with_log is the launcher
+    # itself), so the usual fork-with-locks-held risk doesn't apply.
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
                           stdin=stdin,
+                          preexec_fn=preexec_chain,
                           **kwargs) as proc:
         try:
             if ctx is not None:
