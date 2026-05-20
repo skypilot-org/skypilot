@@ -94,6 +94,15 @@ class PermissionService:
             else:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
+            # The viewer allowlist is in-process state (not stored in
+            # casbin). It MUST be populated in every process that handles
+            # requests — main API server process *and* every uvicorn
+            # worker — otherwise viewer-role requests fall through with
+            # an empty allowlist and 403 on every path. We do this here
+            # (no policy lock needed: read-only, no DB writes), so worker
+            # processes that never call `initialize(full_initialize=True)`
+            # still get the allowlist built on first `_ensure_enforcer()`.
+            self._build_viewer_allowlist_no_lock()
 
     def _ensure_enforcer(self) -> casbin.SyncedEnforcer:
         """Ensure enforcer is initialized and return it."""
@@ -125,6 +134,12 @@ class PermissionService:
     def _get_plugin_viewer_allowlist(self) -> List[dict]:
         """Get viewer-allowlist entries from loaded plugins.
 
+        Lazily populates the module-level plugin allowlist cache if
+        it's empty — this matters in uvicorn worker processes which
+        re-import `sky.server.plugins` from scratch and would otherwise
+        see an empty cache (only the main server process calls
+        `load_plugin_viewer_allowlist()` at startup).
+
         Returns:
             List of `{path, method}` records, or empty list if plugins
             module is not available or no rules are defined.
@@ -132,7 +147,18 @@ class PermissionService:
         try:
             # pylint: disable=import-outside-toplevel
             from sky.server import plugins as server_plugins
-            return server_plugins.get_plugin_viewer_allowlist()
+            cached = server_plugins.get_plugin_viewer_allowlist()
+            if cached:
+                return cached
+            # Cache empty — could be either "no plugin entries" or
+            # "loader hasn't run in this process". Try to populate it;
+            # `load_plugin_viewer_allowlist` is side-effect-free
+            # (instantiates each plugin but doesn't call install) and
+            # idempotent.
+            try:
+                return server_plugins.load_plugin_viewer_allowlist()
+            except AttributeError:
+                return cached
         except ImportError:
             logger.debug('Plugin module not available, '
                          'skipping plugin viewer allowlist')
@@ -145,6 +171,20 @@ class PermissionService:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get plugin viewer allowlist: {e}')
             return []
+
+    def _build_viewer_allowlist_no_lock(self) -> None:
+        """Build `self._viewer_allowlist` from defaults + plugin entries.
+
+        Read-only with respect to casbin/DB state — no policy lock
+        required. Safe to call from any process (main server or uvicorn
+        worker); the result is per-process in-memory state.
+        """
+        plugin_viewer_allow = self._get_plugin_viewer_allowlist()
+        self._viewer_allowlist = [(rule['path'], rule['method'])
+                                  for rule in rbac.get_viewer_allowlist(
+                                      plugin_allowlist=plugin_viewer_allow)]
+        logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
+                     'entries')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
@@ -184,17 +224,12 @@ class PermissionService:
         # Get plugin RBAC rules dynamically
         plugin_rules = self._get_plugin_rbac_rules()
 
-        # Build the viewer allowlist (in-memory only; not written to
-        # Casbin). Boot-only: operator-config changes to
-        # rbac.roles.viewer.permissions.allowlist require a server
-        # restart to take effect — same semantics as the existing
-        # blocklist for the user role.
-        plugin_viewer_allow = self._get_plugin_viewer_allowlist()
-        self._viewer_allowlist = [(rule['path'], rule['method'])
-                                  for rule in rbac.get_viewer_allowlist(
-                                      plugin_allowlist=plugin_viewer_allow)]
-        logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
-                     'entries')
+        # Viewer allowlist is built in `_lazy_initialize` (called above
+        # via `_ensure_enforcer`) so worker processes that never reach
+        # this method still get it. Operator-config changes to
+        # `rbac.roles.viewer.permissions.allowlist` still require a
+        # server restart — same semantics as the existing blocklist
+        # for the user role.
 
         # If we already have policies for the expected roles, skip
         # initialization
