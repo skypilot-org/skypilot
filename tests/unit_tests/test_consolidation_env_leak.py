@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 
 from sky.jobs import recovery_strategy
-from sky.server.requests import executor as request_executor
+from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -35,18 +35,18 @@ class TestCleanServerEnvCapture:
 
     def setup_method(self):
         # Force a fresh capture for each test.
-        request_executor._clean_server_env = None  # pylint: disable=protected-access
+        clean_env_module._clean_server_env = None  # pylint: disable=protected-access
 
     def test_capture_then_get_returns_snapshot(self):
         os.environ['SKY_TEST_CAPTURE_KEY'] = 'captured_value'
         try:
-            request_executor.capture_clean_server_env()
+            clean_env_module.capture_clean_server_env()
             # Mutate env AFTER capture — simulates a request mutating
             # os.environ via override_request_env_and_config.
             os.environ['SKY_TEST_CAPTURE_KEY'] = 'mutated_after_capture'
             os.environ['SKY_TEST_NEW_KEY'] = 'added_after_capture'
 
-            snapshot = request_executor.get_clean_server_env()
+            snapshot = clean_env_module.get_clean_server_env()
             assert snapshot['SKY_TEST_CAPTURE_KEY'] == 'captured_value'
             assert 'SKY_TEST_NEW_KEY' not in snapshot
         finally:
@@ -56,26 +56,26 @@ class TestCleanServerEnvCapture:
     def test_capture_is_idempotent(self):
         os.environ['SKY_TEST_IDEMPOTENT'] = 'first'
         try:
-            request_executor.capture_clean_server_env()
+            clean_env_module.capture_clean_server_env()
             os.environ['SKY_TEST_IDEMPOTENT'] = 'second'
-            request_executor.capture_clean_server_env()  # second call no-op
-            snapshot = request_executor.get_clean_server_env()
+            clean_env_module.capture_clean_server_env()  # second call no-op
+            snapshot = clean_env_module.get_clean_server_env()
             assert snapshot['SKY_TEST_IDEMPOTENT'] == 'first'
         finally:
             os.environ.pop('SKY_TEST_IDEMPOTENT', None)
 
     def test_get_returns_copy_not_reference(self):
-        request_executor.capture_clean_server_env()
-        snap1 = request_executor.get_clean_server_env()
+        clean_env_module.capture_clean_server_env()
+        snap1 = clean_env_module.get_clean_server_env()
         snap1['MUTATED_AFTER_GET'] = 'should_not_leak'
-        snap2 = request_executor.get_clean_server_env()
+        snap2 = clean_env_module.get_clean_server_env()
         assert 'MUTATED_AFTER_GET' not in snap2
 
     def test_get_before_capture_falls_back_to_current_env(self):
         # Don't call capture_clean_server_env().
         os.environ['SKY_TEST_FALLBACK'] = 'fallback_val'
         try:
-            snap = request_executor.get_clean_server_env()
+            snap = clean_env_module.get_clean_server_env()
             # Fallback returns current os.environ — correctness is "doesn't
             # crash and returns a useful dict", not "matches the
             # pre-pollution state" (which it can't, since nothing captured).
@@ -148,7 +148,7 @@ class TestLocalProcessCommandRunnerUsesCleanEnv:
         # Pre-populate the clean snapshot with a known value, and a value
         # that's deliberately ABSENT — so we can tell the snapshot was used
         # rather than current os.environ.
-        request_executor._clean_server_env = {  # pylint: disable=protected-access
+        clean_env_module._clean_server_env = {  # pylint: disable=protected-access
             'PATH': os.environ.get('PATH', '/usr/bin'),
             'CLEAN_MARKER': 'clean_value',
         }
@@ -174,4 +174,4 @@ class TestLocalProcessCommandRunnerUsesCleanEnv:
                 'present (from clean snapshot).')
         finally:
             os.environ.pop('SKY_TEST_RUN_LEAK', None)
-            request_executor._clean_server_env = None  # pylint: disable=protected-access
+            clean_env_module._clean_server_env = None  # pylint: disable=protected-access

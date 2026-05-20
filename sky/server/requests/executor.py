@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -154,52 +155,6 @@ class RequestQueue:
 # The active queue factory, set during start().
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
-# Snapshot of os.environ from before any request-scoped env mutation can
-# happen. Read by LocalProcessCommandRunner when spawning long-lived
-# subprocesses (consolidation-mode controllers) so they don't inherit
-# per-request env pollution from override_request_env_and_config.
-#
-# Captured once per process:
-#   1. capture_clean_server_env() runs from the API server's main process at
-#      startup, before any request can mutate os.environ.
-#   2. The captured snapshot is then passed as initargs to BurstableExecutor
-#      so each worker process gets the same snapshot at spawn time,
-#      regardless of whether the main process is currently handling a
-#      coroutine-path request that has polluted its own os.environ.
-_clean_server_env: Optional[Dict[str, str]] = None
-
-
-def capture_clean_server_env() -> None:
-    """Snapshot os.environ as the clean server env. Idempotent.
-
-    Called from the main API server process at startup, before any request
-    can mutate os.environ. Workers don't call this — they receive the same
-    snapshot through executor_initializer's initargs (see below).
-    """
-    global _clean_server_env
-    if _clean_server_env is None:
-        _clean_server_env = dict(os.environ)
-
-
-def get_clean_server_env() -> Dict[str, str]:
-    """Return a copy of the server's pre-request-pollution env.
-
-    Used by LocalProcessCommandRunner.run as the default env for spawned
-    subprocesses, so consolidation-mode controllers don't inherit
-    per-request env mutations applied by override_request_env_and_config.
-    """
-    if _clean_server_env is None:
-        # Should not happen on the API server (the main process calls
-        # capture_clean_server_env() at startup, and workers receive the
-        # snapshot via initargs). Fall back to current env so call sites
-        # still work in tests / other contexts; log so we notice if this
-        # ever fires in production.
-        logger.warning('get_clean_server_env() called before '
-                       'capture_clean_server_env(); falling back to current '
-                       'os.environ, which may carry per-request pollution.')
-        return dict(os.environ)
-    return dict(_clean_server_env)
-
 
 def executor_initializer(proc_group: str,
                          clean_env: Optional[Dict[str, str]] = None):
@@ -214,9 +169,7 @@ def executor_initializer(proc_group: str,
     # for a lazy-spawned burst worker could reflect a coroutine-path
     # request mid-pollution in the main process.
     if clean_env is not None:
-        global _clean_server_env
-        if _clean_server_env is None:
-            _clean_server_env = dict(clean_env)
+        clean_env_module.set_clean_server_env(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -374,7 +327,7 @@ class RequestWorker:
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group, get_clean_server_env()))
+                initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)

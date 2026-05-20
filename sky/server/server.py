@@ -62,6 +62,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
+from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -3549,10 +3550,10 @@ if __name__ == '__main__':
         # before any per-request env mutation can happen. Used when
         # spawning consolidation-mode controllers so they don't inherit
         # the client request's env vars (e.g. SKYPILOT_API_SERVER_ENDPOINT).
-        # Workers also re-snapshot in executor_initializer; this main-
-        # process snapshot covers requests routed through the coroutine
-        # path that runs inside the API server process itself.
-        executor.capture_clean_server_env()
+        # The same snapshot is forwarded to workers via initargs (see
+        # executor.start) and to coroutine-path requests running in this
+        # same process.
+        clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
 

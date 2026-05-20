@@ -23,6 +23,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import auth_utils
@@ -1762,14 +1763,6 @@ class LocalProcessCommandRunner(CommandRunner):
         command_str = command_str.replace(constants.SKY_PYTHON_CMD,
                                           sys.executable)
         logger.debug(f'Running command locally: {command_str}')
-        # `sky.utils.command_runner` is imported (transitively via
-        # `sky.provision.kubernetes.instance`) while `sky` is still
-        # initializing, before `sky.server.requests.executor` finishes
-        # loading — a top-level import here causes a partial-module
-        # AttributeError on `command_runner.CommandRunner`. Lazy import
-        # avoids the cycle.
-        # pylint: disable=import-outside-toplevel
-        from sky.server.requests import executor as request_executor
         return log_lib.run_with_log(command_str,
                                     log_path,
                                     require_outputs=require_outputs,
@@ -1777,7 +1770,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
-                                    env=request_executor.get_clean_server_env(),
+                                    env=clean_env_module.get_clean_server_env(),
                                     **kwargs)
 
     @timeline.event
