@@ -61,12 +61,14 @@ logger = sky_logging.init_logger(__name__)
 # `controller_ip` is atomic w.r.t. controller readiness (sky.serve.service
 # only flips DB after _wait_for_controller_ready), so the only failure modes
 # left are: (1) DB read replica lag right after a recovery; (2) brief network
-# blips between pods. Both resolve in <1s — a small bounded retry covers them.
+# blips between pods.
 # Intermediate retries log at DEBUG to avoid spamming WARN every refresh tick
 # while the controller is intentionally absent (CONTROLLER_INIT /
 # SHUTTING_DOWN / FAILED_CLEANUP); the final-attempt failure logs once at
 # WARN.
-_CONTROLLER_HTTP_RETRY_ATTEMPTS = 3
+# A single attempt with a tight connect timeout keeps `sky jobs pool status`
+# responsive even when one of N pools' controllers is unreachable.
+_CONTROLLER_HTTP_RETRY_ATTEMPTS = 1
 _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # (connect_timeout, read_timeout). Connect timeout matters most: when the
 # controller pod is dead/unreachable, kernel ECONNREFUSED is instant on
@@ -75,7 +77,7 @@ _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # explicit timeout, `requests` waits forever and `sky jobs pool status`
 # appears to hang. Read timeout is generous because /autoscaler/info on a
 # busy controller can take a moment.
-_CONTROLLER_HTTP_TIMEOUT_SECONDS = (2.0, 10.0)
+_CONTROLLER_HTTP_TIMEOUT_SECONDS = (1.0, 10.0)
 
 
 def _get_controller_url(service_name: str, controller_port: int) -> str:
@@ -1928,19 +1930,38 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
             else:
                 used_by_str = '-'
 
-        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
-            'handle']
-        if replica_handle is not None:
-            infra = replica_handle.launched_resources.infra.formatted_str()
-            simplified = not show_all
-            resources_str_simple, resources_str_full = (
-                resources_utils.get_readable_resources_repr(
-                    replica_handle, simplified_only=simplified))
-            if simplified:
-                resources_str = resources_str_simple
-            else:
-                assert resources_str_full is not None
-                resources_str = resources_str_full
+        # Prefer pre-computed string fields from the server (new servers
+        # ship these alongside or instead of a pickled handle to keep wire
+        # payload small). Fall back to computing them locally from
+        # ``record['handle']`` for back-compat with old servers.
+        infra_pre = record.get('infra')
+        if infra_pre is not None:
+            infra = infra_pre
+        if show_all:
+            resources_pre = (record.get('resources_str_full') or
+                             record.get('resources_str'))
+        else:
+            resources_pre = record.get('resources_str')
+        if resources_pre is not None:
+            resources_str = resources_pre
+
+        if infra_pre is None or resources_pre is None:
+            replica_handle: Optional[
+                'backends.CloudVmRayResourceHandle'] = record.get('handle')
+            if replica_handle is not None:
+                if infra_pre is None:
+                    infra = (
+                        replica_handle.launched_resources.infra.formatted_str())
+                if resources_pre is None:
+                    simplified = not show_all
+                    resources_str_simple, resources_str_full = (
+                        resources_utils.get_readable_resources_repr(
+                            replica_handle, simplified_only=simplified))
+                    if simplified:
+                        resources_str = resources_str_simple
+                    else:
+                        assert resources_str_full is not None
+                        resources_str = resources_str_full
 
         replica_values = [
             service_name,

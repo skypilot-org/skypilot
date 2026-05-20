@@ -244,13 +244,18 @@ class TestControllerHttpRetry:
                 assert m.call_count == 1
 
     def test_post_retries_then_succeeds(self):
-        # First 2 calls raise, 3rd succeeds.
+        # First 2 calls raise, 3rd succeeds. The default attempt count is
+        # tightened to 1 (see lazy-handle PR), but the retry mechanism
+        # itself still needs end-to-end coverage — patch the constant up
+        # to 3 just for this test.
         side = [
             requests_exceptions.ConnectionError('refused'),
             requests_exceptions.ConnectionError('refused'),
             mock.Mock(status_code=200)
         ]
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.post',
                         side_effect=side) as m:
@@ -310,6 +315,8 @@ class TestControllerHttpRetry:
         with mock.patch('sky.serve.serve_utils.serve_state.'
                         'get_service_from_name',
                         side_effect=records), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=capture_get):
@@ -396,7 +403,11 @@ class TestControllerHttpRetry:
             requests_exceptions.Timeout('connect timed out'),
             mock.Mock(status_code=200),
         ]
+        # Patch the attempt count up to 3 so the retry path is actually
+        # exercised; the production default is 1 (see lazy-handle PR).
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=side) as m:
