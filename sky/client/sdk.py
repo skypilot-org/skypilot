@@ -164,6 +164,19 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         line_count = 0
 
         for line in rich_utils.decode_rich_status(response):
+            # Report forward progress to the retry decorator for every
+            # message received from the wire, including None control
+            # messages (e.g. heartbeats). Receiving any message
+            # indicates the underlying connection is healthy, so the
+            # consecutive-failure counter should reset. Without this,
+            # resumable streams that spend a full retry window only
+            # replaying already-printed lines (or receiving only
+            # heartbeats) never advance `progress_count` and can
+            # exhaust their retry budget even though the stream is
+            # actively making progress over the network.
+            if retry_context is not None:
+                retry_context.progress_count += 1
+
             if line is not None:
                 line_count += 1
 
@@ -179,16 +192,11 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
 
                 print(line, flush=True, end='', file=output_stream)
 
-                if retry_context is not None:
-                    if resumable:
-                        # Reaching here implies line_count > line_processed
-                        # (otherwise the resumable skip above would have
-                        # `continue`'d). Advance the high-water mark.
-                        retry_context.line_processed = line_count
-                    # Report forward progress to the retry decorator so it
-                    # can reset the consecutive-failure counter even for
-                    # non-resumable streams.
-                    retry_context.progress_count += 1
+                if retry_context is not None and resumable:
+                    # Reaching here implies line_count > line_processed
+                    # (otherwise the resumable skip above would have
+                    # `continue`'d). Advance the high-water mark.
+                    retry_context.line_processed = line_count
         if request_id is not None and get_result:
             return get(request_id)
         else:
