@@ -404,7 +404,7 @@ def _consolidated_launch(
                 f'(returncode={returncode}). The job row is in an incomplete '
                 f'state; cancel it with `sky jobs cancel {job_ids_str}` '
                 f'before retrying. Script log: {log_path}'),
-            detailed_reason=None)
+            detailed_reason='')
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
 
