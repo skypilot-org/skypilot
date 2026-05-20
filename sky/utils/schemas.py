@@ -2241,7 +2241,24 @@ def get_config_schema():
         'properties': {
             'default_role': {
                 'type': 'string',
-                'case_insensitive_enum': ['admin', 'user']
+                'case_insensitive_enum': ['admin', 'user', 'viewer']
+            },
+            # Per-role permission overrides. Schema is intentionally
+            # permissive (additionalProperties: True on
+            # `permissions`) because admin/user use `blocklist`
+            # entries while `viewer` uses `allowlist`; both shapes
+            # are `[{path, method}, ...]`.
+            'roles': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'object',
+                    'properties': {
+                        'permissions': {
+                            'type': 'object',
+                            'additionalProperties': True,
+                        },
+                    },
+                },
             },
         },
     }

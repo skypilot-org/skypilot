@@ -401,9 +401,12 @@ class TestPermissionService:
         mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
 
     def test_check_endpoint_permission(self):
-        """Test checking endpoint permissions."""
+        """Test checking endpoint permissions (admin/user blocklist path)."""
         mock_enforcer = mock.Mock()
         mock_enforcer.enforce.return_value = True
+        # New dispatch reads roles first; return a non-viewer role so the
+        # call falls through to the Casbin blocklist check.
+        mock_enforcer.get_roles_for_user.return_value = ['user']
 
         service = permission.PermissionService()
         service.enforcer = mock_enforcer
@@ -413,6 +416,61 @@ class TestPermissionService:
         assert result is True
         mock_enforcer.enforce.assert_called_once_with('user1', '/api/test',
                                                       'GET')
+
+    def test_check_endpoint_permission_viewer_allowed(self):
+        """Viewer role: allowlist hit returns False (request not blocked)."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [('/status', 'POST')]
+
+        result = service.check_endpoint_permission('user1', '/status', 'POST')
+
+        assert result is False
+        # When the viewer dispatch handles the request, the underlying
+        # blocklist enforce() must NOT be called.
+        mock_enforcer.enforce.assert_not_called()
+
+    def test_check_endpoint_permission_viewer_denied(self):
+        """Viewer role: no allowlist hit returns True (request blocked)."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [('/status', 'POST')]
+
+        result = service.check_endpoint_permission('user1', '/launch', 'POST')
+
+        assert result is True
+        mock_enforcer.enforce.assert_not_called()
+
+    def test_check_endpoint_permission_viewer_keymatch2(self):
+        """Viewer allowlist uses Casbin keyMatch2 path patterns."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [
+            ('/ssh_node_pools/:pool_name/status', 'GET'),
+            ('/plugins/api/foo/*', 'POST'),
+        ]
+
+        # Placeholder match.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/status', 'GET') is False
+        # Wildcard match.
+        assert service.check_endpoint_permission('u', '/plugins/api/foo/bar',
+                                                 'POST') is False
+        # Method mismatch -> denied.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/status', 'POST') is True
+        # Sibling path -> denied.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/keys', 'GET') is True
 
     def test_check_workspace_permission_non_server(self):
         """Test workspace permission check when not on API server."""
@@ -1136,6 +1194,31 @@ class TestPermissionService:
         service.update_role('user1', 'admin')
 
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+
+    def test_sa_token_permission_viewer_denied_for_own(self):
+        """Viewers cannot manage even their own SA tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['viewer'])
+
+        # Viewer attempting to delete a token they own:
+        assert service.check_service_account_token_permission(
+            'viewer-bob', 'viewer-bob', 'delete') is False
+
+    def test_sa_token_permission_user_can_manage_own(self):
+        """Regular user can still manage their own SA tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['user'])
+
+        assert service.check_service_account_token_permission(
+            'alice', 'alice', 'delete') is True
+
+    def test_sa_token_permission_admin_can_manage_others(self):
+        """Admins can manage anyone's tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['admin'])
+
+        assert service.check_service_account_token_permission(
+            'eve', 'someone-else', 'delete') is True
 
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")

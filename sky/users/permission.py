@@ -8,6 +8,7 @@ import time
 from typing import Generator, List, Optional, Set
 
 import casbin
+from casbin import util as casbin_util
 import filelock
 import sqlalchemy_adapter
 
@@ -46,6 +47,14 @@ class PermissionService:
     def __init__(self):
         self.enforcer: Optional[casbin.SyncedEnforcer] = None
         self._lock = threading.Lock()
+        # Viewer role's endpoint allowlist, materialised at boot. Built
+        # in _maybe_initialize_policies from rbac.get_viewer_allowlist()
+        # + any plugin-supplied entries. Stored as a list of
+        # (path_pattern, method) tuples for fast iteration in
+        # check_endpoint_permission. Kept OUT of the Casbin policy
+        # table so that admin/user behaviour is unchanged — see
+        # 02_change_plan.md §2.2.
+        self._viewer_allowlist: List[tuple] = []
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -113,6 +122,30 @@ class PermissionService:
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
 
+    def _get_plugin_viewer_allowlist(self) -> List[dict]:
+        """Get viewer-allowlist entries from loaded plugins.
+
+        Returns:
+            List of `{path, method}` records, or empty list if plugins
+            module is not available or no rules are defined.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            return server_plugins.get_plugin_viewer_allowlist()
+        except ImportError:
+            logger.debug('Plugin module not available, '
+                         'skipping plugin viewer allowlist')
+            return []
+        except AttributeError:
+            # Old plugin module that doesn't export this loader.
+            logger.debug('Plugin module does not expose '
+                         'get_plugin_viewer_allowlist; skipping')
+            return []
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get plugin viewer allowlist: {e}')
+            return []
+
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
         basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
@@ -150,6 +183,18 @@ class PermissionService:
 
         # Get plugin RBAC rules dynamically
         plugin_rules = self._get_plugin_rbac_rules()
+
+        # Build the viewer allowlist (in-memory only; not written to
+        # Casbin). Boot-only: operator-config changes to
+        # rbac.roles.viewer.permissions.allowlist require a server
+        # restart to take effect — same semantics as the existing
+        # blocklist for the user role.
+        plugin_viewer_allow = self._get_plugin_viewer_allowlist()
+        self._viewer_allowlist = [(rule['path'], rule['method'])
+                                  for rule in rbac.get_viewer_allowlist(
+                                      plugin_allowlist=plugin_viewer_allow)]
+        logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
+                     'entries')
 
         # If we already have policies for the expected roles, skip
         # initialization
@@ -336,7 +381,18 @@ class PermissionService:
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
-        """Check permission."""
+        """Check permission.
+
+        Return True to BLOCK the request (RBAC middleware turns truthy
+        return into 403). Return False to allow.
+
+        Admin / user roles use the Casbin blocklist semantics:
+        True iff a `(role, path, method)` policy matches.
+
+        Viewer role uses an in-memory allowlist:
+        True (block) unless the (path, method) matches an entry in
+        `self._viewer_allowlist`.
+        """
         # We intentionally don't load the policy here, as it is a hot path, and
         # we don't support updating the policy.
         # We don't hold the lock for checking permission, as it is read only and
@@ -344,7 +400,26 @@ class PermissionService:
         # as long as it is eventually consistent.
         # self._load_policy_no_lock()
         enforcer = self._ensure_enforcer()
+        # Read roles from in-memory enforcer state. Do NOT use
+        # self.get_user_roles(...) here — that does a DB roundtrip via
+        # _load_policy_no_lock and would put a query on the request hot
+        # path.
+        roles = enforcer.get_roles_for_user(user_id)
+        if rbac.RoleName.VIEWER.value in roles:
+            return not self._is_viewer_allowed(path, method)
         return enforcer.enforce(user_id, path, method)
+
+    def _is_viewer_allowed(self, path: str, method: str) -> bool:
+        """Test (path, method) against the viewer allowlist."""
+        for allow_path, allow_method in self._viewer_allowlist:
+            if allow_method != method:
+                continue
+            # casbin_util.key_match2: arg1 is the request key, arg2 is
+            # the policy pattern. Pattern supports `:name` placeholders
+            # and `*` wildcards.
+            if casbin_util.key_match2(path, allow_path):
+                return True
+        return False
 
     def _load_policy_no_lock(self):
         """Load policy from storage."""
@@ -446,12 +521,25 @@ class PermissionService:
             True if the user has permission, False otherwise
         """
         del action
+
+        # Viewers cannot manage ANY service-account tokens, including
+        # their own.  Allowing them to mint or rotate tokens would be
+        # a privilege-escalation path: a freshly-minted SA defaults to
+        # rbac.get_default_role() (ADMIN unless reconfigured), and the
+        # current update-role endpoint would let the owner promote
+        # the SA arbitrarily.  The SA-token write endpoints are also
+        # off the viewer allowlist at the URL layer; this is
+        # defense-in-depth so a future allowlist addition can't
+        # accidentally open the path.
+        user_roles = self.get_user_roles(user_id)
+        if rbac.RoleName.VIEWER.value in user_roles:
+            return False
+
         # Users can always manage their own tokens
         if user_id == token_owner_id:
             return True
 
         # Check if user has admin role (admins can manage any token)
-        user_roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in user_roles:
             return True
 
