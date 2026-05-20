@@ -2709,7 +2709,7 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
-def _try_polling_auth(endpoint: str) -> Optional[str]:
+def _try_polling_auth(endpoint: str, no_browser: bool = False) -> Optional[str]:
     """Try the polling-based authentication flow."""
     try:
         # Generate code verifier (random secret) and challenge (hash)
@@ -2717,17 +2717,22 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
         # Open browser to authorization page. The polling flow does not
-        # require the browser to be on this machine, so if we cannot open
-        # one locally, just ask the user to visit the URL themselves.
+        # require the browser to be on this machine, so if --no-browser was
+        # passed or we cannot open one locally, just ask the user to visit
+        # the URL themselves.
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if common_utils.open_browser(auth_url):
+        browser_opened = False
+        if not no_browser:
+            browser_opened = common_utils.open_browser(auth_url)
+            if not browser_opened:
+                logger.debug('Failed to open browser.')
+        if browser_opened:
             click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
                        f'{colorama.Style.RESET_ALL}\n'
                        f'Please click "Authorize" to complete login.\n'
                        f'{colorama.Style.DIM}Press ctrl+c to fall back to '
                        f'legacy auth method.{colorama.Style.RESET_ALL}')
         else:
-            logger.debug('Failed to open browser.')
             click.echo(f'{colorama.Fore.GREEN}Open this URL to complete '
                        f'login:{colorama.Style.RESET_ALL}\n\n'
                        f'{colorama.Style.BRIGHT}{auth_url}'
@@ -2766,8 +2771,14 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         return None
 
 
-def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+def _try_localhost_callback_auth(endpoint: str,
+                                 no_browser: bool = False) -> Optional[str]:
     """Try the localhost callback authentication flow (legacy)."""
+    if no_browser:
+        # This flow requires the browser to redirect back to a localhost port
+        # on this machine, so it cannot work without a local browser.
+        logger.debug('Skipping localhost callback flow: --no-browser is set.')
+        return None
     server: Optional[oauth_lib.HTTPServer] = None
     try:
         callback_port = common_utils.find_free_port(8000)
@@ -2831,7 +2842,8 @@ def _try_manual_token_entry(endpoint: str) -> Optional[str]:
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
               relogin: bool = False,
-              service_account_token: Optional[str] = None) -> None:
+              service_account_token: Optional[str] = None,
+              no_browser: bool = False) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -2845,6 +2857,9 @@ def api_login(endpoint: Optional[str] = None,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
         relogin: Whether to force relogin with OAuth2 when enabled.
         service_account_token: Service account token for authentication.
+        no_browser: If True, do not attempt to open a browser locally; print
+            the auth URL and let the user open it themselves. Skips the
+            localhost-callback flow, which requires a local browser.
 
     Returns:
         None
@@ -2940,11 +2955,12 @@ def api_login(endpoint: Optional[str] = None,
         # 3. Manual token entry
         remote_api_version = versions.get_remote_api_version()
         if remote_api_version is not None and remote_api_version >= 30:
-            token = _try_polling_auth(endpoint)
+            token = _try_polling_auth(endpoint, no_browser=no_browser)
 
         if token is None:
             # Polling auth not available or failed, try localhost callback
-            token = _try_localhost_callback_auth(endpoint)
+            token = _try_localhost_callback_auth(endpoint,
+                                                 no_browser=no_browser)
 
         if token is None:
             # All automatic methods failed, fall back to manual entry
