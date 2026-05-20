@@ -62,50 +62,42 @@ class RequestBackend(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
     async def reconcile_internal_daemons_async(
         self,
         internal_daemons: List['daemons_lib.InternalRequestDaemon'],
     ) -> List['Request']:
-        """Reconcile persisted daemon rows + task_queue with `internal_daemons`.
+        """Reconcile persisted daemon rows with `internal_daemons`.
 
-        Postcondition (serialised w.r.t. concurrent callers via a
-        backend-appropriate lock):
+        The default behaviour (used by the OSS SQLite backend, whose DB
+        is wiped via ``reset_db_and_logs`` ->
+        ``clear_local_api_server_database`` on every ``sky api start``)
+        is to insert a fresh PENDING row
+        for each non-skip daemon and return the list of `Request`
+        objects for the caller to enqueue onto an in-memory task queue.
+        There is no stale row state to reconcile because the DB is
+        freshly empty.
 
-        - For each daemon `d` in `internal_daemons`:
-          * If `d.should_skip()` is True and no existing row is RUNNING on
-            a live executor, delete any row for `d.id` (and its
-            task_queue entries, if persistent).
-          * Else if a row exists with status=RUNNING and a live executor
-            owns it, UPDATE only `request_body`, `name`, `schedule_type`
-            in place — preserve `status`, `pid`, `replica_id`,
-            `entrypoint`. Do NOT enqueue.
-          * Else (no row / terminal status / RUNNING-on-dead-executor),
-            UPSERT to status=PENDING with a fresh `payloads.RequestBody()`
-            (current `os.environ`), `pid=NULL`, and any backend-specific
-            ownership column (e.g. `replica_id`) set to NULL. Ensure
-            exactly one task_queue entry exists for `d.id` (delete
-            duplicates first).
-        - Any "daemon-shaped" row in DB whose `request_id` is not in
-          `internal_daemons` at all is deleted, along with its
-          task_queue entries.
-
-        "Daemon-shaped" is backend-defined: SQLite matches
-        `request_id LIKE '%-daemon'`; PG matches `is_daemon = TRUE`.
-        "Live executor" is also backend-defined: SQLite checks
-        `psutil.pid_exists(pid)`; PG checks `replica_id IN ha_replicas`
-        with fresh heartbeat.
-
-        Returns a list of `Request` objects whose task_queue enqueue is
-        NOT handled internally and must be enqueued by the caller. For
-        backends with a persistent task_queue (PG), the returned list is
-        always empty (queue rows are written inside the same
-        transaction as the request rows). For backends with an
-        in-memory task_queue (the OSS multiprocessing path), the
-        returned list contains every daemon that needs a fresh enqueue
-        on the freshly-started in-memory queue.
+        Backends with a persistent task_queue (PG) override this method
+        to refresh env_vars on existing rows (so they reflect the
+        current process's `os.environ` rather than whatever the row's
+        original creator captured), delete daemon-shaped rows whose ids
+        are no longer in `internal_daemons`, preserve rows currently
+        RUNNING on a live executor (refresh env_vars only), and
+        maintain a single `task_queue` entry per daemon inside the same
+        transaction. The PG override returns `[]` because it writes the
+        queue inline; the SQLite default returns the full set of
+        non-skip daemons for the caller to enqueue.
         """
-        raise NotImplementedError
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import requests as requests_lib
+        to_enqueue: List['Request'] = []
+        for d in internal_daemons:
+            if d.should_skip():
+                continue
+            req = requests_lib.build_internal_daemon_request(d)
+            await self.create_if_not_exists_async(req)
+            to_enqueue.append(req)
+        return to_enqueue
 
     @abc.abstractmethod
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
