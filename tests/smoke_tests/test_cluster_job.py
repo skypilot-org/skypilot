@@ -1526,18 +1526,24 @@ def test_volume_env_mount_kubernetes():
             ' && '.join([
                 'sky jobs cancel -a -y || true',
                 # After the managed job completes, its worker cluster is torn
-                # down asynchronously by the jobs controller. Retry the volume
-                # delete until the cluster is gone (up to ~5 minutes), since
-                # the volume can't be deleted while a cluster still uses it.
+                # down asynchronously by the jobs controller, and the volume
+                # listing only drops the entry after `sky volumes delete`
+                # propagates server-side. Retry the delete while the cluster
+                # still uses the volume, then poll the listing until the
+                # entry is gone.
                 f'for i in $(seq 1 60); do '
                 f'out=$(sky volumes delete {full_pvc_name} -y 2>&1) && break; '
                 f'echo "$out"; '
                 f'echo "$out" | grep -q "is used by" || exit 1; '
                 f'sleep 5; '
                 f'done',
-                f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
-                f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
-                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+                f'for i in $(seq 1 60); do '
+                f'vol=$(sky volumes ls | grep "{full_pvc_name}" || true); '
+                f'if [ -z "$vol" ]; then echo "{full_pvc_name} deleted"; '
+                f'exit 0; fi; '
+                f'sleep 5; '
+                f'done; '
+                f'echo "{full_pvc_name} not deleted"; exit 1'
             ]),
         )
         smoke_tests_utils.run_one_test(test)
