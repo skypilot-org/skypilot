@@ -56,11 +56,8 @@ ENV_VARS_TO_CLEAR = [
     constants.USER_ID_ENV_VAR,
     constants.USER_ENV_VAR,
     env_options.Options.SHOW_DEBUG_INFO.env_key,
-    # The consolidation-mode controller starts a local API server via
-    # api_start. If this env var is set (e.g. inherited from a client
-    # request that spawned the controller), get_server_url() returns a
-    # non-local URL and api_start refuses to start. Clear it so api_start
-    # always resolves to the local default; restored in the finally below.
+    # If this is set, get_server_url() returns a non-local URL and
+    # api_start refuses to start a local server. Always start local here.
     constants.SKY_API_SERVER_URL_ENV_VAR,
 ]
 
@@ -520,20 +517,6 @@ class StrategyExecutor:
                                         env_var, None)
                                     logger.debug('Cleared env var: '
                                                  f'{env_var}')
-                                # get_server_url() and is_api_server_local()
-                                # are @lru_cache(scope='global'). For an
-                                # already-polluted controller (e.g. one
-                                # spawned with a leaked endpoint before the
-                                # LocalProcessCommandRunner fix landed), any
-                                # earlier call to either function in this
-                                # process baked the leaked URL into the
-                                # cache — popping the env var alone does
-                                # not invalidate it, so api_start would
-                                # still observe a non-local endpoint and
-                                # raise. Drop the cache so api_start
-                                # re-reads against the cleared env.
-                                server_common.get_server_url.cache_clear()
-                                server_common.is_api_server_local.cache_clear()
                                 logger.debug('Env vars for api_start: '
                                              f'{os.environ}')
                                 await asyncio.to_thread(sdk.api_start)
