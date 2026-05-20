@@ -27,6 +27,7 @@ import tempfile
 from sky.jobs import recovery_strategy
 from sky.server.requests import executor as request_executor
 from sky.skylet import constants
+from sky.utils import command_runner
 
 
 class TestCleanServerEnvCapture:
@@ -153,7 +154,6 @@ class TestLocalProcessCommandRunnerUsesCleanEnv:
         }
         os.environ['SKY_TEST_RUN_LEAK'] = 'should_not_appear'
         try:
-            from sky.utils import (command_runner)  # pylint: disable=import-outside-toplevel
             runner = command_runner.LocalProcessCommandRunner()
             with tempfile.TemporaryDirectory() as tmpdir:
                 log_path = os.path.join(tmpdir, 'run.log')
@@ -184,7 +184,6 @@ class TestLocalProcessCommandRunnerUsesCleanEnv:
             'CLEAN_MARKER': 'clean_value',
         }
         try:
-            from sky.utils import (command_runner)  # pylint: disable=import-outside-toplevel
             runner = command_runner.LocalProcessCommandRunner()
             with tempfile.TemporaryDirectory() as tmpdir:
                 log_path = os.path.join(tmpdir, 'run.log')
