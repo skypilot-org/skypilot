@@ -21,6 +21,7 @@ import anyio
 import colorama
 import filelock
 import orjson
+import psutil
 
 from sky import exceptions
 from sky import global_user_state
@@ -36,6 +37,7 @@ from sky.server.requests import storage as request_storage
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
+from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -551,6 +553,18 @@ def request_lock_path(request_id: str) -> str:
     return os.path.join(lock_path, f'.{request_id}.lock')
 
 
+def _reconcile_lock_path() -> str:
+    """Path of the filelock guarding reconcile_internal_daemons_async.
+
+    Deliberately lives outside `REQUEST_LOG_PATH_PREFIX` because the latter
+    is wiped via `shutil.rmtree` by `reset_db_and_logs` on each
+    `sky api start`. `~/.sky/locks/` is durable across server restarts.
+    """
+    lock_dir = os.path.expanduser('~/.sky/locks')
+    os.makedirs(lock_dir, exist_ok=True)
+    return os.path.join(lock_dir, 'reconcile_internal_daemons.lock')
+
+
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     """Kill all pending and running requests for a cluster.
 
@@ -774,6 +788,40 @@ async def create_if_not_exists_async(request: Request) -> bool:
     """
     return await request_storage.get_request_backend(
     ).create_if_not_exists_async(request)
+
+
+def build_internal_daemon_request(
+        daemon: 'daemons.InternalRequestDaemon') -> Request:
+    """Build a fresh `Request` for an internal daemon.
+
+    Captures the current process's `os.environ` via `payloads.RequestBody()`.
+    Status starts at PENDING with no `pid`. The returned object is not yet
+    persisted.
+    """
+    body = payloads.RequestBody()
+    return Request(
+        request_id=daemon.id,
+        name=server_constants.REQUEST_NAME_PREFIX + daemon.name,
+        entrypoint=daemon.run_event,
+        request_body=body,
+        status=RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=ScheduleType.SHORT,
+        user_id=skylet_constants.SKYPILOT_SYSTEM_USER_ID,
+    )
+
+
+async def reconcile_internal_daemons_async(
+    internal_daemons: List['daemons.InternalRequestDaemon'],) -> List[Request]:
+    """Reconcile persisted daemon rows with the given daemons.
+
+    Thin module-level wrapper around the active backend's
+    `reconcile_internal_daemons_async`. See the abstract
+    `RequestBackend.reconcile_internal_daemons_async` in
+    `sky.server.requests.storage` for the full contract.
+    """
+    return await request_storage.get_request_backend(
+    ).reconcile_internal_daemons_async(internal_daemons)
 
 
 @dataclasses.dataclass
@@ -1193,6 +1241,101 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                 logger.debug(f'End creating request {request.request_id}')
         return True if row else False
+
+    @init_db_async
+    @asyncio_utils.shield
+    async def reconcile_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons.InternalRequestDaemon'],
+    ) -> List[Request]:
+        assert _DB is not None
+        lock_path = _reconcile_lock_path()
+
+        daemon_by_id = {d.id: d for d in internal_daemons}
+        keep_ids = set(daemon_by_id.keys())
+
+        async with filelock.AsyncFileLock(lock_path):
+            # Identify "daemon-shaped" rows. Convention: daemon request_ids
+            # end in '-daemon' (verified against
+            # sky/server/daemons.py::INTERNAL_REQUEST_DAEMONS). The
+            # Python-side endswith filter is defensive — if a future
+            # non-daemon request_id ends in '-daemon' we'd need a marker
+            # column on SQLite.
+            # TODO(cooperc): replace LIKE with a dedicated marker column if
+            # we ever ship a non-daemon request id matching this pattern.
+            async with _DB.execute_fetchall_async(
+                    f'SELECT request_id, status, pid FROM {REQUEST_TABLE} '
+                    f'WHERE request_id LIKE \'%-daemon\'') as rows:
+                existing = [
+                    (r[0], r[1], r[2]) for r in rows if r[0].endswith('-daemon')
+                ]
+
+            # First, delete any persisted row whose id is no longer in the
+            # current set of daemons (rename / removal).
+            stale_ids = [rid for rid, _, _ in existing if rid not in keep_ids]
+            if stale_ids:
+                id_list_str = ','.join(repr(rid) for rid in stale_ids)
+                await _DB.execute_and_commit_async(
+                    f'DELETE FROM {REQUEST_TABLE} '
+                    f'WHERE request_id IN ({id_list_str})')
+                logger.info(
+                    f'Reconciled internal daemons: deleted stale daemon rows '
+                    f'{stale_ids}')
+
+            # Existing rows that match a current daemon: classify by
+            # status. RUNNING with a live local pid => preserve.
+            preserved_running: Set[str] = set()
+            for rid, status, pid in existing:
+                if rid not in keep_ids:
+                    continue
+                if (status == RequestStatus.RUNNING.value and
+                        pid is not None and psutil.pid_exists(pid)):
+                    preserved_running.add(rid)
+
+            to_enqueue: List[Request] = []
+            full_upsert_cols = [c for c in REQUEST_COLUMNS if c != 'request_id']
+            upsert_sql = (
+                f'INSERT INTO {REQUEST_TABLE} '
+                f'({", ".join(REQUEST_COLUMNS)}) '
+                f'VALUES ({", ".join(["?"] * len(REQUEST_COLUMNS))}) '
+                f'ON CONFLICT(request_id) DO UPDATE SET '
+                f'{", ".join(f"{c}=excluded.{c}" for c in full_upsert_cols)}')
+
+            for d in internal_daemons:
+                # `should_skip()` daemons get their row deleted unless a
+                # local daemon is currently running for them (don't yank
+                # mid-config-flip).
+                if d.should_skip() and d.id not in preserved_running:
+                    await _DB.execute_and_commit_async(
+                        f'DELETE FROM {REQUEST_TABLE} WHERE request_id = ?',
+                        (d.id,))
+                    continue
+
+                req = build_internal_daemon_request(d)
+
+                if d.id in preserved_running:
+                    # In-place refresh: only env-bearing + identity fields.
+                    # Do NOT touch status / pid / entrypoint (entrypoint
+                    # is already pickled and loaded by the running
+                    # daemon's executor; rewriting it is meaningless and
+                    # would needlessly invalidate the row).
+                    encoded_body = encoders.pickle_and_encode(req.request_body)
+                    await _DB.execute_and_commit_async(
+                        f'UPDATE {REQUEST_TABLE} '
+                        f'SET request_body=?, name=?, schedule_type=? '
+                        f'WHERE request_id=?',
+                        (encoded_body, req.name, req.schedule_type.value, d.id))
+                    continue
+
+                # Full upsert (insert or reset terminal/PENDING row).
+                await _DB.execute_and_commit_async(upsert_sql, req.to_row())
+                to_enqueue.append(req)
+
+            logger.info(f'Reconciled internal daemons: '
+                        f'{len(to_enqueue)} freshly enqueued, '
+                        f'{len(preserved_running)} preserved as RUNNING, '
+                        f'{len(stale_ids)} stale rows deleted')
+            return to_enqueue
 
     @init_db
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:

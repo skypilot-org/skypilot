@@ -8,6 +8,7 @@ from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
                     TYPE_CHECKING)
 
 if TYPE_CHECKING:
+    from sky.server import daemons as daemons_lib
     from sky.server.requests.requests import Request
     from sky.server.requests.requests import RequestStatus
     from sky.server.requests.requests import RequestTaskFilter
@@ -58,6 +59,51 @@ class RequestBackend(abc.ABC):
 
         Returns:
             True if a new request was created, False if it already exists.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def reconcile_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons_lib.InternalRequestDaemon'],
+    ) -> List['Request']:
+        """Reconcile persisted daemon rows + task_queue with `internal_daemons`.
+
+        Postcondition (serialised w.r.t. concurrent callers via a
+        backend-appropriate lock):
+
+        - For each daemon `d` in `internal_daemons`:
+          * If `d.should_skip()` is True and no existing row is RUNNING on
+            a live executor, delete any row for `d.id` (and its
+            task_queue entries, if persistent).
+          * Else if a row exists with status=RUNNING and a live executor
+            owns it, UPDATE only `request_body`, `name`, `schedule_type`
+            in place — preserve `status`, `pid`, `replica_id`,
+            `entrypoint`. Do NOT enqueue.
+          * Else (no row / terminal status / RUNNING-on-dead-executor),
+            UPSERT to status=PENDING with a fresh `payloads.RequestBody()`
+            (current `os.environ`), `pid=NULL`, and any backend-specific
+            ownership column (e.g. `replica_id`) set to NULL. Ensure
+            exactly one task_queue entry exists for `d.id` (delete
+            duplicates first).
+        - Any "daemon-shaped" row in DB whose `request_id` is not in
+          `internal_daemons` at all is deleted, along with its
+          task_queue entries.
+
+        "Daemon-shaped" is backend-defined: SQLite matches
+        `request_id LIKE '%-daemon'`; PG matches `is_daemon = TRUE`.
+        "Live executor" is also backend-defined: SQLite checks
+        `psutil.pid_exists(pid)`; PG checks `replica_id IN ha_replicas`
+        with fresh heartbeat.
+
+        Returns a list of `Request` objects whose task_queue enqueue is
+        NOT handled internally and must be enqueued by the caller. For
+        backends with a persistent task_queue (PG), the returned list is
+        always empty (queue rows are written inside the same
+        transaction as the request rows). For backends with an
+        in-memory task_queue (the OSS multiprocessing path), the
+        returned list contains every daemon that needs a fresh enqueue
+        on the freshly-started in-memory queue.
         """
         raise NotImplementedError
 
