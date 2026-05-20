@@ -25,6 +25,7 @@ from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -531,8 +532,6 @@ class StrategyExecutor:
                                 # still observe a non-local endpoint and
                                 # raise. Drop the cache so api_start
                                 # re-reads against the cleared env.
-                                # pylint: disable=import-outside-toplevel
-                                from sky.server import common as server_common
                                 server_common.get_server_url.cache_clear()
                                 server_common.is_api_server_local.cache_clear()
                                 logger.debug('Env vars for api_start: '
@@ -549,8 +548,6 @@ class StrategyExecutor:
                             # HA failover may land the controller on new hosts,
                             # ensure blob extraction on the current host
                             if self.file_mounts_blob_id is not None:
-                                # pylint: disable=import-outside-toplevel
-                                from sky.server import common as server_common
                                 await asyncio.to_thread(
                                     server_common.resolve_blob_dir,
                                     self.file_mounts_blob_id,
