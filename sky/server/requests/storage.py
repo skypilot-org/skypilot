@@ -62,42 +62,42 @@ class RequestBackend(abc.ABC):
         """
         raise NotImplementedError
 
-    async def reconcile_internal_daemons_async(
+    @abc.abstractmethod
+    async def create_or_refresh_internal_daemon_async(
+            self, request: 'Request') -> bool:
+        """For an internal daemon request: insert a fresh PENDING row or
+        refresh env-bearing columns on an existing row.
+
+        Returns True if a new row was inserted (caller should enqueue
+        the request onto the task queue), False if an existing row was
+        refreshed in-place (the task_queue entry from the original
+        creator stays in place; do NOT enqueue again).
+
+        Atomic + idempotent under concurrent callers. Replaces
+        `create_if_not_exists_async` on the daemon submission path:
+        the dedup contract is identical (exactly one concurrent caller
+        gets True), but losing callers also UPDATE `request_body`,
+        `name`, and `schedule_type` on the existing row so the
+        persisted `env_vars` reflect the current process's
+        `os.environ` rather than whatever the original creator
+        captured (which may be from a previous deployment generation
+        in HA setups).
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def delete_orphan_internal_daemons_async(
         self,
         internal_daemons: List['daemons_lib.InternalRequestDaemon'],
-    ) -> List['Request']:
-        """Reconcile persisted daemon rows with `internal_daemons`.
+    ) -> None:
+        """Delete daemon-shaped rows whose `request_id` is not in
+        `internal_daemons` (daemon was renamed / removed in code),
+        along with any task_queue entries (for backends with a
+        persistent queue).
 
-        The default behaviour (used by the OSS SQLite backend, whose DB
-        is wiped via ``reset_db_and_logs`` ->
-        ``clear_local_api_server_database`` on every ``sky api start``)
-        is to insert a fresh PENDING row
-        for each non-skip daemon and return the list of `Request`
-        objects for the caller to enqueue onto an in-memory task queue.
-        There is no stale row state to reconcile because the DB is
-        freshly empty.
-
-        Backends with a persistent task_queue (PG) override this method
-        to refresh env_vars on existing rows (so they reflect the
-        current process's `os.environ` rather than whatever the row's
-        original creator captured), delete daemon-shaped rows whose ids
-        are no longer in `internal_daemons`, preserve rows currently
-        RUNNING on a live executor (refresh env_vars only), and
-        maintain a single `task_queue` entry per daemon inside the same
-        transaction. The PG override returns `[]` because it writes the
-        queue inline; the SQLite default returns the full set of
-        non-skip daemons for the caller to enqueue.
+        Idempotent under concurrent callers.
         """
-        # pylint: disable=import-outside-toplevel
-        from sky.server.requests import requests as requests_lib
-        to_enqueue: List['Request'] = []
-        for d in internal_daemons:
-            if d.should_skip():
-                continue
-            req = requests_lib.build_internal_daemon_request(d)
-            await self.create_if_not_exists_async(req)
-            to_enqueue.append(req)
-        return to_enqueue
+        raise NotImplementedError
 
     @abc.abstractmethod
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:

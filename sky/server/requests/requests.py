@@ -798,17 +798,27 @@ def build_internal_daemon_request(
     )
 
 
-async def reconcile_internal_daemons_async(
-    internal_daemons: List['daemons.InternalRequestDaemon'],) -> List[Request]:
-    """Reconcile persisted daemon rows with the given daemons.
+async def create_or_refresh_internal_daemon_async(request: Request) -> bool:
+    """Insert or refresh an internal daemon's row.
 
-    Thin module-level wrapper around the active backend's
-    `reconcile_internal_daemons_async`. See the abstract
-    `RequestBackend.reconcile_internal_daemons_async` in
-    `sky.server.requests.storage` for the full contract.
+    Thin module-level wrapper. See
+    `RequestBackend.create_or_refresh_internal_daemon_async` for the
+    contract.
     """
     return await request_storage.get_request_backend(
-    ).reconcile_internal_daemons_async(internal_daemons)
+    ).create_or_refresh_internal_daemon_async(request)
+
+
+async def delete_orphan_internal_daemons_async(
+    internal_daemons: List['daemons.InternalRequestDaemon'],) -> None:
+    """Delete persisted daemon rows whose id is not in `internal_daemons`.
+
+    Thin module-level wrapper. See
+    `RequestBackend.delete_orphan_internal_daemons_async` for the
+    contract.
+    """
+    return await request_storage.get_request_backend(
+    ).delete_orphan_internal_daemons_async(internal_daemons)
 
 
 @dataclasses.dataclass
@@ -1229,12 +1239,56 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 logger.debug(f'End creating request {request.request_id}')
         return True if row else False
 
-    # Note: SqliteRequestBackend inherits the default
-    # reconcile_internal_daemons_async from RequestBackend, which simply
-    # `create_if_not_exists`-es each non-skip daemon and returns the list
-    # for the caller to enqueue. The OSS SQLite DB is wiped via
-    # `reset_db_and_logs` on every `sky api start`, so there are no
-    # persistent stale rows to reconcile in this backend.
+    @init_db_async
+    @asyncio_utils.shield
+    async def create_or_refresh_internal_daemon_async(self,
+                                                      request: Request) -> bool:
+        assert _DB is not None
+        # Try insert first (the dedup primitive: only one concurrent
+        # caller wins the conflict).
+        inserted = await self.create_if_not_exists_async(request)
+        if inserted:
+            return True
+        # Lost the insert race: an existing row remains. UPDATE the
+        # env-bearing columns so the persisted row reflects this
+        # process's `os.environ` (and the matching `name` /
+        # `schedule_type` from the current code). Concurrent UPDATEs
+        # from sibling uvicorn workers in the same process write the
+        # same values; cross-pod UPDATEs from a newer generation win
+        # by virtue of happening last.
+        encoded_body = encoders.pickle_and_encode(request.request_body)
+        await _DB.execute_and_commit_async(
+            f'UPDATE {REQUEST_TABLE} '
+            f'SET request_body=?, name=?, schedule_type=? '
+            f'WHERE request_id=?',
+            (encoded_body, request.name, request.schedule_type.value,
+             request.request_id))
+        return False
+
+    @init_db_async
+    @asyncio_utils.shield
+    async def delete_orphan_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons.InternalRequestDaemon'],
+    ) -> None:
+        assert _DB is not None
+        keep_ids = {d.id for d in internal_daemons}
+        # SQLite has no `is_daemon` column; use the `*-daemon` naming
+        # convention (verified against sky/server/daemons.py).
+        # TODO(cooperc): replace LIKE with a dedicated marker column if
+        # a non-daemon request_id ever ends in `-daemon`.
+        async with _DB.execute_fetchall_async(
+            f'SELECT request_id FROM {REQUEST_TABLE} '
+            f'WHERE request_id LIKE \'%-daemon\'') as rows:
+            existing = [r[0] for r in rows if r[0].endswith('-daemon')]
+        stale_ids = [rid for rid in existing if rid not in keep_ids]
+        if not stale_ids:
+            return
+        id_list_str = ','.join(repr(rid) for rid in stale_ids)
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {REQUEST_TABLE} '
+            f'WHERE request_id IN ({id_list_str})')
+        logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
 
     @init_db
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:

@@ -842,6 +842,38 @@ async def schedule_request_async(
                                     precondition, retryable)
 
 
+async def schedule_internal_daemon_async(
+        daemon: 'daemons.InternalRequestDaemon') -> None:
+    """Submit an internal daemon's request to the executor.
+
+    Idempotent under concurrent callers (multiple uvicorn workers in the
+    same process; multiple replicas sharing a PG-backed request store):
+
+    - First caller inserts a fresh PENDING row + enqueues onto the task
+      queue.
+    - Subsequent callers UPDATE `request_body` / `name` /
+      `schedule_type` on the existing row (so the persisted env_vars
+      reflect *this* process's `os.environ` rather than whatever the
+      original creator captured) and skip the enqueue (the existing
+      task_queue entry from the original creator remains in place).
+
+    This replaces the previous "schedule_request_async → catch
+    RequestAlreadyExistsError → log debug" pattern for daemon
+    requests: the dedup contract is identical (exactly one concurrent
+    caller wins the insert race and enqueues), but losing callers now
+    actively refresh env-bearing columns on the existing row instead
+    of leaving stale state in place.
+    """
+    request = api_requests.build_internal_daemon_request(daemon)
+    inserted = await api_requests.create_or_refresh_internal_daemon_async(
+        request)
+    if inserted:
+        await schedule_prepared_request(request, retryable=True)
+    else:
+        logger.debug(f'Internal daemon {daemon.id} row refreshed (existed); '
+                     'enqueue skipped.')
+
+
 async def schedule_prepared_request(request_task: api_requests.Request,
                                     ignore_return_value: bool = False,
                                     precondition: Optional[

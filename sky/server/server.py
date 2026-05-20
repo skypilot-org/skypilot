@@ -742,10 +742,15 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
 
-    # Note: internal daemon scheduling has moved out of lifespan into the
-    # parent server process (see start()), to ensure reconciliation runs
-    # before any RequestWorker starts dequeuing potentially-stale task_queue
-    # entries from a persistent (PG) queue backend.
+    # Startup: Run background tasks. Delete any persisted daemon rows whose
+    # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
+    # removed in code), then submit each current daemon.
+    await requests_lib.delete_orphan_internal_daemons_async(
+        daemons.INTERNAL_REQUEST_DAEMONS)
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
+        if event.should_skip():
+            continue
+        await executor.schedule_internal_daemon_async(event)
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
@@ -3529,29 +3534,7 @@ if __name__ == '__main__':
         global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
-        # Reconcile persisted daemon rows with the current code's
-        # INTERNAL_REQUEST_DAEMONS BEFORE workers start dequeuing the
-        # (potentially persistent) task_queue, so that stale entries from a
-        # prior process / replica generation don't get run with stale env.
-        # See sky.server.requests.storage.RequestBackend
-        # .reconcile_internal_daemons_async for the contract.
-        to_enqueue = asyncio.run(
-            requests_lib.reconcile_internal_daemons_async(
-                daemons.INTERNAL_REQUEST_DAEMONS))
-
         queue_server, workers = executor.start(config)
-
-        # Enqueue daemons that reconcile flagged for enqueue. For backends
-        # with a persistent task_queue (e.g. PG) this list is empty —
-        # reconcile already populated the queue inside its lock. For the
-        # in-memory multiprocessing queue (OSS), this populates the
-        # freshly-created queue with one entry per daemon.
-        async def _enqueue_pending_daemons() -> None:
-            for request_task in to_enqueue:
-                await executor.schedule_prepared_request(request_task,
-                                                         retryable=True)
-
-        asyncio.run(_enqueue_pending_daemons())
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
