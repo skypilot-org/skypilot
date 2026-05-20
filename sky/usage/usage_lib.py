@@ -551,7 +551,6 @@ _loki_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
 _loki_session: Optional['requests.Session'] = None
 _loki_pending_lock = threading.Lock()
 _loki_pending: 'List[concurrent.futures.Future]' = []
-_LOKI_FLUSH_TIMEOUT_S = 0.3
 # Prune completed futures from _loki_pending only when the list grows past
 # this threshold, instead of scanning the whole list on every send.
 _LOKI_PENDING_PRUNE_THRESHOLD = 64
@@ -574,17 +573,21 @@ def _get_loki_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 
 def _flush_pending_loki_sends() -> None:
-    """Best-effort wait for in-flight Loki sends on interpreter shutdown."""
+    """Wait for all in-flight Loki sends on interpreter shutdown.
+
+    Each submitted POST is bounded by the 0.5s timeout inside
+    ``_post_to_loki``, so the worst-case overall drain is
+    ``ceil(pending / max_workers) * 0.5s`` even if Loki is unreachable.
+    For a healthy Loki the drain is typically well under that because
+    most POSTs submitted during the command already completed in the
+    background by the time we get here.
+    """
     with _loki_pending_lock:
         pending = [f for f in _loki_pending if not f.done()]
         _loki_pending.clear()
-    deadline = time.monotonic() + _LOKI_FLUSH_TIMEOUT_S
     for f in pending:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
         try:
-            f.result(timeout=remaining)
+            f.result()
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -646,11 +649,13 @@ def _send_to_loki(message_type: MessageType):
         }]
     }
     payload = json.dumps(payload)
-    # Fire-and-forget: hand the POST to a daemon thread so the caller
-    # doesn't block on Loki's response. The 0.5s request timeout inside
-    # _post_to_loki still bounds the background thread's lifetime, and
-    # atexit (_flush_pending_loki_sends) gives in-flight sends a short
-    # window to complete when the process exits.
+    # Run the POST in parallel on a daemon thread so the caller doesn't
+    # block on Loki's response, but still record the future so the
+    # atexit hook (_flush_pending_loki_sends) waits for every submitted
+    # POST to complete before the process exits. Net effect: Loki RTTs
+    # overlap with the caller's work and with each other (up to
+    # max_workers in parallel) instead of being sequential on the
+    # critical path, but no submitted send is silently dropped.
     future = _get_loki_executor().submit(_post_to_loki, payload, headers)
     with _loki_pending_lock:
         _loki_pending.append(future)
