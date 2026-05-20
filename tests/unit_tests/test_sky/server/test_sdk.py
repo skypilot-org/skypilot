@@ -888,10 +888,12 @@ def test_stream_response_resumable_retry_skips_replayed_lines():
     assert decode_call_count == 2
     # Final result is forwarded from get(request_id).
     assert result == 'final_result'
-    # Both progress fields advanced exactly to the number of distinct lines.
+    # line_processed tracks distinct lines (high-water mark for resumable
+    # skip-ahead). progress_count tracks total wire-level messages received
+    # across all attempts: 2 from the first attempt + 5 from the retry = 7.
     ctx = captured_context['ctx']
     assert ctx.line_processed == 5
-    assert ctx.progress_count == 5
+    assert ctx.progress_count == 7
 
 
 def test_stream_response_no_request_id():
