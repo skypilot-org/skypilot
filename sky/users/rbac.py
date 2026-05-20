@@ -286,13 +286,21 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'path': '/upload_v2/blob',
         'method': 'GET'
     },
-    # --- Dashboard / plugin metadata ---
+    # --- Dashboard / static / auth-flow surface ---
+    # These paths are usually RBAC-skipped at the middleware level
+    # (`/dashboard/`, `/api/` prefix in server.py:200) but are listed
+    # here so the route-coverage test in
+    # tests/unit_tests/test_sky/users/test_viewer_route_coverage.py
+    # treats them as a deliberate allow rather than an
+    # un-categorized route.
     {
-        'path': '/dashboard_config',
+        'path': '/dashboard/*',
         'method': 'GET'
     },
-    # /api/plugins GET is RBAC-skipped at the middleware level but
-    # included here for documentation/coverage consistency.
+    {
+        'path': '/api/v1/auth/token',
+        'method': 'GET'
+    },
     {
         'path': '/api/plugins',
         'method': 'GET'
