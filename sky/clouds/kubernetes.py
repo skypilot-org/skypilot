@@ -174,27 +174,6 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def _resolve_all_includes_in_cluster(cls) -> bool:
-        """Resolve whether 'all' should include the in-cluster context.
-
-        Precedence (highest first):
-          1. SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER env var
-             (operator-level, set on the API server pod;
-             not overridable by admin via config).
-          2. `kubernetes.all_includes_in_cluster` config field (workspace
-             beats global).
-          3. Default: True (backward compatible).
-        """
-        env_val = (env_options.Options.
-                   ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.get_optional())
-        if env_val is not None:
-            return env_val
-        return skypilot_config.get_effective_workspace_region_config(
-            cloud='kubernetes',
-            keys=('all_includes_in_cluster',),
-            default_value=True)
-
-    @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts.
 
@@ -229,8 +208,13 @@ class Kubernetes(clouds.Cloud):
             allowed_contexts is None and
             env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
         if allow_all_contexts:
-            all_includes_in_cluster = cls._resolve_all_includes_in_cluster()
-            if all_includes_in_cluster:
+            # `SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`
+            # excludes the API server's own in-cluster context from the
+            # `'all'` expansion, so the cluster running the API server is
+            # not surfaced as a user-facing compute target. Default is to
+            # include in-cluster (backward compatible).
+            if env_options.Options.ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER \
+                    .get():
                 allowed_contexts = all_contexts
             else:
                 in_cluster_name = kubernetes.in_cluster_context_name()
