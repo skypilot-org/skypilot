@@ -169,18 +169,16 @@ _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 _clean_server_env: Optional[Dict[str, str]] = None
 
 
-def capture_clean_server_env(env: Optional[Dict[str, str]] = None) -> None:
-    """Snapshot os.environ (or the supplied env) as the clean server env.
+def capture_clean_server_env() -> None:
+    """Snapshot os.environ as the clean server env. Idempotent.
 
-    Idempotent. The main API server process calls this with no argument at
-    startup, snapshotting its own os.environ. Workers receive the same
-    snapshot via executor_initializer's initargs, so a worker spawned lazily
-    while the main process is mid-coroutine-request still records the
-    pre-pollution env.
+    Called from the main API server process at startup, before any request
+    can mutate os.environ. Workers don't call this — they receive the same
+    snapshot through executor_initializer's initargs (see below).
     """
     global _clean_server_env
     if _clean_server_env is None:
-        _clean_server_env = dict(env if env is not None else os.environ)
+        _clean_server_env = dict(os.environ)
 
 
 def get_clean_server_env() -> Dict[str, str]:
@@ -211,11 +209,14 @@ def executor_initializer(proc_group: str,
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
     # The main API server process captures its env at startup and forwards
-    # it via initargs. We use that snapshot directly so the worker doesn't
-    # depend on its own spawn-time os.environ (which could have been
-    # polluted if the worker was lazy-spawned while a coroutine-path
-    # request was mid-flight in the main process).
-    capture_clean_server_env(clean_env)
+    # it via initargs (see RequestWorker.run). Adopt that snapshot directly
+    # so the worker doesn't depend on its own spawn-time os.environ, which
+    # for a lazy-spawned burst worker could reflect a coroutine-path
+    # request mid-pollution in the main process.
+    if clean_env is not None:
+        global _clean_server_env
+        if _clean_server_env is None:
+            _clean_server_env = dict(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
