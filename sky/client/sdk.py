@@ -2716,17 +2716,24 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
-        # Open browser to authorization page
+        # Open browser to authorization page. The polling flow does not
+        # require the browser to be on this machine, so if we cannot open
+        # one locally, just ask the user to visit the URL themselves.
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not common_utils.open_browser(auth_url):
+        if common_utils.open_browser(auth_url):
+            click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n'
+                       f'Please click "Authorize" to complete login.\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
+        else:
             logger.debug('Failed to open browser.')
-            return None
-
-        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
-                   f'{colorama.Style.RESET_ALL}\n'
-                   f'Please click "Authorize" to complete login.\n'
-                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
-                   f'auth method.{colorama.Style.RESET_ALL}')
+            click.echo(f'{colorama.Fore.GREEN}Open this URL to complete '
+                       f'login:{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.BRIGHT}{auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
 
         # Poll for token
         start_time = time.time()
