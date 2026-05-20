@@ -4,6 +4,7 @@ import os
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.skylet import constants as skylet_constants
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -33,7 +34,10 @@ def _get_kubernetes_namespace() -> str:
 def _get_configmap_name() -> str:
     """Get the ConfigMap name for the SkyPilot config."""
     release_name = (os.getenv('HELM_RELEASE_NAME') or
-                    os.getenv('SKYPILOT_RELEASE_NAME') or 'skypilot')
+                    skylet_constants.getenv_server_with_legacy(
+                        skylet_constants.SKYPILOT_SERVER_RELEASE_NAME_ENV_VAR,
+                        skylet_constants.LEGACY_SKYPILOT_RELEASE_NAME_ENV_VAR)
+                    or 'skypilot')
     return f'{release_name}-config'
 
 

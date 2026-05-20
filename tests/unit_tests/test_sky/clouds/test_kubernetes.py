@@ -372,18 +372,24 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 class TestKubernetesAllIncludesInCluster(unittest.TestCase):
     """Tests for `kubernetes.all_includes_in_cluster` and its env var."""
 
-    ENV_VAR = 'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER'
+    ENV_VAR = 'SKYPILOT_SERVER_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER'
+    LEGACY_ENV_VAR = 'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER'
 
     def setUp(self):
         kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
         # Ensure env var leaks from other tests don't influence assertions.
         self._original_env = os.environ.pop(self.ENV_VAR, None)
+        self._original_legacy_env = os.environ.pop(self.LEGACY_ENV_VAR, None)
 
     def tearDown(self):
         if self._original_env is not None:
             os.environ[self.ENV_VAR] = self._original_env
         else:
             os.environ.pop(self.ENV_VAR, None)
+        if self._original_legacy_env is not None:
+            os.environ[self.LEGACY_ENV_VAR] = self._original_legacy_env
+        else:
+            os.environ.pop(self.LEGACY_ENV_VAR, None)
 
     @staticmethod
     def _mk_allowed_contexts_side_effect(allowed_contexts_value):

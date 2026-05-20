@@ -1115,7 +1115,9 @@ def get_cpu_count() -> int:
     """Get the number of CPUs, with cgroup awareness."""
     # This env-var is kept since it is still useful for limiting the resource
     # of SkyPilot in non-containerized environments.
-    cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
+    cpu_count = constants.getenv_server_with_legacy(
+        constants.SKYPILOT_SERVER_POD_CPU_CORE_LIMIT_ENV_VAR,
+        constants.LEGACY_SKYPILOT_POD_CPU_CORE_LIMIT_ENV_VAR)
     if cpu_count is not None:
         try:
             return int(float(cpu_count))
@@ -1129,7 +1131,9 @@ def get_cpu_count() -> int:
 
 def get_mem_size_gb() -> float:
     """Get the memory size in GB, with cgroup awareness."""
-    mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
+    mem_size = constants.getenv_server_with_legacy(
+        constants.SKYPILOT_SERVER_POD_MEMORY_GB_LIMIT_ENV_VAR,
+        constants.LEGACY_SKYPILOT_POD_MEMORY_GB_LIMIT_ENV_VAR)
     if mem_size is not None:
         try:
             return float(mem_size)
@@ -1138,7 +1142,9 @@ def get_mem_size_gb() -> float:
                 raise ValueError(
                     f'Failed to parse the memory size from {mem_size} (GB)'
                 ) from e
-    mem_size = os.getenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT')
+    mem_size = constants.getenv_server_with_legacy(
+        constants.SKYPILOT_SERVER_POD_MEMORY_BYTES_LIMIT_ENV_VAR,
+        constants.LEGACY_SKYPILOT_POD_MEMORY_BYTES_LIMIT_ENV_VAR)
     if mem_size is not None:
         try:
             return float(mem_size) / (1024**3)

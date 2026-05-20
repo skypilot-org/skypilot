@@ -1,5 +1,8 @@
 """Constants for SkyPilot."""
-from typing import List, Tuple
+import logging
+import os
+import typing
+from typing import List, Optional, Tuple
 
 from packaging import version
 
@@ -133,7 +136,157 @@ DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
 
 # Prefix for SkyPilot environment variables
 SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
+# Variables with this prefix are excluded from request_body_env_vars()'s
+# scrape (sky/server/requests/payloads.py), so they never get forwarded from
+# the client into a server request body or persisted into request_body.env_vars.
+# Server-deployment env vars (set by Helm / extraEnvs on the api-server pod)
+# must use this prefix to avoid leaking back into os.environ on the server
+# via override_request_env_and_config().
 SKYPILOT_SERVER_ENV_VAR_PREFIX = 'SKYPILOT_SERVER_'
+
+
+@typing.overload
+def getenv_server_with_legacy(new_name: str, legacy_name: str) -> Optional[str]:
+    ...
+
+
+@typing.overload
+def getenv_server_with_legacy(new_name: str, legacy_name: str,
+                              default: str) -> str:
+    ...
+
+
+def getenv_server_with_legacy(new_name: str,
+                              legacy_name: str,
+                              default: Optional[str] = None) -> Optional[str]:
+    """Read a server-only env var, falling back to a deprecated alias.
+
+    Server-only env vars used to live under the plain ``SKYPILOT_`` prefix,
+    which made them eligible to be scraped by ``request_body_env_vars()``
+    and forwarded into a request body. They have been renamed to
+    ``SKYPILOT_SERVER_*``; this helper supports the deprecation window by
+    preferring the new name and falling back to the legacy one.
+
+    Logs a debug message if only the legacy name is set, or if both are set
+    (operator probably did a partial rename).
+    """
+    new_val = os.environ.get(new_name)
+    legacy_val = os.environ.get(legacy_name)
+    if new_val is not None and legacy_val is not None and new_val != legacy_val:
+        logging.getLogger(__name__).debug(
+            'Both %s and %s are set with different values; using %s. '
+            'Remove the deprecated %s alias.', new_name, legacy_name, new_name,
+            legacy_name)
+        return new_val
+    if new_val is not None:
+        return new_val
+    if legacy_val is not None:
+        logging.getLogger(__name__).debug(
+            'Env var %s is deprecated; use %s instead.', legacy_name, new_name)
+        return legacy_val
+    return default
+
+
+def getenv_server_with_legacy_bool(new_name: str,
+                                   legacy_name: str) -> Optional[bool]:
+    """Bool variant of ``getenv_server_with_legacy``; returns None if unset."""
+    val = getenv_server_with_legacy(new_name, legacy_name)
+    if val is None:
+        return None
+    return val.lower() in ('true', '1')
+
+
+# Server-only env vars: must use SKYPILOT_SERVER_ prefix so the
+# request_body_env_vars() filter excludes them. Each ships with a legacy
+# alias for backwards-compat during the deprecation window; readers should
+# use getenv_server_with_legacy() to look them up.
+# Deprecation: the legacy aliases below are scheduled for removal in a
+# future release once all charts/operators have migrated.
+SKYPILOT_SERVER_APISERVER_UUID_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}APISERVER_UUID')
+LEGACY_SKYPILOT_APISERVER_UUID_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}APISERVER_UUID')
+
+SKYPILOT_SERVER_POD_CPU_CORE_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}POD_CPU_CORE_LIMIT')
+LEGACY_SKYPILOT_POD_CPU_CORE_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}POD_CPU_CORE_LIMIT')
+
+SKYPILOT_SERVER_POD_MEMORY_BYTES_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}POD_MEMORY_BYTES_LIMIT')
+LEGACY_SKYPILOT_POD_MEMORY_BYTES_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}POD_MEMORY_BYTES_LIMIT')
+
+SKYPILOT_SERVER_POD_MEMORY_GB_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}POD_MEMORY_GB_LIMIT')
+LEGACY_SKYPILOT_POD_MEMORY_GB_LIMIT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}POD_MEMORY_GB_LIMIT')
+
+SKYPILOT_SERVER_RELEASE_NAME_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}RELEASE_NAME')
+LEGACY_SKYPILOT_RELEASE_NAME_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}RELEASE_NAME')
+
+SKYPILOT_SERVER_INGRESS_HOST_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}INGRESS_HOST')
+LEGACY_SKYPILOT_INGRESS_HOST_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}INGRESS_HOST')
+
+SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}INGRESS_BASIC_AUTH_ENABLED')
+LEGACY_SKYPILOT_INGRESS_BASIC_AUTH_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}INGRESS_BASIC_AUTH_ENABLED')
+
+SKYPILOT_SERVER_INITIAL_BASIC_AUTH_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}INITIAL_BASIC_AUTH')
+LEGACY_SKYPILOT_INITIAL_BASIC_AUTH_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}INITIAL_BASIC_AUTH')
+
+SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}DISABLE_BASIC_AUTH_MIDDLEWARE')
+LEGACY_SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}DISABLE_BASIC_AUTH_MIDDLEWARE')
+
+SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}AUTH_OAUTH2_PROXY_ENABLED')
+LEGACY_SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_OAUTH2_PROXY_ENABLED')
+
+SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_BASE_URL_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}AUTH_OAUTH2_PROXY_BASE_URL')
+LEGACY_SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_OAUTH2_PROXY_BASE_URL')
+
+SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}AUTH_USER_HEADER')
+LEGACY_SKYPILOT_AUTH_USER_HEADER_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER')
+
+SKYPILOT_SERVER_GRACE_PERIOD_SECONDS_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}GRACE_PERIOD_SECONDS')
+LEGACY_SKYPILOT_GRACE_PERIOD_SECONDS_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}GRACE_PERIOD_SECONDS')
+
+SKYPILOT_SERVER_ROLLING_UPDATE_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ROLLING_UPDATE_ENABLED')
+LEGACY_SKYPILOT_ROLLING_UPDATE_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}ROLLING_UPDATE_ENABLED')
+
+SKYPILOT_SERVER_API_SERVER_STORAGE_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}API_SERVER_STORAGE_ENABLED')
+LEGACY_SKYPILOT_API_SERVER_STORAGE_ENABLED_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_STORAGE_ENABLED')
+
+SKYPILOT_SERVER_IN_CLUSTER_NAMESPACE_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}IN_CLUSTER_NAMESPACE')
+LEGACY_SKYPILOT_IN_CLUSTER_NAMESPACE_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}IN_CLUSTER_NAMESPACE')
+
+SKYPILOT_SERVER_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER_ENV_VAR = (
+    f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}'
+    'ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER')
+LEGACY_SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -594,35 +747,40 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
 IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
-# Environment variable that is set to 'true' if rolling update strategy is
-# enabled for the API server deployment.
-SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
-# Environment variable that is set to 'true' if persistent storage is enabled
-# for the API server deployment (via Helm storage.enabled=true).
-# This enables persistence of managed job logs and file mounts across rolling
-# updates.
-SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
+# Server-only env vars. The bare names here are legacy aliases preserved for
+# backwards-compat with operators who set them directly via Helm extraEnvs
+# (and to be read via constants.getenv_server_with_legacy()). New code should
+# reference the SKYPILOT_SERVER_*_ENV_VAR constants defined near the top of
+# this file.
+SKYPILOT_ROLLING_UPDATE_ENABLED = LEGACY_SKYPILOT_ROLLING_UPDATE_ENABLED_ENV_VAR
+SKYPILOT_API_SERVER_STORAGE_ENABLED = (
+    LEGACY_SKYPILOT_API_SERVER_STORAGE_ENABLED_ENV_VAR)
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
 
 # Environment variable that is set to 'true' if metrics are enabled.
+# Note: uses SKY_ prefix (not SKYPILOT_) so it's not eligible for the env-var
+# forwarding filter; left as-is for historical consistency.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
-# If set, overrides the header that we can use to get the user name.
-ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
+# Legacy alias for AUTH_USER_HEADER. Use
+# SKYPILOT_SERVER_AUTH_USER_HEADER_ENV_VAR via getenv_server_with_legacy().
+ENV_VAR_SERVER_AUTH_USER_HEADER = LEGACY_SKYPILOT_AUTH_USER_HEADER_ENV_VAR
 
 # Environment variable that is used as the DB connection string for the
-# skypilot server.
+# skypilot server. Server-only but already explicitly popped in
+# request_body_env_vars(); intentionally left under the SKYPILOT_ prefix.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
-SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
-SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
+SKYPILOT_INITIAL_BASIC_AUTH = LEGACY_SKYPILOT_INITIAL_BASIC_AUTH_ENV_VAR
+SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = (
+    LEGACY_SKYPILOT_INGRESS_BASIC_AUTH_ENABLED_ENV_VAR)
 SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE = (
-    'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE')
+    LEGACY_SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE_ENV_VAR)
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -707,7 +865,9 @@ MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
 DEFAULT_PRIORITY = 0
 
-GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
+# Legacy alias for GRACE_PERIOD_SECONDS. Use
+# SKYPILOT_SERVER_GRACE_PERIOD_SECONDS_ENV_VAR via getenv_server_with_legacy().
+GRACE_PERIOD_SECONDS_ENV_VAR = LEGACY_SKYPILOT_GRACE_PERIOD_SECONDS_ENV_VAR
 COST_REPORT_DEFAULT_DAYS = 30
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +

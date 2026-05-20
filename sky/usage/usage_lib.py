@@ -372,11 +372,17 @@ class ServerHeartbeatMessage(MessageToReport):
         import socket  # pylint: disable=import-outside-toplevel
         self.interval_seconds = interval_seconds
         self.hostname: str = socket.gethostname()
-        self.release_name: Optional[str] = (os.getenv('SKYPILOT_RELEASE_NAME')
-                                            or os.getenv('HELM_RELEASE_NAME'))
+        self.release_name: Optional[str] = (
+            skylet_constants.getenv_server_with_legacy(
+                skylet_constants.SKYPILOT_SERVER_RELEASE_NAME_ENV_VAR,
+                skylet_constants.LEGACY_SKYPILOT_RELEASE_NAME_ENV_VAR) or
+            os.getenv('HELM_RELEASE_NAME'))
         self.server_hash: str = common_utils.get_user_hash()
         self.sky_version: str = sky.__version__
-        self.ingress_host: Optional[str] = os.getenv('SKYPILOT_INGRESS_HOST')
+        self.ingress_host: Optional[str] = (
+            skylet_constants.getenv_server_with_legacy(
+                skylet_constants.SKYPILOT_SERVER_INGRESS_HOST_ENV_VAR,
+                skylet_constants.LEGACY_SKYPILOT_INGRESS_HOST_ENV_VAR))
 
     @classmethod
     def register_provider(cls, name: str,

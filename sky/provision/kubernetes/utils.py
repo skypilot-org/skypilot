@@ -2825,8 +2825,9 @@ def get_kube_config_context_namespace(
         # effect only when using in-cluster auth because the recommended way to
         # set the namespace when using kubeconfig is to change the namespace
         # configured in the context.
-        env_namespace = os.getenv(
-            kubernetes_constants.KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR)
+        env_namespace = constants.getenv_server_with_legacy(
+            constants.SKYPILOT_SERVER_IN_CLUSTER_NAMESPACE_ENV_VAR,
+            constants.LEGACY_SKYPILOT_IN_CLUSTER_NAMESPACE_ENV_VAR)
         if env_namespace:
             return env_namespace
         # Fall back to service account namespace file

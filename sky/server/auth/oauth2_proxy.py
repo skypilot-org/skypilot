@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import http
-import os
 import traceback
 from typing import Optional
 import urllib
@@ -15,9 +14,9 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.server import constants as server_constants
 from sky.server import middleware_utils
 from sky.server.auth import loopback
+from sky.skylet import constants as skylet_constants
 from sky.users import permission
 from sky.utils import common_utils
 
@@ -30,12 +29,17 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.enabled: bool = (os.getenv(
-            server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false') == 'true')
+        self.enabled: bool = (skylet_constants.getenv_server_with_legacy(
+            skylet_constants.SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR,
+            skylet_constants.LEGACY_SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED_ENV_VAR,
+            default='false') == 'true')
         self.proxy_base: str = ''
         if self.enabled:
-            proxy_base = os.getenv(
-                server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR)
+            proxy_base = skylet_constants.getenv_server_with_legacy(
+                skylet_constants.
+                SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_BASE_URL_ENV_VAR,
+                skylet_constants.
+                LEGACY_SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL_ENV_VAR)
             if not proxy_base:
                 raise ValueError('OAuth2 Proxy is enabled but base_url is not '
                                  'set')

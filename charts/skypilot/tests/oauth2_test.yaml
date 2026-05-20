@@ -276,12 +276,12 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+            name: SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_ENABLED
             value: "true"
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+            name: SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_BASE_URL
             value: "http://RELEASE-NAME-oauth2-proxy:4180"
 
   - it: should apply global image pull secrets to oauth2-proxy pods

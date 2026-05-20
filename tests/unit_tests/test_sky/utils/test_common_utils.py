@@ -286,9 +286,15 @@ class TestCgroupFunctions:
         mock_cgroup_cpu.return_value = 2.0
         assert common_utils.get_cpu_count() == 2
 
-        # Test with env var
+        # Test with new server-prefixed env var
         with mock.patch.dict('os.environ',
-                             {'SKYPILOT_POD_CPU_CORE_LIMIT': '2'}):
+                             {'SKYPILOT_SERVER_POD_CPU_CORE_LIMIT': '3'},
+                             clear=False):
+            assert common_utils.get_cpu_count() == 3
+
+        # Test legacy env var still honored (deprecation fallback)
+        with mock.patch.dict('os.environ', {'SKYPILOT_POD_CPU_CORE_LIMIT': '2'},
+                             clear=False):
             assert common_utils.get_cpu_count() == 2
 
     @mock.patch('psutil.virtual_memory')
@@ -307,9 +313,16 @@ class TestCgroupFunctions:
         mock_cgroup_mem.return_value = 16 * 1024**3  # 16GB
         assert common_utils.get_mem_size_gb() == 8.0
 
-        # Test with env var
+        # Test with new server-prefixed env var
         with mock.patch.dict('os.environ',
-                             {'SKYPILOT_POD_MEMORY_GB_LIMIT': '2'}):
+                             {'SKYPILOT_SERVER_POD_MEMORY_GB_LIMIT': '3'},
+                             clear=False):
+            assert common_utils.get_mem_size_gb() == 3.0
+
+        # Test legacy env var still honored (deprecation fallback)
+        with mock.patch.dict('os.environ',
+                             {'SKYPILOT_POD_MEMORY_GB_LIMIT': '2'},
+                             clear=False):
             assert common_utils.get_mem_size_gb() == 2.0
 
 

@@ -31,14 +31,14 @@ class Options(enum.Enum):
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
                                      False)
-    # Operator-level override for whether `allowed_contexts: 'all'` (or the
-    # env-var-triggered allow-all path) should include the API server's own
-    # in-cluster context. Unset by default; falls through to the config field
-    # `kubernetes.all_includes_in_cluster`.
-    # Read via `get_optional()` since "unset" is
-    # semantically distinct from "false".
-    ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER = (
-        'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER', False)
+
+    # NOTE: ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER was previously here,
+    # but it is a server-only operator setting (not a per-process flag). Its
+    # env var has been renamed to SKYPILOT_SERVER_ALL_KUBERNETES_CONTEXTS_
+    # INCLUDES_IN_CLUSTER and is read directly in
+    # `sky/clouds/kubernetes.py::_resolve_all_includes_in_cluster` via
+    # `constants.getenv_server_with_legacy_bool()`. Removed from this enum so
+    # the name isn't exported to user agent pods via `all_options()`.
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()

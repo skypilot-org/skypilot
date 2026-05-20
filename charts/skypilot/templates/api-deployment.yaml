@@ -51,6 +51,14 @@ spec:
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
       serviceAccountName: {{ include "skypilot.serviceAccountName" . }}
+      # Disable Kubernetes service-link env var injection. K8s otherwise
+      # injects <SVC>_SERVICE_HOST / _PORT / _PORT_<n>_TCP_* for every
+      # Service in this pod's namespace, including any user-cluster
+      # SkyPilot Services that happen to land here. Those env vars are
+      # stale on subsequent requests and historically leaked into
+      # request_body.env_vars via request_body_env_vars() before being
+      # filtered.
+      enableServiceLinks: false
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -97,16 +105,39 @@ spec:
         {{- with .Values.apiService.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        # SkyPilot dev flag. Not server-only — read by env_options on both
+        # client and server.
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
-        - name: SKYPILOT_RELEASE_NAME
+        # Server-only env vars use the SKYPILOT_SERVER_ prefix so they are
+        # excluded by request_body_env_vars()'s prefix filter and can never
+        # be scraped back into a request body / persisted to PG / re-applied
+        # via os.environ.update() in a daemon executor.
+        #
+        # Each server-only var is emitted under BOTH the new SKYPILOT_SERVER_
+        # name and the legacy SKYPILOT_ name. The dual-emit covers the chart-
+        # vs-image upgrade-skew window: a new chart paired with an old image
+        # that only reads the legacy name still works. Drop the legacy emits
+        # in a future release once charts and images have caught up. New
+        # code reads via constants.getenv_server_with_legacy() which prefers
+        # the new name, so old chart + new image also works.
+        - name: SKYPILOT_SERVER_RELEASE_NAME
+          value: {{ $fullName | quote }}
+        - name: SKYPILOT_RELEASE_NAME  # DEPRECATED — remove in a future release.
           value: {{ $fullName | quote }}
         {{- if .Values.ingress.enabled }}
-        - name: SKYPILOT_INGRESS_HOST
+        - name: SKYPILOT_SERVER_INGRESS_HOST
+          value: {{ .Values.ingress.host | quote }}
+        - name: SKYPILOT_INGRESS_HOST  # DEPRECATED
           value: {{ .Values.ingress.host | quote }}
         {{- end }}
         {{- if and (eq (include "skypilot.enableBasicAuthInAPIServer" . | trim) "true") (ne (include "skypilot.initialBasicAuthSecretName" . | trim) "") }}
-        - name: SKYPILOT_INITIAL_BASIC_AUTH
+        - name: SKYPILOT_SERVER_INITIAL_BASIC_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "skypilot.initialBasicAuthSecretName" . }}
+              key: auth
+        - name: SKYPILOT_INITIAL_BASIC_AUTH  # DEPRECATED
           valueFrom:
             secretKeyRef:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
@@ -117,7 +148,9 @@ spec:
           value: "true"
         {{- end }}
         {{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" }}
-        - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+        - name: SKYPILOT_SERVER_INGRESS_BASIC_AUTH_ENABLED
+          value: "true"
+        - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED  # DEPRECATED
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
@@ -125,7 +158,9 @@ spec:
           value: /root/gcp-cred.json
         {{- end }}
         {{- if .Values.kubernetesCredentials.inclusterNamespace }}
-        - name: SKYPILOT_IN_CLUSTER_NAMESPACE
+        - name: SKYPILOT_SERVER_IN_CLUSTER_NAMESPACE
+          value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
+        - name: SKYPILOT_IN_CLUSTER_NAMESPACE  # DEPRECATED
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
         {{- end }}
         {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
@@ -133,6 +168,8 @@ spec:
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
         {{- if .Values.apiService.dbConnectionSecretName }}
+        # SKYPILOT_DB_CONNECTION_URI is server-only but already explicitly
+        # excluded by name in request_body_env_vars(); name retained.
         - name: SKYPILOT_DB_CONNECTION_URI
           valueFrom:
             secretKeyRef:
@@ -146,43 +183,73 @@ spec:
               key: connection_string
         {{- end }}
         {{- if .Values.apiService.authUserHeaderName }}
-        - name: SKYPILOT_AUTH_USER_HEADER
+        - name: SKYPILOT_SERVER_AUTH_USER_HEADER
+          value: {{ .Values.apiService.authUserHeaderName | quote }}
+        - name: SKYPILOT_AUTH_USER_HEADER  # DEPRECATED
           value: {{ .Values.apiService.authUserHeaderName | quote }}
         {{- end }}
-        - name: SKYPILOT_GRACE_PERIOD_SECONDS
+        - name: SKYPILOT_SERVER_GRACE_PERIOD_SECONDS
+          value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
+        - name: SKYPILOT_GRACE_PERIOD_SECONDS  # DEPRECATED
           value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
-        - name: SKYPILOT_APISERVER_UUID
+        - name: SKYPILOT_SERVER_APISERVER_UUID
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
-        - name: SKYPILOT_ROLLING_UPDATE_ENABLED
+        - name: SKYPILOT_APISERVER_UUID  # DEPRECATED
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: SKYPILOT_SERVER_ROLLING_UPDATE_ENABLED
+          value: "true"
+        - name: SKYPILOT_ROLLING_UPDATE_ENABLED  # DEPRECATED
           value: "true"
         {{- end }}
         {{- if .Values.storage.enabled }}
-        - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
+        - name: SKYPILOT_SERVER_API_SERVER_STORAGE_ENABLED
+          value: "true"
+        - name: SKYPILOT_API_SERVER_STORAGE_ENABLED  # DEPRECATED
           value: "true"
         {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
+        # Uses SKY_ prefix (not SKYPILOT_) so the env-var forwarding filter
+        # already excludes it; retained for backwards compatibility.
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
         {{- if .Values.auth.disableBasicAuthMiddleware }}
-        - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+        - name: SKYPILOT_SERVER_DISABLE_BASIC_AUTH_MIDDLEWARE
+          value: "true"
+        - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE  # DEPRECATED
           value: "true"
         {{- end }}
         {{- if .Values.auth.oauth.enabled }}
-        - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+        - name: SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
-        - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+        - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED  # DEPRECATED
+          value: "true"
+        - name: SKYPILOT_SERVER_AUTH_OAUTH2_PROXY_BASE_URL
+          value: {{ include "skypilot.oauth2ProxyURL" . }}
+        - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL  # DEPRECATED
           value: {{ include "skypilot.oauth2ProxyURL" . }}
         {{- end }}
-        - name: SKYPILOT_POD_CPU_CORE_LIMIT
+        - name: SKYPILOT_SERVER_POD_CPU_CORE_LIMIT
           valueFrom:
             resourceFieldRef:
               containerName: skypilot-api
               resource: requests.cpu
-        - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+        - name: SKYPILOT_POD_CPU_CORE_LIMIT  # DEPRECATED
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.cpu
+        - name: SKYPILOT_SERVER_POD_MEMORY_BYTES_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: skypilot-api
+              resource: requests.memory
+        - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT  # DEPRECATED
           valueFrom:
             resourceFieldRef:
               containerName: skypilot-api

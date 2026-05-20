@@ -5,6 +5,9 @@ NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
                        'the node labels for identifying GPUs '
                        '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
+# Legacy alias for the in-cluster namespace env var. New name is
+# SKYPILOT_SERVER_IN_CLUSTER_NAMESPACE; readers should use
+# constants.getenv_server_with_legacy() rather than reading this directly.
 KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR = 'SKYPILOT_IN_CLUSTER_NAMESPACE'
 
 # Name of kubernetes exec auth wrapper script

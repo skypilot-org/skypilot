@@ -105,6 +105,8 @@ EMPTY_PICKLED_VALUE = 'gAROLg=='
 # TODO(aylei): we should introduce server.yaml for static server admin config,
 # which is more structured than multiple environment variables and can be less
 # confusing to users.
+# Legacy aliases preserved for backwards-compat. Readers should use
+# constants.getenv_server_with_legacy() with the SKYPILOT_SERVER_* form.
 OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
