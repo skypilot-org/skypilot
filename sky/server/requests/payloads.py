@@ -75,21 +75,24 @@ EXTERNAL_LOCAL_ENV_VARS = [
 
 # Kubernetes injects service-link env vars for every Service in the pod's
 # namespace: <SVCNAME_UPPER>_SERVICE_HOST, <SVCNAME_UPPER>_SERVICE_PORT,
-# <SVCNAME_UPPER>_PORT, <SVCNAME_UPPER>_PORT_<n>_TCP[_PROTO|_PORT|_ADDR].
+# <SVCNAME_UPPER>_PORT (URL form), and <SVCNAME_UPPER>_PORT_<n>_TCP[_PROTO
+# |_PORT|_ADDR].
 # SkyPilot-managed Services in the same namespace as a SkyPilot client (e.g.
 # user-cluster head-ssh services for in-cluster orchestration) therefore
 # inject env vars under the SKYPILOT_ prefix that match the K8s service-link
 # suffix pattern. These are stale on the next request and useless to forward,
 # so deny-list them here.
 #
-# The pattern is conservative: only matches env names whose suffix is a
-# recognized K8s service-link form. Plugin-defined SKYPILOT_AGENT_* vars
-# without a service-link suffix (e.g. SKYPILOT_AGENT_ID, _JWT_SECRET,
-# _API_SERVER_URL) are NOT matched.
+# We match on K8s service-link suffixes (SERVICE_HOST, SERVICE_PORT[_<name>],
+# PORT_<n>_TCP_*) that don't collide with legitimate SKYPILOT_* names. The
+# bare `_PORT` form (URL: "tcp://host:port") is intentionally NOT matched —
+# real SkyPilot vars like SKYPILOT_RAY_PORT and SKYPILOT_RAY_DASHBOARD_PORT
+# would be false positives. The numbered `_PORT_<n>_TCP*` variants K8s also
+# emits cover the same data, so dropping bare `_PORT` loses no real signal.
 _K8S_SERVICE_LINK_ENV_RE = re.compile(
     r'^SKYPILOT_[A-Z0-9_]+_'
     r'(SERVICE_HOST|SERVICE_PORT(_[A-Z0-9_]+)?|'
-    r'PORT|PORT_\d+_TCP(_PROTO|_PORT|_ADDR)?)$')
+    r'PORT_\d+_TCP(_PROTO|_PORT|_ADDR)?)$')
 
 
 def _is_k8s_service_link_env(env_var: str) -> bool:
