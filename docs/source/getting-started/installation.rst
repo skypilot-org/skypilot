@@ -612,7 +612,10 @@ Hint: run ``az account subscription list`` to get a list of subscription IDs und
 CoreWeave
 ~~~~~~~~~
 
-`CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` integration. To set up:
+`CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` and :ref:`Slurm <slurm-installation>` integrations.
+
+Kubernetes (CKS)
+^^^^^^^^^^^^^^^^
 
 1. Install the necessary dependencies for CoreWeave.
 
@@ -658,6 +661,64 @@ CoreWeave
 .. tip::
 
   CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
+
+Slurm
+^^^^^
+
+1. Install the necessary dependencies for CoreWeave with Slurm support.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[coreweave,slurm]"
+      # From nightly build
+      uv pip install "skypilot-nightly[coreweave,slurm]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[coreweave,slurm]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[coreweave,slurm]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[coreweave,slurm]"
+      # From nightly build
+      pip install "skypilot-nightly[coreweave,slurm]"
+      # From source
+      pip install -e ".[coreweave,slurm]"
+
+2. Set up SSH access to the CoreWeave Slurm login node by creating a ``~/.slurm/config`` file:
+
+.. code-block:: shell
+
+  # Create the Slurm config directory
+  mkdir -p ~/.slurm
+
+  # Add your CoreWeave Slurm cluster configuration
+  cat > ~/.slurm/config << EOF
+  Host coreweave-slurm
+      HostName <login-node-hostname>
+      User <username>
+      IdentityFile ~/.ssh/id_rsa
+  EOF
+
+See :ref:`SkyPilot on Slurm <slurm-overview>` for more details on Slurm configuration.
 
 .. _coreweave-caios-installation:
 
