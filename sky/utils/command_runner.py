@@ -1712,7 +1712,6 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            env: Optional[Dict[str, str]] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command.
 
@@ -1727,9 +1726,6 @@ class LocalProcessCommandRunner(CommandRunner):
         from the server's pre-pollution snapshot. controller_envs that the
         caller wants on top are already prepended to the run script as
         `export` lines, so they layer in correctly.
-
-        Callers may pass an explicit `env` to override; otherwise we default
-        to the captured pre-pollution server env.
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
@@ -1766,16 +1762,14 @@ class LocalProcessCommandRunner(CommandRunner):
         command_str = command_str.replace(constants.SKY_PYTHON_CMD,
                                           sys.executable)
         logger.debug(f'Running command locally: {command_str}')
-        if env is None:
-            # `sky.utils.command_runner` is imported (transitively via
-            # `sky.provision.kubernetes.instance`) while `sky` is still
-            # initializing, before `sky.server.requests.executor` finishes
-            # loading — a top-level import here causes a partial-module
-            # AttributeError on `command_runner.CommandRunner`. Lazy import
-            # avoids the cycle.
-            # pylint: disable=import-outside-toplevel
-            from sky.server.requests import executor as request_executor
-            env = request_executor.get_clean_server_env()
+        # `sky.utils.command_runner` is imported (transitively via
+        # `sky.provision.kubernetes.instance`) while `sky` is still
+        # initializing, before `sky.server.requests.executor` finishes
+        # loading — a top-level import here causes a partial-module
+        # AttributeError on `command_runner.CommandRunner`. Lazy import
+        # avoids the cycle.
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import executor as request_executor
         return log_lib.run_with_log(command_str,
                                     log_path,
                                     require_outputs=require_outputs,
@@ -1783,7 +1777,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
-                                    env=env,
+                                    env=request_executor.get_clean_server_env(),
                                     **kwargs)
 
     @timeline.event

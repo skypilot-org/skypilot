@@ -138,13 +138,13 @@ class TestRecoveryStrategyBeltAndSuspenders:
 class TestLocalProcessCommandRunnerUsesCleanEnv:
     """LocalProcessCommandRunner.run is the only CommandRunner that inherits
     the calling process's env into the child process (subprocess.Popen). It
-    must default to the pre-pollution server env snapshot, not the worker's
-    current os.environ — otherwise per-request env mutations from
+    must pass the pre-pollution server env snapshot to Popen, not the
+    worker's current os.environ — otherwise per-request env mutations from
     override_request_env_and_config leak into long-lived consolidation-mode
     controllers spawned via run_on_head -> run_driver -> run.
     """
 
-    def test_run_defaults_to_clean_server_env(self):
+    def test_run_uses_clean_server_env(self):
         # Pre-populate the clean snapshot with a known value, and a value
         # that's deliberately ABSENT — so we can tell the snapshot was used
         # rather than current os.environ.
@@ -174,36 +174,4 @@ class TestLocalProcessCommandRunnerUsesCleanEnv:
                 'present (from clean snapshot).')
         finally:
             os.environ.pop('SKY_TEST_RUN_LEAK', None)
-            request_executor._clean_server_env = None  # pylint: disable=protected-access
-
-    def test_run_honors_explicit_env_override(self):
-        # Caller can still pass env= to override; useful for tests / callers
-        # that want a specific env.
-        request_executor._clean_server_env = {  # pylint: disable=protected-access
-            'PATH': os.environ.get('PATH', '/usr/bin'),
-            'CLEAN_MARKER': 'clean_value',
-        }
-        try:
-            runner = command_runner.LocalProcessCommandRunner()
-            with tempfile.TemporaryDirectory() as tmpdir:
-                log_path = os.path.join(tmpdir, 'run.log')
-                out_path = os.path.join(tmpdir, 'out.txt')
-                rc = runner.run(
-                    f'echo "marker=${{CLEAN_MARKER:-<unset>}} '
-                    f'override=${{OVERRIDE_MARKER:-<unset>}}" > {out_path}',
-                    log_path=log_path,
-                    stream_logs=False,
-                    process_stream=True,
-                    require_outputs=False,
-                    env={
-                        'PATH': os.environ.get('PATH', '/usr/bin'),
-                        'OVERRIDE_MARKER': 'override_value',
-                    })
-                assert rc == 0
-                with open(out_path, encoding='utf-8') as f:
-                    body = f.read().strip()
-            # Explicit env wins: CLEAN_MARKER (which is in the snapshot) is
-            # NOT in the explicit env, so it should be unset.
-            assert body == 'marker=<unset> override=override_value', body
-        finally:
             request_executor._clean_server_env = None  # pylint: disable=protected-access
