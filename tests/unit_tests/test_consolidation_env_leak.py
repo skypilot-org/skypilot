@@ -1,4 +1,4 @@
-"""Tests for the consolidation-mode env-leak fix (GitHub issue / SKY-5504).
+"""Tests for the consolidation-mode env-leak fix.
 
 When a request handler is in-flight, its os.environ has been mutated by
 `override_request_env_and_config` to include the client's env_vars (most
@@ -11,8 +11,11 @@ The fix has two layers:
   1. recovery_strategy.py clears `SKY_API_SERVER_URL_ENV_VAR` (and
      invalidates the lru_cache on get_server_url/is_api_server_local)
      before calling api_start, so already-leaked controllers self-heal.
-  2. `_consolidated_launch` and the serve mirror pass an explicit clean
-     env to `run_on_head`, breaking the inheritance chain at its root.
+  2. `LocalProcessCommandRunner.run` (the only CommandRunner that inherits
+     the calling process's env into the child) passes a captured clean
+     server env to subprocess.Popen instead of letting it default to
+     os.environ, breaking the inheritance chain at its root for any
+     consolidation-mode spawn.
 
 These tests pin both layers.
 """
@@ -20,7 +23,6 @@ These tests pin both layers.
 import os
 import subprocess
 import tempfile
-from unittest import mock
 
 from sky.jobs import recovery_strategy
 from sky.server.requests import executor as request_executor
@@ -132,108 +134,77 @@ class TestRecoveryStrategyBeltAndSuspenders:
                 'a polluted env before the plumbing fix landed.')
 
 
-class TestRunOnHeadForwardsEnvKwarg:
-    """`backend.run_on_head` must thread env through to LocalProcessCommandRunner.
-
-    This is the actual fix point: if env is dropped anywhere between
-    run_on_head and the underlying subprocess.Popen, the leak comes back.
+class TestLocalProcessCommandRunnerUsesCleanEnv:
+    """LocalProcessCommandRunner.run is the only CommandRunner that inherits
+    the calling process's env into the child process (subprocess.Popen). It
+    must default to the pre-pollution server env snapshot, not the worker's
+    current os.environ — otherwise per-request env mutations from
+    override_request_env_and_config leak into long-lived consolidation-mode
+    controllers spawned via run_on_head -> run_driver -> run.
     """
 
-    def test_local_runner_run_accepts_env(self):
-        # Smoke-check: LocalProcessCommandRunner.run accepts env= without
-        # raising, and runs a trivial command.
-        from sky.utils import command_runner  # local import
-        runner = command_runner.LocalProcessCommandRunner()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            log_path = os.path.join(tmpdir, 'run.log')
-            # Set a leak in our own env to make sure the spawned bash does
-            # not inherit it when we pass env=clean.
-            os.environ['SKY_TEST_RUN_LEAK'] = 'should_not_appear'
-            try:
-                clean = {
-                    k: v
-                    for k, v in os.environ.items()
-                    if k != 'SKY_TEST_RUN_LEAK'
-                }
-                # Use stream_logs=True / process_stream=False so output
-                # lands in the log file via tee.
+    def test_run_defaults_to_clean_server_env(self):
+        # Pre-populate the clean snapshot with a known value, and a value
+        # that's deliberately ABSENT — so we can tell the snapshot was used
+        # rather than current os.environ.
+        request_executor._clean_server_env = {  # pylint: disable=protected-access
+            'PATH': os.environ.get('PATH', '/usr/bin'),
+            'CLEAN_MARKER': 'clean_value',
+        }
+        os.environ['SKY_TEST_RUN_LEAK'] = 'should_not_appear'
+        try:
+            from sky.utils import (command_runner)  # pylint: disable=import-outside-toplevel
+            runner = command_runner.LocalProcessCommandRunner()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                log_path = os.path.join(tmpdir, 'run.log')
+                out_path = os.path.join(tmpdir, 'out.txt')
                 rc = runner.run(
-                    'env | grep -E "^SKY_TEST_RUN_LEAK=" > '
-                    f'{tmpdir}/leak.txt || true; echo done',
+                    'echo "leak=${SKY_TEST_RUN_LEAK:-<unset>} '
+                    f'clean=${{CLEAN_MARKER:-<unset>}}" > {out_path}',
+                    log_path=log_path,
+                    stream_logs=False,
+                    process_stream=True,
+                    require_outputs=False)
+                assert rc == 0
+                with open(out_path, encoding='utf-8') as f:
+                    body = f.read().strip()
+            assert body == 'leak=<unset> clean=clean_value', (
+                f'Subprocess saw {body!r}: SKY_TEST_RUN_LEAK should be '
+                'absent (came from caller env) and CLEAN_MARKER should be '
+                'present (from clean snapshot).')
+        finally:
+            os.environ.pop('SKY_TEST_RUN_LEAK', None)
+            request_executor._clean_server_env = None  # pylint: disable=protected-access
+
+    def test_run_honors_explicit_env_override(self):
+        # Caller can still pass env= to override; useful for tests / callers
+        # that want a specific env.
+        request_executor._clean_server_env = {  # pylint: disable=protected-access
+            'PATH': os.environ.get('PATH', '/usr/bin'),
+            'CLEAN_MARKER': 'clean_value',
+        }
+        try:
+            from sky.utils import (command_runner)  # pylint: disable=import-outside-toplevel
+            runner = command_runner.LocalProcessCommandRunner()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                log_path = os.path.join(tmpdir, 'run.log')
+                out_path = os.path.join(tmpdir, 'out.txt')
+                rc = runner.run(
+                    f'echo "marker=${{CLEAN_MARKER:-<unset>}} '
+                    f'override=${{OVERRIDE_MARKER:-<unset>}}" > {out_path}',
                     log_path=log_path,
                     stream_logs=False,
                     process_stream=True,
                     require_outputs=False,
-                    env=clean)
+                    env={
+                        'PATH': os.environ.get('PATH', '/usr/bin'),
+                        'OVERRIDE_MARKER': 'override_value',
+                    })
                 assert rc == 0
-                leak_path = os.path.join(tmpdir, 'leak.txt')
-                if os.path.exists(leak_path):
-                    with open(leak_path, encoding='utf-8') as f:
-                        body = f.read().strip()
-                    assert body == '', (f'Subprocess saw leaked env: {body!r}')
-            finally:
-                os.environ.pop('SKY_TEST_RUN_LEAK', None)
-
-
-class TestConsolidatedLaunchPassesCleanEnv:
-    """The plumbing test: _consolidated_launch should hand a clean env to
-    backend.run_on_head, NOT the worker's current (polluted) os.environ.
-    """
-
-    def test_consolidated_launch_forwards_clean_env(self):
-        # Capture a known-clean snapshot.
-        request_executor._clean_server_env = {  # pylint: disable=protected-access
-            'PATH': '/usr/bin',
-            'CLEAN_MARKER': '1'
-        }
-        # Now simulate per-request pollution in os.environ.
-        os.environ['SKY_TEST_POLLUTION'] = 'polluted'
-        try:
-            # Patch run_on_head to record what env was passed.
-            captured = {}
-            fake_backend = mock.MagicMock()
-
-            def record_env(*args, **kwargs):
-                captured['env'] = kwargs.get('env')
-                captured['kwargs_keys'] = list(kwargs.keys())
-                return None
-
-            fake_backend.run_on_head.side_effect = record_env
-            fake_backend.sync_file_mounts.return_value = None
-            from sky import backends as _backends
-            fake_backend.__class__ = _backends.CloudVmRayBackend
-
-            fake_handle = mock.MagicMock()
-
-            with mock.patch.object(
-                    __import__('sky.backends.backend_utils', fromlist=['x']),
-                    'is_controller_accessible', return_value=fake_handle), \
-                 mock.patch.object(
-                    __import__('sky.backends.backend_utils', fromlist=['x']),
-                    'get_backend_from_handle', return_value=fake_backend), \
-                 mock.patch(
-                    'sky.jobs.server.core.sky_logging.silent',
-                    return_value=__import__('contextlib').nullcontext()):
-                # Build a minimal controller_task stub.
-                controller_task = mock.MagicMock()
-                controller_task.run = 'echo run-script'
-                controller_task.envs = {'CONTROLLER_ENV': 'present'}
-                controller_task.file_mounts = {}
-                controller_task.storage_mounts = []
-
-                from sky.jobs.server import core as jobs_core
-                jobs_core._consolidated_launch(controller=mock.MagicMock(),
-                                               controller_task=controller_task,
-                                               job_ids=[1])
-
-            assert captured.get('env') is not None, (
-                'run_on_head was called without env=; the plumbing fix is '
-                'missing or regressed.')
-            assert captured['env'].get('CLEAN_MARKER') == '1'
-            assert 'SKY_TEST_POLLUTION' not in captured['env'], (
-                'env passed to run_on_head includes the polluted var; the '
-                'snapshot must be the pre-pollution capture, NOT the '
-                'current os.environ.')
+                with open(out_path, encoding='utf-8') as f:
+                    body = f.read().strip()
+            # Explicit env wins: CLEAN_MARKER (which is in the snapshot) is
+            # NOT in the explicit env, so it should be unset.
+            assert body == 'marker=<unset> override=override_value', body
         finally:
-            os.environ.pop('SKY_TEST_POLLUTION', None)
             request_executor._clean_server_env = None  # pylint: disable=protected-access

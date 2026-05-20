@@ -5769,7 +5769,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
-        env: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
@@ -5798,9 +5797,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             source_bashrc: Whether to source bashrc when running on the command
                 on the VM. If it is a user-related commands, it would always be
                 good to source bashrc to make sure the env vars are set.
-            env: Optional explicit environment for the subprocess. Only
-                honored by LocalProcessCommandRunner (consolidation mode);
-                see CommandRunner.run_driver.
 
         Returns:
             returncode
@@ -5828,7 +5824,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
-            env=env,
             **kwargs,
         )
 

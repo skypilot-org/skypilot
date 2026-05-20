@@ -599,8 +599,6 @@ class CommandRunner:
     def run_driver(
         self,
         cmd: Union[str, List[str]],
-        *,
-        env: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs the command for executing the job driver on the cluster.
@@ -612,12 +610,6 @@ class CommandRunner:
 
         Args:
             cmd: The command to run.
-            env: Optional explicit environment to use for the subprocess. Only
-              meaningful for LocalProcessCommandRunner, where it overrides
-              os.environ inheritance for the spawned bash. SSH-based runners
-              apply env via remote shell exports rather than the local
-              subprocess env, so this kwarg has no effect on the SSH path.
-              Forwarded as a no-op there so callers can pass it uniformly.
             **kwargs: Additional arguments passed to run().
 
         Returns:
@@ -625,8 +617,6 @@ class CommandRunner:
             or
             A tuple of (returncode, stdout, stderr).
         """
-        if env is not None:
-            kwargs['env'] = env
         return self.run(cmd, **kwargs)
 
     def run_setup(
@@ -1722,14 +1712,20 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            env: Optional[Dict[str, str]] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command.
 
-        If env is provided, it is passed through as the subprocess's env
-        (overriding os.environ inheritance). Used to spawn consolidation-mode
-        controllers with a clean server env instead of the worker's
-        per-request-polluted env.
+        Unlike the SSH/Slurm runners, this spawns the command in-process via
+        subprocess.Popen — so without intervention the child inherits the
+        caller's os.environ. Inside an API-server worker that environ may have
+        been mutated mid-request by override_request_env_and_config, which is
+        how SKYPILOT_API_SERVER_ENDPOINT and other client-side SKYPILOT_-
+        prefixed vars used to leak into long-lived consolidation-mode
+        controllers. We pass an explicit `env` to subprocess.Popen so the child
+        bash (and everything it spawns: scheduler, nohup controller) starts
+        from the server's pre-pollution snapshot. controller_envs that the
+        caller wants on top are already prepended to the run script as
+        `export` lines, so they layer in correctly.
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
@@ -1766,8 +1762,14 @@ class LocalProcessCommandRunner(CommandRunner):
         command_str = command_str.replace(constants.SKY_PYTHON_CMD,
                                           sys.executable)
         logger.debug(f'Running command locally: {command_str}')
-        if env is not None:
-            kwargs['env'] = env
+        # Local import avoids a top-level circular dep between command_runner
+        # (utility) and the server's executor module.
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import executor as request_executor
+
+        # Caller can still override env via kwargs (e.g. tests); default to
+        # the captured pre-pollution snapshot.
+        kwargs.setdefault('env', request_executor.get_clean_server_env())
         return log_lib.run_with_log(command_str,
                                     log_path,
                                     require_outputs=require_outputs,

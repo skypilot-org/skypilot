@@ -154,47 +154,48 @@ class RequestQueue:
 # The active queue factory, set during start().
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
-# Snapshot of os.environ taken before any request-scoped env mutation can
-# happen. Used when spawning long-lived subprocesses (consolidation-mode
-# controllers) that must NOT inherit per-request env pollution from
-# override_request_env_and_config. See get_clean_server_env() below.
+# Snapshot of os.environ from before any request-scoped env mutation can
+# happen. Read by LocalProcessCommandRunner when spawning long-lived
+# subprocesses (consolidation-mode controllers) so they don't inherit
+# per-request env pollution from override_request_env_and_config.
 #
-# Captured in two places:
-#   1. capture_clean_server_env(): called once at API server startup, for
-#      the main process (covers coroutine-executed requests).
-#   2. executor_initializer(): called once per worker process at spawn time,
-#      AFTER worker-side plugin load — so the snapshot reflects the worker's
-#      legitimate startup env, including anything plugins set in EXECUTOR
-#      context.
+# Captured once per process:
+#   1. capture_clean_server_env() runs from the API server's main process at
+#      startup, before any request can mutate os.environ.
+#   2. The captured snapshot is then passed as initargs to BurstableExecutor
+#      so each worker process gets the same snapshot at spawn time,
+#      regardless of whether the main process is currently handling a
+#      coroutine-path request that has polluted its own os.environ.
 _clean_server_env: Optional[Dict[str, str]] = None
 
 
-def capture_clean_server_env() -> None:
-    """Snapshot the current process's os.environ as the clean server env.
+def capture_clean_server_env(env: Optional[Dict[str, str]] = None) -> None:
+    """Snapshot os.environ (or the supplied env) as the clean server env.
 
-    Idempotent. Called from the API server's main process at startup so the
-    snapshot is available even when a request runs via the coroutine path
-    (which executes inside the main API server process rather than a worker
-    process). Workers call this from executor_initializer too.
+    Idempotent. The main API server process calls this with no argument at
+    startup, snapshotting its own os.environ. Workers receive the same
+    snapshot via executor_initializer's initargs, so a worker spawned lazily
+    while the main process is mid-coroutine-request still records the
+    pre-pollution env.
     """
     global _clean_server_env
     if _clean_server_env is None:
-        _clean_server_env = dict(os.environ)
+        _clean_server_env = dict(env if env is not None else os.environ)
 
 
 def get_clean_server_env() -> Dict[str, str]:
     """Return a copy of the server's pre-request-pollution env.
 
-    Use this when spawning long-lived subprocesses (notably the
-    consolidation-mode jobs/serve controllers) so they don't inherit
+    Used by LocalProcessCommandRunner.run as the default env for spawned
+    subprocesses, so consolidation-mode controllers don't inherit
     per-request env mutations applied by override_request_env_and_config.
     """
     if _clean_server_env is None:
-        # Should not happen on the API server (both main and worker
-        # processes call capture_clean_server_env() before any request is
-        # processed). Fall back to current env so call sites still work in
-        # tests / other contexts; log so we notice if this ever fires in
-        # production.
+        # Should not happen on the API server (the main process calls
+        # capture_clean_server_env() at startup, and workers receive the
+        # snapshot via initargs). Fall back to current env so call sites
+        # still work in tests / other contexts; log so we notice if this
+        # ever fires in production.
         logger.warning('get_clean_server_env() called before '
                        'capture_clean_server_env(); falling back to current '
                        'os.environ, which may carry per-request pollution.')
@@ -202,16 +203,19 @@ def get_clean_server_env() -> Dict[str, str]:
     return dict(_clean_server_env)
 
 
-def executor_initializer(proc_group: str):
+def executor_initializer(proc_group: str,
+                         clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
-    # Capture the worker's clean env AFTER plugin load so the snapshot
-    # includes any env vars EXECUTOR-context plugins set, but BEFORE any
-    # request-scoped pollution can run.
-    capture_clean_server_env()
+    # The main API server process captures its env at startup and forwards
+    # it via initargs. We use that snapshot directly so the worker doesn't
+    # depend on its own spawn-time os.environ (which could have been
+    # polluted if the worker was lazy-spawned while a coroutine-path
+    # request was mid-flight in the main process).
+    capture_clean_server_env(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -362,11 +366,14 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
+            # Pass the main process's clean env snapshot so workers (incl.
+            # lazy-spawned burst workers) record the same pre-pollution env
+            # regardless of when they spawn.
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group,))
+                initargs=(proc_group, get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)

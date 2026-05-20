@@ -520,12 +520,17 @@ class StrategyExecutor:
                                     logger.debug('Cleared env var: '
                                                  f'{env_var}')
                                 # get_server_url() and is_api_server_local()
-                                # are functools.lru_cache'd. If something
-                                # earlier in this process called them while
-                                # SKY_API_SERVER_URL_ENV_VAR was set, the
-                                # cache holds the wrong (remote) URL — and
-                                # the env-var clear above wouldn't take
-                                # effect. Invalidate so api_start re-reads.
+                                # are @lru_cache(scope='global'). For an
+                                # already-polluted controller (e.g. one
+                                # spawned with a leaked endpoint before the
+                                # LocalProcessCommandRunner fix landed), any
+                                # earlier call to either function in this
+                                # process baked the leaked URL into the
+                                # cache — popping the env var alone does
+                                # not invalidate it, so api_start would
+                                # still observe a non-local endpoint and
+                                # raise. Drop the cache so api_start
+                                # re-reads against the cleared env.
                                 # pylint: disable=import-outside-toplevel
                                 from sky.server import common as server_common
                                 server_common.get_server_url.cache_clear()

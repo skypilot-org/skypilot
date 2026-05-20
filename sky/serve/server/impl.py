@@ -27,7 +27,6 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.server.requests import executor as request_executor
 from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -324,13 +323,11 @@ def up(
             self_pod_ip_dbg = os.environ.get('POD_IP', '<unset>')
             logger.debug(f'Serve up() run_on_head: spawning controller '
                          f'subprocess locally on {self_pod_ip_dbg}')
-            # See sky/jobs/server/core.py::_consolidated_launch for why we
-            # pass env explicitly: break the worker -> bash -> controller
-            # env inheritance so the long-lived serve controller does not
-            # carry per-request env pollution.
-            backend.run_on_head(controller_handle,
-                                run_script,
-                                env=request_executor.get_clean_server_env())
+            # LocalProcessCommandRunner (used for consolidation-mode spawns)
+            # supplies a clean server env to the subprocess so per-request
+            # env pollution doesn't leak into the long-lived serve
+            # controller. See LocalProcessCommandRunner.run for details.
+            backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
         fore = colorama.Fore
