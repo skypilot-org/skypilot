@@ -1114,12 +1114,13 @@ available_node_types:
               # open file handlers with write access
               # closes if none exist
               monitor_file() {
-                tail -f $file &
+                local file="$1"
+                tail -f "$file" &
                 TAIL_PID=$!
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
-                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
+                  if [ $(mylsof "$file" | wc -l) -lt 2 ]; then
                     kill $TAIL_PID
                     break
                   fi
@@ -1131,7 +1132,13 @@ available_node_types:
               }
 
               log_tail() {
-                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
+                # Use a bash glob (not `ls $(eval echo ...)`) so we are
+                # safe against ARG_MAX at very high file counts and against
+                # spaces in $HOME or in any path component. nullglob makes
+                # an empty match a no-op instead of yielding the literal
+                # pattern. log_tail is launched via `log_tail &`, so this
+                # runs in its own subshell and the shopt does not leak.
+                shopt -s nullglob
 
                 # O(1) membership set. Replaces an `echo $str | grep -q` check
                 # that was O(n) per file (O(n^2) across the outer loop).
@@ -1142,29 +1149,30 @@ available_node_types:
                 # the PVC retains task logs from all prior (completed) jobs;
                 # tailing them all spawns a tail+mylsof loop per file, and
                 # mylsof's /proc/*/fd/* scan grows with the process count,
-                # producing runaway fork growth. nullglob is off by default,
-                # so the `ls` guard handles the empty-glob case.
-                if ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; then
-                  for f in $(eval echo $FILE_PATTERN); do
-                    already_monitored[$f]=1
-                  done
-                fi
+                # producing runaway fork growth.
+                for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                  already_monitored["$f"]=1
+                done
 
-                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                # Wait until at least one log file exists.
+                while true; do
+                  for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                    break 2
+                  done
                   sleep 1
                 done
 
                 # Infinite loop to continuously check for new files
                 while true; do
-                  for file in $(eval echo $FILE_PATTERN); do
+                  for file in "$HOME"/sky_logs/*/tasks/*.log; do
                     if [[ -n "${already_monitored[$file]:-}" ]]; then
                       # File is already being monitored
                       continue
                     fi
 
                     # Monitor the new file
-                    monitor_file $file &
-                    already_monitored[$file]=1
+                    monitor_file "$file" &
+                    already_monitored["$file"]=1
                   done
                   sleep 0.1
                 done
