@@ -394,10 +394,21 @@ available_node_types:
         {% if k8s_enable_oci_roce %}
         # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
         # network namespace; pods must share host networking to reach the
-        # RDMA fabric. ClusterFirstWithHostNet still routes .svc.cluster.local
-        # lookups to CoreDNS so inter-node Ray comms work.
+        # RDMA fabric. This is the only path that sets hostNetwork from the
+        # template — the pod_config path injects it via
+        # combine_pod_config_fields(). k8s_enable_oci_roce also implies
+        # k8s_host_network on the Python side, so the dnsPolicy below and the
+        # Ray-port probe machinery apply here too.
         # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
+        {% endif %}
+        {% if k8s_host_network %}
+        # Under hostNetwork the default dnsPolicy silently falls back to
+        # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
+        # won't resolve, and the worker probe gets stuck dialing the head.
+        # k8s_host_network is the single source of truth for "this pod runs
+        # on the host network" (set for both the pod_config and OCI RoCE
+        # paths), so this covers OCI RoCE too.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
         {% if volume_mounts %}
@@ -419,8 +430,10 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% set _affinity_node = (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% if _affinity_node or k8s_host_network %}
         affinity:
+          {% if _affinity_node %}
           nodeAffinity:
             {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
             requiredDuringSchedulingIgnoredDuringExecution:
@@ -455,6 +468,27 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+          {% endif %}
+          {% endif %}
+          {% if k8s_host_network %}
+          # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
+          # shares the node's net namespace, so two pods of the SAME SkyPilot
+          # cluster on one node would (a) collide on host ports and (b)
+          # register both raylets under the same host IP -- Ray's client-side
+          # resolver then collapses the two NodeIDs onto one gRPC endpoint and
+          # hangs pg.ready(). Forcing one pod per node makes every pod's host
+          # IP unique and routable, which is also exactly what lets a
+          # hostNetwork cluster span multiple K8s nodes. requiredDuring (not
+          # preferred): the guarantee must be hard -- a multi-pod hostNetwork
+          # cluster that cannot get a node per pod fails to schedule loudly
+          # rather than silently racing. The selector is per-cluster
+          # (skypilot-cluster), so unrelated clusters can still co-locate.
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  skypilot-cluster: {{cluster_name_on_cloud}}
+              topologyKey: kubernetes.io/hostname
           {% endif %}
         {% endif %}
         {% if k8s_spot_label_key is not none %}
@@ -590,6 +624,20 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% if k8s_host_network %}
+            # Downward API rather than $HOSTNAME — hostNetwork pods
+            # inherit the host node's hostname. Used by
+            # host_network_probe to key per-pod ConfigMap entries and
+            # set ownerReferences for GC.
+            - name: SKYPILOT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SKYPILOT_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            {% endif %}
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
@@ -610,7 +658,8 @@ available_node_types:
               value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
-              value: {{ value }}
+              # tojson forces a quoted string; K8s rejects non-string env values.
+              value: {{ value | tojson }}
             {% endfor %}
             {% if k8s_enable_docker_all %}
             - name: DOCKER_HOST
@@ -1172,6 +1221,10 @@ available_node_types:
                   # Start ray worker on the worker pod.
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+{% if k8s_host_network %}
+                  # SKYPILOT_RAY_PORT and the head-up wait are handled
+                  # by the worker probe inside ray_worker_start_command.
+{% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
                   until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
@@ -1181,6 +1234,7 @@ available_node_types:
                   until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
                     sleep 0.1
                   done
+{% endif %}
 
                   set +e
                   {{ ray_worker_start_command }}
@@ -1227,12 +1281,13 @@ available_node_types:
               # open file handlers with write access
               # closes if none exist
               monitor_file() {
-                tail -f $file &
+                local file="$1"
+                tail -f "$file" &
                 TAIL_PID=$!
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
-                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
+                  if [ $(mylsof "$file" | wc -l) -lt 2 ]; then
                     kill $TAIL_PID
                     break
                   fi
@@ -1244,25 +1299,47 @@ available_node_types:
               }
 
               log_tail() {
-                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
-                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                # Use a bash glob (not `ls $(eval echo ...)`) so we are
+                # safe against ARG_MAX at very high file counts and against
+                # spaces in $HOME or in any path component. nullglob makes
+                # an empty match a no-op instead of yielding the literal
+                # pattern. log_tail is launched via `log_tail &`, so this
+                # runs in its own subshell and the shopt does not leak.
+                shopt -s nullglob
+
+                # O(1) membership set. Replaces an `echo $str | grep -q` check
+                # that was O(n) per file (O(n^2) across the outer loop).
+                local -A already_monitored
+
+                # Pre-seed with every file that exists at startup so we do NOT
+                # spawn monitor_file for them. On an HA controller pod restart
+                # the PVC retains task logs from all prior (completed) jobs;
+                # tailing them all spawns a tail+mylsof loop per file, and
+                # mylsof's /proc/*/fd/* scan grows with the process count,
+                # producing runaway fork growth.
+                for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                  already_monitored["$f"]=1
+                done
+
+                # Wait until at least one log file exists.
+                while true; do
+                  for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                    break 2
+                  done
                   sleep 1
                 done
 
-                # Keep track of already monitored files
-                already_monitored=""
-
                 # Infinite loop to continuously check for new files
                 while true; do
-                  for file in $(eval echo $FILE_PATTERN); do
-                    if echo $already_monitored | grep -q $file; then
+                  for file in "$HOME"/sky_logs/*/tasks/*.log; do
+                    if [[ -n "${already_monitored[$file]:-}" ]]; then
                       # File is already being monitored
                       continue
                     fi
 
                     # Monitor the new file
-                    monitor_file $file &
-                    already_monitored="${already_monitored} ${file}"
+                    monitor_file "$file" &
+                    already_monitored["$file"]=1
                   done
                   sleep 0.1
                 done
@@ -1366,12 +1443,17 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if not k8s_host_network %}
+          # Omitted under hostNetwork: the scheduler's NodePorts predicate
+          # treats containerPort as hostPort and blocks sibling pods even
+          # though the probe assigns Ray's ports dynamically.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
           - containerPort: 46590  # Used by Skylet gRPC
+          {% endif %}
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to

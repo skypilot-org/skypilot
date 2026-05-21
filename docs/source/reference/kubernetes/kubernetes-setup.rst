@@ -258,6 +258,7 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-fuse`
 * :ref:`kubernetes-setup-proxy`
+* :ref:`kubernetes-setup-hostnetwork`
 
 .. _kubernetes-setup-volumes:
 
@@ -382,6 +383,37 @@ To resolve this, you can configure proxy settings for SkyPilot pods by adding en
 Replace ``proxy-host:3128`` with your actual proxy server address and port.
 
 Both uppercase and lowercase versions of the proxy environment variables are included for maximum compatibility across different tools and libraries.
+
+.. _kubernetes-setup-hostnetwork:
+
+Set up host networking
+^^^^^^^^^^^^^^^^^^^^^^
+
+For workloads that need the node's network stack directly — for example, RDMA/InfiniBand for multi-node training, or to avoid CNI overhead for latency-sensitive jobs — you can run SkyPilot pods with host networking by setting ``hostNetwork: true`` in the pod spec:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          hostNetwork: true
+
+With ``hostNetwork: true``, a pod shares the node's network namespace instead of getting its own. Normally this would cause two SkyPilot pods scheduled to the same node to collide on Ray's default ports and on the node's SSH port. SkyPilot handles this automatically: before Ray starts, each pod probes a free port set on the node, the head publishes its chosen ports to a ``<cluster>-ray-ports`` ConfigMap for workers to discover, and each pod's in-container SSH server is rebound to a probed port. **No additional configuration beyond** ``hostNetwork: true`` **is required**, and multiple SkyPilot clusters can safely share a node.
+
+For a multi-node cluster, SkyPilot additionally enforces that **every pod of the same cluster is placed on a distinct Kubernetes node**. This is implemented as a required pod anti-affinity (per-cluster label selector, topology key ``kubernetes.io/hostname``) injected into every ``hostNetwork`` pod. One pod per node guarantees each pod has a unique, routable host IP — which is also exactly what lets a ``hostNetwork`` cluster span multiple Kubernetes nodes. The selector is scoped per cluster, so pods of *different* clusters can still co-locate on a node (their cross-cluster port collisions are resolved by the free-port probe described above).
+
+.. warning::
+
+    Because this anti-affinity is a *hard* scheduling constraint (``requiredDuringSchedulingIgnoredDuringExecution``), a multi-node ``hostNetwork`` cluster needs at least as many schedulable Kubernetes nodes as it has pods. If enough distinct nodes are not available, the cluster fails to schedule with a clear error rather than silently co-locating pods of the same cluster and racing on the shared host network.
+
+.. note::
+
+    The ConfigMap is created in the same namespace as the SkyPilot pods and is owned by the head pod, so it is garbage-collected by Kubernetes on ``sky down``. The SkyPilot service account must be able to create, get, and update ConfigMaps in that namespace (already covered by the :ref:`minimal permissions <cloud-permissions-kubernetes>`).
+
+.. note::
+
+    OCI OKE RoCE clusters (launched with ``network_tier: best`` on OCI bare-metal GPU shapes) require host networking to reach the RDMA fabric, so SkyPilot enables it for them automatically — you do **not** set ``hostNetwork: true`` yourself. The same probe and one-pod-per-node behavior described above (including the multi-node node-count requirement in the warning) applies to those clusters.
 
 .. _kubernetes-observability:
 

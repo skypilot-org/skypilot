@@ -85,16 +85,25 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
         """Test using global allowed_contexts=all in config when workspace config is None."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = 'all'
+
+        # get_effective_region_config is called for 'allowed_contexts';
+        # 'all_includes_in_cluster' is read via
+        # get_effective_workspace_region_config and patched separately.
+        def _get_eff(*args, **kwargs):
+            keys = kwargs.get('keys') or (args[1] if len(args) > 1 else None)
+            if keys == ('allowed_contexts',):
+                return 'all'
+            return kwargs.get('default_value')
+
+        mock_get_cloud_config_value.side_effect = _get_eff
 
         result = kubernetes.Kubernetes.existing_allowed_contexts()
 
         self.assertEqual(set(result), {'ctx1', 'ctx2', 'ctx3'})
-        mock_get_cloud_config_value.assert_called_once_with(
-            cloud='kubernetes',
-            keys=('allowed_contexts',),
-            region=None,
-            default_value=None)
+        mock_get_cloud_config_value.assert_any_call(cloud='kubernetes',
+                                                    keys=('allowed_contexts',),
+                                                    region=None,
+                                                    default_value=None)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -358,6 +367,169 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
                              ['prod-cluster', 'staging-cluster'])
             # Should log the nonexistent context (SSH contexts are skipped)
             mock_log.assert_called_once_with(('nonexistent-cluster',))
+
+
+class TestKubernetesAllIncludesInCluster(unittest.TestCase):
+    """Tests for the SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER
+    env var that excludes the in-cluster context from the `'all'` expansion.
+    """
+
+    ENV_VAR = 'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER'
+
+    def setUp(self):
+        kubernetes.Kubernetes._log_skipped_contexts_once.cache_clear()
+        # Ensure env var leaks from other tests don't influence assertions.
+        self._original_env = os.environ.pop(self.ENV_VAR, None)
+
+    def tearDown(self):
+        if self._original_env is not None:
+            os.environ[self.ENV_VAR] = self._original_env
+        else:
+            os.environ.pop(self.ENV_VAR, None)
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_default_includes_in_cluster(self, mock_get_region,
+                                         mock_get_workspace,
+                                         mock_get_all_contexts):
+        """Default (env unset): 'all' includes in-cluster (backward compat)."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'ctx-b', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'ctx-b', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_true_includes_in_cluster(self, mock_get_region,
+                                          mock_get_workspace,
+                                          mock_get_all_contexts):
+        """Env var explicitly true: 'all' includes in-cluster."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'true'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_env_false_excludes_in_cluster(self, mock_get_region,
+                                           mock_get_workspace,
+                                           mock_get_all_contexts):
+        """Env var false: in-cluster is filtered out of the 'all' expansion.
+
+        This is the hosted-product use case.
+        """
+        mock_get_all_contexts.return_value = ['ctx-a', 'ctx-b', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'ctx-b'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_legacy_allow_all_env_respects_filter(self, mock_get_region,
+                                                  mock_get_workspace,
+                                                  mock_get_all_contexts):
+        """`SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS=true` path is symmetric.
+
+        When no `allowed_contexts` is set in config but the legacy
+        allow-all env var is set, the same `'all'` expansion runs and the
+        in-cluster filter env var still applies.
+        """
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = None
+
+        with patch.dict(os.environ, {
+                'SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS': 'true',
+                self.ENV_VAR: 'false',
+        },
+                        clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    def test_explicit_in_cluster_in_list_is_kept(self, mock_get_workspace,
+                                                 mock_get_all_contexts):
+        """Explicit allowed_contexts list is honored even with env var false."""
+        mock_get_all_contexts.return_value = ['ctx-a', 'in-cluster']
+
+        def _workspace_get(key, default=None):
+            if key == 'allowed_contexts':
+                return ['ctx-a', 'in-cluster']
+            return default
+
+        mock_get_workspace.return_value.get.side_effect = _workspace_get
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.provision.kubernetes.utils.'
+           'get_current_kube_config_context_name')
+    @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_no_kubeconfig_fallback_unaffected_by_env(
+            self, mock_in_cluster_name, mock_is_incluster, mock_current,
+            mock_get_nested, mock_get_workspace, mock_get_all_contexts):
+        """The "no kubeconfig -> in-cluster" fallback is independent of
+        the filter env var: the filter only applies to the `'all'` path.
+        """
+        mock_get_all_contexts.return_value = ['in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_nested.return_value = None
+        mock_current.return_value = None
+        mock_is_incluster.return_value = True
+        mock_in_cluster_name.return_value = 'in-cluster'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, ['in-cluster'])
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_custom_in_cluster_name_is_filtered(self, mock_in_cluster_name,
+                                                mock_get_region,
+                                                mock_get_workspace,
+                                                mock_get_all_contexts):
+        """Custom in-cluster name (via SKYPILOT_IN_CLUSTER_CONTEXT_NAME) is
+        what gets filtered — not the literal string 'in-cluster'."""
+        mock_in_cluster_name.return_value = 'my-host-cluster'
+        mock_get_all_contexts.return_value = [
+            'ctx-a', 'my-host-cluster', 'in-cluster'
+        ]
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_region.return_value = 'all'
+
+        with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
+            result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        # 'my-host-cluster' (the configured in-cluster name) is excluded;
+        # the literal string 'in-cluster' here is a regular kubeconfig
+        # context and is kept.
+        self.assertEqual(set(result), {'ctx-a', 'in-cluster'})
 
 
 class TestKubernetesSecurityContextMerging(unittest.TestCase):
@@ -768,6 +940,11 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         # OCI RoCE requires hostNetwork, privileged, and /dev/infiniband.
         self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # OCI RoCE forces hostNetwork via the template, so k8s_host_network
+        # must also be True — otherwise the Ray-port/sshd probe machinery is
+        # skipped and inter-node Ray + `ssh <cluster>` break under
+        # hostNetwork (the pod's sshd can't bind host:22).
+        self.assertTrue(deploy_vars['k8s_host_network'])
         # IPC_LOCK is shared with other high-perf types and stays True.
         self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
         # Sanity: GPUDirect flags are False for OCI.
@@ -776,6 +953,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_enable_gpudirect_rdma'])
 
         k8s_env_vars = deploy_vars['k8s_env_vars']
+        # The probe is runtime-gated on these env vars (see
+        # instance_setup._host_network_probe_cmd); they must be wired for
+        # OCI RoCE so the probe actually runs.
+        self.assertEqual(k8s_env_vars['SKYPILOT_HOST_NETWORK'], '1')
+        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'],
+                         'test-oci-cluster-ray-ports')
+        self.assertEqual(k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'],
+                         'default')
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertEqual(k8s_env_vars['NCCL_IB_GID_INDEX'], '3')
         self.assertEqual(k8s_env_vars['NCCL_IB_TC'], '41')
@@ -857,6 +1042,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         self.assertFalse(deploy_vars['k8s_enable_oci_roce'])
         self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
+        # No OCI RoCE and no pod_config hostNetwork override -> the pod is
+        # not host-networked, so the probe machinery stays off.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        self.assertNotIn('SKYPILOT_RAY_PORTS_CONFIGMAP_NAME',
+                         deploy_vars['k8s_env_vars'])
         self.assertNotIn('NCCL_IB_GID_INDEX', deploy_vars['k8s_env_vars'])
 
 

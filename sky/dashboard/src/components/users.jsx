@@ -1407,8 +1407,8 @@ function UsersTable({
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [sortConfig, setSortConfig] = useState({
-    key: 'username',
-    direction: 'ascending',
+    key: 'default',
+    direction: 'descending',
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
@@ -1997,6 +1997,24 @@ function UsersTable({
       filtered = Object.values(deduped);
     }
 
+    if (sortConfig.key === 'default') {
+      // Default sort: GPUs desc, then Joined (most recent first), then Name asc.
+      const cmpStr = (a, b) => {
+        const sa = (a ?? '').toString().toLowerCase();
+        const sb = (b ?? '').toString().toLowerCase();
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return 0;
+      };
+      const cmpNum = (a, b) => (a ?? 0) - (b ?? 0);
+      return [...filtered].sort((a, b) => {
+        const byGpu = cmpNum(b.gpuCount, a.gpuCount);
+        if (byGpu !== 0) return byGpu;
+        const byJoined = cmpNum(b.created_at, a.created_at);
+        if (byJoined !== 0) return byJoined;
+        return cmpStr(a.usernameDisplay, b.usernameDisplay);
+      });
+    }
     return sortData(filtered, sortConfig.key, sortConfig.direction);
   }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
@@ -2103,295 +2121,307 @@ function UsersTable({
   }
 
   return (
-    <Card>
-      <div className="overflow-x-auto rounded-lg">
-        <Table className="min-w-full">
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                onClick={() => requestSort('usernameDisplay')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Name{getSortDirection('usernameDisplay')}
-              </TableHead>
-              {!deduplicateUsers && (
+    <>
+      {filteredAndSortedUsers.length > 0 && (
+        <div className="text-sm text-gray-500 mb-2">
+          {filteredAndSortedUsers.length}{' '}
+          {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
+        </div>
+      )}
+      <Card>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
                 <TableHead
-                  onClick={() => requestSort('fullEmailID')}
+                  onClick={() => requestSort('usernameDisplay')}
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
                 >
-                  User ID{getSortDirection('fullEmailID')}
+                  Name{getSortDirection('usernameDisplay')}
                 </TableHead>
-              )}
-              {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                <TableHead
-                  onClick={() => requestSort('role')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-                >
-                  Role{getSortDirection('role')}
-                </TableHead>
-              )}
-              {!deduplicateUsers &&
-                !ingressBasicAuthEnabled &&
-                !externalProxyAuthEnabled && (
+                {!deduplicateUsers && (
                   <TableHead
-                    onClick={() => requestSort('userType')}
+                    onClick={() => requestSort('fullEmailID')}
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
                   >
-                    Type{getSortDirection('userType')}
+                    User ID{getSortDirection('fullEmailID')}
                   </TableHead>
                 )}
-              <TableHead
-                onClick={() => requestSort('created_at')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Joined{getSortDirection('created_at')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('gpuCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                GPUs{getSortDirection('gpuCount')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('clusterCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Clusters{getSortDirection('clusterCount')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('jobCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Jobs{getSortDirection('jobCount')}
-              </TableHead>
-              {/* Show Actions column if basicAuthEnabled and not deduplicating */}
-              {!deduplicateUsers &&
-                (basicAuthEnabled || currentUserRole === 'admin') && (
-                  <TableHead className="whitespace-nowrap w-1/7">
-                    Actions
+                {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                  <TableHead
+                    onClick={() => requestSort('role')}
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  >
+                    Role{getSortDirection('role')}
                   </TableHead>
                 )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredAndSortedUsers.map((user) => {
-              const isSystemUser = user.userType === 'system';
-              const isBasicUser = user.userType === 'basic';
-              const canResetPassword =
-                isBasicUser &&
-                (currentUserRole === 'admin' || user.userId === currentUserId);
-              return (
-                <TableRow key={user.userId}>
-                  <TableCell className="truncate" title={user.username}>
-                    {user.usernameDisplay}
-                  </TableCell>
-                  {!deduplicateUsers && (
-                    <TableCell className="truncate" title={user.fullEmailID}>
-                      {user.fullEmailID}
-                    </TableCell>
+                {!deduplicateUsers &&
+                  !ingressBasicAuthEnabled &&
+                  !externalProxyAuthEnabled && (
+                    <TableHead
+                      onClick={() => requestSort('userType')}
+                      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                    >
+                      Type{getSortDirection('userType')}
+                    </TableHead>
                   )}
-                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                    <TableCell className="truncate" title={user.role}>
-                      <div className="flex items-center gap-2">
-                        {editingUserId === user.userId ? (
-                          <>
-                            <select
-                              value={currentEditingRole}
-                              onChange={(e) =>
-                                setCurrentEditingRole(e.target.value)
-                              }
-                              aria-label="Select user role"
-                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                            >
-                              <option value="admin">Admin</option>
-                              <option value="user">User</option>
-                            </select>
-                            <button
-                              onClick={() => handleSaveEdit(user.userId)}
-                              className="text-green-600 hover:text-green-800 p-1"
-                              title="Save"
-                            >
-                              <CheckIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              className="text-gray-500 hover:text-gray-700 p-1"
-                              title="Cancel"
-                            >
-                              <XIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="capitalize">{user.role}</span>
-                            {/* Only show edit role button if admin and not a system user */}
-                            {currentUserRole === 'admin' && (
-                              <button
-                                onClick={
-                                  !isSystemUser
-                                    ? () =>
-                                        handleEditClick(user.userId, user.role)
-                                    : undefined
-                                }
-                                className={
-                                  !isSystemUser
-                                    ? 'text-blue-600 hover:text-blue-700 p-1'
-                                    : 'text-gray-300 cursor-not-allowed p-1'
-                                }
-                                title={
-                                  !isSystemUser
-                                    ? 'Edit role'
-                                    : 'Cannot edit role for system users'
-                                }
-                                disabled={isSystemUser}
-                              >
-                                <PenIcon className="h-3 w-3" />
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
+                <TableHead
+                  onClick={() => requestSort('created_at')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Joined{getSortDirection('created_at')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('gpuCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  GPUs{getSortDirection('gpuCount')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('clusterCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Clusters{getSortDirection('clusterCount')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('jobCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Jobs{getSortDirection('jobCount')}
+                </TableHead>
+                {/* Show Actions column if basicAuthEnabled and not deduplicating */}
+                {!deduplicateUsers &&
+                  (basicAuthEnabled || currentUserRole === 'admin') && (
+                    <TableHead className="whitespace-nowrap w-1/7">
+                      Actions
+                    </TableHead>
                   )}
-                  {!deduplicateUsers &&
-                    !ingressBasicAuthEnabled &&
-                    !externalProxyAuthEnabled && (
-                      <TableCell className="truncate" title={user.userType}>
-                        <span className="capitalize">
-                          {user.userType === 'sso' ? 'SSO' : user.userType}
-                        </span>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAndSortedUsers.map((user) => {
+                const isSystemUser = user.userType === 'system';
+                const isBasicUser = user.userType === 'basic';
+                const canResetPassword =
+                  isBasicUser &&
+                  (currentUserRole === 'admin' ||
+                    user.userId === currentUserId);
+                return (
+                  <TableRow key={user.userId}>
+                    <TableCell className="truncate" title={user.username}>
+                      {user.usernameDisplay}
+                    </TableCell>
+                    {!deduplicateUsers && (
+                      <TableCell className="truncate" title={user.fullEmailID}>
+                        {user.fullEmailID}
                       </TableCell>
                     )}
-                  <TableCell className="truncate">
-                    {user.created_at ? (
-                      <TimestampWithTooltip
-                        date={new Date(user.created_at * 1000)}
-                      />
-                    ) : (
-                      '-'
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.gpuCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          user.gpuCount > 0
-                            ? 'bg-purple-100 text-purple-600'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                        title={`Total GPUs: ${user.gpuCount}`}
-                      >
-                        {user.gpuCount}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.clusterCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          user.clusterCount > 0
-                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                      >
-                        {user.clusterCount}
-                      </Link>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.jobCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          user.jobCount > 0
-                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                      >
-                        {user.jobCount}
-                      </Link>
-                    )}
-                  </TableCell>
-                  {/* Actions cell logic - hide when deduplicating */}
-                  {!deduplicateUsers &&
-                    (basicAuthEnabled || currentUserRole === 'admin') && (
-                      <TableCell className="relative">
+                    {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                      <TableCell className="truncate" title={user.role}>
                         <div className="flex items-center gap-2">
-                          {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
-                          {basicAuthEnabled && (
-                            <button
-                              onClick={
-                                canResetPassword
-                                  ? async () => {
-                                      onResetPassword(user);
-                                    }
-                                  : undefined
-                              }
-                              className={
-                                canResetPassword
-                                  ? 'text-blue-600 hover:text-blue-700 p-1'
-                                  : 'text-gray-300 cursor-not-allowed p-1'
-                              }
-                              title={
-                                !isBasicUser
-                                  ? 'Password reset only available for basic auth users'
-                                  : canResetPassword
-                                    ? 'Reset Password'
-                                    : 'You can only reset your own password'
-                              }
-                              disabled={!canResetPassword}
-                            >
-                              <KeyRoundIcon className="h-4 w-4" />
-                            </button>
-                          )}
-                          {/* Delete button - only show for admin, disabled for system users */}
-                          {currentUserRole === 'admin' && (
-                            <button
-                              onClick={
-                                !isSystemUser
-                                  ? () => onDeleteUser(user)
-                                  : undefined
-                              }
-                              className={
-                                !isSystemUser
-                                  ? 'text-red-600 hover:text-red-700 p-1'
-                                  : 'text-gray-300 cursor-not-allowed p-1'
-                              }
-                              title={
-                                !isSystemUser
-                                  ? 'Delete User'
-                                  : 'Cannot delete system users'
-                              }
-                              disabled={isSystemUser}
-                            >
-                              <Trash2Icon className="h-4 w-4" />
-                            </button>
+                          {editingUserId === user.userId ? (
+                            <>
+                              <select
+                                value={currentEditingRole}
+                                onChange={(e) =>
+                                  setCurrentEditingRole(e.target.value)
+                                }
+                                aria-label="Select user role"
+                                className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                              >
+                                <option value="admin">Admin</option>
+                                <option value="user">User</option>
+                              </select>
+                              <button
+                                onClick={() => handleSaveEdit(user.userId)}
+                                className="text-green-600 hover:text-green-800 p-1"
+                                title="Save"
+                              >
+                                <CheckIcon className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="text-gray-500 hover:text-gray-700 p-1"
+                                title="Cancel"
+                              >
+                                <XIcon className="h-4 w-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="capitalize">{user.role}</span>
+                              {/* Only show edit role button if admin and not a system user */}
+                              {currentUserRole === 'admin' && (
+                                <button
+                                  onClick={
+                                    !isSystemUser
+                                      ? () =>
+                                          handleEditClick(
+                                            user.userId,
+                                            user.role
+                                          )
+                                      : undefined
+                                  }
+                                  className={
+                                    !isSystemUser
+                                      ? 'text-blue-600 hover:text-blue-700 p-1'
+                                      : 'text-gray-300 cursor-not-allowed p-1'
+                                  }
+                                  title={
+                                    !isSystemUser
+                                      ? 'Edit role'
+                                      : 'Cannot edit role for system users'
+                                  }
+                                  disabled={isSystemUser}
+                                >
+                                  <PenIcon className="h-3 w-3" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </TableCell>
                     )}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+                    {!deduplicateUsers &&
+                      !ingressBasicAuthEnabled &&
+                      !externalProxyAuthEnabled && (
+                        <TableCell className="truncate" title={user.userType}>
+                          <span className="capitalize">
+                            {user.userType === 'sso' ? 'SSO' : user.userType}
+                          </span>
+                        </TableCell>
+                      )}
+                    <TableCell className="truncate">
+                      {user.created_at ? (
+                        <TimestampWithTooltip
+                          date={new Date(user.created_at * 1000)}
+                        />
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.gpuCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            user.gpuCount > 0
+                              ? 'bg-purple-100 text-purple-600'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                          title={`Total GPUs: ${user.gpuCount}`}
+                        >
+                          {user.gpuCount}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.clusterCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            user.clusterCount > 0
+                              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                        >
+                          {user.clusterCount}
+                        </Link>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.jobCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            user.jobCount > 0
+                              ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                        >
+                          {user.jobCount}
+                        </Link>
+                      )}
+                    </TableCell>
+                    {/* Actions cell logic - hide when deduplicating */}
+                    {!deduplicateUsers &&
+                      (basicAuthEnabled || currentUserRole === 'admin') && (
+                        <TableCell className="relative">
+                          <div className="flex items-center gap-2">
+                            {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
+                            {basicAuthEnabled && (
+                              <button
+                                onClick={
+                                  canResetPassword
+                                    ? async () => {
+                                        onResetPassword(user);
+                                      }
+                                    : undefined
+                                }
+                                className={
+                                  canResetPassword
+                                    ? 'text-blue-600 hover:text-blue-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isBasicUser
+                                    ? 'Password reset only available for basic auth users'
+                                    : canResetPassword
+                                      ? 'Reset Password'
+                                      : 'You can only reset your own password'
+                                }
+                                disabled={!canResetPassword}
+                              >
+                                <KeyRoundIcon className="h-4 w-4" />
+                              </button>
+                            )}
+                            {/* Delete button - only show for admin, disabled for system users */}
+                            {currentUserRole === 'admin' && (
+                              <button
+                                onClick={
+                                  !isSystemUser
+                                    ? () => onDeleteUser(user)
+                                    : undefined
+                                }
+                                className={
+                                  !isSystemUser
+                                    ? 'text-red-600 hover:text-red-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isSystemUser
+                                    ? 'Delete User'
+                                    : 'Cannot delete system users'
+                                }
+                                disabled={isSystemUser}
+                              >
+                                <Trash2Icon className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -2821,6 +2851,12 @@ function ServiceAccountTokensView({
         </div>
       ) : (
         <>
+          <div className="text-sm text-gray-500 mb-2">
+            {filteredTokens.length}{' '}
+            {filteredTokens.length === 1
+              ? 'service account'
+              : 'service accounts'}
+          </div>
           <Card>
             <Table>
               <TableHeader>
