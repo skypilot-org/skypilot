@@ -796,11 +796,32 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_thread_pool: thread_utils.ThreadSafeDict[
             int, thread_utils.SafeThread] = thread_utils.ThreadSafeDict()
 
+        # Run recovery synchronously before launching the daemon threads.
+        #
+        # If any daemon (especially `_job_status_fetcher`, which SSHes /
+        # gRPC-calls into each replica's head node to query job status)
+        # wins the race for `self.lock`, the main thread blocks on
+        # `_recover_replica_operations`'s `with self.lock:` until that
+        # daemon's per-replica SSH walk completes. With unreachable
+        # replicas (pod / VM gone), each SSH connect hangs at the kernel
+        # TCP timeout (tens of seconds to minutes), so the main thread
+        # never returns from `SkyPilotReplicaManager.__init__` →
+        # `SkyServeController.__init__` → never reaches `uvicorn.run`,
+        # and `_wait_for_controller_ready` times out (60s) in the parent
+        # `_start` process. With HA recovery changes, that
+        # timeout now triggers `os._exit(1)` → daemon retries → same
+        # race → infinite loop.
+        #
+        # Doing recovery first guarantees the main thread has the lock
+        # for the brief window it needs (and `_launch_replica` itself
+        # just queues a SafeThread, no SSH inline). The daemons can
+        # safely start after — they'll wait for the lock only when
+        # `_recover_replica_operations` has already released it.
+        self._recover_replica_operations()
+
         threading.Thread(target=self._thread_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
-
-        self._recover_replica_operations()
 
     @with_lock
     def _recover_replica_operations(self):
