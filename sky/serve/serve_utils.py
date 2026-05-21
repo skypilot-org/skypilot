@@ -1,6 +1,8 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import concurrent.futures
+import contextvars
 import dataclasses
 import datetime
 import enum
@@ -61,12 +63,14 @@ logger = sky_logging.init_logger(__name__)
 # `controller_ip` is atomic w.r.t. controller readiness (sky.serve.service
 # only flips DB after _wait_for_controller_ready), so the only failure modes
 # left are: (1) DB read replica lag right after a recovery; (2) brief network
-# blips between pods. Both resolve in <1s — a small bounded retry covers them.
+# blips between pods.
 # Intermediate retries log at DEBUG to avoid spamming WARN every refresh tick
 # while the controller is intentionally absent (CONTROLLER_INIT /
 # SHUTTING_DOWN / FAILED_CLEANUP); the final-attempt failure logs once at
 # WARN.
-_CONTROLLER_HTTP_RETRY_ATTEMPTS = 3
+# A single attempt with a tight connect timeout keeps `sky jobs pool status`
+# responsive even when one of N pools' controllers is unreachable.
+_CONTROLLER_HTTP_RETRY_ATTEMPTS = 1
 _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # (connect_timeout, read_timeout). Connect timeout matters most: when the
 # controller pod is dead/unreachable, kernel ECONNREFUSED is instant on
@@ -75,7 +79,14 @@ _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # explicit timeout, `requests` waits forever and `sky jobs pool status`
 # appears to hang. Read timeout is generous because /autoscaler/info on a
 # busy controller can take a moment.
-_CONTROLLER_HTTP_TIMEOUT_SECONDS = (2.0, 10.0)
+_CONTROLLER_HTTP_TIMEOUT_SECONDS = (1.0, 10.0)
+
+# Bound on the per-call thread pool used by `get_service_status_pickled` to
+# fan out across services/pools. The per-service work is dominated by I/O
+# (controller HTTP + DB reads), so threads parallelize well. Capped low so a
+# 100-pool deployment doesn't open 100 simultaneous DB connections or
+# trigger memory pressure on big pools.
+_STATUS_FANOUT_MAX_WORKERS = 8
 
 
 def _get_controller_url(service_name: str, controller_port: int) -> str:
@@ -946,18 +957,34 @@ def _get_service_status(
 
 def get_service_status_pickled(service_names: Optional[List[str]],
                                pool: bool) -> List[Dict[str, str]]:
-    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
-    for service_name in service_names:
-        service_status = _get_service_status(service_name, pool=pool)
-        if service_status is None:
-            continue
-        service_statuses.append({
-            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in service_status.items()
-        })
+    if not service_names:
+        return []
+    # Fan out across services. Each `_get_service_status` is dominated by
+    # I/O (controller HTTP + DB reads) so threads parallelize well; the
+    # cap on max_workers keeps memory and DB-connection pressure bounded.
+    # Each task gets a fresh `Context.copy()` because the same Context
+    # can't be entered from multiple threads (Context.run raises
+    # RuntimeError otherwise) — but the values (request_id / user_id)
+    # are inherited so log redirection still works inside workers.
+    # `ex.map` preserves the existing failure contract (first failure
+    # aborts the whole call).
+    parent_ctx = contextvars.copy_context()
+
+    def _run_in_context(name: str) -> Optional[Dict[str, Any]]:
+        return parent_ctx.copy().run(_get_service_status, name, pool=pool)
+
+    max_workers = min(len(service_names), _STATUS_FANOUT_MAX_WORKERS)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        statuses = list(ex.map(_run_in_context, service_names))
+    service_statuses: List[Dict[str, str]] = [{
+        k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+        for k, v in s.items()
+    }
+                                              for s in statuses
+                                              if s is not None]
     return sorted(service_statuses, key=lambda x: x['name'])
 
 
@@ -1999,19 +2026,39 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
             else:
                 used_by_str = '-'
 
-        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
-            'handle']
-        if replica_handle is not None:
-            infra = replica_handle.launched_resources.infra.formatted_str()
-            simplified = not show_all
-            resources_str_simple, resources_str_full = (
-                resources_utils.get_readable_resources_repr(
-                    replica_handle, simplified_only=simplified))
-            if simplified:
-                resources_str = resources_str_simple
-            else:
-                assert resources_str_full is not None
-                resources_str = resources_str_full
+        # Prefer pre-computed string fields from the server (new servers
+        # ship these alongside or instead of a pickled handle to keep wire
+        # payload small). Fall back to computing them locally from
+        # ``record['handle']`` for back-compat with old servers.
+        infra_pre = record.get('infra')
+        if infra_pre is not None:
+            infra = infra_pre
+        if show_all:
+            resources_pre = (record.get('resources_str_full') or
+                             record.get('resources_str'))
+        else:
+            resources_pre = record.get('resources_str')
+        if resources_pre is not None:
+            resources_str = resources_pre
+
+        if infra_pre is None or resources_pre is None:
+            replica_handle: Optional[
+                'backends.CloudVmRayResourceHandle'] = record.get('handle')
+            if (replica_handle is not None and
+                    replica_handle.launched_resources is not None):
+                if infra_pre is None:
+                    infra = (
+                        replica_handle.launched_resources.infra.formatted_str())
+                if resources_pre is None:
+                    simplified = not show_all
+                    resources_str_simple, resources_str_full = (
+                        resources_utils.get_readable_resources_repr(
+                            replica_handle, simplified_only=simplified))
+                    if simplified:
+                        resources_str = resources_str_simple
+                    else:
+                        assert resources_str_full is not None
+                        resources_str = resources_str_full
 
         replica_values = [
             service_name,

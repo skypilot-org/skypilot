@@ -567,22 +567,27 @@ class ReplicaInfo:
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
+        # Resolve the handle once. When the cluster row is missing, the
+        # handle is also missing (they live in the same row), so
+        # short-circuit to avoid an extra DB lookup.
+        if cluster_record is None:
+            handle = None
+        else:
+            handle = self.handle(cluster_record)
+        # Always populate the small derived strings — new clients read
+        # these instead of touching the handle, and the cost is just a
+        # dict lookup + isinstance on a cluster_record we already have.
+        if handle is not None and handle.launched_resources is not None:
+            info_dict['cloud'] = repr(handle.launched_resources.cloud)
+            info_dict['region'] = handle.launched_resources.region
+            simple, full = resources_utils.get_readable_resources_repr(
+                handle, simplified_only=False)
+            info_dict['resources_str'] = simple
+            info_dict['resources_str_full'] = (full
+                                               if full is not None else simple)
+            info_dict['infra'] = handle.launched_resources.infra.formatted_str()
         if with_handle:
-            # When the cluster row is missing, the handle is also missing
-            # (they live in the same row). ``self.handle(None)`` would issue
-            # another DB lookup against the same row and return None
-            # anyway, so short-circuit instead.
-            if cluster_record is None:
-                handle = None
-            else:
-                handle = self.handle(cluster_record)
             info_dict['handle'] = handle
-            if handle is not None:
-                info_dict['cloud'] = repr(handle.launched_resources.cloud)
-                info_dict['region'] = handle.launched_resources.region
-                info_dict['resources_str'] = (
-                    resources_utils.get_readable_resources_repr(
-                        handle, simplified_only=True)[0])
         return info_dict
 
     def __repr__(self) -> str:
