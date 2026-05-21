@@ -23,15 +23,14 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 from dataclasses import dataclass
-import os
 import time
 from typing import List, Optional
 
 from accelerate import Accelerator
 import httpx
 import torch
-from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 
@@ -46,6 +45,7 @@ class TrainingConfig:
     model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"
     batch_size: int = 4
     num_epochs: int = 3
+    steps_per_epoch: int = 100
     learning_rate: float = 1e-6
     max_new_tokens: int = 512
     temperature: float = 0.7
@@ -58,6 +58,9 @@ class TrainingConfig:
     # (e.g., a shared PVC or bucket mounted on both tasks).
     policy_sync_path: Optional[str] = None
     policy_sync_interval: int = 10
+    policy_sync_servers: Optional[List[str]] = None
+    policy_sync_max_attempts: int = 30
+    policy_sync_retry_interval: int = 10
 
 
 class RLHFTrainer:
@@ -92,6 +95,14 @@ class RLHFTrainer:
         # Statistics
         self.total_steps = 0
         self.total_rewards = 0.0
+
+    def save_static_policy_sync_assets(self):
+        """Save static policy files used by later weight syncs."""
+        if not self.config.policy_sync_path:
+            return
+        if not self.accelerator.is_main_process:
+            return
+        self.tokenizer.save_pretrained(self.config.policy_sync_path)
 
     def wait_for_services(self,
                           max_retries: int = 30,
@@ -281,7 +292,7 @@ class RLHFTrainer:
 
         # GRPO: normalize rewards within batch (group-relative)
         mean_reward = rewards_tensor.mean()
-        std_reward = rewards_tensor.std() + 1e-8
+        std_reward = rewards_tensor.std(unbiased=False) + 1e-8
         advantages = (rewards_tensor - mean_reward) / std_reward
 
         # Policy gradient loss (negative because we maximize reward)
@@ -309,22 +320,65 @@ class RLHFTrainer:
         unwrapped = self.accelerator.unwrap_model(self.model)
         unwrapped.save_pretrained(self.config.policy_sync_path,
                                   safe_serialization=True)
-        self.tokenizer.save_pretrained(self.config.policy_sync_path)
 
-        # 2. Tell the rollout server to load the new weights and flush KV cache.
-        base_url = f"http://{self.config.rollout_server}"
-        try:
-            r = self.http_client.post(
-                f"{base_url}/update_weights_from_disk",
-                json={"model_path": self.config.policy_sync_path},
-                timeout=300.0)
-            r.raise_for_status()
-            self.http_client.post(f"{base_url}/flush_cache", timeout=30.0)
-            print(f"[policy-sync] step {self.total_steps}: pushed weights "
-                  f"to {self.config.rollout_server}")
-        except Exception as e:
-            print(f"[policy-sync] step {self.total_steps}: WARNING — "
-                  f"failed to update rollout server weights: {e}")
+        # 2. Tell rollout backend(s) to load the new weights and flush KV cache.
+        sync_servers = self.config.policy_sync_servers or [
+            self.config.rollout_server
+        ]
+        errors = []
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=len(sync_servers)) as executor:
+            future_to_server = {
+                executor.submit(self._sync_policy_to_server, server): server
+                for server in sync_servers
+            }
+            for future in concurrent.futures.as_completed(future_to_server):
+                server = future_to_server[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    errors.append(f"{server}: {e}")
+
+        if errors:
+            raise RuntimeError(
+                "Failed to sync policy weights to rollout backend(s): " +
+                "; ".join(errors))
+
+    def _sync_policy_to_server(self, server: str):
+        base_url = self._base_url(server)
+        last_error: Optional[Exception] = None
+        max_attempts = max(1, self.config.policy_sync_max_attempts)
+        retry_interval = max(0, self.config.policy_sync_retry_interval)
+        with httpx.Client() as client:
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    r = client.post(
+                        f"{base_url}/update_weights_from_disk",
+                        json={"model_path": self.config.policy_sync_path},
+                        timeout=300.0)
+                    r.raise_for_status()
+                    r = client.post(f"{base_url}/flush_cache", timeout=30.0)
+                    r.raise_for_status()
+                    print(f"[policy-sync] step {self.total_steps}: pushed "
+                          f"weights to {server}")
+                    return
+                except Exception as e:
+                    last_error = e
+                    if attempt == max_attempts:
+                        break
+                    print(f"[policy-sync] step {self.total_steps}: waiting "
+                          f"for {server} to recover after attempt "
+                          f"{attempt}/{max_attempts}: {e}")
+                    time.sleep(retry_interval)
+
+        raise RuntimeError(last_error)
+
+    @staticmethod
+    def _base_url(server: str) -> str:
+        server = server.rstrip("/")
+        if server.startswith("http://") or server.startswith("https://"):
+            return server
+        return f"http://{server}"
 
     def train_step(self) -> dict:
         """Execute one training step."""
@@ -392,19 +446,20 @@ class RLHFTrainer:
             print(f"Model: {self.config.model_name}")
             print(f"Batch size: {self.config.batch_size}")
             print(f"Epochs: {self.config.num_epochs}")
+            print(f"Steps per epoch: {self.config.steps_per_epoch}")
             print(f"Learning rate: {self.config.learning_rate}")
             print("=" * 60)
 
         # Wait for services
         self.wait_for_services()
+        self.save_static_policy_sync_assets()
 
         # Training loop
-        steps_per_epoch = 100  # Configurable
         for epoch in range(self.config.num_epochs):
             epoch_rewards = []
             epoch_losses = []
 
-            for step in range(steps_per_epoch):
+            for step in range(self.config.steps_per_epoch):
                 metrics = self.train_step()
                 epoch_rewards.append(metrics["mean_reward"])
                 epoch_losses.append(metrics["loss"])
@@ -418,7 +473,7 @@ class RLHFTrainer:
 
                 if self.accelerator.is_main_process and step % 10 == 0:
                     print(f"Epoch {epoch+1}/{self.config.num_epochs} | "
-                          f"Step {step+1}/{steps_per_epoch} | "
+                          f"Step {step+1}/{self.config.steps_per_epoch} | "
                           f"Loss: {metrics['loss']:.4f} | "
                           f"Reward: {metrics['mean_reward']:.4f} | "
                           f"Accuracy: {metrics['accuracy']:.2%}")
@@ -435,7 +490,8 @@ class RLHFTrainer:
                 buffer_stats = self.get_replay_buffer_stats()
                 if buffer_stats:
                     print(
-                        f"Replay Buffer: {buffer_stats['size']}/{buffer_stats['capacity']} "
+                        f"Replay Buffer: {buffer_stats['size']}/"
+                        f"{buffer_stats['capacity']} "
                         f"(avg_reward: {buffer_stats['avg_reward']:.4f}, "
                         f"positive_ratio: {buffer_stats['positive_ratio']:.2%})"
                     )
@@ -480,6 +536,10 @@ def main():
                         type=int,
                         default=3,
                         help="Number of training epochs")
+    parser.add_argument("--steps-per-epoch",
+                        type=int,
+                        default=100,
+                        help="Number of training steps per epoch")
     parser.add_argument("--learning-rate",
                         type=float,
                         default=1e-6,
@@ -488,16 +548,38 @@ def main():
                         type=str,
                         default=None,
                         help="Shared path (PVC/bucket mounted on both trainer "
-                             "and rollout-server). When set, the trainer saves "
-                             "the updated policy here and asks the rollout "
-                             "server to reload it after every "
-                             "--policy-sync-interval steps.")
+                        "and rollout-server). When set, the trainer saves "
+                        "the updated policy here and asks the rollout "
+                        "server to reload it after every "
+                        "--policy-sync-interval steps.")
     parser.add_argument("--policy-sync-interval",
                         type=int,
                         default=10,
                         help="Number of training steps between policy syncs "
-                             "to the rollout server.")
+                        "to the rollout server.")
+    parser.add_argument("--policy-sync-servers",
+                        type=str,
+                        default=None,
+                        help="Comma-separated rollout backend addresses for "
+                        "policy reloads.")
+    parser.add_argument("--policy-sync-max-attempts",
+                        type=int,
+                        default=30,
+                        help="Maximum policy sync attempts per rollout "
+                        "backend before failing.")
+    parser.add_argument("--policy-sync-retry-interval",
+                        type=int,
+                        default=10,
+                        help="Seconds to wait between policy sync retry "
+                        "attempts.")
     args = parser.parse_args()
+    policy_sync_servers = None
+    if args.policy_sync_servers:
+        policy_sync_servers = [
+            server.strip()
+            for server in args.policy_sync_servers.split(",")
+            if server.strip()
+        ]
 
     config = TrainingConfig(
         data_server=args.data_server,
@@ -507,9 +589,13 @@ def main():
         model_name=args.model,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
+        steps_per_epoch=args.steps_per_epoch,
         learning_rate=args.learning_rate,
         policy_sync_path=args.policy_sync_path,
         policy_sync_interval=args.policy_sync_interval,
+        policy_sync_servers=policy_sync_servers,
+        policy_sync_max_attempts=args.policy_sync_max_attempts,
+        policy_sync_retry_interval=args.policy_sync_retry_interval,
     )
 
     trainer = RLHFTrainer(config)
