@@ -1,6 +1,8 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import concurrent.futures
+import contextvars
 import dataclasses
 import datetime
 import enum
@@ -78,6 +80,13 @@ _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # appears to hang. Read timeout is generous because /autoscaler/info on a
 # busy controller can take a moment.
 _CONTROLLER_HTTP_TIMEOUT_SECONDS = (1.0, 10.0)
+
+# Bound on the per-call thread pool used by `get_service_status_pickled` to
+# fan out across services/pools. The per-service work is dominated by I/O
+# (controller HTTP + DB reads), so threads parallelize well. Capped low so a
+# 100-pool deployment doesn't open 100 simultaneous DB connections or
+# trigger memory pressure on big pools.
+_STATUS_FANOUT_MAX_WORKERS = 8
 
 
 def _get_controller_url(service_name: str, controller_port: int) -> str:
@@ -877,18 +886,34 @@ def _get_service_status(
 
 def get_service_status_pickled(service_names: Optional[List[str]],
                                pool: bool) -> List[Dict[str, str]]:
-    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
-    for service_name in service_names:
-        service_status = _get_service_status(service_name, pool=pool)
-        if service_status is None:
-            continue
-        service_statuses.append({
-            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in service_status.items()
-        })
+    if not service_names:
+        return []
+    # Fan out across services. Each `_get_service_status` is dominated by
+    # I/O (controller HTTP + DB reads) so threads parallelize well; the
+    # cap on max_workers keeps memory and DB-connection pressure bounded.
+    # Each task gets a fresh `Context.copy()` because the same Context
+    # can't be entered from multiple threads (Context.run raises
+    # RuntimeError otherwise) — but the values (request_id / user_id)
+    # are inherited so log redirection still works inside workers.
+    # `ex.map` preserves the existing failure contract (first failure
+    # aborts the whole call).
+    parent_ctx = contextvars.copy_context()
+
+    def _run_in_context(name: str) -> Optional[Dict[str, Any]]:
+        return parent_ctx.copy().run(_get_service_status, name, pool=pool)
+
+    max_workers = min(len(service_names), _STATUS_FANOUT_MAX_WORKERS)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        statuses = list(ex.map(_run_in_context, service_names))
+    service_statuses: List[Dict[str, str]] = [{
+        k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+        for k, v in s.items()
+    }
+                                              for s in statuses
+                                              if s is not None]
     return sorted(service_statuses, key=lambda x: x['name'])
 
 

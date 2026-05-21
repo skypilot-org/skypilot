@@ -14,10 +14,14 @@ Coverage:
    computing from the handle when those are absent (old server).
 """
 import base64
+import contextvars
 import pickle
+import time
+from typing import List, Optional
 from unittest import mock
 
 import orjson
+import pytest
 
 from sky.serve import replica_managers
 from sky.serve import serve_state
@@ -343,3 +347,114 @@ class TestControllerHttpRetryTightened:
     def test_short_connect_timeout(self):
         connect, _ = serve_utils._CONTROLLER_HTTP_TIMEOUT_SECONDS
         assert connect <= 1.0
+
+
+class TestGetServiceStatusPickledParallel:
+    """`get_service_status_pickled` fans out across services. The change
+    must preserve four contracts: (a) returned list sorted by 'name'; (b)
+    None statuses filtered out; (c) first failure aborts the whole call
+    (matching legacy serial behavior); (d) contextvars propagate into
+    workers so request-scoped log redirection keeps working."""
+
+    def _fake_status(self, name):
+        return {
+            'name': name,
+            'status': serve_state.ServiceStatus.READY,
+            'replica_info': [],
+        }
+
+    def test_returns_sorted_by_name(self):
+        names = ['svc-c', 'svc-a', 'svc-b']
+        with mock.patch('sky.serve.serve_utils._get_service_status',
+                        side_effect=lambda n, pool: self._fake_status(n)):
+            out = serve_utils.get_service_status_pickled(names, pool=False)
+        # Decode the pickled 'name' fields to verify the final order.
+        decoded_names = [
+            pickle.loads(base64.b64decode(s['name'].encode('utf-8')))
+            for s in out
+        ]
+        assert decoded_names == ['svc-a', 'svc-b', 'svc-c']
+
+    def test_skips_none_results(self):
+        """A service that vanished mid-call (`_get_service_status` returns
+        None) must be silently dropped, not stuffed into the response."""
+
+        def side(name, pool):
+            return None if name == 'svc-gone' else self._fake_status(name)
+
+        with mock.patch('sky.serve.serve_utils._get_service_status',
+                        side_effect=side):
+            out = serve_utils.get_service_status_pickled(
+                ['svc-a', 'svc-gone', 'svc-b'], pool=False)
+        assert len(out) == 2
+
+    def test_first_failure_raises_like_serial(self):
+        """ex.map() yields in input order and re-raises the first
+        exception it encounters. Matches the legacy for-loop contract:
+        any failure surfaces immediately."""
+
+        class Boom(Exception):
+            pass
+
+        def side(name, pool):
+            if name == 'svc-boom':
+                raise Boom('controller went away')
+            return self._fake_status(name)
+
+        with mock.patch('sky.serve.serve_utils._get_service_status',
+                        side_effect=side):
+            with pytest.raises(Boom):
+                serve_utils.get_service_status_pickled(
+                    ['svc-a', 'svc-boom', 'svc-b'], pool=False)
+
+    def test_empty_input_short_circuits(self):
+        """Empty `service_names` must NOT spawn an executor (cheap path
+        for the very common empty-cluster case)."""
+        with mock.patch('sky.serve.serve_utils._get_service_status') as m:
+            out = serve_utils.get_service_status_pickled([], pool=False)
+        assert out == []
+        m.assert_not_called()
+
+    def test_runs_concurrently_not_serial(self):
+        """Workers run in parallel: 4 services each sleeping 100ms must
+        finish in well under the 400ms serial bound. Tolerant threshold
+        (200ms) avoids flakes on slow CI but still proves parallelism."""
+
+        def slow(name, pool):
+            time.sleep(0.1)
+            return self._fake_status(name)
+
+        with mock.patch('sky.serve.serve_utils._get_service_status',
+                        side_effect=slow):
+            t0 = time.perf_counter()
+            out = serve_utils.get_service_status_pickled(
+                ['s1', 's2', 's3', 's4'], pool=False)
+            elapsed = time.perf_counter() - t0
+        assert len(out) == 4
+        # Serial would be ~0.4s; parallel with 4 workers should be ~0.1s.
+        assert elapsed < 0.25, f'expected parallel execution, took {elapsed:.2f}s'
+
+    def test_contextvars_propagated(self):
+        """request_id / user_id contextvars must be visible inside worker
+        threads — without `contextvars.copy_context()` the worker would
+        see the default (empty) value and lose log scoping."""
+        marker: 'contextvars.ContextVar[Optional[str]]' = (
+            contextvars.ContextVar('test_marker', default=None))
+        seen_in_worker: List[Optional[str]] = []
+
+        def capture(name, pool):
+            seen_in_worker.append(marker.get())
+            return self._fake_status(name)
+
+        marker.set('caller-tag')
+        with mock.patch('sky.serve.serve_utils._get_service_status',
+                        side_effect=capture):
+            serve_utils.get_service_status_pickled(['s1', 's2', 's3'],
+                                                   pool=False)
+        assert seen_in_worker == ['caller-tag'] * 3
+
+    def test_worker_cap_respected(self):
+        """For 100 services, max_workers must be capped at
+        `_STATUS_FANOUT_MAX_WORKERS` — a runaway thread count would
+        exhaust the DB connection pool on QueuePool deployments."""
+        assert serve_utils._STATUS_FANOUT_MAX_WORKERS <= 16
