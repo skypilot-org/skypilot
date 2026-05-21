@@ -117,7 +117,10 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/ssh_node_pools/{pool_name}/down', 'POST'),
     ('/ssh_node_pools/down', 'POST'),
     # --- Debug ---
-    ('/debug/dump_create', 'POST'),
+    # /debug/dump_create is intentionally on the viewer allowlist (see
+    # _DEFAULT_VIEWER_ALLOWLIST) so viewers can capture support diagnostics;
+    # only the download endpoint stays admin-only because the dump file
+    # itself may contain sensitive state.
     ('/debug/dump_download/{dump_filename}', 'GET'),
     # --- /api/* paths: RBAC-skipped at middleware level, not on
     # viewer allowlist; explicitly enumerated here for documentation.

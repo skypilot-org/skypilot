@@ -54,8 +54,14 @@ class TestGetViewerAllowlist:
         } not in allowlist
         # User export exposes password hashes.
         assert {'path': '/users/export', 'method': 'GET'} not in allowlist
-        # Debug dump endpoints expose internal state.
-        assert {'path': '/debug/dump_create', 'method': 'POST'} not in allowlist
+        # `/debug/dump_create` is intentionally on the allowlist for
+        # support diagnostics (see _DEFAULT_VIEWER_ALLOWLIST); only the
+        # download endpoint is admin-only because the dump file itself
+        # may contain sensitive state.
+        assert {
+            'path': '/debug/dump_download/{dump_filename}',
+            'method': 'GET',
+        } not in allowlist
 
     def test_websocket_ssh_proxies_NOT_on_default_allowlist(self):
         with mock.patch('sky.skypilot_config.get_nested', return_value={}):
