@@ -14,7 +14,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, TextIO, Type, Union)
+                    Optional, Set, TextIO, Type, Union)
 import uuid
 
 import colorama
@@ -366,6 +366,11 @@ def ha_recovery_for_consolidation_mode(pool: bool):
     noun = 'pool' if pool else 'serve'
     capnoun = noun.capitalize()
     prefix = f'{noun}_'
+    # Snapshot the set of in-flight _start service names once per iteration
+    # so we don't walk /proc N times for N services. This also gives all
+    # services a consistent view (no torn read where service A is checked
+    # before service B's _start spawns, and B is checked after).
+    in_flight_service_names = _snapshot_in_flight_start_service_names()
     with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(prefix),
               'w',
               encoding='utf-8') as f:
@@ -382,7 +387,7 @@ def ha_recovery_for_consolidation_mode(pool: bool):
             status_dbg = svc.get('status')
             f.write(f'ha_recovery candidate {service_name}: '
                     f'pid={controller_pid} ip={controller_ip} '
-                    f'status={status_dbg}')
+                    f'status={status_dbg}\n')
             if controller_pid is not None:
                 try:
                     alive = _controller_process_alive(controller_pid,
@@ -402,6 +407,20 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                             f'{noun} {service_name} is still running. '
                             'Skipping recovery.\n')
                     continue
+
+            # Defense in depth: even if DB controller_pid is stale (e.g. an
+            # older _start hadn't yet pre-claimed it, or pre-claim is
+            # disabled / lost), still skip the recovery launch if any
+            # `python -m sky.serve.service --service-name <name>` is
+            # already running on this pod (snapshot taken once at the
+            # top of the iteration). Otherwise the daemon's ~20s
+            # iteration repeatedly fires recovery during the 0-60s
+            # controller boot window, piling up multiple _start instances.
+            if service_name in in_flight_service_names:
+                f.write(f'{capnoun} {service_name}: _start process already '
+                        f'running on this pod; skipping recovery this '
+                        f'round.\n')
+                continue
 
             script = serve_state.get_ha_recovery_script(service_name)
             if script is None:
@@ -427,6 +446,58 @@ def _controller_process_alive(pid: int, service_name: str) -> bool:
         ) and f'--service-name {service_name}' in cmd_str
     except psutil.NoSuchProcess:
         return False
+
+
+def _snapshot_in_flight_start_service_names() -> Set[str]:
+    """Walk `/proc` once and return the set of service names that have an
+    active (non-zombie) `python -m sky.serve.service --service-name <name>`
+    process on this pod.
+
+    Used by ha_recovery_for_consolidation_mode to deduplicate recovery
+    launches: while a previously-spawned _start is still in its 0-60s
+    boot window waiting for the controller subprocess to bind, DB
+    controller_pid may still point at the dead previous instance.
+    Re-firing the recovery script in that window causes pile-up
+    (multiple _start instances racing on the same service).
+
+    Snapshotting once per daemon iteration (rather than per-service)
+    gives O(processes + N services) instead of O(processes * N), and
+    also a consistent view (all services see the same set).
+
+    Zombies are excluded — a `_start` process that died but hasn't been
+    reaped (pods without a proper init process) would otherwise
+    permanently block recovery for that service.
+
+    Matching is on the argv LIST (not a joined string), so
+    `--service-name pool-a` does not falsely match `--service-name pool-abc`.
+    """
+    in_flight: Set[str] = set()
+    for proc in psutil.process_iter(['cmdline', 'status']):
+        try:
+            if proc.info.get('status') == psutil.STATUS_ZOMBIE:
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            if 'sky.serve.service' not in ' '.join(cmdline):
+                continue
+            try:
+                idx = cmdline.index('--service-name')
+            except ValueError:
+                continue
+            if idx + 1 < len(cmdline):
+                in_flight.add(cmdline[idx + 1])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return in_flight
+
+
+def _start_in_flight(service_name: str) -> bool:
+    """Thin wrapper around `_snapshot_in_flight_start_service_names` for
+    one-off checks (e.g. tests, ad-hoc callers).
+
+    The hot path in `ha_recovery_for_consolidation_mode` calls the
+    snapshot helper directly and reuses the set across services.
+    """
+    return service_name in _snapshot_in_flight_start_service_names()
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
