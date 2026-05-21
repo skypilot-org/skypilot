@@ -462,6 +462,149 @@ class TestTerminateShuttingDownPurge:
             mock_purge.assert_not_called()
 
 
+class TestTerminateConsolidationDeadController:
+    """In consolidation mode, the controller subprocess can die (OOM, crash)
+    while the service row is still in a non-terminal status (READY,
+    NO_REPLICA, etc.). The default code path writes a TERMINATE signal file
+    that the dead controller will never read, so the row gets stuck forever.
+    `--purge` must short-circuit to a direct DB cleanup when we can prove the
+    controller is dead and we're the pod that should own it."""
+
+    def _service_record(self, status, controller_pid=1234, controller_ip=None):
+        return {
+            'name': 'svc',
+            'status': status,
+            'controller_pid': controller_pid,
+            'controller_port': 20001,
+            'controller_ip': controller_ip,
+            'pool': True,
+        }
+
+    def _patches(self,
+                 status,
+                 controller_pid=1234,
+                 controller_ip=None,
+                 nonterminal_job_ids=None,
+                 consolidation=True,
+                 pid_alive_return=False,
+                 pid_alive_side_effect=None,
+                 pod_ip_env=None):
+        record = self._service_record(status,
+                                      controller_pid=controller_pid,
+                                      controller_ip=controller_ip)
+        env = {} if pod_ip_env is None else {'POD_IP': pod_ip_env}
+        patches = [
+            mock.patch(
+                'sky.serve.serve_utils.serve_state.'
+                'get_glob_service_names',
+                return_value=['svc']),
+            mock.patch('sky.serve.serve_utils._get_service_status',
+                       return_value=record),
+            mock.patch(
+                'sky.serve.serve_utils.managed_job_state.'
+                'get_nonterminal_job_ids_by_pool',
+                return_value=nonterminal_job_ids or []),
+            mock.patch('sky.serve.serve_utils.is_consolidation_mode',
+                       return_value=consolidation),
+            mock.patch.dict('sky.serve.serve_utils.os.environ', env,
+                            clear=True),
+        ]
+        alive_kwargs = {}
+        if pid_alive_side_effect is not None:
+            alive_kwargs['side_effect'] = pid_alive_side_effect
+        else:
+            alive_kwargs['return_value'] = pid_alive_return
+        patches.append(
+            mock.patch('sky.serve.serve_utils._controller_process_alive',
+                       **alive_kwargs))
+        return patches
+
+    def _run(self, patches, purge=True):
+        # Stub signal-file path + filelock so the "controller alive" branch
+        # doesn't write a real file into ~/.sky/signals during tests.
+        # serve_utils calls Path(...).expanduser() and then operates on the
+        # result, so wire expanduser() back to the same mock to make
+        # assertions readable.
+        mock_signal_file = mock.MagicMock()
+        mock_signal_file.expanduser.return_value = mock_signal_file
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patches[5], \
+             mock.patch('sky.serve.serve_utils._terminate_failed_services',
+                        return_value=None) as mock_purge, \
+             mock.patch('sky.serve.serve_utils.pathlib.Path',
+                        return_value=mock_signal_file), \
+             mock.patch('sky.serve.serve_utils.filelock.FileLock'):
+            serve_utils.terminate_services(['svc'], purge=purge, pool=True)
+            return mock_purge, mock_signal_file
+
+    def test_purge_force_cleans_when_local_controller_is_dead(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                pid_alive_return=False)
+        mock_purge, mock_signal = self._run(patches)
+        mock_purge.assert_called_once_with('svc',
+                                           serve_state.ServiceStatus.READY)
+        # No signal file should be opened when we force-clean.
+        mock_signal.open.assert_not_called()
+
+    def test_purge_force_cleans_when_controller_pid_is_none(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.NO_REPLICA,
+                                controller_pid=None)
+        mock_purge, _ = self._run(patches)
+        mock_purge.assert_called_once_with('svc',
+                                           serve_state.ServiceStatus.NO_REPLICA)
+
+    def test_purge_writes_signal_when_controller_is_alive(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                pid_alive_return=True)
+        mock_purge, mock_signal = self._run(patches)
+        mock_purge.assert_not_called()
+        mock_signal.open.assert_called()
+
+    def test_no_purge_does_not_force_clean_even_when_dead(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                pid_alive_return=False)
+        mock_purge, _ = self._run(patches, purge=False)
+        mock_purge.assert_not_called()
+
+    def test_purge_no_force_clean_when_controller_on_peer_pod(self):
+        # HA: controller_ip points at a different pod, so our local psutil
+        # check would be meaningless. Fall back to the signal-file path.
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                controller_ip='10.0.0.42',
+                                pod_ip_env='10.0.0.41',
+                                pid_alive_return=False)
+        mock_purge, _ = self._run(patches)
+        mock_purge.assert_not_called()
+
+    def test_purge_no_force_clean_when_not_consolidation_mode(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                consolidation=False,
+                                pid_alive_return=False)
+        mock_purge, _ = self._run(patches)
+        mock_purge.assert_not_called()
+
+    def test_purge_treats_psutil_exception_as_alive(self):
+        # psutil raised (AccessDenied / cmdline race): conservative path.
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        patches = self._patches(serve_state.ServiceStatus.READY,
+                                pid_alive_side_effect=RuntimeError('boom'))
+        mock_purge, _ = self._run(patches)
+        mock_purge.assert_not_called()
+
+
 class TestPoolStatusBatchedQuery:
     """`_get_service_status(pool=True)` must batch its per-replica job lookups
     into a single grouped query. The previous per-replica fan-out scaled with

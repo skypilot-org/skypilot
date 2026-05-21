@@ -1306,6 +1306,44 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
         # `serve_state.add_or_update_version` in service.py.
         purge_cmd = (f'sky jobs pool down {service_name} --purge'
                      if pool else f'sky serve down {service_name} --purge')
+        # Force-clean DB when the consolidation-mode controller subprocess is
+        # provably dead. Without this, the non-terminal-status branch below
+        # writes a TERMINATE signal file that the dead controller will never
+        # read, leaving the row stuck forever. The SHUTTING_DOWN and
+        # failed_statuses branches above already cover their respective
+        # zombie cases via _terminate_failed_services; this is the
+        # non-terminal-status counterpart for consolidation mode.
+        # Only safe to run our local psutil check when we're the pod that
+        # should be running the controller: in HA, controller_ip can point
+        # at a peer pod and the pid is meaningless to us.
+        if purge and is_consolidation_mode(pool):
+            controller_pid = service_status.get('controller_pid')
+            controller_ip = service_status.get('controller_ip')
+            self_ip = os.environ.get('POD_IP')
+            controller_is_local = (controller_ip is None or
+                                   controller_ip == self_ip)
+            if controller_is_local:
+                try:
+                    pid_alive = (controller_pid is not None and
+                                 _controller_process_alive(
+                                     controller_pid, service_name))
+                except Exception:  # pylint: disable=broad-except
+                    # psutil raised (AccessDenied, cmdline race, etc.).
+                    # Be conservative: treat as alive and let the normal
+                    # signal-write path handle it.
+                    pid_alive = True
+                if not pid_alive:
+                    logger.warning(
+                        f'{capnoun} {service_name!r} controller '
+                        f'subprocess (pid={controller_pid}) is not '
+                        'alive. Force-cleaning DB records via --purge. '
+                        'Cloud resources may be leaked.')
+                    message = _terminate_failed_services(
+                        service_name, service_status['status'])
+                    if message is not None:
+                        messages.append(message)
+                    terminated_service_names.append(f'{service_name!r}')
+                    continue
         if (service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):
             failed_status = service_status['status']
