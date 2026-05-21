@@ -155,7 +155,16 @@ class TestBackwardCompatibility:
             # Fix https://github.com/skypilot-org/skypilot/issues/7287
             # for legacy skypilot versions.
             'uv pip install uvicorn==0.35.0 && '
-            f'{pip_install_cmd}')
+            f'{pip_install_cmd} && '
+            # Old SkyPilot versions pin `kubernetes>=20.0.0,!=32.0.0` with
+            # no upper bound, so uv resolves kubernetes==36.0.0 (released
+            # 2026-05-20), which breaks in-cluster auth, bearer token
+            # handling, and renames attributes used by sky launch/serve
+            # against k8s. The current branch pins `<36.0.0`; downgrade
+            # the base env to match so quicktest-core --kubernetes works.
+            # TODO: Remove once the base version tested against also
+            # pins `kubernetes<36.0.0`.
+            'uv pip install "kubernetes<36.0.0"')
 
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
         # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
@@ -179,20 +188,6 @@ class TestBackwardCompatibility:
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && python '
             f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
-
-        # Hot-patch old env for kubernetes==36.0.0 (released 2026-05-20)
-        # back-compat. Two breakages in old SkyPilot wheels:
-        #   - PodValidator regex only handles dict(K, V); kubernetes 36
-        #     emits dict[K, V] in openapi_types -> sky launch --cloud
-        #     kubernetes fails on metadata.labels.
-        #   - V1ServiceSpec.external_i_ps was renamed to external_ips ->
-        #     sky serve up against k8s fails with AttributeError.
-        # See Buildkite quicktest-core build #3239 (dict) and #3246
-        # (external_i_ps).
-        # TODO: Remove hotpatch once the base version includes both fixes.
-        self._run_cmd(
-            f'{self.ACTIVATE_BASE} && python '
-            f'{pathlib.Path(__file__).parent / "hotpatch_kubernetes36.py"}')
 
         # Install current version in current environment
         self._run_cmd(

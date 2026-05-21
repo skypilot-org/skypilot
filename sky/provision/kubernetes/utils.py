@@ -2482,8 +2482,8 @@ class PodValidator:
                 sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
-            if klass.startswith('dict(') or klass.startswith('dict['):
-                match = re.match(r'dict[(\[]([^,]*), (.*)[)\]]', klass)
+            if klass.startswith('dict('):
+                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
                 if match is None:
                     raise ValueError(f'Invalid dict type format: {klass}')
                 sub_kls = match.group(2)
