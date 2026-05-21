@@ -43,7 +43,9 @@ def _is_viewer(request: fastapi.Request) -> bool:
     # already consulted to gate this request to here.
     enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
     roles = enforcer.get_roles_for_user(auth_user.id)
-    return rbac.RoleName.VIEWER.value in roles
+    # Admin wins over viewer when both roles are present.
+    return (rbac.RoleName.VIEWER.value in roles and
+            rbac.RoleName.ADMIN.value not in roles)
 
 
 def force_viewer_status_body(

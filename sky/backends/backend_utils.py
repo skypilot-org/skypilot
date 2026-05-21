@@ -287,7 +287,9 @@ def _caller_is_viewer() -> bool:
         roles = enforcer.get_roles_for_user(user_id)
     except Exception:  # pylint: disable=broad-except
         return False
-    return rbac_mod.RoleName.VIEWER.value in roles
+    # Admin wins over viewer when both roles are present.
+    return (rbac_mod.RoleName.VIEWER.value in roles and
+            rbac_mod.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str) -> bool:

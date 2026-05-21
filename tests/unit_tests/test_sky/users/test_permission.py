@@ -483,6 +483,24 @@ class TestPermissionService:
         assert service.check_endpoint_permission(
             'u', '/ssh_node_pools/myPool/keys', 'GET') is True
 
+    def test_check_endpoint_permission_admin_wins_over_viewer(self):
+        """A user with both admin and viewer roles uses admin semantics."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer', 'admin']
+        # enforce returns False (allowed) for admin under blocklist semantics.
+        mock_enforcer.enforce.return_value = False
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        # Empty allowlist would deny everything if viewer semantics applied.
+        service._viewer_allowlist = []
+
+        # /launch is not on any allowlist; viewer-only would block it,
+        # but admin+viewer must fall through to enforce() -> allowed.
+        assert service.check_endpoint_permission('u', '/launch',
+                                                 'POST') is False
+        mock_enforcer.enforce.assert_called_once_with('u', '/launch', 'POST')
+
     def test_check_workspace_permission_non_server(self):
         """Test workspace permission check when not on API server."""
         # Ensure ENV_VAR_IS_SKYPILOT_SERVER is not set
@@ -1230,6 +1248,15 @@ class TestPermissionService:
 
         assert service.check_service_account_token_permission(
             'eve', 'someone-else', 'delete') is True
+
+    def test_sa_token_permission_admin_wins_over_viewer(self):
+        """A user holding both admin and viewer can manage any token."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['admin', 'viewer'])
+
+        # Without admin precedence, the viewer rule would deny this.
+        assert service.check_service_account_token_permission(
+            'dual', 'someone-else', 'delete') is True
 
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")

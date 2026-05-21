@@ -438,7 +438,10 @@ class PermissionService:
         # _load_policy_no_lock and would put a query on the request hot
         # path.
         roles = enforcer.get_roles_for_user(user_id)
-        if rbac.RoleName.VIEWER.value in roles:
+        # Admin wins over viewer when a user holds both — viewer's
+        # default-deny semantics shouldn't restrict an admin.
+        if (rbac.RoleName.VIEWER.value in roles and
+                rbac.RoleName.ADMIN.value not in roles):
             return not self._is_viewer_allowed(path, method)
         return enforcer.enforce(user_id, path, method)
 
@@ -555,17 +558,18 @@ class PermissionService:
         """
         del action
 
-        # Viewers cannot manage ANY service-account tokens
         user_roles = self.get_user_roles(user_id)
+        # Admin can manage any token — check this first so a user
+        # holding both admin and viewer isn't blocked by the viewer rule.
+        if rbac.RoleName.ADMIN.value in user_roles:
+            return True
+
+        # Viewers cannot manage ANY service-account tokens.
         if rbac.RoleName.VIEWER.value in user_roles:
             return False
 
         # Users can always manage their own tokens
         if user_id == token_owner_id:
-            return True
-
-        # Check if user has admin role (admins can manage any token)
-        if rbac.RoleName.ADMIN.value in user_roles:
             return True
 
         # Regular users cannot manage tokens owned by others
