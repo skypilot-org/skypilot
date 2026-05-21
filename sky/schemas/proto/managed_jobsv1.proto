@@ -31,6 +31,9 @@ enum ManagedJobStatus {
   MANAGED_JOB_STATUS_FAILED_NO_RESOURCE = 12;
   MANAGED_JOB_STATUS_FAILED_CONTROLLER = 13;
   MANAGED_JOB_STATUS_WINDING_DOWN = 14;
+  // Submission was interrupted before scheduler_set_waiting ran. See
+  // sky/jobs/state.py::ManagedJobStatus.FAILED_PRESUBMIT.
+  MANAGED_JOB_STATUS_FAILED_PRESUBMIT = 15;
 }
 
 enum ManagedJobScheduleState {
