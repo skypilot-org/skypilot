@@ -690,6 +690,73 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
 
 
 # ---------------------------------------------------------------------------
+# Autodown (idle timer + `autostop.down: true`) fires the `down` event,
+# not `stop`. Closes the smoke-coverage gap for the post-rename event
+# taxonomy: the unit test ``test_legacy_autodown_hook_routes_to_down_event``
+# pins YAML→events routing at the parse layer; this exercises the live
+# ``StopEvent._execute_hook_if_present`` branch on a real K8s pod —
+# autostop_config.down=True picks the DOWN slot and runs the matching
+# hook.
+#
+# K8s-only because:
+#   - The pod stays UP while the hook sleeps, so `kubectl exec` can
+#     read the live log; once autodown completes the pod is gone, so
+#     timing matters but there's a window we can land in.
+#   - Plain K8s autostop (down=False) is unsupported (kubernetes.py
+#     marks AUTOSTOP unsupported); autodown is the only idle-timer
+#     teardown shape that runs on K8s.
+# ---------------------------------------------------------------------------
+@pytest.mark.kubernetes
+def test_hook_k8s_autodown_fires_down_event():
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'autodown-{time.time()}'
+    # Hook writes its marker, then sleeps so the pod is still UP when
+    # we read it. timeout=120 must exceed the sleep so the hook isn't
+    # killed mid-write.
+    yaml_path = _write_yaml({
+        'autostop': {
+            'idle_minutes': 1,
+            'down': True,
+        },
+        'hooks': [{
+            'run': f'echo {marker} > ~/.sky/hooks/down.log && sleep 60',
+            'events': ['down'],
+            'timeout': 120,
+        }],
+    })
+    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+                 f'2>/dev/null | grep {name} | head -n1')
+    read_log = (f'pod=$({pod_query}) && '
+                f'kubectl exec --context kind-skypilot "$pod" -- '
+                f'cat /home/sky/.sky/hooks/down.log')
+    test = smoke_tests_utils.Test(
+        'test_hook_k8s_autodown_fires_down_event',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra kubernetes --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Wait for idle timer (60s) + hook to start (~10-20s slack).
+            'sleep 90',
+            # While the hook is still sleeping (60s), the pod is UP and
+            # the log we wrote is readable. Asserts the down event fired
+            # — if autodown had routed to the (renamed-away) `stop` event,
+            # `~/.sky/hooks/down.log` would not exist.
+            f'out=$({read_log}) && echo "$out" | grep "{marker}"',
+            # Wait for autodown to complete (hook finishes + pod deletes).
+            'sleep 120',
+            # Cluster is TERMINATED (not STOPPED) since autostop.down=true.
+            # The cluster row is gone from `sky status`.
+            f'! sky status {name} 2>/dev/null | grep -E '
+            f'"^{name}\\s+.*(UP|STOPPED)"',
+        ],
+        f'sky down -y {name} --purge || true',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
 # YAML round-trip: a task YAML with `config.hooks:` must survive
 # Task.to_yaml_config -> from_yaml_config without tripping the user-input
 # rejection that catches a misplaced `resources.hooks:` field.
