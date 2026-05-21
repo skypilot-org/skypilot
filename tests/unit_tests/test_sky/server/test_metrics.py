@@ -69,6 +69,39 @@ async def test_metrics_endpoint_without_multiprocess():
             mock_gen.assert_called_once()
 
 
+def test_register_multiproc_cleanup_atexit_noop_without_env_var():
+    """No atexit registration in single-process / unit-test mode."""
+    with patch.dict(os.environ, {}, clear=False), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register:
+        if 'PROMETHEUS_MULTIPROC_DIR' in os.environ:
+            del os.environ['PROMETHEUS_MULTIPROC_DIR']
+        metrics.register_multiproc_cleanup_atexit()
+        mock_register.assert_not_called()
+
+
+def test_register_multiproc_cleanup_atexit_registers_when_enabled():
+    """When PROMETHEUS_MULTIPROC_DIR is set, register mark_process_dead(pid)."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register, \
+         patch('sky.server.metrics.os.getpid', return_value=4242):
+        metrics.register_multiproc_cleanup_atexit()
+        mock_register.assert_called_once_with(
+            metrics.multiprocess.mark_process_dead, 4242)
+
+
+def test_register_multiproc_cleanup_atexit_is_idempotent():
+    """Repeated calls in the same process only register once."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register:
+        metrics.register_multiproc_cleanup_atexit()
+        metrics.register_multiproc_cleanup_atexit()
+        metrics.register_multiproc_cleanup_atexit()
+        assert mock_register.call_count == 1
+
+
 @pytest.mark.asyncio
 async def test_metrics_endpoint_with_multiprocess():
     """Test metrics endpoint in multiprocess mode."""
