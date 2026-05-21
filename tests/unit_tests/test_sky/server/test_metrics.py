@@ -171,6 +171,144 @@ def test_without_fix_leaks_liveall_file(tmp_path):
     leftover = sorted(os.listdir(tmp_path))
     assert f'gauge_liveall_{pid}.db' in leftover, leftover
 
+def _touch_live_gauge_files(directory, pid):
+    """Write empty live-gauge files matching the prometheus_client schema."""
+    for mode in ('liveall', 'livesum', 'livemax', 'livemin'):
+        path = os.path.join(directory, f'gauge_{mode}_{pid}.db')
+        with open(path, 'wb'):
+            pass
+
+
+def test_scan_multiproc_pids_only_returns_live_gauge_pids(tmp_path):
+    """Pids derived from live-gauge files; aggregate files are ignored."""
+    pid_with_live = 1234
+    pid_aggregate_only = 5678
+    _touch_live_gauge_files(str(tmp_path), pid_with_live)
+    (tmp_path / f'counter_{pid_aggregate_only}.db').write_bytes(b'')
+    (tmp_path / f'histogram_{pid_aggregate_only}.db').write_bytes(b'')
+    (tmp_path / 'unrelated.txt').write_bytes(b'')
+
+    pids = metrics._scan_multiproc_pids(str(tmp_path))
+    assert pids == {pid_with_live}
+
+
+def test_scan_multiproc_pids_missing_dir(tmp_path):
+    """A nonexistent directory yields the empty set (no crash)."""
+    pids = metrics._scan_multiproc_pids(str(tmp_path / 'does-not-exist'))
+    assert pids == set()
+
+
+def test_reap_stale_multiproc_files_noop_without_env(tmp_path):
+    """No PROMETHEUS_MULTIPROC_DIR -> no work, no errors."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
+        assert metrics._reap_stale_multiproc_files() == 0
+
+
+def test_reap_stale_multiproc_files_removes_only_dead_pids(tmp_path):
+    """Live pids stay; dead pids are reaped exactly once each.
+
+    Dead pids are simulated via patching pid_exists rather than an
+    out-of-range integer, to keep this test resilient on systems with a
+    high pid_max.
+    """
+    dead_pid_a, dead_pid_b, live_pid = 991, 992, os.getpid()
+    _touch_live_gauge_files(str(tmp_path), dead_pid_a)
+    _touch_live_gauge_files(str(tmp_path), dead_pid_b)
+    _touch_live_gauge_files(str(tmp_path), live_pid)
+
+    def fake_pid_exists(pid):
+        return pid == live_pid
+
+    reaped_pids = []
+
+    def fake_mark_dead(pid):
+        reaped_pids.append(pid)
+        for path in (
+                tmp_path /
+                f'gauge_liveall_{pid}.db').parent.glob(f'gauge_live*_{pid}.db'):
+            path.unlink()
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists',
+               side_effect=fake_pid_exists), \
+         patch('sky.server.metrics.multiprocess.mark_process_dead',
+               side_effect=fake_mark_dead):
+        reaped = metrics._reap_stale_multiproc_files()
+
+    assert reaped == 2
+    assert sorted(reaped_pids) == [dead_pid_a, dead_pid_b]
+    # Live pid's files survive; dead pids' files were unlinked.
+    remaining = sorted(p.name for p in tmp_path.iterdir())
+    assert remaining == [
+        f'gauge_liveall_{live_pid}.db',
+        f'gauge_livemax_{live_pid}.db',
+        f'gauge_livemin_{live_pid}.db',
+        f'gauge_livesum_{live_pid}.db',
+    ]
+
+
+def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
+    """A failure on one pid does not stop the rest of the sweep."""
+    pid_a, pid_b = 991, 992
+    _touch_live_gauge_files(str(tmp_path), pid_a)
+    _touch_live_gauge_files(str(tmp_path), pid_b)
+
+    successes = []
+
+    def flaky_mark_dead(pid):
+        if pid == pid_a:
+            raise OSError('boom')
+        successes.append(pid)
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=False), \
+         patch('sky.server.metrics.multiprocess.mark_process_dead',
+               side_effect=flaky_mark_dead):
+        reaped = metrics._reap_stale_multiproc_files()
+
+    assert reaped == 1
+    assert successes == [pid_b]
+
+
+@pytest.mark.asyncio
+async def test_multiproc_reaper_daemon_returns_when_env_unset():
+    """Daemon exits immediately if PROMETHEUS_MULTIPROC_DIR is unset."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
+        # Should return without sleeping or scheduling another tick.
+        await metrics.multiproc_reaper_daemon(interval_seconds=3600)
+
+
+@pytest.mark.asyncio
+async def test_multiproc_reaper_daemon_loops_and_cancels(tmp_path):
+    """Daemon ticks, calls reap, and exits cleanly on cancellation."""
+    import asyncio  # local to avoid touching module-level imports
+    call_count = {'n': 0}
+
+    def fake_reap():
+        call_count['n'] += 1
+        return 0
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics._reap_stale_multiproc_files',
+               side_effect=fake_reap):
+        task = asyncio.create_task(
+            metrics.multiproc_reaper_daemon(interval_seconds=0))
+        # Yield enough times for several ticks to run.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert call_count['n'] >= 1
+
 
 @pytest.mark.asyncio
 async def test_metrics_endpoint_with_multiprocess():
