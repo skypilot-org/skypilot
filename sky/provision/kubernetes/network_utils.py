@@ -261,12 +261,8 @@ def get_ingress_external_ip_and_ports(
         # 2. Use the skypilot.co/external-ip annotation in the service
         # 3. Otherwise return 'localhost'
         ip = None
-        # kubernetes>=36.0.0 renamed V1ServiceSpec.external_i_ps to
-        # external_ips. Read both so we work against either client version.
-        external_ips = (getattr(ingress_service.spec, 'external_ips', None) or
-                        getattr(ingress_service.spec, 'external_i_ps', None))
-        if external_ips:
-            ip = external_ips[0]
+        if ingress_service.spec.external_i_ps is not None:
+            ip = ingress_service.spec.external_i_ps[0]
         elif ingress_service.metadata.annotations is not None:
             ip = ingress_service.metadata.annotations.get(
                 'skypilot.co/external-ip', None)
