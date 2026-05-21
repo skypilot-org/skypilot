@@ -721,6 +721,24 @@ Tails the provisioning logs (provision.log) for a cluster.
 **Returns:**
     Exit code 0 on streaming success; raises on HTTP error.
 
+### `sky.tail_hook_logs`
+
+```python
+sky.tail_hook_logs(cluster_name: str, event: Optional[str] = None, follow: bool = True, tail: int = 0) -> int
+```
+
+Tails a per-event lifecycle-hook log on the cluster.
+
+**Args:**
+    cluster_name: name of the cluster.
+    event: one of ``stop``, ``preemption``, ``down``. When None,
+        auto-selects whichever log exists on the cluster.
+    follow: whether to follow the logs.
+    tail: number of lines to display from the end of the log file.
+
+**Returns:**
+    Exit code 0 on streaming success; non-zero on failure.
+
 ### `sky.download_logs`
 
 ```python
@@ -1403,21 +1421,3 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
-
-### `sky.tail_hook_logs`
-
-```python
-sky.tail_hook_logs(cluster_name: str, event: Optional[str] = None, follow: bool = True, tail: int = 0) -> int
-```
-
-Tails a per-event lifecycle-hook log on the cluster.
-
-**Args:**
-    cluster_name: name of the cluster.
-    event: one of ``stop``, ``preemption``, ``down``. When None,
-        auto-selects whichever log exists on the cluster.
-    follow: whether to follow the logs.
-    tail: number of lines to display from the end of the log file.
-
-**Returns:**
-    Exit code 0 on streaming success; non-zero on failure.

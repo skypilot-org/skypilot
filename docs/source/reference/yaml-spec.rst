@@ -281,7 +281,8 @@ Format:
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
 
 To run a script before autostop, see :ref:`Lifecycle hooks <lifecycle-hooks>`
-(under ``config.hooks`` with ``events: [autostop]``).
+(under ``config.hooks`` with ``events: [stop]`` for autostop, or
+``events: [down]`` for autodown — ``autostop: {down: true}``).
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -1312,11 +1313,11 @@ Example:
       - run: |
           cd my-code-base
           git add . && git commit -m "Auto-commit" && git push
-        events: [autostop, preemption, down]  # optional; defaults to all three
-        timeout: 300                          # optional; default 3600s
+        events: [stop, preemption, down]  # optional; defaults to all three
+        timeout: 300                      # optional; default 3600s
 
 The ``hooks`` field lists scripts to run on the cluster on lifecycle events
-(``autostop``, ``preemption``, ``down``). See :ref:`Lifecycle hooks
+(``stop``, ``preemption``, ``down``). See :ref:`Lifecycle hooks
 <lifecycle-hooks>` for the full reference.
 
 .. _service-yaml-spec:

@@ -302,7 +302,9 @@ class StopEvent(SkyletEvent):
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
 
-            # Execute autostop hook if provided (for old provisioner path)
+            # Execute stop/down event hook if provided (for old provisioner
+            # path). The method claims the `stop` slot when autostop.down is
+            # false and the `down` slot for autodown.
             self._execute_hook_if_present(autostop_config)
 
             is_cluster_multinode = config['max_workers'] > 0
@@ -384,7 +386,9 @@ class StopEvent(SkyletEvent):
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
 
-        # Execute autostop hook if provided
+        # Execute stop/down event hook if provided. The method claims the
+        # `stop` slot when autostop.down is false and the `down` slot for
+        # autodown.
         self._execute_hook_if_present(autostop_config)
 
         cluster_name_on_cloud = cluster_config['cluster_name']
