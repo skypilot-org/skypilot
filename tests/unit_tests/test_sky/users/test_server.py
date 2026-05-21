@@ -174,10 +174,12 @@ class TestUsersEndpoints:
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
-        # Should call get_users_for_role for each supported role
-        assert mock_get_users_for_role.call_count == 2  # admin and user roles
+        # Should call get_users_for_role for each supported role:
+        # admin, user, viewer.
+        assert mock_get_users_for_role.call_count == 3
         mock_get_users_for_role.assert_any_call('admin')
         mock_get_users_for_role.assert_any_call('user')
+        mock_get_users_for_role.assert_any_call('viewer')
 
     @mock.patch('sky.global_user_state.get_all_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -196,7 +198,7 @@ class TestUsersEndpoints:
         assert result == []
         mock_get_all_users.assert_called_once()
         # Should still call get_users_for_role for each supported role even with no users
-        assert mock_get_users_for_role.call_count == 2  # admin and user roles
+        assert mock_get_users_for_role.call_count == 3  # admin, user, viewer
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
