@@ -30,6 +30,14 @@ logger = sky_logging.init_logger(__name__)
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
 
+# Built-in user identities that the server seeds at startup. They must not
+# be deletable or have their role changed via the user-management API.
+_INTERNAL_USER_IDS = (
+    common.SERVER_ID,
+    constants.SKYPILOT_SYSTEM_USER_ID,
+    constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+)
+
 router = fastapi.APIRouter()
 
 
@@ -44,11 +52,7 @@ def get_user_type(user: models.User) -> str:
     """
     if user.is_service_account():
         return models.UserType.SA.value
-    if user.id in [
-            common.SERVER_ID,
-            constants.SKYPILOT_SYSTEM_USER_ID,
-            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
-    ]:
+    if user.id in _INTERNAL_USER_IDS:
         return models.UserType.SYSTEM.value
     if user.password is not None:
         return models.UserType.BASIC.value
@@ -171,11 +175,7 @@ def user_update(request: fastapi.Request,
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
     # Disallow updating the internal users.
-    if need_update_role and user_info.id in [
-            common.SERVER_ID,
-            constants.SKYPILOT_SYSTEM_USER_ID,
-            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
-    ]:
+    if need_update_role and user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot update role for internal '
                                     f'API server user {user_info.name}')
@@ -204,11 +204,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
     # Disallow deleting the internal users.
-    if user_info.id in [
-            common.SERVER_ID,
-            constants.SKYPILOT_SYSTEM_USER_ID,
-            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
-    ]:
+    if user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot delete internal '
                                     f'API server user {user_info.name}')

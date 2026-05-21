@@ -301,6 +301,16 @@ class PermissionService:
              rbac.RoleName.VIEWER.value),
         ]
         for system_user_id, system_user_role in system_users:
+            # Seed a User row so callers that look the user up via
+            # global_user_state.get_user() — e.g. session middleware
+            # validating an impersonated identity — find one. Otherwise
+            # the row is only created lazily (executor.prepare_request_async
+            # for SKYPILOT_SYSTEM_USER_ID), which doesn't cover the
+            # login path. add_or_update_user is idempotent.
+            global_user_state.add_or_update_user(
+                models.User(id=system_user_id,
+                            name=system_user_id,
+                            user_type=models.UserType.SYSTEM.value))
             if system_user_id not in users_with_roles:
                 logger.debug(f'Adding role for system user: {system_user_id} '
                              f'({system_user_role})')
