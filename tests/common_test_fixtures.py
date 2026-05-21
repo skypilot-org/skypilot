@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import collections
 import os
@@ -690,9 +691,8 @@ def reset_global_state():
     # xdist worker — break subsequent tests that read
     # ``versions.get_remote_api_version()`` expecting either None or
     # an int (e.g. test_sky/server/test_sdk.py::test_api_login_*).
-    from sky.server import versions as _versions
-    _versions.set_remote_api_version(None)
-    _versions.set_remote_version('unknown')
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
     # Ensure a usable event loop is installed on the main thread.
     # Python 3.9 + xdist sometimes leaves a worker process with no
     # current event loop after pytest-asyncio (or any test that calls
@@ -703,13 +703,12 @@ def reset_global_state():
     # then hit ``RuntimeError: There is no current event loop in
     # thread 'MainThread'``. Installing a fresh loop here makes the
     # legacy pattern safe regardless of what the prior test did.
-    import asyncio as _asyncio
     try:
-        loop = _asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         if loop.is_closed():
-            _asyncio.set_event_loop(_asyncio.new_event_loop())
+            asyncio.set_event_loop(asyncio.new_event_loop())
     except RuntimeError:
-        _asyncio.set_event_loop(_asyncio.new_event_loop())
+        asyncio.set_event_loop(asyncio.new_event_loop())
     # Reload config from default paths to reset any in-memory config changes
     # from previous tests that might have modified the config.
     _safe_reload_config()
@@ -719,7 +718,7 @@ def reset_global_state():
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
     # Same ContextVar reset as the pre-yield branch.
-    _versions.set_remote_api_version(None)
-    _versions.set_remote_version('unknown')
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
     # Reload config again to reset any changes made by this test
     _safe_reload_config()
