@@ -180,6 +180,20 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && python '
             f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
 
+        # Hot-patch old env for kubernetes==36.0.0 (released 2026-05-20)
+        # back-compat. Two breakages in old SkyPilot wheels:
+        #   - PodValidator regex only handles dict(K, V); kubernetes 36
+        #     emits dict[K, V] in openapi_types -> sky launch --cloud
+        #     kubernetes fails on metadata.labels.
+        #   - V1ServiceSpec.external_i_ps was renamed to external_ips ->
+        #     sky serve up against k8s fails with AttributeError.
+        # See Buildkite quicktest-core build #3239 (dict) and #3246
+        # (external_i_ps).
+        # TODO: Remove hotpatch once the base version includes both fixes.
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_kubernetes36.py"}')
+
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
