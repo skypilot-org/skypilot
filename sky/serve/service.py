@@ -355,7 +355,14 @@ def _bail_on_boot_failure(service_name: str,
                  f'Killing controller subprocess and exiting WITHOUT '
                  f'cleanup so the daemon can retry. DB state and HA '
                  f'recovery script preserved.')
-    if controller_process is not None:
+    # Defensive: skip kill if pid is None. `Process.start()` populates
+    # pid on success, but if start() raised before setting it the
+    # current code path would never reach here anyway (the outer try
+    # in `_start` would handle that). Still, guard explicitly because
+    # `psutil.Process(None)` returns the *calling* process — so
+    # passing `[None]` to `kill_children_processes` would target
+    # ourselves (and our own children) instead of bailing out cleanly.
+    if controller_process is not None and controller_process.pid is not None:
         try:
             # kill_children_processes with parent_pids != None SIGKILLs
             # the parent itself AND its recursive children (see
@@ -641,7 +648,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         # deletes the HA recovery script and may remove the entire
         # service row, so an audit line (especially with the active
         # exception type if any) is worth it for future post-mortems.
-        # The Fix 1 path (`_wait_for_controller_ready` timeout) and
+        # The path (`_wait_for_controller_ready` timeout) and
         # `_orphan_exit` both bypass this finally entirely via
         # os._exit; anything else reaching here is either the user
         # signal (flag above) or an unexpected propagating exception.

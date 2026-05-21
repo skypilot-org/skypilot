@@ -253,6 +253,26 @@ class TestBailOnBootFailure:
             mock_kill.assert_not_called()
             mock_exit.assert_called_once_with(1)
 
+    def test_handles_none_controller_pid(self):
+        """If `controller_process` was created but `start()` never set a
+        pid (e.g. start() itself raised before assigning pid), we must
+        NOT pass `pid=None` to `kill_children_processes`:
+        `psutil.Process(None)` resolves to the *calling* process, so
+        passing `[None]` would SIGKILL ourselves (and our own children)
+        before `os._exit(1)` runs — defeating the cleanup bypass."""
+        with mock.patch('os._exit') as mock_exit, \
+             mock.patch('sky.serve.service.subprocess_utils.'
+                        'kill_children_processes') as mock_kill:
+            ctrl = mock.Mock()
+            ctrl.pid = None
+            service._bail_on_boot_failure(
+                'svc',
+                ctrl,
+                timeout_seconds=60,
+                boot_err=RuntimeError('did not become ready'))
+            mock_kill.assert_not_called()
+            mock_exit.assert_called_once_with(1)
+
     def test_swallows_kill_failure(self):
         """If kill_children_processes raises (e.g. pid already gone
         between when we read it and when we try to kill it), we still
