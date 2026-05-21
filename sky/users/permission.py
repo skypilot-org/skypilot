@@ -294,13 +294,18 @@ class PermissionService:
                 user_added = self._add_user_if_not_exists_no_lock(
                     existing_user.id)
                 policy_updated = policy_updated or user_added
-        for system_user_id in [
-                common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
-        ]:
+        system_users = [
+            (common.SERVER_ID, rbac.RoleName.ADMIN.value),
+            (constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value),
+            (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+             rbac.RoleName.VIEWER.value),
+        ]
+        for system_user_id, system_user_role in system_users:
             if system_user_id not in users_with_roles:
-                logger.debug(f'Adding role for system user: {system_user_id}')
+                logger.debug(f'Adding role for system user: {system_user_id} '
+                             f'({system_user_role})')
                 user_added = self._add_user_if_not_exists_no_lock(
-                    system_user_id, rbac.RoleName.ADMIN.value)
+                    system_user_id, system_user_role)
                 policy_updated = policy_updated or user_added
         if policy_updated:
             enforcer.save_policy()

@@ -44,7 +44,11 @@ def get_user_type(user: models.User) -> str:
     """
     if user.is_service_account():
         return models.UserType.SA.value
-    if user.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+    if user.id in [
+            common.SERVER_ID,
+            constants.SKYPILOT_SYSTEM_USER_ID,
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+    ]:
         return models.UserType.SYSTEM.value
     if user.password is not None:
         return models.UserType.BASIC.value
@@ -168,7 +172,9 @@ def user_update(request: fastapi.Request,
                                     detail=f'User {user_id} does not exist')
     # Disallow updating the internal users.
     if need_update_role and user_info.id in [
-            common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
+            common.SERVER_ID,
+            constants.SKYPILOT_SYSTEM_USER_ID,
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
     ]:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot update role for internal '
@@ -198,7 +204,11 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
     # Disallow deleting the internal users.
-    if user_info.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+    if user_info.id in [
+            common.SERVER_ID,
+            constants.SKYPILOT_SYSTEM_USER_ID,
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+    ]:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot delete internal '
                                     f'API server user {user_info.name}')

@@ -160,6 +160,17 @@ class TestPermissionService:
             mock_enforcer.add_grouping_policy.assert_any_call(
                 user.id, rbac.get_default_role())
 
+        # Verify built-in system users are seeded with the expected roles:
+        # the existing system user + SERVER_ID are admin; the new
+        # system-viewer is viewer.
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            common.SERVER_ID, rbac.RoleName.ADMIN.value)
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value)
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+            rbac.RoleName.VIEWER.value)
+
         # Verify policy was saved
         mock_enforcer.save_policy.assert_called()
 
@@ -1325,13 +1336,16 @@ class TestPermissionServiceMultiProcess:
                                  ('user2', 'workspace1', '*')}
 
         # Should have one grouping policy call per user (for default role assignment)
-        # plus system users (SERVER_ID and SKYPILOT_SYSTEM_USER_ID) with admin role
-        expected_grouping_policy_calls = {('user1', rbac.get_default_role()),
-                                          ('user2', rbac.get_default_role()),
-                                          ('user3', rbac.get_default_role()),
-                                          (common.SERVER_ID, 'admin'),
-                                          (constants.SKYPILOT_SYSTEM_USER_ID,
-                                           'admin')}
+        # plus the three built-in system users — SERVER_ID and the system
+        # admin user with admin role, and the system viewer user with viewer.
+        expected_grouping_policy_calls = {
+            ('user1', rbac.get_default_role()),
+            ('user2', rbac.get_default_role()),
+            ('user3', rbac.get_default_role()),
+            (common.SERVER_ID, 'admin'),
+            (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
+            (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'),
+        }
 
         assert unique_policy_calls == expected_policy_calls
         assert unique_grouping_policy_calls == expected_grouping_policy_calls
@@ -1377,6 +1391,8 @@ class TestPermissionServiceMultiProcess:
                 ]
                 result.append([common.SERVER_ID, 'admin'])
                 result.append([constants.SKYPILOT_SYSTEM_USER_ID, 'admin'])
+                result.append(
+                    [constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'])
                 return result
 
         def get_roles_for_user_side_effect(user_id):
@@ -1416,12 +1432,13 @@ class TestPermissionServiceMultiProcess:
         service._maybe_initialize_policies()
         service._maybe_initialize_policies()
 
-        # Each user should only be added once (3 mock users + 2 system users)
+        # Each user should only be added once (3 mock users + 3 system users)
         expected_calls = {
             (user.id, rbac.get_default_role()) for user in mock_users
         }
         expected_calls.add((common.SERVER_ID, 'admin'))
         expected_calls.add((constants.SKYPILOT_SYSTEM_USER_ID, 'admin'))
+        expected_calls.add((constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'))
         assert len(grouping_policy_calls) == len(expected_calls)
 
         # Verify each user was added exactly once

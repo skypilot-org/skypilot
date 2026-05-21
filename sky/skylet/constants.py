@@ -645,6 +645,13 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
 
+# A built-in viewer-role counterpart to SKYPILOT_SYSTEM_USER_ID. Created
+# automatically so that external auth integrations (e.g. an OIDC bridge that
+# wants to log a user in as a viewer without materializing their identity)
+# have a stable user_id to impersonate as. Pinned to the viewer role at
+# startup; cannot be deleted or have its role changed.
+SKYPILOT_SYSTEM_VIEWER_USER_ID = 'skypilot-system-viewer'
+
 # The directory to store the logging configuration.
 LOGGING_CONFIG_DIR = '~/.sky/logging'
 
