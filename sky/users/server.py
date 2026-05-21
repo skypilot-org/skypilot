@@ -179,7 +179,7 @@ def user_update(request: fastapi.Request,
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot update role for internal '
                                     f'API server user {user_info.name}')
-    if password and user_info.id == constants.SKYPILOT_SYSTEM_USER_ID:
+    if password and user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(
             status_code=400,
             detail=f'Cannot update password for internal '
