@@ -41,6 +41,7 @@ from sky.utils import command_runner
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.utils import status_lib
 
@@ -71,6 +72,15 @@ class TemplateOverrideFn(Protocol):
     use a custom cluster config template instead of the cloud's
     default (``_get_cluster_config_template(cloud)`` in
     ``cloud_vm_ray_backend``), or ``None`` to use the cloud's default.
+
+    ``to_provision`` is the resource currently being launched — the same
+    one passed into ``Cloud.make_deploy_resources_variables``. Its
+    ``region`` is guaranteed non-None (set by the optimizer and asserted
+    in the backend before dispatch), so implementations can read it
+    directly instead of fishing it out of ``task.best_resources`` or
+    the user's pre-optimizer ``task.resources`` alternatives list. The
+    backend's failover loop may swap ``to_provision`` between retries;
+    ``template_override`` is re-invoked with the current attempt.
     """
 
     # pylint: disable=unnecessary-ellipsis
@@ -78,6 +88,7 @@ class TemplateOverrideFn(Protocol):
     def __call__(
         self,
         task: 'task_lib.Task',
+        to_provision: 'resources_lib.Resources',
         *,
         _extra_launch_context: Dict[str, Any],
         _is_launched_by_jobs_controller: bool,
