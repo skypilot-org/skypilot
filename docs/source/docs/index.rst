@@ -291,7 +291,6 @@ Follow updates:
    Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop
-   ../reference/lifecycle-hooks
 
 .. toctree::
    :hidden:
@@ -350,6 +349,7 @@ Follow updates:
    ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
    ../examples/ports
+   ../reference/lifecycle-hooks
    ../reference/logging
    ../reference/faq
 
