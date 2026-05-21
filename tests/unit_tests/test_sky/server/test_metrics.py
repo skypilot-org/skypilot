@@ -171,6 +171,7 @@ def test_without_fix_leaks_liveall_file(tmp_path):
     leftover = sorted(os.listdir(tmp_path))
     assert f'gauge_liveall_{pid}.db' in leftover, leftover
 
+
 def _touch_live_gauge_files(directory, pid):
     """Write empty live-gauge files matching the prometheus_client schema."""
     for mode in ('liveall', 'livesum', 'livemax', 'livemin'):

@@ -8,7 +8,6 @@ import os
 import re
 import threading
 import time
-import traceback
 from typing import List, Optional, Set
 
 import fastapi
@@ -113,8 +112,8 @@ def _reap_stale_multiproc_files() -> int:
             # Don't let a single bad file or a race with another reaper
             # tick kill the daemon.
             logger.warning(
-                f'Failed to reap prometheus multiproc files for pid {pid}: '
-                f'{traceback.format_exc()}')
+                f'Failed to reap prometheus multiproc files for pid {pid}.',
+                exc_info=True)
     return reaped
 
 
@@ -168,8 +167,8 @@ async def multiproc_reaper_daemon(
             logger.info('Prometheus multiproc reaper cancelled')
             break
         except Exception:  # pylint: disable=broad-except
-            logger.warning(f'Error in prometheus multiproc reaper: '
-                           f'{traceback.format_exc()}')
+            logger.warning('Error in prometheus multiproc reaper.',
+                           exc_info=True)
         await asyncio.sleep(interval_seconds)
 
 
