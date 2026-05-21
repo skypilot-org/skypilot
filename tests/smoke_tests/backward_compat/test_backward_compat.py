@@ -180,6 +180,19 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && python '
             f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
 
+        # Hot-patch old env to accept the new `dict[K, V]` openapi_types
+        # format introduced by kubernetes==36.0.0 (released 2026-05-20).
+        # Old SkyPilot versions' PodValidator only handles `dict(K, V)`, so
+        # `sky launch --cloud kubernetes` fails on metadata.labels validation
+        # whenever pip resolves kubernetes>=36.0.0 in the base env.
+        # See Buildkite quicktest-core build #3239.
+        # TODO: Remove hotpatch once the base version includes the validator
+        # fix that accepts both dict(K, V) and dict[K, V].
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_dict_openapi_types.py"}'
+        )
+
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
