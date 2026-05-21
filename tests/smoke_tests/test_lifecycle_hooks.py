@@ -710,25 +710,45 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
 def test_hook_k8s_autodown_fires_down_event():
     name = smoke_tests_utils.get_cluster_name()
     marker = f'autodown-{time.time()}'
-    # Hook writes its marker, then sleeps so the pod is still UP when
-    # we read it. timeout=120 must exceed the sleep so the hook isn't
-    # killed mid-write.
+    # Hook writes its marker, then sleeps long enough for the read
+    # poll-loop below to land in the window. timeout=240 must exceed
+    # the sleep so the hook isn't killed mid-write.
     yaml_path = _write_yaml({
         'autostop': {
             'idle_minutes': 1,
             'down': True,
         },
         'hooks': [{
-            'run': f'echo {marker} > ~/.sky/hooks/down.log && sleep 60',
+            'run': f'echo {marker} > ~/.sky/hooks/down.log && sleep 180',
             'events': ['down'],
-            'timeout': 120,
+            'timeout': 240,
         }],
     })
     pod_query = (f'kubectl get pods --context kind-skypilot -o name '
                  f'2>/dev/null | grep {name} | head -n1')
-    read_log = (f'pod=$({pod_query}) && '
-                f'kubectl exec --context kind-skypilot "$pod" -- '
-                f'cat /home/sky/.sky/hooks/down.log')
+    cat_log = (f'pod=$({pod_query}) && '
+               f'kubectl exec --context kind-skypilot "$pod" -- '
+               f'cat /home/sky/.sky/hooks/down.log')
+    # Poll up to ~5 min for the hook log to appear, then assert the
+    # marker is in it. The hook fires ~120s after the SetAutostop RPC
+    # at PRE_EXEC, but sky launch returns AFTER the inline job
+    # finishes — so the t-from-launch-return offset varies. Polling
+    # is robust to that variation. ``kubectl exec`` against a missing
+    # log path exits non-zero, which is why we ``|| true`` and check
+    # the grep result instead of relying on the exec exit code.
+    poll_for_log = (
+        f'for i in $(seq 1 60); do '
+        f'  out=$({cat_log} 2>/dev/null) || true; '
+        f'  if echo "$out" | grep -q "{marker}"; then '
+        f'    echo "Found marker after ${{i}} poll(s)"; '
+        f'    exit 0; '
+        f'  fi; '
+        f'  sleep 5; '
+        f'done; '
+        f'echo "REGRESSION: ~/.sky/hooks/down.log did not contain '
+        f'{marker} after 5min of polling — autodown likely routed to '
+        f'the (renamed-away) `stop` event instead of `down`."; '
+        f'exit 1')
     test = smoke_tests_utils.Test(
         'test_hook_k8s_autodown_fires_down_event',
         [
@@ -736,15 +756,14 @@ def test_hook_k8s_autodown_fires_down_event():
             f'--infra kubernetes --fast '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # Wait for idle timer (60s) + hook to start (~10-20s slack).
-            'sleep 90',
-            # While the hook is still sleeping (60s), the pod is UP and
-            # the log we wrote is readable. Asserts the down event fired
-            # — if autodown had routed to the (renamed-away) `stop` event,
-            # `~/.sky/hooks/down.log` would not exist.
-            f'out=$({read_log}) && echo "$out" | grep "{marker}"',
+            # Poll for the down-event hook log to appear on the live
+            # pod. The autodown teardown does NOT begin until the hook
+            # finishes (sleep 180s in the hook script), so the pod is
+            # accessible via `kubectl exec` for the entire write +
+            # sleep window — plenty of time to land a successful read.
+            poll_for_log,
             # Wait for autodown to complete (hook finishes + pod deletes).
-            'sleep 120',
+            'sleep 240',
             # Cluster is TERMINATED (not STOPPED) since autostop.down=true.
             # The cluster row is gone from `sky status`.
             f'! sky status {name} 2>/dev/null | grep -E '
