@@ -5,7 +5,7 @@ https://json-schema.org/
 """
 import enum
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -36,7 +36,20 @@ def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
     _extra_job_recovery_properties[name] = schema
 
 
+_extra_jobs_properties: Dict[str, Any] = {}
+
 _extra_kubernetes_properties: Dict[str, Any] = {}
+
+# Registry for plugin-provided properties under the top-level
+# `plugins:` config section. Keyed by plugin name.
+_extra_plugin_properties: Dict[str, Any] = {}
+
+
+def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register a sub-property of the top-level `plugins:` config section."""
+    if name in _extra_plugin_properties:
+        raise ValueError(f'Plugin property {name!r} is already registered.')
+    _extra_plugin_properties[name] = schema
 
 
 def _allow_additional_properties() -> bool:
@@ -52,6 +65,24 @@ def _allow_additional_properties() -> bool:
     # Import here to avoid circular imports (plugins imports from sky.utils).
     from sky.server import plugins  # pylint: disable=import-outside-toplevel
     return not plugins.plugins_loaded()
+
+
+def register_jobs_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the jobs controller schema.
+
+    This allows plugins to extend the ``jobs`` config section with
+    custom configuration fields.  The property is merged into the
+    schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'boolean'}).
+    """
+    if name in _extra_jobs_properties:
+        raise ValueError(f'Jobs property {name!r} is already registered.')
+    _extra_jobs_properties[name] = schema
 
 
 def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
@@ -1248,7 +1279,8 @@ _LABELS_SCHEMA = {
 _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
-            'type': 'string'
+            'type': 'string',
+            'minLength': 1,
         },
         {
             # A list of single-element dict to pretain the
@@ -1262,7 +1294,8 @@ _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
             'items': {
                 'type': 'object',
                 'additionalProperties': {
-                    'type': 'string'
+                    'type': 'string',
+                    'minLength': 1,
                 },
                 'maxProperties': 1,
                 'minProperties': 1,
@@ -1482,11 +1515,14 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
-    # when both are set.
+    # when both are set. Permissive so external schedulers (registered
+    # via plugins) can layer their own sub-fields under `quota` without
+    # requiring per-key OSS schema updates; sub-field validation is the
+    # consumer's responsibility.
     'quota': {
         'type': 'object',
         'required': [],
-        'additionalProperties': False,
+        'additionalProperties': True,
         'properties': {
             'queue': {
                 'type': 'string',
@@ -1519,6 +1555,16 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'type': 'array',
         'items': {
             'type': 'string'
+        },
+    },
+    'apt_mirrors': {
+        # List of APT mirror hostnames (or empty list to disable fallback
+        # mirrors entirely) to try in order when installing packages on a
+        # provisioned pod. When unset, SkyPilot uses a built-in default list.
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'pattern': '^[a-zA-Z0-9.-]+$',
         },
     },
     'set_pod_resource_limits': {
@@ -1600,47 +1646,51 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema():
+    def _get_controller_schema(extra_properties: Optional[Dict[str,
+                                                               Any]] = None,):
+        props: Dict[str, Any] = {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                        'default': False,
+                    },
+                    'autostop': _AUTOSTOP_SCHEMA,
+                    'consolidation_mode': {
+                        'type': 'boolean',
+                        # When unset, automatically enabled for deploy-mode
+                        # servers (--deploy) if no existing controller
+                        # clusters are found.
+                    },
+                    'controller_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                    'task_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                },
+            },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            },
+            'force_disable_cloud_bucket': {
+                'type': 'boolean',
+                'default': False,
+            },
+        }
+        if extra_properties:
+            props.update(extra_properties)
         return {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'controller': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'resources': resources_schema,
-                        'high_availability': {
-                            'type': 'boolean',
-                            'default': False,
-                        },
-                        'autostop': _AUTOSTOP_SCHEMA,
-                        'consolidation_mode': {
-                            'type': 'boolean',
-                            # When unset, automatically enabled for deploy-mode
-                            # servers (--deploy) if no existing controller
-                            # clusters are found.
-                        },
-                        'controller_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                        'task_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                    },
-                },
-                'bucket': {
-                    'type': 'string',
-                    'pattern': '^(https|s3|gs|r2|cos)://.+',
-                    'required': [],
-                },
-                'force_disable_cloud_bucket': {
-                    'type': 'boolean',
-                    'default': False,
-                },
-            }
+            'additionalProperties': _allow_additional_properties(),
+            'properties': props,
         }
 
     cloud_configs = {
@@ -2015,6 +2065,8 @@ def get_config_schema():
                 'domain': {
                     'type': 'string',
                 },
+                'security_group_name':
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'region_configs': {
                     'type': 'object',
                     'required': [],
@@ -2122,6 +2174,12 @@ def get_config_schema():
                 'type': 'string',
                 'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
             },
+            # Only honored by daemons that opt in to reading this; see the
+            # per-daemon event functions in sky/server/daemons.py for support.
+            'interval_seconds': {
+                'type': 'integer',
+                'minimum': 1,
+            },
         }
     }
 
@@ -2183,7 +2241,24 @@ def get_config_schema():
         'properties': {
             'default_role': {
                 'type': 'string',
-                'case_insensitive_enum': ['admin', 'user']
+                'case_insensitive_enum': ['admin', 'user', 'viewer']
+            },
+            # Per-role permission overrides. Schema is intentionally
+            # permissive (additionalProperties: True on
+            # `permissions`) because admin/user use `blocklist`
+            # entries while `viewer` uses `allowlist`; both shapes
+            # are `[{path, method}, ...]`.
+            'roles': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'object',
+                    'properties': {
+                        'permissions': {
+                            'type': 'object',
+                            'additionalProperties': True,
+                        },
+                    },
+                },
             },
         },
     }
@@ -2304,7 +2379,10 @@ def get_config_schema():
                         'quota': {
                             'type': 'object',
                             'required': [],
-                            'additionalProperties': False,
+                            # Permissive — see the per-context quota block
+                            # below; mirrors that policy at the workspace
+                            # cloud level.
+                            'additionalProperties': True,
                             'properties': {
                                 'queue': {
                                     'type': 'string',
@@ -2341,7 +2419,10 @@ def get_config_schema():
                                     'quota': {
                                         'type': 'object',
                                         'required': [],
-                                        'additionalProperties': False,
+                                        # Permissive — see the per-context
+                                        # quota block under
+                                        # _CONTEXT_CONFIG_SCHEMA_KUBERNETES.
+                                        'additionalProperties': True,
                                         'properties': {
                                             'queue': {
                                                 'type': 'string',
@@ -2483,6 +2564,32 @@ def get_config_schema():
         },
     }
 
+    dashboard_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'external_links': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['label', 'regex'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'label': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                        'regex': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -2496,7 +2603,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(),
+            'jobs': _get_controller_schema(
+                extra_properties=_extra_jobs_properties,),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
@@ -2510,6 +2618,17 @@ def get_config_schema():
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
+            'dashboard': dashboard_schema,
             **cloud_configs,
+            # For plugin-specific config.
+            'plugins': {
+                'type': 'object',
+                'required': [],
+                # Allow unknown properties since a plugin can be turned off
+                # and the previously valid config should not block server
+                # from reading the config file.
+                'additionalProperties': True,
+                'properties': _extra_plugin_properties,
+            },
         },
     }

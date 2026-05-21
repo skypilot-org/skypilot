@@ -4,13 +4,26 @@ CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
-# The filelock for selecting service ports on controller VM when starting a
-# service. We need to have a filelock to avoid port collision when starting
-# multiple services at the same time.
-PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
+# The filelock for selecting service ports when starting a service. Two
+# requirements:
+#  (1) Same-pod sky.serve.service subprocesses must serialize so they don't
+#      both pick the same just-freed port between their respective
+#      `find_free_port` and the controller subprocess actually `bind()`-ing.
+#  (2) The lock must NOT live on a network filesystem. fcntl/flock over NFS
+#      requires a working NLM server (rpc.statd/lockd); many K8s NFS PVC
+#      setups mount with `local_lock=none` and the server has no lockd, so
+#      flock silently becomes a no-op — multiple processes "acquire" the
+#      lock simultaneously and race anyway.
+PORT_SELECTION_FILE_LOCK_PATH = '~/.sky/skyserve_port_selection.lock'
 
 # Signal file path for controller to handle signals.
-SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
+SIGNAL_FILE_PATH = '~/.sky/signals/sky_serve_controller_signal_{}'
+
+# The consolidation mode lock ensures that if multiple API servers are running
+# at the same time (e.g. during a rolling update), recovery can only happen once
+# the previous API server has exited.
+POOL_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/pool_consolidation_mode_lock'
+SERVE_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/serve_consolidation_mode_lock'
 
 # Time to wait in seconds for controller to setup, this involves the time to run
 # cloud dependencies installation.

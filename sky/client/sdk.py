@@ -156,13 +156,27 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             continue to run for long periods of time without further streaming.
     """
 
-    retry_context: Optional[rest.RetryContext] = None
-    if resumable:
-        retry_context = rest.get_retry_context()
+    # Always fetch the retry context (if any) so we can report progress to
+    # the retry decorator across all stream types. `resumable` only controls
+    # whether already-printed lines are skipped on retry.
+    retry_context = rest.get_retry_context()
     try:
         line_count = 0
 
         for line in rich_utils.decode_rich_status(response):
+            # Report forward progress to the retry decorator for every
+            # message received from the wire, including None control
+            # messages (e.g. heartbeats). Receiving any message
+            # indicates the underlying connection is healthy, so the
+            # consecutive-failure counter should reset. Without this,
+            # resumable streams that spend a full retry window only
+            # replaying already-printed lines (or receiving only
+            # heartbeats) never advance `progress_count` and can
+            # exhaust their retry budget even though the stream is
+            # actively making progress over the network.
+            if retry_context is not None:
+                retry_context.progress_count += 1
+
             if line is not None:
                 line_count += 1
 
@@ -171,10 +185,17 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     # Line was consumed by interactive auth handler
                     continue
 
-                if retry_context is None:
-                    print(line, flush=True, end='', file=output_stream)
-                elif line_count > retry_context.line_processed:
-                    print(line, flush=True, end='', file=output_stream)
+                if (resumable and retry_context is not None and
+                        line_count <= retry_context.line_processed):
+                    # Already printed on a previous attempt; skip.
+                    continue
+
+                print(line, flush=True, end='', file=output_stream)
+
+                if retry_context is not None and resumable:
+                    # Reaching here implies line_count > line_processed
+                    # (otherwise the resumable skip above would have
+                    # `continue`'d). Advance the high-water mark.
                     retry_context.line_processed = line_count
         if request_id is not None and get_result:
             return get(request_id)
@@ -564,6 +585,8 @@ def launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -729,6 +752,8 @@ def launch(
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
             _file_mounts_blob_id,
+            _extra_launch_context,
+            _include_credentials,
         )
 
 
@@ -752,6 +777,8 @@ def _launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -828,6 +855,18 @@ def _launch(
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
+    # Only request credential bundling when the remote server advertises
+    # support for it. Old servers ignore the field via Pydantic
+    # ``extra='ignore'`` so this is also safe to send unconditionally,
+    # but checking up-front lets us skip the work on servers that would
+    # discard it anyway and makes the gating intent explicit.
+    include_credentials = _include_credentials
+    if include_credentials:
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is None or remote_api_version <
+                server_constants.MIN_LAUNCH_CREDENTIALS_API_VERSION):
+            include_credentials = False
+
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -845,6 +884,8 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        extra_launch_context=_extra_launch_context or {},
+        include_credentials=include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -2675,17 +2716,24 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
-        # Open browser to authorization page
+        # Open browser to authorization page. The polling flow does not
+        # require the browser to be on this machine, so if we cannot open
+        # one locally, just ask the user to visit the URL themselves.
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not common_utils.open_browser(auth_url):
+        if common_utils.open_browser(auth_url):
+            click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n'
+                       f'Please click "Authorize" to complete login.\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
+        else:
             logger.debug('Failed to open browser.')
-            return None
-
-        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
-                   f'{colorama.Style.RESET_ALL}\n'
-                   f'Please click "Authorize" to complete login.\n'
-                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
-                   f'auth method.{colorama.Style.RESET_ALL}')
+            click.echo(f'{colorama.Fore.GREEN}Open this URL to complete '
+                       f'login:{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.BRIGHT}{auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
 
         # Poll for token
         start_time = time.time()

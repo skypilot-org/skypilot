@@ -3,10 +3,11 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
+import dataclasses
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, Type
 
 from sky import models
 from sky import sky_logging
@@ -40,9 +41,96 @@ from sky.utils import command_runner
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
+    from sky import task as task_lib
     from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
+
+
+@dataclasses.dataclass
+class TemplateSpec:
+    """A cluster config template path plus extra variables.
+
+    Cluster config templates are the Jinja-rendered per-cloud YAMLs
+    under ``sky/templates/`` (e.g. ``aws-ray.yml.j2``) that drive
+    provisioning. See ``sky.backends.backend_utils.write_cluster_config``.
+
+    ``template_path`` is either an absolute path (for plugin-shipped
+    templates) or a bare filename relative to ``sky/templates/`` (for
+    in-tree templates). ``variables`` are merged into the standard
+    template variables when the template is rendered.
+    """
+    template_path: str
+    variables: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+class TemplateOverrideFn(Protocol):
+    """Callable signature for ``Provisioner.template_override``.
+
+    Called by the backend at launch time. Return a ``TemplateSpec`` to
+    use a custom cluster config template instead of the cloud's
+    default (``_get_cluster_config_template(cloud)`` in
+    ``cloud_vm_ray_backend``), or ``None`` to use the cloud's default.
+    """
+
+    # pylint: disable=unnecessary-ellipsis
+
+    def __call__(
+        self,
+        task: 'task_lib.Task',
+        *,
+        _extra_launch_context: Dict[str, Any],
+        _is_launched_by_jobs_controller: bool,
+    ) -> Optional[TemplateSpec]:
+        ...
+
+
+@dataclasses.dataclass
+class Provisioner:
+    """Registered provisioner for a cloud.
+
+    ``module`` is a module-shaped object (typically a Python module,
+    but any object with the relevant attributes works) providing the
+    routed lifecycle functions: ``run_instances``,
+    ``terminate_instances``, ``query_instances``, etc. Plugin authors
+    look at any built-in cloud module (e.g.
+    ``sky/provision/aws.py``, ``sky/provision/kubernetes/__init__.py``)
+    for the canonical shape.
+
+    ``template_override`` is an optional hook called at launch time —
+    outside the routed lifecycle dispatch — that lets the plugin
+    redirect a task to a custom Jinja template + extra variables.
+    """
+    module: Any
+    template_override: Optional[TemplateOverrideFn] = None
+
+
+_registered_provisioners: Dict[str, Provisioner] = {}
+
+
+def register_provisioner(
+    cloud_name: str,
+    module: Any,
+    *,
+    template_override: Optional[TemplateOverrideFn] = None,
+) -> None:
+    """Register a Provisioner under a cloud name. Last registration wins.
+
+    Plugins call this in their ``install()`` phase. ``cloud_name``
+    matches the lowercase canonical cloud name (e.g. ``'kubernetes'``,
+    ``'aws'``).
+    """
+    _registered_provisioners[cloud_name.lower()] = Provisioner(
+        module=module, template_override=template_override)
+    logger.debug(
+        'Registered Provisioner for %r: module=%s, '
+        'template_override=%s', cloud_name.lower(),
+        type(module).__name__, template_override is not None)
+
+
+def get_registered_provisioner(cloud_name: str) -> Optional[Provisioner]:
+    """Return the Provisioner registered for ``cloud_name``, or None."""
+    return _registered_provisioners.get(cloud_name.lower())
 
 
 def _route_to_cloud_impl(func):
@@ -60,14 +148,27 @@ def _route_to_cloud_impl(func):
         module_name = provider_name.lower()
         if module_name == 'lambda':
             module_name = 'lambda_cloud'
-        module = globals().get(module_name)
-        assert module is not None, f'Unknown provider: {module_name}'
+        # Registered Provisioner methods take precedence over the static
+        # cloud module's; if the registered Provisioner's module does not
+        # define ``func.__name__``, dispatch falls through to the existing
+        # cloud module.
+        plugin = _registered_provisioners.get(module_name)
+        plugin_module = plugin.module if plugin is not None else None
+        existing_module = globals().get(module_name)
+        assert (plugin_module is not None or existing_module
+                is not None), (f'Unknown provider: {module_name}')
 
-        impl = getattr(module, func.__name__, None)
+        impl = None
+        if plugin_module is not None:
+            impl = getattr(plugin_module, func.__name__, None)
+        if impl is None and existing_module is not None:
+            impl = getattr(existing_module, func.__name__, None)
+
         if impl is not None:
             return impl(*args, **kwargs)
 
-        # If implementation does not exist, fall back to default implementation
+        # Neither side implements it — fall back to the decorator's default
+        # body (typically ``raise NotImplementedError``).
         return func(provider_name, *args, **kwargs)
 
     return _wrapper

@@ -1173,3 +1173,56 @@ tests:
           path: spec.template.spec.containers[0].livenessProbe
       - notExists:
           path: spec.template.spec.containers[0].readinessProbe
+
+  - it: should inject POD_IP env from downward API
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+
+  - it: should not duplicate POD_IP env when apiService.extraEnvs already provides it
+    set:
+      apiService.extraEnvs:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: SOME_OTHER_ENV
+          value: "x"
+    asserts:
+      # User-supplied POD_IP from extraEnvs should still be present.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+      # And the user's other extraEnv should be preserved.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SOME_OTHER_ENV
+            value: "x"
+      # Total env count = baseline (9, with chart's POD_IP suppressed: 8) + 2
+      # user-provided = 10. A duplicate would push it to 11.
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 10
+
+  - it: should not duplicate POD_IP env when global.extraEnvs already provides it
+    set:
+      global.extraEnvs:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+    asserts:
+      # Baseline (9) - chart's POD_IP suppressed (8) + user's POD_IP (1) = 9.
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 9

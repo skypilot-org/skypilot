@@ -72,4 +72,20 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 20  # codegen plugin loader passes PluginContext
+MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
+
+# Prefix used for service-account tokens issued to managed jobs that opt in
+# to api_server_access. The expired-token-cleanup daemon uses this prefix to
+# identify managed-job tokens that should be swept once their TTL passes.
+# Keep this in sync with the token name format in
+# sky/jobs/server/core.py::_create_job_api_token.
+MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
+
+# TTL for service-account tokens issued to managed jobs with
+# api_server_access. Kept short so any tokens that leak past the controller
+# cleanup are reaped quickly by the expired-token-cleanup daemon.
+# TODO(lloyd-brown): The controller does not renew this token while the job is
+# still running, so long-running jobs (e.g. multi-day training) can have their
+# api_server_access token expire mid-run. Add token renewal so the TTL only
+# bounds leaked-token lifetime, not in-use token lifetime.
+MANAGED_JOB_TOKEN_TTL_DAYS = 3

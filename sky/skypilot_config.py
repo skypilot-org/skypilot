@@ -53,10 +53,11 @@ import copy
 import json
 import os
 import pathlib
+import re
 import tempfile
 import threading
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
 import sqlalchemy
@@ -487,6 +488,31 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
+    _validate_dashboard_external_links(config, config_source)
+
+
+def _validate_dashboard_external_links(config: Dict[str, Any],
+                                       config_source: str) -> None:
+    """Ensures every dashboard.external_links regex is compilable."""
+    dashboard = config.get('dashboard') if isinstance(config, dict) else None
+    if not isinstance(dashboard, dict):
+        return
+    external_links = dashboard.get('external_links')
+    if not isinstance(external_links, list):
+        return
+    for idx, entry in enumerate(external_links):
+        if not isinstance(entry, dict):
+            continue
+        regex = entry.get('regex')
+        if not isinstance(regex, str):
+            continue
+        try:
+            re.compile(regex)
+        except re.error as e:
+            raise ValueError(
+                f'Invalid config YAML from ({config_source}). '
+                f'dashboard.external_links[{idx}].regex is not a valid regex: '
+                f'{regex!r} ({e}).') from e
 
 
 def overlay_skypilot_config(
@@ -831,6 +857,25 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+# Hooks invoked at the end of `update_api_server_config_no_lock`, after the
+# new config has been persisted and reloaded in-process. Plugins use this to
+# invalidate caches that were derived from the config (e.g. a request that
+# memoized the result of `get_nested(...)` for a TTL). Registered at server
+# startup during single-threaded plugin loading, so no lock is needed.
+_CONFIG_UPDATE_HOOKS: List[Callable[[], None]] = []
+
+
+def register_config_update_hook(fn: Callable[[], None]) -> None:
+    """Register a callback to be invoked when the API server config is updated.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. The callback runs after the new config has been
+    persisted and reloaded; exceptions are caught and logged so a misbehaving
+    hook cannot fail the config update.
+    """
+    if fn not in _CONFIG_UPDATE_HOOKS:
+        _CONFIG_UPDATE_HOOKS.append(fn)
+
 
 def get_effective_queue_name(
         cloud: str,
@@ -1041,3 +1086,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 config, global_config_path)
 
     reload_config()
+    for hook in list(_CONFIG_UPDATE_HOOKS):
+        try:
+            hook()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Config-update hook {hook!r} raised: {e}',
+                           exc_info=True)

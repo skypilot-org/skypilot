@@ -92,6 +92,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
       high-throughput, low-latency networking
     - AWS_EFA: AWS EKS/HyperPod clusters with Elastic Fabric Adapter (EFA)
       support for high-performance inter-node communication
+    - OCI_ROCE: Oracle OKE clusters on bare-metal GPU shapes
+      (BM.GPU.*.8) with RoCEv2 over Mellanox ConnectX, provisioned via
+      dedicated RDMA capacity pools
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -100,6 +103,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
       sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
     - Nebius settings match the InfiniBand configuration used in Nebius VMs
     - AWS EFA settings match the EFA configuration used in AWS VMs
+    - OCI settings match the RoCE configuration used in OCI bare-metal
+      GPU shapes (per oracle-quickstart/oci-hpc-oke reference manifests)
     """
 
     GCP_TCPX = 'gcp_tcpx'
@@ -109,6 +114,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     COREWEAVE = 'coreweave'
     TOGETHER = 'together'
     AWS_EFA = 'aws_efa'
+    OCI_ROCE = 'oci_roce'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
@@ -138,6 +144,25 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         elif self == KubernetesHighPerformanceNetworkType.AWS_EFA:
             return {
                 'FI_PROVIDER': 'efa',
+            }
+        elif self == KubernetesHighPerformanceNetworkType.OCI_ROCE:
+            # OCI bare-metal GPU shapes (BM.GPU.*.8) use RoCEv2 over
+            # Mellanox ConnectX. Values per oracle-quickstart/oci-hpc-oke
+            # NCCL reference manifests. Per-shape exact HCA lists give
+            # marginally better perf; the broad 'mlx5' prefix match here
+            # works on all shapes. Users can override via task `envs:`.
+            # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                # RoCEv2 GID index. Fixed on OCI's bare-metal GPU images.
+                'NCCL_IB_GID_INDEX': '3',
+                # DSCP for OCI's lossless RoCE fabric (PFC class).
+                'NCCL_IB_TC': '41',
+                # OCI BM.GPU shapes use legacy eth* naming; primary NIC
+                # is eth0 even under hostNetwork: true.
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
@@ -209,7 +234,7 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
 # We add a version suffix to the port-forward proxy command to ensure backward
 # compatibility and avoid overwriting the older version.
-PORT_FORWARD_PROXY_CMD_VERSION = 2
+PORT_FORWARD_PROXY_CMD_VERSION = 3
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
@@ -974,6 +999,20 @@ class GKEAutoscaler(Autoscaler):
             # Cluster information is not available.
             # return True for optimistic pod scheduling.
             logger.debug(f'{e.message}', exc_info=True)
+            return True
+
+        # GKE Autopilot uses Node Auto-Provisioning (NAP) to create node
+        # pools on demand for any requested instance type, including GPUs.
+        # The static node pool list returned by the API only reflects the
+        # CPU bootstrap pools and does not advertise what NAP can provision,
+        # so the per-pool fit check below would falsely reject GPU requests.
+        # Trust NAP to satisfy the request.
+        # Use `is True` so a non-boolean value (e.g. accidentally a string)
+        # cannot inadvertently bypass the fit check on Standard clusters.
+        if cluster.get('autopilot', {}).get('enabled') is True:
+            logger.debug(f'Cluster {cluster_name} is Autopilot-managed; '
+                         'trusting Node Auto-Provisioning to satisfy '
+                         f'{instance_type}.')
             return True
 
         # Check if any node pool with autoscaling enabled can
@@ -2443,8 +2482,8 @@ class PodValidator:
                 sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
-            if klass.startswith('dict('):
-                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+            if klass.startswith('dict(') or klass.startswith('dict['):
+                match = re.match(r'dict[(\[]([^,]*), (.*)[)\]]', klass)
                 if match is None:
                     raise ValueError(f'Invalid dict type format: {klass}')
                 sub_kls = match.group(2)
@@ -2969,15 +3008,15 @@ class KubernetesInstanceType:
         return self.name
 
 
-def construct_ssh_jump_command(
-        private_key_path: str,
-        ssh_jump_ip: str,
-        ssh_jump_port: Optional[int] = None,
-        ssh_jump_user: str = 'sky',
-        proxy_cmd_path: Optional[str] = None,
-        proxy_cmd_target_pod: Optional[str] = None,
-        current_kube_context: Optional[str] = None,
-        current_kube_namespace: Optional[str] = None) -> str:
+def construct_ssh_jump_command(private_key_path: str,
+                               ssh_jump_ip: str,
+                               ssh_jump_port: Optional[int] = None,
+                               ssh_jump_user: str = 'sky',
+                               proxy_cmd_path: Optional[str] = None,
+                               proxy_cmd_target_pod: Optional[str] = None,
+                               current_kube_context: Optional[str] = None,
+                               current_kube_namespace: Optional[str] = None,
+                               host_network: bool = False) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -2994,9 +3033,14 @@ def construct_ssh_jump_command(
             current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
+        # Pass hostNetwork as a flag: it's known statically here, so the
+        # proxy script avoids a per-connection `kubectl get pod` probe
+        # (zero extra kubectl calls on the common non-hostNetwork path).
+        host_network_flag = '-N ' if host_network else ''
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
                                    f'{kube_context_flag}'
                                    f'{kube_namespace_flag}'
+                                   f'{host_network_flag}'
                                    f'{proxy_cmd_target_pod}\'')
     return ssh_jump_proxy_command
 
@@ -3006,6 +3050,7 @@ def get_ssh_proxy_command(
     private_key_path: str,
     context: Optional[str],
     namespace: str,
+    host_network: bool = False,
 ) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
@@ -3037,6 +3082,12 @@ def get_ssh_proxy_command(
         private_key_path: str; Path to the private key to use for SSH.
             This key must be authorized to access the SSH jump pod.
         namespace: Kubernetes namespace to use.
+        host_network: bool; Whether the target pod runs with
+            ``hostNetwork: true``. When True the proxy script discovers
+            the pod's probed sshd port from the cluster's ConfigMap;
+            when False it skips that lookup and uses port 22. Passed as
+            a flag so the script needs no per-connection `kubectl get
+            pod` probe to determine this.
     """
     ssh_jump_ip = '127.0.0.1'  # Local end of the port-forward tunnel
     assert private_key_path is not None, 'Private key path must be provided'
@@ -3051,7 +3102,8 @@ def get_ssh_proxy_command(
         # command to make sure SSH still works when the current
         # context/namespace is changed by the user.
         current_kube_context=context,
-        current_kube_namespace=namespace)
+        current_kube_namespace=namespace,
+        host_network=host_network)
     return ssh_jump_proxy_command
 
 
@@ -3358,6 +3410,40 @@ def inject_docker_cache_volume(
                 })
 
 
+def resolve_effective_pod_config(
+    cluster_config_overrides: Dict[str, Any],
+    cloud: Optional[clouds.Cloud] = None,
+    context: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolves the effective ``kubernetes.pod_config`` (global + overrides).
+
+    This is the same pod_config that combine_pod_config_fields() folds into
+    the rendered cluster YAML. make_deploy_resources_variables() needs it
+    before the template is rendered (to detect ``hostNetwork``), so both
+    resolve it here to stay in agreement on the SSH cloud/context handling.
+    """
+    # We don't use override_configs in `get_effective_region_config`, as
+    # merging the pod config requires special handling.
+    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
+    context_str = context
+    if isinstance(cloud, clouds.SSH) and context is not None:
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
+    kubernetes_config = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    override_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
+    return kubernetes_config
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
@@ -3403,25 +3489,8 @@ def combine_pod_config_fields(
         ```
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
-    # We don't use override_configs in `get_effective_region_config`, as merging
-    # the pod config requires special handling.
-    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
-    context_str = context
-    if isinstance(cloud, clouds.SSH) and context is not None:
-        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
-        context_str = context[len('ssh-'):]
-    kubernetes_config = skypilot_config.get_effective_region_config(
-        cloud=cloud_str,
-        region=context_str,
-        keys=('pod_config',),
-        default_value={})
-    override_pod_config = config_utils.get_cloud_config_value_from_dict(
-        dict_config=cluster_config_overrides,
-        cloud=cloud_str,
-        region=context_str,
-        keys=('pod_config',),
-        default_value={})
-    config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
+    kubernetes_config = resolve_effective_pod_config(cluster_config_overrides,
+                                                     cloud, context)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     config_utils.merge_k8s_configs(

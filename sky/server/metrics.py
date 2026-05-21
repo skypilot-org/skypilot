@@ -209,12 +209,18 @@ def metrics() -> fastapi.Response:
 
 
 # Per-context timeout for metrics collection. Must be shorter than the
-# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
-# endpoint responds promptly even when one remote cluster is unreachable.
-# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
-# blocks the entire /gpu-metrics response, causing Prometheus to mark the
-# scrape target as down.
-_PER_CONTEXT_TIMEOUT_SECONDS = 8
+# Prometheus scrape_timeout configured on the upstream Prometheus that
+# scrapes this endpoint so the response arrives before that scrape times
+# out and marks the target down. Operators federating from a Prometheus
+# with a non-default scrape_timeout should adjust both together; see
+# docs/source/reference/api-server/examples/api-server-gpu-metrics-setup.rst.
+#
+# Without a per-context timeout, a single hanging port-forward (e.g. 30s
+# httpx timeout) would block the entire /gpu-metrics response.
+#
+# 20s accommodates large compute clusters where federate latency plus
+# port-forward setup can run 5-10s warm and longer cold.
+_PER_CONTEXT_TIMEOUT_SECONDS = 20
 
 _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
     '/var/skypilot/credentials/kubeconfig/kubeconfig')

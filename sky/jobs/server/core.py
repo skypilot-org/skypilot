@@ -347,6 +347,7 @@ class _DefaultManagedJobRunner:
         follow: bool,
         controller: bool,
         tail: Optional[int],
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]],
     ) -> int:
         return backend.tail_managed_job_logs(handle,
@@ -355,6 +356,7 @@ class _DefaultManagedJobRunner:
                                              follow=follow,
                                              controller=controller,
                                              tail=tail,
+                                             tail_offset=tail_offset,
                                              task=task)
 
 
@@ -618,13 +620,14 @@ def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
     # pylint: disable=import-outside-toplevel
     from sky.users.token_service import token_service
 
-    token_name = f'managed-job-{job_name or "unnamed"}-{dag_uuid[:8]}'
+    token_name = (f'{managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX}'
+                  f'{job_name or "unnamed"}-{dag_uuid[:8]}')
 
     token_data = token_service.create_token(
         creator_user_id=creator_user_id,
         service_account_user_id=creator_user_id,
         token_name=token_name,
-        expires_in_days=7)
+        expires_in_days=managed_job_constants.MANAGED_JOB_TOKEN_TTL_DAYS)
 
     global_user_state.add_service_account_token(
         token_id=token_data['token_id'],
@@ -1541,6 +1544,7 @@ def tail_logs(name: Optional[str],
               controller: bool,
               refresh: bool,
               tail: Optional[int] = None,
+              tail_offset: Optional[int] = None,
               task: Optional[Union[str, int]] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
@@ -1588,6 +1592,7 @@ def tail_logs(name: Optional[str],
         follow=follow,
         controller=controller,
         tail=tail,
+        tail_offset=tail_offset,
         task=task,
     )
 

@@ -38,9 +38,17 @@ SKY_REMOTE_RAY_PORT = 6380
 SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
 # Note we can not use json.dumps which will add a space between ":" and its
 # value which causes the yaml parser to fail.
+# The os.environ.get(...) calls stay unevaluated here on purpose: this
+# string is executed remotely on the pod, where the hostNetwork probe
+# (sky.provision.kubernetes.host_network_probe) may have set the port env
+# vars. It falls back to the SkyPilot defaults otherwise.
 SKY_REMOTE_RAY_PORT_DICT_STR = (
-    f'{{"ray_port":{SKY_REMOTE_RAY_PORT}, '
-    f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
+    '{'
+    f'"ray_port":int(os.environ.get("SKYPILOT_RAY_PORT",'
+    f'{SKY_REMOTE_RAY_PORT})), '
+    f'"ray_dashboard_port":int(os.environ.get('
+    f'"SKYPILOT_RAY_DASHBOARD_PORT",{SKY_REMOTE_RAY_DASHBOARD_PORT}))'
+    '}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
@@ -149,7 +157,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '36'  # Add fields to ManagedJobInfo proto for handle.
+SKYLET_VERSION = '37'  # log_lib.tail_logs supports tail_offset.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -508,6 +516,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
     ('azure', 'remote_identity'),
@@ -635,6 +644,9 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
 
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
+
+# A built-in viewer-role counterpart to SKYPILOT_SYSTEM_USER_ID.
+SKYPILOT_SYSTEM_VIEWER_USER_ID = 'skypilot-system-viewer'
 
 # The directory to store the logging configuration.
 LOGGING_CONFIG_DIR = '~/.sky/logging'

@@ -9,6 +9,7 @@ from sky import global_user_state
 from sky import models
 from sky import provision
 from sky.schemas.api import responses
+from sky.server import plugin_hooks
 from sky.utils import status_lib
 from sky.volumes.server import core
 
@@ -683,6 +684,143 @@ class TestVolumeCore:
         assert mock_get_volume_by_name.call_count == 2
         assert mock_provision_delete.call_count == 2
         assert mock_delete_volume.call_count == 2
+
+    @pytest.fixture(autouse=True)
+    def _clear_volume_deleted_hooks(self):
+        """Reset the global hook list around each test in this class."""
+        plugin_hooks._VOLUME_DELETED_HOOKS.clear()
+        yield
+        plugin_hooks._VOLUME_DELETED_HOOKS.clear()
+
+    def _setup_volume_delete_mocks(self,
+                                   monkeypatch,
+                                   provision_delete_side_effect=None):
+        """Set up the standard set of mocks for volume_delete hook tests."""
+        handle = mock.MagicMock(spec=models.VolumeConfig)
+        handle.cloud = 'kubernetes'
+        handle.region = 'my-context'
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': handle,
+        }
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=mock_volume))
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock.MagicMock())
+        provision_delete = mock.MagicMock(
+            side_effect=provision_delete_side_effect)
+        monkeypatch.setattr(provision, 'delete_volume', provision_delete)
+        monkeypatch.setattr(provision, 'get_volume_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        return handle
+
+    def test_volume_delete_fires_hook(self, monkeypatch):
+        """volume_delete invokes registered hooks with name and config."""
+        handle = self._setup_volume_delete_mocks(monkeypatch)
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.fires_hook', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'])
+
+        assert captured == [('test-volume', handle)]
+
+    def test_volume_delete_purge_fires_hook(self, monkeypatch):
+        """Hook fires even when purge=True and provision.delete_volume fails."""
+        handle = self._setup_volume_delete_mocks(
+            monkeypatch,
+            provision_delete_side_effect=Exception('cloud delete failed'))
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.purge_fires_hook', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'], purge=True)
+
+        assert captured == [('test-volume', handle)]
+
+    def test_volume_delete_does_not_fire_hook_when_provision_fails_no_purge(
+            self, monkeypatch):
+        """Hook must not fire if delete aborts before db deletion."""
+        self._setup_volume_delete_mocks(
+            monkeypatch,
+            provision_delete_side_effect=Exception('cloud delete failed'))
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.no_fire_on_failure', lambda name, config: captured.append(
+                (name, config)))
+
+        with pytest.raises(Exception, match='cloud delete failed'):
+            core.volume_delete(['test-volume'])
+
+        assert captured == []
+
+    def test_volume_delete_hook_failure_does_not_block_delete(
+            self, monkeypatch):
+        """An exception inside a hook must not propagate out of volume_delete."""
+        self._setup_volume_delete_mocks(monkeypatch)
+
+        def bad_hook(name, config):
+            raise RuntimeError('hook boom')
+
+        plugin_hooks.register_volume_deleted_hook('test.bad_hook', bad_hook)
+
+        # Should not raise.
+        core.volume_delete(['test-volume'])
+
+    def test_register_replaces_hook_with_same_id(self, monkeypatch):
+        """Re-registering with the same ID replaces the previous callback."""
+        handle = self._setup_volume_delete_mocks(monkeypatch)
+        first_calls = []
+        second_calls = []
+
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: first_calls.append((name, config)))
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: second_calls.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'])
+
+        assert first_calls == []
+        assert second_calls == [('test-volume', handle)]
+
+    def test_volume_delete_multiple_fires_hook_per_volume(self, monkeypatch):
+        """Hook fires once per volume in a multi-volume delete call."""
+        handles = []
+        mock_volumes = []
+        for vname, cloud in [('v1', 'aws'), ('v2', 'gcp')]:
+            handle = mock.MagicMock(spec=models.VolumeConfig)
+            handle.cloud = cloud
+            handle.region = None
+            handles.append(handle)
+            mock_volumes.append({
+                'name': vname,
+                'status': status_lib.VolumeStatus.READY,
+                'handle': handle,
+            })
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(side_effect=mock_volumes))
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock.MagicMock())
+        monkeypatch.setattr(provision, 'delete_volume', mock.MagicMock())
+        monkeypatch.setattr(provision, 'get_volume_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.multi_volume', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['v1', 'v2'])
+
+        assert captured == [('v1', handles[0]), ('v2', handles[1])]
 
     def test_volume_apply_success_new_volume(self, monkeypatch):
         """Test volume_apply with successful creation of new volume."""

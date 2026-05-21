@@ -246,7 +246,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
       * ``--tail 5`` returns exactly 5 matching lines.
       * the last-N-lines requested are the *trailing* lines (line 20).
       * ``--tail`` + ``-s`` is rejected at the CLI layer.
-      * ``--tail 0`` (default) returns all 20 lines.
+      * No ``--tail`` flag with a small log returns all 20 lines.
     """
     name = smoke_tests_utils.get_cluster_name()
     get_job_id_cmd = (f'sky jobs queue | grep tail-{name} | head -n1 '
@@ -274,7 +274,7 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'test "$count" = "5" && '
             f'echo "$out" | grep -q "SKYLOGTAIL 20" && '
             f'! (echo "$out" | grep -q "SKYLOGTAIL 1$")',
-            # --tail 0 (default) should return all 20 lines.
+            # No --tail (default 1000) on a 20-line log returns all 20.
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'out=$(sky jobs logs $JOB_ID --no-follow) && '
             f'count=$(echo "$out" | grep -c "SKYLOGTAIL ") && '
@@ -283,9 +283,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a negative value is rejected.
-            f'(sky jobs logs --tail -1 1 2>&1 || true) | '
-            f'grep "non-negative integer"',
+            # --tail with a non-numeric value is rejected by Click's
+            # built-in int parser. Negative ints (and 0) are valid
+            # synonyms for "all lines".
+            f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
+            f'grep "is not a valid integer"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -574,25 +576,30 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    user_hash = common_utils.get_user_hash()
-    # Use a short stable prefix plus user_hash anchor. When the user
-    # hash is long (e.g., 19 chars for service accounts),
-    # make_cluster_name_on_cloud truncates the display name to fit
-    # within K8s's 42-char limit, so name_on_cloud is no longer a
-    # prefix of the actual pod name.
+    # Match a short stable prefix of the test cluster name against the
+    # `skypilot-cluster-name` annotation column (which always holds the full
+    # untruncated cluster name). Two reasons:
+    #   1. The annotation always preserves the full name, so the
+    #      `-cloud-cmd` exclusion below is reliable even when the user hash
+    #      is long enough (e.g. 19 chars for service accounts) that
+    #      `<test>-cloud-cmd` gets truncated past the 42-char K8s limit and
+    #      the `-cloud-cmd` suffix disappears from the pod name.
+    #   2. A short prefix is robust against provisioning backends that
+    #      rewrite the cluster name with their own truncation rule, where
+    #      `name_on_cloud` (computed with the local truncation rule) is no
+    #      longer a prefix of the actual cluster name.
+    # Excluding cloud-cmd is critical: the kubectl command runs from inside
+    # the cloud-cmd pod via `sky exec`, so a stray match would self-kill the
+    # helper pod and fail the test with exit code 137.
     stable_prefix = name_on_cloud[:15]
-    # Exclude the cloud-cmd helper cluster: its head/worker pods share the
-    # same {stable_prefix} and {user_hash} suffix, so without this filter
-    # `kubectl delete` would also kill the pod running this very command,
-    # producing exit code 137 and a spurious test failure.
-    terminate_head_cmd = (
-        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
+    _get_job_pods = (
+        'kubectl get pods -l skypilot-cluster-name --no-headers -o custom-columns='
+        '"NAME:.metadata.name,CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
         f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
-        f'grep -- "{user_hash}-head" | xargs kubectl delete pod')
+        'awk \'{print $1}\' | sort')
+    terminate_head_cmd = f'{_get_job_pods} | head -1 | xargs kubectl delete pod'
     terminate_worker_cmd = (
-        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
-        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
-        f'grep -- "{user_hash}-worker" | xargs kubectl delete pod')
+        f'{_get_job_pods} | tail -1 | xargs kubectl delete pod')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [
@@ -615,7 +622,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
                 # check, but should be significantly shorter than the timeout of
                 # a transient error retries, as the controller should discover
                 # the cluster termination immediately.
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -628,7 +636,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.RECOVERING],
-                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,

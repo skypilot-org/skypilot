@@ -356,39 +356,62 @@ def override_request_env_and_config(
         request_body: payloads.RequestBody, request_id: str,
         request_name: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
+    # Daemons run AS the server, not as any client. Their persisted
+    # request_body.env_vars came from whichever pod first scheduled them,
+    # which may be a previous deployment generation with stale downward-API
+    # values (e.g. SKYPILOT_POD_MEMORY_BYTES_LIMIT, SKYPILOT_APISERVER_UUID).
+    # Overlaying those would clobber the current pod's actual values. So
+    # for daemons, skip the env overlay and use the current process's
+    # os.environ.
+    is_daemon = daemons.is_daemon_request_id(request_id)
     original_env = os.environ.copy()
     try:
-        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
-        # server affecting client requests. If set on the client side, it will
-        # be overridden by the request body.
-        os.environ.pop('SKYPILOT_DEBUG', None)
-        # Remove the db connection uri from client supplied env vars, as the
-        # client should not set the db string on server side.
-        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-        # Remove the in-cluster context name from client supplied env vars.
-        # When a client runs inside a Kubernetes pod (e.g., a managed job with
-        # api_server_access), its env has SKYPILOT_IN_CLUSTER_CONTEXT_NAME set
-        # pod template. If this leaks into the server's os.environ, it causes
-        # the server to attempt in-cluster auth (load_incluster_config) instead
-        # of using its own kubeconfig, which fails when the server is not
-        # running in a Kubernetes pod.
-        request_body.env_vars.pop(
-            kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
-        os.environ.update(request_body.env_vars)
-        # Note: may be overridden by AuthProxyMiddleware.
-        # TODO(zhwu): we need to make the entire request a context available to
-        # the entire request execution, so that we can access info like user
-        # through the execution.
-        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                           name=request_body.env_vars[constants.USER_ENV_VAR])
-        _, user = global_user_state.add_or_update_user(user, return_user=True)
+        if is_daemon:
+            # The SkyPilot system user is already upserted at scheduling
+            # time by prepare_request_async when is_skypilot_system=True,
+            # so no add_or_update_user round-trip is needed per tick.
+            user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
+                               name=constants.SKYPILOT_SYSTEM_USER_ID,
+                               user_type=models.UserType.SYSTEM.value)
+            # Daemons always run in-process on the server, regardless of
+            # what the persisted body recorded.
+            using_remote_api_server = False
+        else:
+            # Unset SKYPILOT_DEBUG by default, to avoid the value set on the
+            # API server affecting client requests. If set on the client
+            # side, it will be overridden by the request body.
+            os.environ.pop('SKYPILOT_DEBUG', None)
+            # Remove the db connection uri from client supplied env vars, as
+            # the client should not set the db string on server side.
+            request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # Remove the in-cluster context name from client supplied env
+            # vars. When a client runs inside a Kubernetes pod (e.g., a
+            # managed job with api_server_access), its env has
+            # SKYPILOT_IN_CLUSTER_CONTEXT_NAME set pod template. If this
+            # leaks into the server's os.environ, it causes the server to
+            # attempt in-cluster auth (load_incluster_config) instead of
+            # using its own kubeconfig, which fails when the server is not
+            # running in a Kubernetes pod.
+            request_body.env_vars.pop(
+                kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            os.environ.update(request_body.env_vars)
+            # Note: may be overridden by AuthProxyMiddleware.
+            # TODO(zhwu): we need to make the entire request a context
+            # available to the entire request execution, so that we can
+            # access info like user through the execution.
+            user = models.User(
+                id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                name=request_body.env_vars[constants.USER_ENV_VAR])
+            _, user = global_user_state.add_or_update_user(user,
+                                                           return_user=True)
+            using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
         os.environ['CLICOLOR_FORCE'] = '1'
         server_common.reload_for_new_request(
             client_entrypoint=request_body.entrypoint,
             client_command=request_body.entrypoint_command,
-            using_remote_api_server=request_body.using_remote_api_server,
+            using_remote_api_server=using_remote_api_server,
             user=user,
             request_id=request_id)
         logger.debug(
@@ -420,7 +443,11 @@ def override_request_env_and_config(
         # Restore the original environment variables, so that a new request
         # won't be affected by the previous request, e.g. SKYPILOT_DEBUG
         # setting, etc. This is necessary as our executor is reusing the
-        # same process for multiple requests.
+        # same process for multiple requests. The daemon path also relies
+        # on this: daemons mutate os.environ from inside the with block
+        # (e.g. setting SKYPILOT_DISABLE_LOGGING in
+        # InternalRequestDaemon.run_event), and that mutation must not
+        # leak to whichever request the worker handles next.
         os.environ.clear()
         os.environ.update(original_env)
 

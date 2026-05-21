@@ -293,6 +293,14 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    extra_launch_context: Dict[str, Any] = {}
+    # When True and the server supports it (API_VERSION >=
+    # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
+    # 3-tuple (job_id, handle, credentials) instead of (job_id, handle).
+    # Old servers ignore this field via Pydantic ``extra='ignore'`` and
+    # continue to return the 2-tuple, so it is safe for new clients to
+    # set against any server.
+    include_credentials: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -314,6 +322,8 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
+        kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
 
 
@@ -628,6 +638,10 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Skip the last `tail_offset` lines from the end of the file before
+    # taking `tail` lines. Used by the dashboard live-tail UI to fetch
+    # progressively older windows without re-reading the whole file.
+    tail_offset: Optional[int] = None
     # Task identifier: int for task_id, str for task_name
     task: Optional[Union[str, int]] = None
 
@@ -911,6 +925,11 @@ class CostReportBody(RequestBody):
     # we use hashes instead of names to avoid the case where
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
+    # Filter by cluster name. Useful for the dashboard, which routes a
+    # torn-down cluster's detail page by name (the URL param is the
+    # cluster name, not the hash). When both cluster_hashes and
+    # cluster_names are set, rows matching either are returned.
+    cluster_names: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False

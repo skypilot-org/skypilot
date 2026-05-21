@@ -31,8 +31,6 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
-from sky.utils import annotations
 from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -79,20 +77,6 @@ class ProcessStatus(enum.Enum):
 
     # The process failed
     FAILED = 'FAILED'
-
-
-@annotations.lru_cache(scope='request')
-def get_usage_run_id() -> str:
-    """Returns a unique run id for each 'run'.
-
-    A run is defined as the lifetime of a process that has imported `sky`
-    and has called its CLI or programmatic APIs. For example, two successive
-    `sky launch` are two runs.
-    """
-    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
-    if usage_run_id is not None:
-        return usage_run_id
-    return str(uuid.uuid4())
 
 
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -977,14 +961,23 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict[str, Any],
+def fill_template(template_ref: str, variables: Dict[str, Any],
                   output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    root_dir = os.path.dirname(os.path.dirname(__file__))
-    template_path = os.path.join(root_dir, 'templates', template_name)
+    """Create a file from a Jinja template.
+
+    ``template_ref`` is either a bare filename (resolved against
+    ``sky/templates/``) or an absolute path. Plugins ship their own
+    templates inside their package and pass an absolute path so they
+    don't have to write into SkyPilot's tree.
+    """
+    assert template_ref.endswith('.j2'), template_ref
+    if os.path.isabs(template_ref):
+        template_path = template_ref
+    else:
+        root_dir = os.path.dirname(os.path.dirname(__file__))
+        template_path = os.path.join(root_dir, 'templates', template_ref)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+        raise FileNotFoundError(f'Template "{template_ref}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))

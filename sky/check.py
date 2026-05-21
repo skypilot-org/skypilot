@@ -1,9 +1,11 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
 import os
+import re
 import traceback
 from types import ModuleType
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
@@ -29,6 +31,67 @@ PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME)
 
 logger = sky_logging.init_logger(__name__)
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub('', s) if isinstance(s, str) else ''
+
+
+def _build_check_results(
+    cloud2ctx2text: Dict[str, Dict[str, str]],
+    check_results_dict: Dict[Any, List[Tuple]],
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Construct the persistable {cloud: {ctx: {enabled, reason}}} dict.
+
+    Combines two sources because cloud2ctx2text is only populated for
+    per-context (k8s/SSH) checks; non-k8s clouds' string reasons live in
+    check_results_dict.
+    """
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    # Per-context entries (k8s, SSH).
+    for cloud_repr, ctx2text in cloud2ctx2text.items():
+        out.setdefault(cloud_repr, {})
+        for ctx, text in ctx2text.items():
+            stripped = _strip_ansi(text)
+            # Match a positive 'enabled.' prefix so that exception messages
+            # (which start with neither 'enabled.' nor 'disabled.') are
+            # correctly classified as not-enabled. The trailing period is
+            # intentional: it matches 'enabled.' and 'enabled. Reason: ...'
+            # but not hypothetical future variants like 'enabled but degraded'.
+            out[cloud_repr][ctx] = {
+                'enabled': stripped.lower().startswith('enabled.'),
+                'reason': stripped,
+            }
+
+    # Non-k8s clouds: aggregate string reasons across capabilities. A cloud
+    # isn't fully usable if ANY capability fails, so prefer a failure reason
+    # when present; only show a success reason if every capability succeeded.
+    for cloud_tuple, result_list in check_results_dict.items():
+        cloud_repr = cloud_tuple[0]
+        if cloud_repr in out:
+            # k8s / SSH already populated above; don't overwrite.
+            continue
+        string_reasons = [(ok, reason)
+                          for _, ok, reason in result_list
+                          if not isinstance(reason, dict)]
+        if not string_reasons:
+            continue
+        all_ok = all(ok for ok, _ in string_reasons)
+        # Prefer the first failure reason if any; otherwise the first
+        # success reason.
+        failure_reasons = [r for ok, r in string_reasons if not ok]
+        chosen_reason = (failure_reasons[0]
+                         if failure_reasons else string_reasons[0][1])
+        out.setdefault(cloud_repr, {})
+        out[cloud_repr][''] = {
+            'enabled': all_ok,
+            'reason': _strip_ansi(chosen_reason or ''),
+        }
+
+    return out
 
 
 def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
@@ -313,6 +376,27 @@ def check_capabilities(
                 current_workspace_name)
             all_enabled_clouds = all_enabled_clouds.union(
                 enabled_clouds_for_capability)
+
+        # Persist the per-(cloud, context) status so downstream consumers
+        # (dashboard endpoints, plugins, etc.) can read it without
+        # re-running cloud probes. Full-workspace runs replace the row;
+        # scoped runs (clouds is not None) merge at cloud granularity.
+        # Wrapped in try/except: this row is a cache, and the
+        # source-of-truth enabled_clouds_<workspace>_<cap> rows have
+        # already been written above. A transient DB failure or
+        # unsupported dialect must not fail the user-visible
+        # `sky check` command.
+        try:
+            results_to_persist = _build_check_results(cloud2ctx2text,
+                                                      check_results_dict)
+            global_user_state.set_check_results(
+                results_to_persist,
+                current_workspace_name,
+                is_full_workspace_run=(clouds is None),
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to persist check_results for workspace '
+                           f'{current_workspace_name!r}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,

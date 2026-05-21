@@ -1354,9 +1354,23 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  tail: int = 0) -> str:
+                  tail: int = 0,
+                  tail_offset: Optional[int] = None) -> str:
         # pylint: disable=line-too-long
 
+        # tail_offset is gated on SKYLET_VERSION 37+ — older skylets reject
+        # the kwarg. We omit it entirely on the old branch so the codegen
+        # signature stays identical to what those skylets expect.
+        tail_logs_call = (
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})'
+        )
+        if tail_offset is not None:
+            tail_logs_call = (
+                f'if int(constants.SKYLET_VERSION) < 37:'
+                f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})'
+                f'\nelse:'
+                f'\n  log_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail}, tail_offset={tail_offset})'
+            )
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
@@ -1371,9 +1385,14 @@ class JobLibCodeGen:
              f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
             ),
             # Add a newline to leave the if indent block above.
-            f'\nlog_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})',
-            # After tailing, check the job status and exit with appropriate code
-            'job_status = job_lib.get_status(job_id)',
+            '\n' + tail_logs_call,
+            # After tailing, check the job status and exit with appropriate
+            # code. The leading '\n' resets indentation back to column 0;
+            # without it, ';'.join() in _build below would paste these onto
+            # the last line of the if/else above and the statements would be
+            # absorbed into the `else:` suite (so the if-branch falls through
+            # without sys.exit-ing).
+            '\njob_status = job_lib.get_status(job_id)',
             'exit_code = exceptions.JobExitCode.from_job_status(job_status)',
             # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
             # exit with success (0) since fetching current logs is a successful operation.

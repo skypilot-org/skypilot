@@ -40,7 +40,7 @@ Launch a cluster or task.
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--idle-minutes-to-autostop`, `-i` — Automatically stop the cluster after this many minutes of idleness, i.e., no running or pending jobs in the cluster's job queue. Idleness gets reset depending on the ``--wait-for`` flag. Setting this ...
 - `--wait-for` — Determines the condition for resetting the idleness timer. This option works in conjunction with ``--idle-minutes-to-autostop``. Options:   1. ``jobs_and_ssh`` (default): Wait for in-progress jobs an...
@@ -85,7 +85,7 @@ Execute a task or command on an existing cluster.
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
@@ -211,7 +211,7 @@ Tail the log of a job.
 - `--sync-down`, `-s` — Sync down the logs of a job to the local machine. For a distributed job, a separate log file from each worker will be downloaded.
 - `--status` — If specified, do not show logs but exit with a status code for the job's status: 0 for succeeded, or 1 for all other statuses.
 - `--follow`, `--no-follow` — Follow the logs of a job. If --no-follow is specified, print the log so far and exit. [default: --follow]
-- `--tail` (default: `0`) — The number of lines to display from the end of the log file. Default is 0, which means print all lines.
+- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
 - `CLUSTER` — text
 - `JOB_IDS` — text
 
@@ -341,7 +341,7 @@ Launch a managed job from a YAML or a command.
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--cluster`, `-c` — Alias for --name, the name of the managed job.
 - `--job-recovery` — Recovery strategy to use for managed jobs.
@@ -364,7 +364,7 @@ Tail or sync down the log of a managed job.
 - `--controller` — Show the controller logs of this job; useful for debugging launching/recoveries, etc.
 - `--refresh`, `-r` — Query the latest job logs, restarting the jobs controller if stopped.
 - `--sync-down`, `-s` — Download logs for all jobs shown in the queue.
-- `--tail` (default: `0`) — The number of lines to display from the end of the log file. Default is 0, which means all lines. Useful for large logs (e.g. multi-GB) where downloading the full file is slow.
+- `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
 - `JOB_ID` — integer
 - `TASK` — text
 
@@ -403,7 +403,7 @@ Either apply a config to a pool for managed jobs submission or update the number
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--yes`, `-y` — Skip confirmation prompt.
 
@@ -535,7 +535,7 @@ Launch a SkyServe service.
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--yes`, `-y` — Skip confirmation prompt.
 
@@ -568,7 +568,7 @@ Update a SkyServe service.
 - `--local-disk` — Local (instance) storage requirement. Format: [mode:]size[+] or mode. Mode is "nvme" (default) or "ssd". Size is total GB across all disks. If only mode specified, size defaults to 100+. If only size ...
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
-- `--ports` — Ports to open on the cluster. If specified, overrides the "ports" config in the YAML.
+- `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--mode` (default: `rolling`) — Update mode. If "rolling", SkyServe will update the service with rolling update. If "blue_green", SkyServe will update the service with blue-green update.
 - `--yes`, `-y` — Skip confirmation prompt.

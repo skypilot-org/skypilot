@@ -125,10 +125,16 @@ export async function getClusters({ clusterNames = null } = {}) {
         workspace: cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
+        statusTooltip:
+          cluster.status === 'INIT' ? cluster.launch_status_reason : null,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
         node_names: cluster.node_names || null,
+        // Persisted external links from the cluster row (currently
+        // populated with cloud-provider instance console URLs at launch
+        // time). Shape: {label: url}.
+        links: cluster.links || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -155,7 +161,11 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null, days = 30) {
+export async function getClusterHistory(
+  clusterHash = null,
+  days = 30,
+  clusterName = null
+) {
   try {
     const requestBody = {
       days: days,
@@ -165,6 +175,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
+    }
+    // The server filters on hash OR name when both are set, which lets the
+    // dashboard look up a cluster by either identifier in a single call.
+    // This avoids fetching the entire history (potentially tens of
+    // thousands of rows) just to resolve a name-keyed URL.
+    if (clusterName) {
+      requestBody.cluster_names = [clusterName];
     }
 
     const history = await apiClient.fetch('/cost_report', requestBody);
@@ -240,6 +257,7 @@ export async function streamClusterJobLogs({
   onNewLog,
   workspace,
   signal,
+  tail = DEFAULT_TAIL_LINES,
 }) {
   try {
     await apiClient.stream(
@@ -248,7 +266,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
-        tail: DEFAULT_TAIL_LINES,
+        tail,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
@@ -617,8 +635,6 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
-    const activeClusters = await dashboardCache.get(getClusters);
-
     let allClusters;
     if (showHistory) {
       let historyClusters = [];
@@ -631,22 +647,14 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      const markedActive = activeClusters.map((c) => ({
-        ...c,
-        isHistorical: false,
-      }));
-      const markedHistory = historyClusters.map((c) => ({
-        ...c,
-        isHistorical: true,
-      }));
-
-      allClusters = [...markedActive];
-      markedHistory.forEach((hist) => {
-        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
-          allClusters.push(hist);
-        }
-      });
+      // "Show history" surfaces only truly terminated clusters within the
+      // selected time window. cost_report also returns active clusters, so
+      // drop anything still present in cluster_table (status !== TERMINATED).
+      allClusters = historyClusters
+        .filter((c) => c.status === 'TERMINATED')
+        .map((c) => ({ ...c, isHistorical: true }));
     } else {
+      const activeClusters = await dashboardCache.get(getClusters);
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,

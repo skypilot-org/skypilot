@@ -29,7 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
-    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
 
@@ -101,6 +101,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         A100: 3.50     # $/accelerator/hr
+    :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -241,6 +244,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+    :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
@@ -325,7 +329,7 @@ Retention period for cluster events in hours (optional). Set to a negative value
 
 Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
 
-Default: ``24.0`` (1 day).
+Default: ``720.0`` (30 days).
 
 Example:
 
@@ -1987,6 +1991,27 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
           # inherited from the cloud-level pricing above.
           cpu: 0.08
 
+.. _config-yaml-kubernetes-apt-mirrors:
+
+``kubernetes.apt_mirrors``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Override the APT mirrors tried when installing packages on a pod (optional).
+Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
+fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    apt_mirrors:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
+
+Can also be set per-context via ``context_configs``.
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -2469,6 +2494,63 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-nebius-security-group-name:
+
+``nebius.security_group_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Security group (optional).
+
+Name of an existing Nebius security group to attach to launched VMs. If not
+specified, SkyPilot creates and manages a per-cluster security group named
+``sky-sg-<cluster-name-on-cloud>``.
+
+Note: the user-supplied security group must already exist in the **same Nebius
+network** as the subnet SkyPilot uses for the cluster. SkyPilot will not create
+the security group on your behalf when this option is set. You can check a
+security group's network in the Nebius console under VPC > Security Groups.
+
+The security group must already have at least one rule before launch. SkyPilot
+deliberately does not modify a user-managed security group — silently adding
+default rules (e.g., SSH from anywhere) would conflict with the "you own the
+rules" intent of BYO. Pre-configure at minimum:
+
+- An ingress rule allowing your operator CIDR to reach SSH on ports 22 and 10022
+- A self-referencing ingress rule for intra-cluster traffic (head/worker Ray
+  on 6379, 8265, 52365, the worker port range, etc.)
+- Any application ports your task declares via ``ports:``
+
+When ``security_group_name`` is set and the task declares ``ports:``, SkyPilot
+will warn at launch and skip ``open_ports`` — adding the matching ingress rules
+is the user's responsibility.
+
+Some example use cases are shown below.
+
+- ``<string>``: Use the named security group for all clusters.
+
+- ``<list of single-element dict>``: A list of single-element dictionaries
+  mapping from the cluster name (pattern) to the security group name to use.
+  The matching is done in the same order as the list.
+
+  NOTE: If none of the wildcard expressions match the cluster name, SkyPilot
+  will fall back to creating its own security group named
+  ``sky-sg-<cluster-name-on-cloud>``. To specify a default, use ``*`` as the
+  wildcard expression.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1 — single SG for all clusters
+    security_group_name: my-sg
+
+    # Format 2 — per-cluster pattern matching
+    security_group_name:
+      - my-training-*: my-training-sg
+      - sky-serve-controller-*: my-serving-sg
+      - "*": my-default-sg
 
 .. _config-yaml-vast:
 

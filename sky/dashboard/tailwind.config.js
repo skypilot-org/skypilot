@@ -1,4 +1,9 @@
 /** @type {import('tailwindcss').Config} */
+const extraContent = (process.env.SKYPILOT_DASHBOARD_TAILWIND_CONTENT || '')
+  .split(';')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 module.exports = {
   darkMode: ['class'],
   content: [
@@ -6,6 +11,7 @@ module.exports = {
     './components/**/*.{js,jsx}',
     './app/**/*.{js,jsx}',
     './src/**/*.{js,jsx}',
+    ...extraContent,
   ],
   prefix: '',
   theme: {

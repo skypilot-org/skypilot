@@ -295,16 +295,21 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+            _ALL_JOB_STATUSES,
+            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
+                                               'sleep {gap_seconds}')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
-        timeout: int):
+        job_name: str,
+        job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int,
+        gap_seconds: int = 10):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
-        timeout=timeout)
+        timeout=timeout,
+        gap_seconds=gap_seconds)
 
 
 _WAIT_UNTIL_PIPELINE_TASK_STATUS = (
@@ -1133,10 +1138,10 @@ def get_dashboard_cluster_status_request_id() -> str:
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
+    body = payloads.JobsQueueV2Body(all_users=True, limit=1000)
     response = server_common.make_authenticated_request(
         'POST',
-        '/internal/dashboard/jobs/queue',
+        '/internal/dashboard/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         server_url=get_api_server_url())
     return server_common.get_request_id(response)

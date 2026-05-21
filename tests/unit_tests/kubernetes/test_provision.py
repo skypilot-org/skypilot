@@ -1558,6 +1558,43 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
             f'No autoscaler configured → short user timeout must not be '
             f'bumped, but loop ran for {clock.now}s.')
 
+    def test_emits_launch_progress_on_autoscale_detection(self, monkeypatch):
+        """When the autoscaler is detected, exactly one LAUNCH_PROGRESS event
+        must be emitted with the spinner's status text."""
+        _, raise_errors, cluster_name_on_cloud = self._setup(
+            monkeypatch,
+            autoscaler_type='gke',
+            autoscale_detected=True,
+        )
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        # The autoscaler branch latches once — exactly one LAUNCH_PROGRESS emit.
+        launch_progress_calls = [
+            call for call in add_event.call_args_list
+            if call.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(launch_progress_calls) == 1
+        kwargs = launch_progress_calls[0].kwargs
+        assert kwargs['reason'].startswith('Launching (')
+        assert kwargs['nop_if_duplicate'] is True
+
 
 # ---------------------------------------------------------------------------
 # Helpers and tests for _condensed_pod_reason()
@@ -1922,3 +1959,699 @@ class TestFullPipeline:
         assert 'nvcr.io/nvidia/pytorch:bad-tag' in blocks
         assert 'Hint:' in blocks
         assert 'image' in blocks.lower() or 'registry' in blocks.lower()
+
+
+class TestWaitForPodsToRunLaunchProgressEmit:
+    """Tests for the LAUNCH_PROGRESS emit added to _wait_for_pods_to_run."""
+
+    @staticmethod
+    def _make_pod(name: str, cluster_name_on_cloud: str):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        # status_text branch in the production code only checks
+        # phase / container_statuses via _inspect_pod_status, which we
+        # mock below — so attribute values here can be loose.
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        return pod
+
+    def _setup(self, monkeypatch, inspect_results_per_iter):
+        """Drive the loop with a scripted sequence of _inspect_pod_status
+        return values. Each entry of inspect_results_per_iter is the list
+        the parallel-map returns for that iteration (one tuple per pod)."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_pod('pod-0', cluster_name_on_cloud)
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        results_iter = iter(inspect_results_per_iter)
+        monkeypatch.setattr(
+            'sky.utils.subprocess_utils.run_in_parallel',
+            lambda fn, items, n: next(results_iter),
+        )
+
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+        return pod, add_event
+
+    def test_emit_on_stage_change_dedup_on_no_change(self, monkeypatch):
+        """First iteration: pulling → emit. Second iteration: still pulling
+        → no emit (same status_text). Third iteration: all running → loop
+        exits."""
+        pod, add_event = self._setup(monkeypatch, [
+            [(False, 'Pulling')],
+            [(False, 'Pulling')],
+            [(True, None)],
+        ])
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert lp_calls[0].kwargs['reason'] == (
+            'Launching (1 pod(s) pending due to Pulling)')
+        assert lp_calls[0].kwargs['nop_if_duplicate'] is True
+
+    def test_no_emit_when_pending_reasons_empty(self, monkeypatch):
+        """When _inspect_pod_status returns no pending reason but is_running
+        is False, status_text is the bare 'Launching' — useless tooltip.
+        No emit must happen for that iteration."""
+        pod, add_event = self._setup(monkeypatch, [
+            [(False, None)],
+            [(True, None)],
+        ])
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert lp_calls == []
+
+
+class TestUnmaskCrashloopbackoffReason:
+    """Tests for _unmask_crashloopbackoff_reason: surfaces last_state.terminated.reason
+    when a container is in CrashLoopBackOff, else returns None."""
+
+    @staticmethod
+    def _cs(*, waiting=None, last_terminated=None):
+        """Build a V1ContainerStatus-shaped mock."""
+        cs = mock.MagicMock()
+        cs.state = mock.MagicMock()
+        cs.state.waiting = waiting
+        cs.last_state = mock.MagicMock()
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    def test_returns_none_when_state_waiting_is_none(self):
+        cs = self._cs(waiting=None)
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_waiting_reason_is_not_crashloop(self):
+        cs = self._cs(waiting=mock.MagicMock(reason='ImagePullBackOff'))
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_last_state_terminated_is_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=None,
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_none_when_last_terminated_reason_is_empty(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='', exit_code=137),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) is None
+
+    def test_returns_last_terminated_reason_when_crashloop_and_present(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) == 'OOMKilled'
+
+    def test_returns_error_for_non_oom_crashloop(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff'),
+            last_terminated=mock.MagicMock(reason='Error', exit_code=1),
+        )
+        assert instance._unmask_crashloopbackoff_reason(cs) == 'Error'
+
+
+class TestGetPodPendingReasonFromContainerStatus:
+    """Tier-1 sweep over pod.status.container_statuses. Per-container first-match
+    wins; iterates state.waiting (skipping ContainerCreating/PodInitializing),
+    then state.terminated, then last_state.terminated."""
+
+    @staticmethod
+    def _cs(*,
+            waiting=None,
+            terminated=None,
+            last_terminated=None,
+            running=False,
+            ready=False):
+        """Build a V1ContainerStatus-shaped mock."""
+        cs = mock.MagicMock()
+        cs.ready = ready
+        cs.state = mock.MagicMock()
+        cs.state.waiting = waiting
+        cs.state.terminated = terminated
+        cs.state.running = mock.MagicMock() if running else None
+        cs.last_state = mock.MagicMock()
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    @staticmethod
+    def _pod(container_statuses):
+        pod = mock.MagicMock()
+        pod.status = mock.MagicMock()
+        pod.status.container_statuses = container_statuses
+        return pod
+
+    def test_healthy_returns_none(self):
+        cs = self._cs(running=True, ready=True)
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_waiting_image_pull_back_off(self):
+        cs = self._cs(waiting=mock.MagicMock(reason='ImagePullBackOff',
+                                             message='Back-off pulling image'))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'ImagePullBackOff'
+
+    def test_waiting_container_creating_returns_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='ContainerCreating', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_waiting_pod_initializing_returns_none(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='PodInitializing', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_crashloopbackoff_unmasks_oomkilled(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                   message='back-off 5m0s'),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'OOMKilled'
+
+    def test_crashloopbackoff_without_last_state_falls_back(self):
+        cs = self._cs(
+            waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                   message='back-off 5m0s'),
+            last_terminated=None,
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'CrashLoopBackOff'
+
+    def test_terminated_non_zero_exit(self):
+        cs = self._cs(terminated=mock.MagicMock(reason='Error', exit_code=1))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'Error'
+
+    def test_terminated_non_zero_exit_no_reason(self):
+        cs = self._cs(terminated=mock.MagicMock(reason=None, exit_code=139))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'Terminated'
+
+    def test_last_state_terminated_with_running_current(self):
+        # Race-window case: container restarted, current state Running, but
+        # last_state.terminated carries the OOM signal.
+        cs = self._cs(
+            running=True,
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) == 'OOMKilled'
+
+    def test_last_state_terminated_completed_clean_exit_returns_none(self):
+        # Negative test: a cleanly-completed previous exit must NOT be
+        # surfaced as a pending reason.
+        cs = self._cs(
+            running=True,
+            last_terminated=mock.MagicMock(reason='Completed', exit_code=0),
+        )
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([cs])) is None
+
+    def test_multi_container_returns_earliest_status_array_match(self):
+        # Walks pod.status.container_statuses in native array order
+        # (= pod-manifest spec order per k8s API).
+        healthy = self._cs(running=True, ready=True)
+        bad = self._cs(
+            waiting=mock.MagicMock(reason='ImagePullBackOff', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([healthy, bad])) == 'ImagePullBackOff'
+
+    def test_transient_waiting_with_prior_oom_beats_later_container(self):
+        # Container A is in transient ContainerCreating but has a prior
+        # OOMKilled in last_state -- checks 2/3 still run on A and surface the
+        # OOM, before B's ImagePullBackOff is ever consulted. Pins the choice
+        # documented in _get_pod_pending_reason_from_container_status's
+        # docstring.
+        a = self._cs(
+            waiting=mock.MagicMock(reason='ContainerCreating', message=''),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        b = self._cs(
+            waiting=mock.MagicMock(reason='ImagePullBackOff', message=''))
+        assert instance._get_pod_pending_reason_from_container_status(
+            self._pod([a, b])) == 'OOMKilled'
+
+    def test_no_container_statuses_returns_none(self):
+        pod = self._pod(None)
+        assert instance._get_pod_pending_reason_from_container_status(
+            pod) is None
+
+    def test_empty_container_statuses_returns_none(self):
+        pod = self._pod([])
+        assert instance._get_pod_pending_reason_from_container_status(
+            pod) is None
+
+
+class TestGetPodPendingReasonTieredEventFilter:
+    """Two-pass scan: Warning events first (regardless of timestamp),
+    then a small allow-list of slow Normal events."""
+
+    @staticmethod
+    def _event(reason: str, event_type: str = 'Normal', message: str = ''):
+        ev = mock.MagicMock()
+        ev.reason = reason
+        ev.type = event_type
+        ev.message = message
+        return ev
+
+    def _patch_events(self, monkeypatch, events):
+        monkeypatch.setattr(instance, '_get_pod_events',
+                            lambda *a, **kw: events)
+
+    def test_no_events_returns_none(self, monkeypatch):
+        self._patch_events(monkeypatch, [])
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'pod-0') is None
+
+    def test_warning_wins_over_normal_regardless_of_age(self, monkeypatch):
+        # Newest event (index 0) is a Normal Pulling, older event is a
+        # Warning FailedScheduling. Warning must win.
+        events = [
+            self._event('Pulling', 'Normal', 'Pulling image "foo:bar"'),
+            self._event('FailedScheduling', 'Warning',
+                        '0/3 nodes are available: insufficient cpu.'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'FailedScheduling',
+            '0/3 nodes are available: insufficient cpu.',
+        )
+
+    def test_allow_listed_normal_returned_when_no_warning(self, monkeypatch):
+        events = [self._event('Pulling', 'Normal', 'Pulling image "foo:bar"')]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns', 'p') == ('Pulling', 'Pulling image "foo:bar"')
+
+    def test_non_allow_listed_normal_returns_none(self, monkeypatch):
+        # SuccessfulAttachVolume is the canonical false-positive we're killing.
+        events = [
+            self._event('SuccessfulAttachVolume', 'Normal',
+                        'AttachVolume.Attach succeeded for volume "x"'),
+            self._event('Pulled', 'Normal', 'Successfully pulled image'),
+            self._event('Created', 'Normal', 'Created container ray-head'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
+    def test_provisioning_normal_returned(self, monkeypatch):
+        events = [
+            self._event('Provisioning', 'Normal',
+                        'External provisioner is provisioning volume')
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'Provisioning',
+            'External provisioner is provisioning volume',
+        )
+
+    def test_wait_for_first_consumer_normal_returned(self, monkeypatch):
+        events = [
+            self._event('WaitForFirstConsumer', 'Normal',
+                        'waiting for first consumer to be created'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'WaitForFirstConsumer',
+            'waiting for first consumer to be created',
+        )
+
+    def test_warning_returns_first_in_newest_first_order(self, monkeypatch):
+        # When multiple Warnings, return newest (index 0 in our list).
+        events = [
+            self._event('FailedScheduling', 'Warning', 'newer'),
+            self._event('FailedMount', 'Warning', 'older'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns',
+                                                'p') == ('FailedScheduling',
+                                                         'newer')
+
+    def test_empty_message_returns_empty_string_not_none(self, monkeypatch):
+        # Preserve the today-behavior of event.message or '' for the second
+        # tuple element.
+        events = [self._event('FailedScheduling', 'Warning', '')]
+        self._patch_events(monkeypatch, events)
+        result = instance._get_pod_pending_reason('ctx', 'ns', 'p')
+        assert result == ('FailedScheduling', '')
+
+    def test_events_fetch_failure_returns_none(self, monkeypatch):
+
+        def raise_for_events(*a, **kw):
+            raise Exception('kube API down')
+
+        monkeypatch.setattr(instance, '_get_pod_events', raise_for_events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
+
+class TestInspectPodStatusTierIntegration:
+    """End-to-end behavior of _inspect_pod_status with the new tier-1 helper.
+
+    These tests exercise the closure indirectly by driving _wait_for_pods_to_run
+    with scripted pod objects. They lock in:
+    - Running-but-not-all-running pods now surface a pending reason instead of
+      returning (False, None).
+    - The Pending-raise path enriches the message via _unmask_crashloopbackoff_reason.
+    """
+
+    @staticmethod
+    def _make_pod(*,
+                  name='pod-0',
+                  phase,
+                  container_statuses,
+                  cluster_name_on_cloud='cn-on-cloud'):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        pod.status.phase = phase
+        pod.status.container_statuses = container_statuses
+        return pod
+
+    @staticmethod
+    def _cs(*,
+            waiting=None,
+            terminated=None,
+            last_terminated=None,
+            running=False,
+            ready=False):
+        cs = mock.MagicMock()
+        cs.ready = ready
+        cs.state.waiting = waiting
+        cs.state.terminated = terminated
+        cs.state.running = mock.MagicMock() if running else None
+        cs.last_state.terminated = last_terminated
+        return cs
+
+    def _drive_one_iteration(self, monkeypatch, pod, then_running=True):
+        """Drive _wait_for_pods_to_run one iteration. Patches the API
+        list-pods call and the parallel-map. Returns the captured
+        add_cluster_event mock so tests can assert on emits.
+
+        If `then_running` is True, the second iteration returns an all-Running
+        pod so the loop exits cleanly.
+        """
+        # Second iteration: all containers running, all pods running → exit.
+        healthy_pod = self._make_pod(
+            phase='Running',
+            container_statuses=[self._cs(running=True, ready=True)],
+            name=pod.metadata.name,
+        )
+        core_api = mock.MagicMock()
+        call_count = {'n': 0}
+
+        def _list_pods(*a, **kw):
+            call_count['n'] += 1
+            return mock.MagicMock(
+                items=[pod if call_count['n'] == 1 else healthy_pod])
+
+        core_api.list_namespaced_pod.side_effect = _list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        # _inspect_pod_status is the function passed to run_in_parallel.
+        # We let the real function run by invoking fn(pod) inside our patch.
+        def _run_in_parallel(fn, items, n):
+            return [fn(p) for p in items]
+
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            _run_in_parallel)
+
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+        return add_event
+
+    def test_running_pod_with_crashloopbackoff_emits_oomkilled(
+            self, monkeypatch):
+        """phase=Running, container in CrashLoopBackOff + last_state OOMKilled.
+        Today this returns (False, None) and no LAUNCH_PROGRESS row is emitted.
+        After: emits a LAUNCH_PROGRESS row whose reason contains 'OOMKilled'."""
+        pod = self._make_pod(
+            phase='Running',
+            container_statuses=[
+                self._cs(
+                    waiting=mock.MagicMock(reason='CrashLoopBackOff',
+                                           message='back-off 5m0s'),
+                    last_terminated=mock.MagicMock(reason='OOMKilled',
+                                                   exit_code=137),
+                )
+            ],
+        )
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert 'OOMKilled' in lp_calls[0].kwargs['reason']
+        assert 'CrashLoopBackOff' not in lp_calls[0].kwargs['reason']
+
+    def test_pending_pod_with_crashloopbackoff_raises_enriched(
+            self, monkeypatch):
+        """phase=Pending, container in CrashLoopBackOff. Today raises
+        'CrashLoopBackOff: <msg>'. After: raises 'OOMKilled: <msg>'
+        (msg preserved). The bare 'CrashLoopBackOff' substring must NOT
+        appear because kubelet's waiting.message text is lowercased
+        'back-off Xs restarting failed container=...'."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(
+                    waiting=mock.MagicMock(
+                        reason='CrashLoopBackOff',
+                        message='back-off 5m0s restarting failed '
+                        'container=ray pod=foo',
+                    ),
+                    last_terminated=mock.MagicMock(reason='OOMKilled',
+                                                   exit_code=137),
+                )
+            ],
+        )
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            self._drive_one_iteration(monkeypatch, pod, then_running=False)
+        err = str(excinfo.value)
+        assert 'OOMKilled' in err
+        assert 'back-off 5m0s' in err
+        assert 'CrashLoopBackOff' not in err
+
+    def test_pending_pod_with_image_pull_back_off_raises_preserves_message(
+            self, monkeypatch):
+        """phase=Pending, ImagePullBackOff. Today raises 'ImagePullBackOff: <msg>'
+        and the message body (e.g. registry URL) is the critical debug info.
+        Verify it's preserved unchanged after the refactor."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(waiting=mock.MagicMock(
+                    reason='ImagePullBackOff',
+                    message='Back-off pulling image "registry.example/foo:bar": '
+                    'connection refused',
+                ))
+            ],
+        )
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            self._drive_one_iteration(monkeypatch, pod, then_running=False)
+        err = str(excinfo.value)
+        assert err.startswith('ImagePullBackOff:')
+        assert 'connection refused' in err
+        assert 'registry.example/foo:bar' in err
+
+    def test_pending_pod_container_creating_does_not_raise(self, monkeypatch):
+        """phase=Pending, ContainerCreating: tier-1 returns None, tier-2/3
+        consulted, no raise. Smoke check that the happy in-flight case still
+        loops."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=[
+                self._cs(waiting=mock.MagicMock(reason='ContainerCreating',
+                                                message=''))
+            ],
+        )
+        # No events → tier-2 and tier-3 also return None.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        # Bare 'Launching' status text is skipped per the existing guard at
+        # instance.py:845. So no LAUNCH_PROGRESS row.
+        assert lp_calls == []
+
+
+class TestCheckInitContainersEnrichedRaise:
+    """Tests the enriched raise message in _check_init_containers when an
+    init container is in CrashLoopBackOff."""
+
+    @staticmethod
+    def _make_init_status(*,
+                          waiting=None,
+                          terminated=None,
+                          last_terminated=None):
+        s = mock.MagicMock()
+        s.state.waiting = waiting
+        s.state.terminated = terminated
+        s.last_state.terminated = last_terminated
+        return s
+
+    @staticmethod
+    def _make_pod(init_container_statuses, name='pod-0'):
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.status.init_container_statuses = init_container_statuses
+        return pod
+
+    def test_init_crashloopbackoff_unmasks_oomkilled(self, monkeypatch):
+        # We drive _wait_for_pods_to_run with a pod whose main container is
+        # in waiting.reason='PodInitializing', which causes _inspect_pod_status
+        # to call _check_init_containers, which then raises the enriched error.
+        init_cs = self._make_init_status(
+            waiting=mock.MagicMock(
+                reason='CrashLoopBackOff',
+                message='back-off 5m0s restarting failed container=init pod=foo',
+            ),
+            last_terminated=mock.MagicMock(reason='OOMKilled', exit_code=137),
+        )
+        pod = self._make_pod([init_cs])
+        pod.status.phase = 'Pending'
+        pod.metadata.deletion_timestamp = None
+        from sky.provision import constants as prov_constants
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        # Main container in PodInitializing so we dispatch to _check_init_containers.
+        main_cs = mock.MagicMock()
+        main_cs.state.waiting = mock.MagicMock(reason='PodInitializing',
+                                               message='')
+        main_cs.state.terminated = None
+        main_cs.state.running = None
+        main_cs.last_state.terminated = None
+        pod.status.container_statuses = [main_cs]
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=[pod])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            instance._wait_for_pods_to_run(
+                namespace='ns',
+                context='ctx',
+                cluster_name='cn',
+                new_pods=[pod],
+            )
+
+        err = str(excinfo.value)
+        assert 'Failed to create init container' in err
+        assert 'OOMKilled' in err
+        assert 'CrashLoopBackOff' not in err
+        assert 'back-off 5m0s' in err  # waiting.message body preserved
+
+    def test_init_other_waiting_reason_unchanged(self, monkeypatch):
+        """Non-CrashLoopBackOff init failure: raise message format matches
+        today (no unmask)."""
+        init_cs = self._make_init_status(waiting=mock.MagicMock(
+            reason='ImagePullBackOff',
+            message='Back-off pulling image "init-img:bad"',
+        ),)
+        pod = self._make_pod([init_cs])
+        pod.status.phase = 'Pending'
+        pod.metadata.deletion_timestamp = None
+        from sky.provision import constants as prov_constants
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        main_cs = mock.MagicMock()
+        main_cs.state.waiting = mock.MagicMock(reason='PodInitializing',
+                                               message='')
+        main_cs.state.terminated = None
+        main_cs.state.running = None
+        main_cs.last_state.terminated = None
+        pod.status.container_statuses = [main_cs]
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=[pod])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        with pytest.raises(config_lib.KubernetesError) as excinfo:
+            instance._wait_for_pods_to_run(
+                namespace='ns',
+                context='ctx',
+                cluster_name='cn',
+                new_pods=[pod],
+            )
+
+        err = str(excinfo.value)
+        assert 'Failed to create init container' in err
+        assert 'ImagePullBackOff' in err
+        assert 'init-img:bad' in err

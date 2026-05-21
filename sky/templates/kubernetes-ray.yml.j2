@@ -388,6 +388,26 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if k8s_enable_oci_roce %}
+        # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
+        # network namespace; pods must share host networking to reach the
+        # RDMA fabric. This is the only path that sets hostNetwork from the
+        # template — the pod_config path injects it via
+        # combine_pod_config_fields(). k8s_enable_oci_roce also implies
+        # k8s_host_network on the Python side, so the dnsPolicy below and the
+        # Ray-port probe machinery apply here too.
+        # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
+        hostNetwork: true
+        {% endif %}
+        {% if k8s_host_network %}
+        # Under hostNetwork the default dnsPolicy silently falls back to
+        # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
+        # won't resolve, and the worker probe gets stuck dialing the head.
+        # k8s_host_network is the single source of truth for "this pod runs
+        # on the host network" (set for both the pod_config and OCI RoCE
+        # paths), so this covers OCI RoCE too.
+        dnsPolicy: ClusterFirstWithHostNet
+        {% endif %}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -407,8 +427,10 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% set _affinity_node = (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
+        {% if _affinity_node or k8s_host_network %}
         affinity:
+          {% if _affinity_node %}
           nodeAffinity:
             {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
             requiredDuringSchedulingIgnoredDuringExecution:
@@ -444,6 +466,27 @@ available_node_types:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
           {% endif %}
+          {% endif %}
+          {% if k8s_host_network %}
+          # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
+          # shares the node's net namespace, so two pods of the SAME SkyPilot
+          # cluster on one node would (a) collide on host ports and (b)
+          # register both raylets under the same host IP -- Ray's client-side
+          # resolver then collapses the two NodeIDs onto one gRPC endpoint and
+          # hangs pg.ready(). Forcing one pod per node makes every pod's host
+          # IP unique and routable, which is also exactly what lets a
+          # hostNetwork cluster span multiple K8s nodes. requiredDuring (not
+          # preferred): the guarantee must be hard -- a multi-pod hostNetwork
+          # cluster that cannot get a node per pod fails to schedule loudly
+          # rather than silently racing. The selector is per-cluster
+          # (skypilot-cluster), so unrelated clusters can still co-locate.
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  skypilot-cluster: {{cluster_name_on_cloud}}
+              topologyKey: kubernetes.io/hostname
+          {% endif %}
         {% endif %}
         {% if k8s_spot_label_key is not none %}
         tolerations:
@@ -460,6 +503,12 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        {% if k8s_enable_oci_roce %}
+        - name: devinf
+          hostPath:
+            path: /dev/infiniband
+            type: Directory
+        {% endif %}
         {% if k8s_fuse_device_required %}
         - name: fusermount-shared-dir
           hostPath:
@@ -539,6 +588,20 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% if k8s_host_network %}
+            # Downward API rather than $HOSTNAME — hostNetwork pods
+            # inherit the host node's hostname. Used by
+            # host_network_probe to key per-pod ConfigMap entries and
+            # set ownerReferences for GC.
+            - name: SKYPILOT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SKYPILOT_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            {% endif %}
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
@@ -559,7 +622,8 @@ available_node_types:
               value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
-              value: {{ value }}
+              # tojson forces a quoted string; K8s rejects non-string env values.
+              value: {{ value | tojson }}
             {% endfor %}
             {% if k8s_enable_docker_all %}
             - name: DOCKER_HOST
@@ -803,16 +867,35 @@ available_node_types:
                 update_apt_sources() {
                   local host=$1
                   local apt_file=$2
-                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
+                  # || true: a sed failure on one sources file (read-only fs,
+                  # immutable bit, full tmpfs) shouldn't kill the whole step;
+                  # restore_source will undo any partial edits on the next
+                  # iteration of the candidate-mirror loop.
+                  $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" "$apt_file" || true
                 }
-                # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
-                # so that both fusemount and fusermount3 can be masked before enabling SSH access.
-                PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
+                # Surface /tmp/apt-update.log to the pod's stderr on failure.
+                # Without this, users only see the terse summary line — the
+                # actual apt error stays inside the (often torn-down) pod.
+                dump_apt_log() {
+                  local log=/tmp/apt-update.log
+                  if [ -f "$log" ]; then
+                    echo "=== /tmp/apt-update.log (last 200 lines) ===" >&2
+                    tail -n 200 "$log" >&2 || true
+                    echo "=== end /tmp/apt-update.log ===" >&2
+                  else
+                    echo "/tmp/apt-update.log not found" >&2
+                  fi
+                }
+                # FUSE compatibility: we want libfuse2 (FUSE 2 ABI for legacy
+                # clients like older s3fs/sshfs) AND fuse3 (binary + libfuse3-3
+                # for hf-mount, rclone, blobfuse2, etc.). On Ubuntu 22.04+
+                # `fuse3 Breaks: fuse` (both ship /usr/bin/fusermount), so the
+                # two packages cannot coexist. FUSE is handled out-of-band below.
+                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl, rsync, ssh and wget are available sooner to unblock the following
                 # conda installation and rsync.
-                # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
@@ -822,13 +905,34 @@ available_node_types:
                       INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
                     fi
                   elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ] || [ "$pkg" == "wget" ]; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "wget" ]; then
                       INSTALL_FIRST="$INSTALL_FIRST $pkg";
                     else
                       MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
                     fi
                   fi
                 done;
+
+                # FUSE handling — four cases for (fuse_installed, fuse3_installed):
+                #   (0, 0): install fuse first then fuse3. apt's Breaks
+                #           resolution removes the `fuse` package while leaving
+                #           libfuse2 → final state: libfuse2 (FUSE 2 ABI) +
+                #           fuse3 (binary + libfuse3-3 for FUSE 3 ABI).
+                #   (1, 0): only fuse3 missing. Queue it in MISSING_PACKAGES;
+                #           apt removes `fuse` package but libfuse2 survives.
+                #   (0, 1): already the desired state (SkyPilot default images).
+                #           User-supplied images may lack libfuse2, need to handle
+                #           this.
+                #   (1, 1): impossible on Ubuntu 22.04+ (Breaks declaration);
+                #           treated as no-op for forward-compat.
+                HAS_FUSE=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse " && HAS_FUSE=1
+                HAS_FUSE3=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse3 " && HAS_FUSE3=1
+                if [ "$HAS_FUSE" = "0" ] && [ "$HAS_FUSE3" = "0" ]; then
+                  INSTALL_FIRST="$INSTALL_FIRST fuse"
+                  MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
+                elif [ "$HAS_FUSE" = "1" ] && [ "$HAS_FUSE3" = "0" ]; then
+                  MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
+                fi
 
                 # Detect distro for mirror fallback
                 APT_OS="unknown"
@@ -854,11 +958,18 @@ available_node_types:
                 # so we only add mirror candidates for ubuntu here.
                 # Selected from https://launchpad.net/ubuntu/+archivemirrors
                 # and results from apt-select
+                {% if k8s_apt_mirrors is not none %}
+                MIRROR_CANDIDATES="{{ k8s_apt_mirrors | join(' ') }}"
+                {% else %}
                 MIRROR_CANDIDATES=""
                 if [ "$APT_OS" = "ubuntu" ]; then
                   MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
                 fi
+                {% endif %}
 
+                # Wrap the candidate-mirror loop in a function so we can
+                # short-circuit when nothing needs installing.
+                run_apt_install_with_fallback() {
                 INSTALL_SUCCESS=false
                 backup_source
                 for candidate in "" $MIRROR_CANDIDATES; do
@@ -876,6 +987,7 @@ available_node_types:
                     fi
                     if [ "$found_sources" = "false" ]; then
                       echo "Error: no apt sources file found" >> /tmp/apt-update.log
+                      dump_apt_log
                       break
                     fi
                   fi
@@ -910,9 +1022,19 @@ available_node_types:
                   break
                 done
                 restore_source
+                }
+
+                INSTALL_SUCCESS=false
+                if [ -z "$INSTALL_FIRST" ] && [ -z "$MISSING_PACKAGES" ]; then
+                  echo "All required packages already installed; skipping apt-update/install." >> /tmp/apt-update.log
+                  INSTALL_SUCCESS=true
+                else
+                  run_apt_install_with_fallback
+                fi
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  dump_apt_log
                   exit 1
                 fi;
 
@@ -930,7 +1052,11 @@ available_node_types:
                   https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
                   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
                   | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
-                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1 || {
+                  echo "Error: failed to install Docker CLI / buildx plugin." >> /tmp/apt-update.log
+                  dump_apt_log
+                  exit 1
+                }
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}
@@ -1059,6 +1185,10 @@ available_node_types:
                   # Start ray worker on the worker pod.
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+{% if k8s_host_network %}
+                  # SKYPILOT_RAY_PORT and the head-up wait are handled
+                  # by the worker probe inside ray_worker_start_command.
+{% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
                   until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
@@ -1068,6 +1198,7 @@ available_node_types:
                   until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
                     sleep 0.1
                   done
+{% endif %}
 
                   set +e
                   {{ ray_worker_start_command }}
@@ -1114,12 +1245,13 @@ available_node_types:
               # open file handlers with write access
               # closes if none exist
               monitor_file() {
-                tail -f $file &
+                local file="$1"
+                tail -f "$file" &
                 TAIL_PID=$!
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
-                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
+                  if [ $(mylsof "$file" | wc -l) -lt 2 ]; then
                     kill $TAIL_PID
                     break
                   fi
@@ -1131,25 +1263,47 @@ available_node_types:
               }
 
               log_tail() {
-                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
-                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                # Use a bash glob (not `ls $(eval echo ...)`) so we are
+                # safe against ARG_MAX at very high file counts and against
+                # spaces in $HOME or in any path component. nullglob makes
+                # an empty match a no-op instead of yielding the literal
+                # pattern. log_tail is launched via `log_tail &`, so this
+                # runs in its own subshell and the shopt does not leak.
+                shopt -s nullglob
+
+                # O(1) membership set. Replaces an `echo $str | grep -q` check
+                # that was O(n) per file (O(n^2) across the outer loop).
+                local -A already_monitored
+
+                # Pre-seed with every file that exists at startup so we do NOT
+                # spawn monitor_file for them. On an HA controller pod restart
+                # the PVC retains task logs from all prior (completed) jobs;
+                # tailing them all spawns a tail+mylsof loop per file, and
+                # mylsof's /proc/*/fd/* scan grows with the process count,
+                # producing runaway fork growth.
+                for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                  already_monitored["$f"]=1
+                done
+
+                # Wait until at least one log file exists.
+                while true; do
+                  for f in "$HOME"/sky_logs/*/tasks/*.log; do
+                    break 2
+                  done
                   sleep 1
                 done
 
-                # Keep track of already monitored files
-                already_monitored=""
-
                 # Infinite loop to continuously check for new files
                 while true; do
-                  for file in $(eval echo $FILE_PATTERN); do
-                    if echo $already_monitored | grep -q $file; then
+                  for file in "$HOME"/sky_logs/*/tasks/*.log; do
+                    if [[ -n "${already_monitored[$file]:-}" ]]; then
                       # File is already being monitored
                       continue
                     fi
 
                     # Monitor the new file
-                    monitor_file $file &
-                    already_monitored="${already_monitored} ${file}"
+                    monitor_file "$file" &
+                    already_monitored["$file"]=1
                   done
                   sleep 0.1
                 done
@@ -1203,28 +1357,35 @@ available_node_types:
                 echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
 
                 touch {{k8s_high_availability_restarting_signal_file}}
-                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
-                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
-                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
-                # will delete the service from the database after it is terminated so everything in the database is running.
+                # Get in-progress managed job IDs. For SkyServe this is None
+                # and every service will be recovered (SkyServe deletes
+                # terminated services so everything in the DB is running).
                 ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
-                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
-                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
-                  JOB_ID=$(basename $file | sed 's/sky_job_//')
-                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  # After set_job_info_without_job_id (#7891), the cluster job
+                  # ID in the script filename no longer equals managed job ID.
+                  # Extract managed job IDs from the script content instead
+                  # (job_ids_array set in jobs-controller.yaml.j2).
                   if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
-                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
+                    MANAGED_IDS=$(sed -n 's/.*job_ids_array=(\([^)]*\)).*/\1/p' "$file" | head -1)
+                    FOUND_IN_PROGRESS=false
+                    if [ -n "$MANAGED_IDS" ]; then
+                      for MID in $MANAGED_IDS; do
+                        if [[ " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${MID} " ]]; then
+                          FOUND_IN_PROGRESS=true
+                          break
+                        fi
+                      done
+                    fi
+                    if [ "$FOUND_IN_PROGRESS" == "false" ]; then
                       continue
                     fi
                   fi
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
-                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
-                  # We should do more tests and make sure it will scale well.
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
                 done
@@ -1246,12 +1407,17 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if not k8s_host_network %}
+          # Omitted under hostNetwork: the scheduler's NodePorts predicate
+          # treats containerPort as hostPort and blocks sibling pods even
+          # though the probe assigns Ray's ports dynamically.
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
           - containerPort: 10001  # Used by Ray Client
           - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
           - containerPort: 46590  # Used by Skylet gRPC
+          {% endif %}
 
           # This volume allocates shared memory for Ray to use for its plasma
           # object store. If you do not provide this, Ray will fall back to
@@ -1259,6 +1425,10 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
+          {% if k8s_enable_oci_roce %}
+          - mountPath: /dev/infiniband
+            name: devinf
+          {% endif %}
           {% if k8s_enable_gpudirect_tcpx %}
           - name: tcpx-socket
             mountPath: /tmp
@@ -1349,8 +1519,14 @@ available_node_types:
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
-          {% if k8s_ipc_lock_capability %}
+          {% if k8s_ipc_lock_capability or k8s_enable_oci_roce %}
           securityContext:
+            {% if k8s_enable_oci_roce %}
+            # OCI OKE bare-metal GPU shapes have no RDMA device plugin;
+            # pods must mount /dev/infiniband from the host and run
+            # privileged to access the RoCE NICs.
+            privileged: true
+            {% endif %}
             capabilities:
               add:
                 - IPC_LOCK

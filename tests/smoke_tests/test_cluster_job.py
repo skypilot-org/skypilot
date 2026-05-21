@@ -2071,7 +2071,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
                 cluster_name=name,
                 job_id='1',
                 job_status=[sky.JobStatus.RUNNING, sky.JobStatus.SUCCEEDED],
-                timeout=150),
+                timeout=360),
             # Wait the GPU process to start.
             'sleep 90',
             f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '
@@ -2810,7 +2810,6 @@ def test_remote_server_api_login():
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
@@ -2851,7 +2850,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support autostop

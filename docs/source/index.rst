@@ -4,6 +4,7 @@ SkyPilot: Manage all your AI compute
 
 .. raw:: html
 
+   <style>html, body { visibility: hidden; }</style>
    <script type="text/javascript">
        window.location.href = "docs/index.html";
    </script>

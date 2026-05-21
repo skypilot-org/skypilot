@@ -11,7 +11,7 @@ import argparse
 import csv
 import json
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
 import requests
 
@@ -50,24 +50,18 @@ GPU_TO_MEMORY = {
     'H100': 81920,
     'GH200': 98304,
     'B200': 184320,  # 180 GB
-    'GENERAL': None
 }
 
 
-def name_to_gpu_and_cnt(name: str) -> Optional[Tuple[str, int]]:
-    """Extract GPU and count from instance type name.
+def name_to_gpu(name: str) -> str:
+    """Extract GPU type from instance type name.
 
     The instance type name is in the format:
       'gpu_{gpu_count}x_{gpu_name}_<suffix>'.
     """
-    # Edge case
     if name == 'gpu_8x_a100_80gb_sxm4':
-        return 'A100-80GB', 8
-    gpu = name.split('_')[2].upper()
-    if gpu == 'GENERAL':
-        return None
-    gpu_cnt = int(name.split('_')[1].replace('x', ''))
-    return gpu, gpu_cnt
+        return 'A100-80GB'
+    return name.split('_')[2].upper()
 
 
 def create_catalog(api_key: str, output_path: str) -> None:
@@ -84,20 +78,17 @@ def create_catalog(api_key: str, output_path: str) -> None:
         # We parse info.keys() in reverse order so gpu_1x_a100_sxm4 comes before
         # gpu_1x_a100 in the catalog (gpu_1x_a100_sxm4 has more availability).
         for vm in reversed(list(info.keys())):
-            gpu_and_cnt = name_to_gpu_and_cnt(vm)
-            gpu: Optional[str]
-            gpu_cnt: Optional[float]
-            if gpu_and_cnt is None:
-                gpu, gpu_cnt = None, None
-            else:
-                gpu = gpu_and_cnt[0]
-                gpu_cnt = float(gpu_and_cnt[1])
-            vcpus = float(info[vm]['instance_type']['specs']['vcpus'])
-            mem = float(info[vm]['instance_type']['specs']['memory_gib'])
+            specs = info[vm]['instance_type']['specs']
+            vcpus = float(specs['vcpus'])
+            mem = float(specs['memory_gib'])
             price = (float(info[vm]['instance_type']['price_cents_per_hour']) /
                      100)
+            gpu: Optional[str] = None
+            gpu_cnt: Optional[float] = None
             gpuinfo: Optional[str] = None
-            if gpu is not None:
+            if specs.get('gpus', 0) > 0:
+                gpu = name_to_gpu(vm)
+                gpu_cnt = float(specs['gpus'])
                 gpuinfo_dict = {
                     'Gpus': [{
                         'Name': gpu,

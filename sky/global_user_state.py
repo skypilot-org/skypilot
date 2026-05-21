@@ -50,7 +50,7 @@ logger = sky_logging.init_logger(__name__)
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
-DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
+DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
@@ -126,6 +126,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # External links for dashboard display, e.g. cloud-provider instance
+    # console URLs generated at launch time. Same shape as the `links` field
+    # on managed-job rows: a JSON object mapping {label: url}.
+    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -223,6 +227,12 @@ class ClusterEventType(enum.Enum):
     """Used to denote events that are directly related to
     a cluster's termination."""
 
+    # Progress milestones emitted during a cluster launch
+    # (e.g. 'Launching (Kubernetes cluster is autoscaling)',
+    # 'Launching (1 pod(s) pending due to Pulling)'). Read for the
+    # LAUNCHING-state badge tooltip on the dashboard.
+    LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
+
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
@@ -255,7 +265,9 @@ service_account_token_table = sqlalchemy.Table(
     Base.metadata,
     sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('token_name', sqlalchemy.Text),
-    sqlalchemy.Column('token_hash', sqlalchemy.Text),
+    # Indexed + unique: the auth middleware looks up rows by hash on every
+    # request to enforce revocation/rotation/expiration.
+    sqlalchemy.Column('token_hash', sqlalchemy.Text, index=True, unique=True),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
@@ -659,12 +671,33 @@ def add_or_update_cluster(cluster_name: str,
             region = str(lr.region) if getattr(lr, 'region', None) else None
             zone = str(lr.zone) if getattr(lr, 'zone', None) else None
 
-    # Extract node_names from cached_cluster_info and merge with lineage
+    # Extract node_names from cached_cluster_info and merge with lineage.
+    # Also opportunistically compute cloud-provider instance console URLs for
+    # the dashboard's External Links section (mirrors the managed-job flow in
+    # sky/jobs/recovery_strategy.py).
     current_names = None
+    instance_links: Optional[Dict[str, str]] = None
     if hasattr(cluster_handle, 'cached_cluster_info'):
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
             current_names = ci.get_node_names()
+            if ready:
+                # Lazy import: sky.utils.instance_links pulls in
+                # sky.provision.common which transitively imports
+                # sky.global_user_state during cold start, so a top-level
+                # import here would deadlock.
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import instance_links as instance_links_utils
+                try:
+                    generated = instance_links_utils.generate_instance_links(
+                        ci, cluster_name)
+                    if generated:
+                        instance_links = generated
+                except Exception as e:  # pylint: disable=broad-except
+                    # Never fail a launch because instance-link generation
+                    # tripped over a missing field on the cluster info.
+                    logger.debug(f'Failed to generate instance links for '
+                                 f'cluster {cluster_name}: {e}')
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -694,7 +727,7 @@ def add_or_update_cluster(cluster_name: str,
     history_workspace = active_workspace
     history_hash = user_hash
 
-    conditional_values = {}
+    conditional_values: Dict[str, Any] = {}
     if is_launch:
         conditional_values.update({
             'launched_at': cluster_launched_at,
@@ -746,6 +779,19 @@ def add_or_update_cluster(cluster_name: str,
         if provision_log_path is not None:
             conditional_values.update({
                 'provision_log_path': provision_log_path,
+            })
+
+        # Merge newly generated instance links with any existing links so
+        # repeated launches (e.g., post-stop start) don't clobber prior entries.
+        if instance_links:
+            existing_links = (cluster_row.links
+                              if cluster_row is not None else None) or {}
+            merged_links: Dict[str, str] = {}
+            if isinstance(existing_links, dict):
+                merged_links.update(existing_links)
+            merged_links.update(instance_links)
+            conditional_values.update({
+                'links': merged_links,
             })
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -1013,13 +1059,48 @@ def _get_last_or_terminal_cluster_event_multiple(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
             row_number).filter(
                 cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type !=
-                ClusterEventType.DEBUG.value).subquery()
+                cluster_event_table.c.type.notin_([
+                    ClusterEventType.DEBUG.value,
+                    ClusterEventType.LAUNCH_PROGRESS.value,
+                ])).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(
             ranked_events.c.cluster_hash,
             ranked_events.c.reason).filter(ranked_events.c.rn == 1).all()
+
+    return {row.cluster_hash: row.reason for row in rows}
+
+
+def get_last_cluster_event_of_type_multiple(
+        cluster_hashes: Set[str],
+        event_type: ClusterEventType) -> Dict[str, str]:
+    """Returns the latest event of `event_type` per cluster_hash.
+
+    Mirrors _get_last_or_terminal_cluster_event_multiple but filters to a
+    single event type (no TERMINAL-priority ordering).
+    """
+    if not cluster_hashes:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+
+        ranked = session.query(
+            cluster_event_table.c.cluster_hash,
+            cluster_event_table.c.reason,
+            row_number,
+        ).filter(
+            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+            cluster_event_table.c.type == event_type.value,
+        ).subquery()
+
+        rows = session.query(
+            ranked.c.cluster_hash,
+            ranked.c.reason,
+        ).filter(ranked.c.rn == 1).all()
 
     return {row.cluster_hash: row.reason for row in rows}
 
@@ -1064,6 +1145,11 @@ async def cluster_event_retention_daemon():
                              f'{debug_retention_hours} hours.')
                 cleanup_cluster_events_with_retention(debug_retention_hours,
                                                       ClusterEventType.DEBUG)
+                # LAUNCH_PROGRESS shares debug retention semantics: short-lived
+                # observability info, no business-record value once the launch
+                # is over.
+                cleanup_cluster_events_with_retention(
+                    debug_retention_hours, ClusterEventType.LAUNCH_PROGRESS)
             if terminal_retention_hours >= 0:
                 logger.debug(
                     'Cleaning up terminal cluster events with retention '
@@ -1288,15 +1374,24 @@ def get_handle_from_cluster_name(
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
+    # Chunk the IN list to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
+    # (default 999 on sqlite < 3.32) and avoid huge IN-clause planning on
+    # PostgreSQL. See _CLUSTER_IN_QUERY_CHUNK_SIZE for the rationale.
+    result: Dict[str, Optional['backends.ResourceHandle']] = {}
+    if not cluster_names:
+        return result
     engine = _db_manager.get_engine()
+    names_list = list(cluster_names)
     with orm.Session(engine) as session:
-        rows = session.query(cluster_table.c.name,
-                             cluster_table.c.handle).filter(
-                                 cluster_table.c.name.in_(cluster_names)).all()
-        return {
-            row.name: pickle.loads(row.handle) if row is not None else None
-            for row in rows
-        }
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(cluster_table.c.name,
+                                 cluster_table.c.handle).filter(
+                                     cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                result[row.name] = (pickle.loads(row.handle)
+                                    if row is not None else None)
+    return result
 
 
 @metrics_lib.time_me
@@ -1805,6 +1900,96 @@ def get_cluster_from_name(
     return record
 
 
+# Bound the IN list per query so we stay under SQLite's
+# SQLITE_MAX_VARIABLE_NUMBER (default 999 on sqlite < 3.32, 32766+ on newer
+# builds) and avoid pathological IN-clause planning on PostgreSQL. 500 is
+# comfortably under both ceilings.
+# Module-level so tests can monkeypatch.
+_CLUSTER_IN_QUERY_CHUNK_SIZE = 500
+
+
+@metrics_lib.time_me
+def get_clusters_from_names(
+    cluster_names: List[str],
+    *,
+    include_user_info: bool = False,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Batched ``get_cluster_from_name`` for many cluster names at once.
+
+    Returns records in the same shape as
+    ``get_cluster_from_name(summary_response=True)``. The verbose
+    ``summary_response=False`` mode is intentionally not exposed here: it
+    would also require batching ``get_terminal_or_last_status_change_event``
+    (another per-row DB call), which is out of scope for the callers that
+    motivated this helper. Use ``get_cluster_from_name`` for those fields.
+
+    Args:
+        cluster_names: List of cluster names to look up.
+        include_user_info: If True, per-row resolve user_hash → user. This
+            re-introduces a per-row DB lookup, so it's off by default.
+
+    Returns:
+        Dict mapping ``cluster_name`` to its record, or to ``None`` for
+        names that don't exist in the cluster table.
+    """
+    result: Dict[str,
+                 Optional[Dict[str,
+                               Any]]] = {name: None for name in cluster_names}
+    if not cluster_names:
+        return result
+    engine = _db_manager.get_engine()
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    with orm.Session(engine) as session:
+        for offset in range(0, len(cluster_names),
+                            _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = cluster_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(*query_fields).filter(
+                cluster_table.c.name.in_(batch)).all()
+            for row in rows:
+                record: Dict[str, Any] = {
+                    'name': row.name,
+                    'launched_at': row.launched_at,
+                    'handle': pickle.loads(row.handle),
+                    'last_use': row.last_use,
+                    'status': status_lib.ClusterStatus[row.status],
+                    'autostop': row.autostop,
+                    'to_down': bool(row.to_down),
+                    'owner': _load_owner(row.owner),
+                    'metadata': json.loads(row.metadata),
+                    'cluster_hash': row.cluster_hash,
+                    'cluster_ever_up': bool(row.cluster_ever_up),
+                    'status_updated_at': row.status_updated_at,
+                    'workspace': row.workspace,
+                    'is_managed': bool(row.is_managed),
+                    'config_hash': row.config_hash,
+                }
+                if include_user_info:
+                    user_hash = _get_user_hash_or_current_user(row.user_hash)
+                    user = get_user(user_hash)
+                    record['user_hash'] = user_hash
+                    record['user_name'] = (user.name
+                                           if user is not None else None)
+                result[row.name] = record
+    return result
+
+
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def cluster_with_name_exists(cluster_name: str) -> bool:
@@ -1865,6 +2050,7 @@ def get_clusters(
             cluster_table.c.metadata,
             cluster_table.c.last_use,
             cluster_table.c.status_updated_at,
+            cluster_table.c.links,
         ])
     if not exclude_managed_clusters:
         query_fields.append(cluster_table.c.is_managed)
@@ -1902,9 +2088,27 @@ def get_clusters(
         current_user_name = (current_user.name
                              if current_user is not None else None)
 
+    # Hoisted: needed by both the new launch-progress fill (any response)
+    # and the existing last_event fill (summary_response=False only).
+    cluster_hashes = {row.cluster_hash for row in rows}
+
+    # Only fetch launch-progress events for clusters actually in INIT.
+    # Keeps the zero-overhead promise for non-INIT callers (e.g. SSH
+    # WebSocket validation uses summary_response=True specifically to
+    # avoid cluster-event queries on the hot path; see comment near
+    # `_get_cluster_and_validate` in server.py). The helper
+    # short-circuits on an empty set, so this is a no-op when no INIT
+    # clusters are in the result.
+    init_cluster_hashes = {
+        row.cluster_hash
+        for row in rows
+        if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
+    }
+    launch_progress_dict = get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+
     # get last cluster event for each row
     if not summary_response:
-        cluster_hashes = {row.cluster_hash for row in rows}
         last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
             cluster_hashes)
 
@@ -1936,12 +2140,21 @@ def get_clusters(
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
+        # launch_status_reason is populated outside the summary_response
+        # gate so both the list page (summary_response=True) and detail
+        # page (summary_response=False) get the badge tooltip data.
+        if record['status'] is status_lib.ClusterStatus.INIT:
+            record['launch_status_reason'] = launch_progress_dict.get(
+                row.cluster_hash)
+        else:
+            record['launch_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
             record['last_event'] = last_cluster_event_dict.get(
                 row.cluster_hash, None)
             record['config_hash'] = row.config_hash
+            record['links'] = row.links if isinstance(row.links, dict) else {}
             record['owner'] = _load_owner(row.owner)
             record['metadata'] = json.loads(row.metadata)
             record['last_use'] = row.last_use
@@ -1966,7 +2179,8 @@ def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
 def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
-        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_hashes: Optional[List[str]] = None,
+        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1974,6 +2188,13 @@ def get_clusters_from_history(
               currently active) that were last used within the past 'days'
               days. Active clusters are always included regardless of this
               parameter.
+        cluster_hashes: If specified, only include clusters whose hash is in
+              this list.
+        cluster_names: If specified, only include clusters whose name is in
+              this list. When both cluster_hashes and cluster_names are
+              specified, rows matching either are returned (logical OR).
+              Note that a single cluster name can map to multiple history
+              records when a name is reused across launches.
 
     Returns:
         List of cluster records with history information.
@@ -2034,9 +2255,15 @@ def get_clusters_from_history(
         query = query.order_by(
             sqlalchemy.desc(cluster_history_table.c.launched_at))
 
+        identifier_filters = []
         if cluster_hashes is not None:
-            query = query.filter(
+            identifier_filters.append(
                 cluster_history_table.c.cluster_hash.in_(cluster_hashes))
+        if cluster_names is not None:
+            identifier_filters.append(
+                cluster_history_table.c.name.in_(cluster_names))
+        if identifier_filters:
+            query = query.filter(sqlalchemy.or_(*identifier_filters))
         rows = query.all()
 
     usage_intervals_dict = {}
@@ -2177,6 +2404,110 @@ def set_enabled_clouds(enabled_clouds: List[str],
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+
+
+_CHECK_RESULTS_KEY_PREFIX = 'check_results_'
+
+
+def _get_check_results_key(workspace: str) -> str:
+    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
+
+
+@metrics_lib.time_me
+def get_cached_check_results(
+        workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Return the persisted check_results dict for a workspace, or {}.
+
+    Shape:
+        {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(config_table).filter_by(
+            key=_get_check_results_key(workspace)).first()
+    if row is None or row.value is None:
+        return {}
+    try:
+        return json.loads(row.value)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning(
+            f'Corrupt check_results row for workspace {workspace!r}; '
+            f'returning empty dict.')
+        return {}
+
+
+@metrics_lib.time_me
+def set_check_results(
+    results: Dict[str, Dict[str, Dict[str, Any]]],
+    workspace: str,
+    *,
+    is_full_workspace_run: bool,
+) -> None:
+    """Persist `results` for `workspace`.
+
+    `is_full_workspace_run=True` replaces the entire row (drops clouds /
+    contexts not present in `results`).  `False` merges at *context*
+    granularity within a cloud: read the existing row, update only the
+    individual leaves under each `cloud_repr` in `results`, and preserve
+    sibling contexts that the scoped run didn't probe.  Per-context
+    merge (rather than replacing the whole cloud entry) is required so a
+    single-context recheck — e.g. a per-context lookup on a multi-
+    context Kubernetes cloud — does not clobber prior results for
+    sibling contexts that the current run didn't iterate.  Stale leaves
+    for contexts that have since been removed from a cloud will linger
+    until the next full-workspace run rewrites the row.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+
+    key = _get_check_results_key(workspace)
+    with orm.Session(engine) as session:
+        if is_full_workspace_run:
+            new_value = results
+        else:
+            # Read-modify-write under the default session isolation. This
+            # is NOT race-safe against concurrent scoped writes for
+            # different clouds in the same workspace: SQLAlchemy
+            # `orm.Session` does not acquire row locks, and under the
+            # default isolation (READ COMMITTED on Postgres, deferred on
+            # SQLite) two interleaved RMW cycles can clobber each
+            # other's per-cloud updates. The blast radius is limited
+            # (one scoped run's leaves get overwritten until the next
+            # write rewrites the row) and the source-of-truth
+            # enabled_clouds_* rows are unaffected, so we accept the
+            # race here rather than serialize through a per-workspace
+            # advisory lock. If this row ever becomes load-bearing for
+            # correctness, switch to `with_for_update()` (postgres) and
+            # an explicit BEGIN IMMEDIATE (sqlite).
+            row = session.query(config_table).filter_by(key=key).first()
+            existing: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            if row is not None and row.value is not None:
+                try:
+                    existing = json.loads(row.value)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f'Corrupt check_results row for workspace '
+                                   f'{workspace!r}; replacing.')
+                    existing = {}
+            new_value = dict(existing)
+            for cloud_repr, ctx_dict in results.items():
+                existing_for_cloud = new_value.get(cloud_repr)
+                if not isinstance(existing_for_cloud, dict):
+                    existing_for_cloud = {}
+                new_value[cloud_repr] = {**existing_for_cloud, **ctx_dict}
+
+        serialized = json.dumps(new_value)
+        insert_stmnt = insert_func(config_table).values(key=key,
+                                                        value=serialized)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_table.c.key],
+            set_={config_table.c.value: serialized})
+        session.execute(do_update_stmt)
+        session.commit()
 
 
 @metrics_lib.time_me
@@ -2627,6 +2958,34 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
+def get_service_account_token_by_hash(
+        token_hash: str) -> Optional[Dict[str, Any]]:
+    """Get a service account token by its sha256 hash.
+
+    Used by the request-auth middleware: hashing the incoming bearer token
+    and matching against this column is what makes revocation and rotation
+    take effect (the DB row's hash is updated on rotation, so old JWTs
+    stop matching). Relies on the unique index on token_hash.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(service_account_token_table).filter_by(
+            token_hash=token_hash).first()
+    if row is None:
+        return None
+    return {
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    }
+
+
+@metrics_lib.time_me
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     """Get all service account tokens for a user (as creator)."""
     engine = _db_manager.get_engine()
@@ -2828,6 +3187,40 @@ def remove_cluster_yaml(cluster_name: str):
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
         session.commit()
+
+
+@metrics_lib.time_me
+def get_expired_service_account_tokens_by_name_prefix(
+        name_prefix: str, now: int) -> List[Dict[str, Any]]:
+    """Return service-account tokens that have expired and match a name prefix.
+
+    Tokens with no expiration are excluded. The LIKE pattern is built with
+    SQLAlchemy parameterization so the prefix cannot inject SQL.
+    """
+    engine = _db_manager.get_engine()
+    # Escape the LIKE metacharacters in the prefix so callers can pass an
+    # arbitrary string without it being treated as a pattern.
+    escaped_prefix = name_prefix.replace('\\', '\\\\').replace('%',
+                                                               '\\%').replace(
+                                                                   '_', '\\_')
+    like_pattern = f'{escaped_prefix}%'
+    with orm.Session(engine) as session:
+        rows = session.query(service_account_token_table).filter(
+            service_account_token_table.c.token_name.like(like_pattern,
+                                                          escape='\\'),
+            service_account_token_table.c.expires_at.isnot(None),
+            service_account_token_table.c.expires_at < now,
+        ).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
 
 
 @metrics_lib.time_me

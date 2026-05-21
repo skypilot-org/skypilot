@@ -4,6 +4,7 @@ from datetime import datetime
 import enum
 import fnmatch
 import hashlib
+import math
 import os
 import pathlib
 import pprint
@@ -265,6 +266,30 @@ _FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
+
+def _caller_is_viewer() -> bool:
+    """Return True iff the executor worker is acting for a viewer user."""
+    # pylint: disable=import-outside-toplevel
+    # In-function import to avoid pulling the permission service into
+    # processes that never need it (e.g. the controller image's CLI
+    # entry point), which would also drag in casbin's import cost.
+    from sky.users import permission
+    from sky.users import rbac as rbac_mod
+    user_id = os.environ.get(constants.USER_ID_ENV_VAR)
+    if not user_id:
+        return False
+    try:
+        enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return False
+    try:
+        roles = enforcer.get_roles_for_user(user_id)
+    except Exception:  # pylint: disable=broad-except
+        return False
+    # Admin wins over viewer when both roles are present.
+    return (rbac_mod.RoleName.VIEWER.value in roles and
+            rbac_mod.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str) -> bool:
@@ -682,6 +707,7 @@ def write_cluster_config(
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
+    extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -1214,6 +1240,8 @@ def write_cluster_config(
     )
     if cloud_specific_failover_overrides is not None:
         variables.update(cloud_specific_failover_overrides)
+    if extra_template_variables is not None:
+        variables.update(extra_template_variables)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -2142,20 +2170,27 @@ def _check_owner_identity_with_record(cluster_name: str,
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
 
-    if owner_identity is None and is_k8s_cloud:
-        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
-        provider_config = config['provider']
-        context = provider_config.get('context')
-        assert isinstance(context, str)
-        try:
-            identity = clouds.Kubernetes.get_identity_from_context_name(context)
-            global_user_state.set_owner_identity_for_cluster(
-                cluster_name, identity)
-            logger.debug(f'Successfully patched {cluster_name} owner identity '
-                         f'to {identity} (launched on {context}).')
-            return
-        except exceptions.CloudUserIdentityError:
-            _raise_identity_error()
+    if owner_identity is None:
+        if is_k8s_cloud:
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = config['provider']
+            context = provider_config.get('context')
+            assert isinstance(context, str)
+            try:
+                identity = clouds.Kubernetes.get_identity_from_context_name(
+                    context)
+            except exceptions.CloudUserIdentityError:
+                _raise_identity_error()
+        else:
+            identity = user_identities[0]
+            context = None
+        global_user_state.set_owner_identity_for_cluster(cluster_name, identity)
+        msg = f'Successfully patched {cluster_name} owner identity to {identity}'
+        if context is not None:
+            msg += f' (launched on context {context})'
+        logger.debug(msg)
+        return
 
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when
@@ -2657,8 +2692,12 @@ def _update_cluster_status(
     # provider.
     cloud = handle.launched_resources.cloud
 
-    # For Slurm, skip Ray health check since it doesn't use Ray.
-    should_check_ray = cloud is not None and cloud.uses_ray()
+    # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
+    # or when the provisioner reports no Ray runtime.
+    # TODO(kevin): migrate cloud.uses_ray() -> ProvisionRuntimeMetadata, i.e.
+    # from cloud -> provision layer.
+    should_check_ray = (cloud is not None and cloud.uses_ray() and
+                        handle.provision_runtime_metadata.has_ray)
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
             not external_cluster_failures):
@@ -2805,6 +2844,15 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
+        # be checked before some_nodes_not_stopped, which would otherwise
+        # report the misleading "some but not all nodes are stopped" for
+        # a single-node cluster whose only node is INIT.
+        abnormal_state_nodes = [
+            name for name, (s, _) in node_statuses.items()
+            if s not in (status_lib.ClusterStatus.UP,
+                         status_lib.ClusterStatus.STOPPED)
+        ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif ray_cluster_unhealthy:
@@ -2816,6 +2864,17 @@ def _update_cluster_status(
             else:
                 init_reason = (
                     f'ray cluster is unhealthy ({ray_status_details})')
+        elif abnormal_state_nodes:
+            if status_reason:
+                init_reason = status_reason
+                status_reason = ''
+            else:
+                distinct_states = sorted(
+                    {node_statuses[n][0].value for n in abnormal_state_nodes})
+                init_reason = (
+                    f'{len(abnormal_state_nodes)} of {handle.launched_nodes} '
+                    f'node(s) in unexpected state: '
+                    f'{", ".join(distinct_states)}')
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
@@ -3683,6 +3742,20 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
     accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+
+    # Defense-in-depth: even if some caller bypasses the HTTP layer's
+    # role_filter shim and reaches here with include_credentials=True
+    # on behalf of a viewer-roled user, refuse to embed SSH key
+    # contents in the response. We resolve the caller via
+    # USER_ID_ENV_VAR which the executor propagates into the worker
+    # process (sky/server/requests/executor.py:377). Reading from the
+    # in-memory casbin enforcer state (get_roles_for_user) avoids a
+    # DB roundtrip on the hot status path.
+    if include_credentials:
+        if _caller_is_viewer():
+            logger.debug('Suppressing include_credentials for viewer caller')
+            include_credentials = False
+
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -3978,6 +4051,16 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     if resources is not None and resources.accelerators is not None:
         resources_dict.update(resources.accelerators)
     return resources_dict
+
+
+def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
+    """Returns the number of GPUs per node for the task."""
+    demands = get_task_demands_dict(task)
+    demands.pop('CPU', None)
+    if not demands:
+        return 0
+    acc_count = list(demands.values())[0]
+    return int(math.ceil(acc_count))
 
 
 def get_task_resources_str(task: 'task_lib.Task',
@@ -4349,6 +4432,99 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
 T = TypeVar('T')
 
 
+def _raise_if_ctx_canceled() -> None:
+    """If we are running inside a cancelled SkyPilotContext, raise immediately.
+
+    Used between gRPC retry attempts so a context cancelled during the
+    backoff sleep does not silently start a new RPC that nobody is waiting
+    for.
+    """
+    ctx = context_lib.get()
+    if ctx is not None and ctx.is_canceled():
+        raise asyncio.CancelledError(
+            'SkyPilotContext cancelled during Skylet retry')
+
+
+def _cancelled_via_ctx(ctx: 'context_lib.SkyPilotContext',
+                       err: 'grpc.RpcError') -> bool:
+    """Did this RpcError come from ctx.cancel() firing our call.cancel()?"""
+    return ctx.is_canceled() and err.code() == grpc.StatusCode.CANCELLED
+
+
+def invoke_grpc_unary(method: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call a gRPC unary method; cancel it on SkyPilotContext cancel.
+
+    Without this wrapper, ``method(request, timeout=...)`` blocks the worker
+    thread inside ``threading.Condition.wait()`` until the gRPC deadline
+    fires, even if the surrounding asyncio task has already been cancelled
+    and nobody is waiting for the result.
+
+    Using ``method.future(...)`` exposes the underlying call object, which
+    can be cancelled from any thread; we register that cancellation with the
+    active SkyPilotContext so it fires on client disconnect, request
+    cancellation, or any other code path that calls ``ctx.cancel()``.
+
+    When the surrounding ctx cancels the call, the gRPC ``CANCELLED``
+    ``RpcError`` is re-raised as ``asyncio.CancelledError`` so the request
+    executor classifies the request as CANCELLED rather than FAILED.
+
+    With no active context, this falls through to the plain blocking call.
+    ``*args`` / ``**kwargs`` are forwarded verbatim so callers can pass
+    ``metadata``, ``credentials``, ``wait_for_ready`` and other gRPC
+    options unchanged.
+    """
+    ctx = context_lib.get()
+    if ctx is None:
+        return method(*args, **kwargs)
+    call = method.future(*args, **kwargs)
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        return call.result()
+    except grpc.RpcError as e:
+        if _cancelled_via_ctx(ctx, e):
+            raise asyncio.CancelledError(
+                'Skylet gRPC call cancelled via SkyPilotContext') from e
+        raise
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
+def invoke_grpc_streaming(method: Any, *args: Any,
+                          **kwargs: Any) -> Iterator[Any]:
+    """Call a gRPC unary-stream method; cancel it on SkyPilotContext cancel.
+
+    The streaming iterator returned by gRPC is a ``_MultiThreadedRendezvous``
+    whose ``.cancel()`` aborts the RPC and unblocks any thread stuck in
+    ``__next__``. We register that on the current SkyPilotContext so a
+    client disconnect tears the stream down instead of leaking a worker
+    thread until the (often absent) deadline.
+
+    When the surrounding ctx cancels the stream, the gRPC ``CANCELLED``
+    ``RpcError`` is re-raised as ``asyncio.CancelledError`` (same
+    rationale as ``invoke_grpc_unary``).
+
+    The returned generator unregisters the callback on completion or
+    error, so successful streams that outlive the cancel scope don't leak
+    the iterator's ``.cancel`` reference. ``*args`` / ``**kwargs`` are
+    forwarded verbatim.
+    """
+    ctx = context_lib.get()
+    call = method(*args, **kwargs)
+    if ctx is None:
+        yield from call
+        return
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        yield from call
+    except grpc.RpcError as e:
+        if _cancelled_via_ctx(ctx, e):
+            raise asyncio.CancelledError(
+                'Skylet gRPC stream cancelled via SkyPilotContext') from e
+        raise
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
 def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     """Generic helper for making Skylet gRPC requests.
 
@@ -4361,6 +4537,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             return func()
         except grpc.RpcError as e:
@@ -4380,6 +4557,7 @@ def invoke_skylet_streaming_with_retries(
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             for response in stream_func():
                 yield response

@@ -87,6 +87,18 @@ def test_validate_file_mounts():
         }
         task_obj.expand_and_validate_file_mounts()
 
+        # Test relative destinations (resolved against ~/sky_workdir).
+        task_obj.file_mounts = {
+            'relative_dir': d,
+            './dotslash_relative_dir': d,
+        }
+        task_obj.expand_and_validate_file_mounts()
+
+        # Test trailing-slash destinations are still rejected.
+        task_obj.file_mounts = {'/remote/': d}
+        with pytest.raises(ValueError, match='cannot end with a slash'):
+            task_obj.expand_and_validate_file_mounts()
+
 
 def test_to_yaml_config_without_envs():
     """Test to_yaml_config() with no environment variables."""
