@@ -2048,3 +2048,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                  log_path=log_path,
                                  stream_logs=stream_logs,
                                  max_retry=max_retry)
+
+# Late import to apply the kubectl-exec subprocess timeout monkey-patch.
+# Imported at the bottom to ensure KubernetesCommandRunner is fully defined.
+from sky.utils import command_runner_timeout_patch  # noqa: E402, F401
