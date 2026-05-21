@@ -676,6 +676,7 @@ Logs into a SkyPilot API server.
 - `--endpoint`, `-e` — The SkyPilot API server endpoint.
 - `--relogin` — Force relogin with OAuth2 when enabled.
 - `--service-account-token`, `--token`, `-t` — Service account token for authentication (starts with ``sky_``).
+- `--no-browser` — Do not attempt to open a browser locally; print the auth URL and wait for the user to open it manually. Useful on headless machines (SSH sessions, containers, etc.).
 
 ### `sky api logout`
 

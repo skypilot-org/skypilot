@@ -1106,7 +1106,7 @@ Streams the API server logs.
 ### `sky.api_login`
 
 ```python
-sky.api_login(endpoint: Optional[str] = None, relogin: bool = False, service_account_token: Optional[str] = None) -> None
+sky.api_login(endpoint: Optional[str] = None, relogin: bool = False, service_account_token: Optional[str] = None, no_browser: bool = False) -> None
 ```
 
 Logs into a SkyPilot API server.
@@ -1122,6 +1122,9 @@ To temporarily override the endpoint, use the environment variable
         http://1.2.3.4:46580 or https://skypilot.mydomain.com.
     relogin: Whether to force relogin with OAuth2 when enabled.
     service_account_token: Service account token for authentication.
+    no_browser: If True, do not attempt to open a browser locally; print
+        the auth URL and let the user open it themselves. Skips the
+        localhost-callback flow, which requires a local browser.
 
 **Returns:**
     None
