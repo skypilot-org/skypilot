@@ -47,13 +47,7 @@ class PermissionService:
     def __init__(self):
         self.enforcer: Optional[casbin.SyncedEnforcer] = None
         self._lock = threading.Lock()
-        # Viewer role's endpoint allowlist, materialised at boot. Built
-        # in _maybe_initialize_policies from rbac.get_viewer_allowlist()
-        # + any plugin-supplied entries. Stored as a list of
-        # (path_pattern, method) tuples for fast iteration in
-        # check_endpoint_permission. Kept OUT of the Casbin policy
-        # table so that admin/user behaviour is unchanged — see
-        # 02_change_plan.md §2.2.
+        # Viewer role's endpoint allowlist, materialised at boot.
         self._viewer_allowlist: List[tuple] = []
 
     def initialize(self):
@@ -96,12 +90,7 @@ class PermissionService:
                 self.enforcer = _enforcer_instance.enforcer
             # The viewer allowlist is in-process state (not stored in
             # casbin). It MUST be populated in every process that handles
-            # requests — main API server process *and* every uvicorn
-            # worker — otherwise viewer-role requests fall through with
-            # an empty allowlist and 403 on every path. We do this here
-            # (no policy lock needed: read-only, no DB writes), so worker
-            # processes that never call `initialize(full_initialize=True)`
-            # still get the allowlist built on first `_ensure_enforcer()`.
+            # requests.
             self._build_viewer_allowlist_no_lock()
 
     def _ensure_enforcer(self) -> casbin.SyncedEnforcer:
@@ -301,12 +290,6 @@ class PermissionService:
              rbac.RoleName.VIEWER.value),
         ]
         for system_user_id, system_user_role in system_users:
-            # Seed a User row so callers that look the user up via
-            # global_user_state.get_user() — e.g. session middleware
-            # validating an impersonated identity — find one. Otherwise
-            # the row is only created lazily (executor.prepare_request_async
-            # for SKYPILOT_SYSTEM_USER_ID), which doesn't cover the
-            # login path. add_or_update_user is idempotent.
             global_user_state.add_or_update_user(
                 models.User(id=system_user_id,
                             name=system_user_id,
@@ -572,15 +555,7 @@ class PermissionService:
         """
         del action
 
-        # Viewers cannot manage ANY service-account tokens, including
-        # their own.  Allowing them to mint or rotate tokens would be
-        # a privilege-escalation path: a freshly-minted SA defaults to
-        # rbac.get_default_role() (ADMIN unless reconfigured), and the
-        # current update-role endpoint would let the owner promote
-        # the SA arbitrarily.  The SA-token write endpoints are also
-        # off the viewer allowlist at the URL layer; this is
-        # defense-in-depth so a future allowlist addition can't
-        # accidentally open the path.
+        # Viewers cannot manage ANY service-account tokens
         user_roles = self.get_user_roles(user_id)
         if rbac.RoleName.VIEWER.value in user_roles:
             return False

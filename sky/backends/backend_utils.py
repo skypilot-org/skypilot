@@ -269,16 +269,7 @@ _FORWARDING_FROM_MESSAGE = 'Forwarding from'
 
 
 def _caller_is_viewer() -> bool:
-    """Return True iff the executor worker is acting for a viewer user.
-
-    Reads the user id from USER_ID_ENV_VAR (set by the executor at
-    sky/server/requests/executor.py:377 when a worker takes a request)
-    and consults the casbin enforcer's in-memory grouping policy.
-    Returns False if the env var is unset (e.g. running outside an
-    executor worker context) or if the permission service has not
-    been initialized — both of which mean we're not on the API
-    server's authenticated request path.
-    """
+    """Return True iff the executor worker is acting for a viewer user."""
     # pylint: disable=import-outside-toplevel
     # In-function import to avoid pulling the permission service into
     # processes that never need it (e.g. the controller image's CLI

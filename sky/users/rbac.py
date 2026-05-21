@@ -46,20 +46,7 @@ _DEFAULT_USER_BLOCKLIST = [{
 
 # Default allowlist for the viewer role. Viewer is allowlist-based: any
 # endpoint NOT on this list is denied for viewers, including any new
-# endpoints added in the future. The trade-off vs the blocklist model
-# used for `user`: a useful read endpoint we forget to add here will
-# 403 (loud + safe) rather than silently leak.
-#
-# Operators can extend this list at `rbac.roles.viewer.permissions.
-# allowlist` in `~/.sky/config.yaml` (additive; you only list the
-# *extra* paths you want to grant, not the entire list).
-#
-# Plugins opt their read endpoints in via `BasePlugin.viewer_allowlist`.
-# Plugin endpoints not declared in `viewer_allowlist` are denied by
-# default.
-#
-# Path patterns use the same Casbin `keyMatch2` syntax as the
-# blocklist (`:name` placeholders, `*` wildcards).
+# endpoints added in the future.
 _DEFAULT_VIEWER_ALLOWLIST = [
     # --- Authentication / session ---
     {
