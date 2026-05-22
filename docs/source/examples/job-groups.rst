@@ -227,7 +227,7 @@ a Kubernetes PVC volume:
     run: |
       python evaluate.py --checkpoint-dir /checkpoints
 
-See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
+See the `full example <https://github.com/skypilot-org/skypilot/tree/master/llm/train-eval-jobgroup>`_ in the SkyPilot repository.
 
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -289,7 +289,7 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
    The same Job Group running in production, viewed from the SkyPilot dashboard.
    Each task has independent resources and can be monitored separately.
 
-See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in the SkyPilot repository.
+See the `full RL post-training example <https://github.com/skypilot-org/skypilot/tree/master/llm/rl-post-training-jobgroup>`_ in the SkyPilot repository.
 
 Primary and auxiliary tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
