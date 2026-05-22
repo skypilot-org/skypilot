@@ -1424,3 +1424,16 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+
+### `sky.tail_autostop_logs`
+
+```python
+sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
+```
+
+[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+The autostop event was renamed to ``stop`` in the generalized
+lifecycle-hooks framework. This shim emits a one-line stderr
+deprecation warning and delegates to :func:`tail_hook_logs` so
+master-version code keeps working through the v0.15.0 grace window.
