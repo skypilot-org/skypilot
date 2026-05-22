@@ -1,6 +1,7 @@
 """Instrumentation for the API server."""
 
 import asyncio
+import atexit
 import multiprocessing
 import os
 import threading
@@ -28,6 +29,34 @@ logger = sky_logging.init_logger(__name__)
 
 _BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
 _COST_TIME_HORIZON_SECONDS = 3600
+
+# Idempotency guard for register_multiproc_cleanup_atexit.
+_multiproc_cleanup_registered = False
+
+
+def register_multiproc_cleanup_atexit() -> None:
+    """Clean up this process's prometheus_client multiproc files on exit.
+
+    Each process that uses pid-labelled multiprocess metrics (uvicorn
+    workers, executor workers) leaves files at
+    ``$PROMETHEUS_MULTIPROC_DIR/<type>_<pid>.db``. The MultiProcessCollector
+    keeps reading those files until ``multiprocess.mark_process_dead(pid)``
+    deletes them. Without this hook, a worker that exits leaves its last
+    written gauge value visible to every future scrape — for ``liveall``
+    gauges this can pin a stale per-pid value indefinitely.
+
+    Safe to call more than once per process; only the first call registers.
+    Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
+    single-process / unit-test environments.
+    """
+    global _multiproc_cleanup_registered
+    if _multiproc_cleanup_registered:
+        return
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        return
+    pid = os.getpid()
+    atexit.register(multiprocess.mark_process_dead, pid)
+    _multiproc_cleanup_registered = True
 
 
 class BurnRateCollector:

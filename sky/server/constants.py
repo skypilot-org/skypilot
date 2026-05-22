@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 50  # bundle credentials with launch response
+API_VERSION = 51  # lazy-load replica handle in serve/pool status
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -49,6 +49,13 @@ MIN_BATCH_API_VERSION = 49
 # launch response. Lets the CLI skip the follow-up /status round-trip that
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
+
+# Servers >= this version omit the bulky pickled `handle` from each replica
+# in serve/pool status responses, shipping pre-computed `infra` /
+# `resources_str` / `resources_str_full` strings instead. Older clients are
+# still served the full handle on the wire so existing SDK code that reads
+# `record['handle']` keeps working.
+MIN_LAZY_REPLICA_HANDLE_API_VERSION = 51
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3

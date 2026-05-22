@@ -86,6 +86,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
@@ -1835,7 +1836,8 @@ async def stop(request: fastapi.Request,
 @app.post('/status')
 async def status(
     request: fastapi.Request,
-    status_body: payloads.StatusBody = payloads.StatusBody()
+    status_body: payloads.StatusBody = fastapi.Depends(
+        role_filter.force_viewer_status_body),
 ) -> None:
     """Gets cluster statuses."""
     if state.get_block_requests():
@@ -3492,10 +3494,13 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
-    # Pre-load plugin RBAC rules before initializing permission service.
-    # This ensures plugin RBAC rules are available when policies are created.
-    logger.info('Pre-loading plugin RBAC rules')
+    # Pre-load plugin RBAC rules + viewer allowlist before initializing
+    # the permission service. The permission service reads both during
+    # _maybe_initialize_policies (blocklist seeded into Casbin; viewer
+    # allowlist built into an in-memory structure).
+    logger.info('Pre-loading plugin RBAC rules + viewer allowlist')
     plugins.load_plugin_rbac_rules()
+    plugins.load_plugin_viewer_allowlist()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
