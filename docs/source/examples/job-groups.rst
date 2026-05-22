@@ -232,7 +232,7 @@ See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates a distributed RL post-training architecture with 5 tasks (see the hero diagram at the top of the page):
+This example demonstrates a distributed RL post-training architecture with 5 tasks (see the hero diagram at the top of the page). The trainer and rollout-server share a ``ReadWriteMany`` Kubernetes volume so the trainer can push freshly-updated policy weights back to the rollout-server every N steps, closing the RL feedback loop:
 
 .. code-block:: yaml
 
@@ -250,6 +250,8 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
     num_nodes: 2
     resources:
       accelerators: A100:1
+    volumes:
+      /shared/policy: rlhf-policy
     run: |
       python rollout_server.py
     ---
@@ -270,11 +272,14 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
     num_nodes: 2
     resources:
       accelerators: A100:1
+    volumes:
+      /shared/policy: rlhf-policy
     run: |
       python ppo_trainer.py \
         --data-server data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000 \
         --rollout-server rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001 \
-        --reward-server reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
+        --reward-server reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002 \
+        --policy-sync-path /shared/policy/latest
 
 .. figure:: ../images/job-groups-dashboard.png
    :width: 100%
