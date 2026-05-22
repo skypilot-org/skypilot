@@ -1517,6 +1517,15 @@ def test_volume_env_mount_kubernetes():
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(mount_job_conf)
         f.flush()
+        # The managed-jobs controller cluster releases the PVC
+        # asynchronously after `sky jobs cancel`; a fixed `sleep 5` is
+        # not enough on multi-node K8s (e.g. shared-GKE pipeline) and
+        # `sky volumes delete` raises ValueError("Volume ... is used
+        # by cluster ..."). Poll up to 60s for the delete to succeed.
+        delete_with_retry = (
+            f'for i in $(seq 1 12); do '
+            f'sky volumes delete {full_pvc_name} -y && break || sleep 5; '
+            f'done')
         test = smoke_tests_utils.Test(
             'volume_env_mount_kubernetes',
             [
@@ -1524,8 +1533,7 @@ def test_volume_env_mount_kubernetes():
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
             ' && '.join([
-                'sky jobs cancel -a -y || true', 'sleep 5',
-                f'sky volumes delete {full_pvc_name} -y',
+                'sky jobs cancel -a -y || true', 'sleep 5', delete_with_retry,
                 f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
                 '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
