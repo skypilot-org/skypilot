@@ -24,6 +24,8 @@ import os
 import subprocess
 import tempfile
 
+import pytest
+
 from sky.jobs import recovery_strategy
 from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
@@ -71,17 +73,11 @@ class TestCleanServerEnvCapture:
         snap2 = clean_env_module.get_clean_server_env()
         assert 'MUTATED_AFTER_GET' not in snap2
 
-    def test_get_before_capture_falls_back_to_current_env(self):
-        # Don't call capture_clean_server_env().
-        os.environ['SKY_TEST_FALLBACK'] = 'fallback_val'
-        try:
-            snap = clean_env_module.get_clean_server_env()
-            # Fallback returns current os.environ — correctness is "doesn't
-            # crash and returns a useful dict", not "matches the
-            # pre-pollution state" (which it can't, since nothing captured).
-            assert snap.get('SKY_TEST_FALLBACK') == 'fallback_val'
-        finally:
-            os.environ.pop('SKY_TEST_FALLBACK', None)
+    def test_get_before_capture_raises(self):
+        # Don't call capture_clean_server_env() — get should raise rather
+        # than silently fall back to (potentially polluted) os.environ.
+        with pytest.raises(RuntimeError, match='before the snapshot was'):
+            clean_env_module.get_clean_server_env()
 
 
 class TestPopenEnvOverrideMechanism:

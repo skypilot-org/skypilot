@@ -1,7 +1,7 @@
 """Process-wide snapshot of the API server's pre-pollution env.
 
-This module is intentionally a leaf (no sky imports beyond stdlib + logging)
-so that `sky.utils.command_runner` can import it at module load time without
+This module is intentionally a leaf (no sky imports beyond stdlib) so that
+`sky.utils.command_runner` can import it at module load time without
 re-entering the heavy `sky.server.requests.executor` graph, which would
 trigger a circular import (executor's transitive imports include
 `sky.provision.kubernetes.instance`, which references
@@ -11,11 +11,8 @@ Used by `LocalProcessCommandRunner.run` to set the `env` for spawned
 subprocesses (consolidation-mode controllers) so they don't inherit
 per-request env pollution from `override_request_env_and_config`.
 """
-import logging
 import os
 from typing import Dict, Optional
-
-logger = logging.getLogger(__name__)
 
 # Set once via capture_clean_server_env() in the main API server process, and
 # once per worker via executor_initializer (forwarded from the main process's
@@ -53,15 +50,18 @@ def get_clean_server_env() -> Dict[str, str]:
     Used by LocalProcessCommandRunner.run as the env for spawned
     subprocesses, so consolidation-mode controllers don't inherit
     per-request env mutations applied by override_request_env_and_config.
+
+    Raises RuntimeError if the snapshot was never installed. The only
+    legitimate caller is on the API server (main process: post
+    capture_clean_server_env() at startup; worker process: post
+    set_clean_server_env() in executor_initializer). Falling back to
+    os.environ here would silently re-introduce the leak this module
+    exists to prevent.
     """
     if _clean_server_env is None:
-        # Should not happen on the API server (the main process calls
-        # capture_clean_server_env() at startup, and workers receive the
-        # snapshot via initargs). Fall back to current env so call sites
-        # still work in tests / other contexts; log so we notice if this
-        # ever fires in production.
-        logger.warning('get_clean_server_env() called before '
-                       'capture_clean_server_env(); falling back to current '
-                       'os.environ, which may carry per-request pollution.')
-        return dict(os.environ)
+        raise RuntimeError(
+            'get_clean_server_env() called before the snapshot was '
+            'installed. The main API server process must call '
+            'capture_clean_server_env() at startup, and workers must call '
+            'set_clean_server_env() from executor_initializer.')
     return dict(_clean_server_env)
