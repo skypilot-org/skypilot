@@ -353,6 +353,20 @@ class SampleBasedGenerator:
             # controller. Leave it null for synthetic rows.
             if 'full_resources' in spot_job:
                 spot_job['full_resources'] = None
+            # EXPERIMENT: null out heavy Text/JSON columns inherited from the
+            # live sample to isolate their contribution to sky jobs queue
+            # latency. Pre-#9592 the inject silently dropped these (dict/list
+            # adapt error), so rows were sparse; post-#9592 they carry the
+            # real per-row content. Hypothesis: this is what drove the
+            # ~1-2s creep in sky jobs queue from 8s → 9-10s in May.
+            for _heavy_col in ('links', 'metadata', 'specs'):
+                if _heavy_col in spot_job:
+                    spot_job[_heavy_col] = None
+            for _heavy_col in ('dag_yaml_content', 'env_file_content',
+                               'config_file_content',
+                               'original_user_yaml_content'):
+                if _heavy_col in job_info:
+                    job_info[_heavy_col] = None
 
             # Update file paths to be unique
             home_dir = os.path.expanduser('~')
