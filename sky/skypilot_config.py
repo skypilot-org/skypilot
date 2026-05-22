@@ -857,6 +857,8 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+_NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
+
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
 # new config has been persisted and reloaded in-process. Plugins use this to
 # invalidate caches that were derived from the config (e.g. a request that
@@ -877,17 +879,27 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
         _CONFIG_UPDATE_HOOKS.append(fn)
 
 
-def get_effective_queue_name(
+def _get_effective_k8s_config_value(
         cloud: str,
+        property_keys: List[Tuple[str, ...]],
         region: Optional[str] = None,
         workspace: Optional[str] = None,
         override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Returns the effective Kueue local queue name from config.
+    """Generic Kubernetes config-value resolver.
 
-    Supports two equivalent spellings, ``kueue.local_queue_name`` and
-    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
-    takes priority over spelling; within the same scope, ``quota.queue``
-    wins over ``kueue.local_queue_name`` when both are set.
+    Resolution precedence (most specific first):
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.<property>``
+    2. ``workspaces.<workspace>.<cloud>.<property>``
+    3. ``<cloud>.context_configs.<region>.<property>``
+    4. ``<cloud>.<property>``
+    5. ``None`` — caller is responsible for any default.
+
+    Within a scope, ``property_keys`` are tried in order; the first non-None
+    hit wins. For single-spelling fields pass ``[('namespace',)]``; for
+    multi-spelling fields pass e.g. ``[('quota', 'queue'),
+    ('kueue', 'local_queue_name')]`` to express "quota.queue wins over
+    kueue.local_queue_name when both are set at the same scope".
     """
     if workspace is None:
         workspace = get_active_workspace()
@@ -912,18 +924,37 @@ def get_effective_queue_name(
                                         default_value={},
                                         override_configs=override_configs))
         if region is not None:
-            for queue_keys in _QUEUE_NAME_KEYS:
+            for property_key in property_keys:
                 value = scope_config.get_nested(
-                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    keys=(cloud, 'context_configs', region) + property_key,
                     default_value=None)
                 if value is not None:
                     return value
-        for queue_keys in _QUEUE_NAME_KEYS:
-            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+        for property_key in property_keys:
+            value = scope_config.get_nested(keys=(cloud,) + property_key,
                                             default_value=None)
             if value is not None:
                 return value
     return None
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_QUEUE_NAME_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
 
 
 def get_effective_namespace(
@@ -941,36 +972,11 @@ def get_effective_namespace(
     4. ``<cloud>.namespace``
     5. ``None`` — caller is responsible for the kubeconfig-default fallback.
     """
-    if workspace is None:
-        workspace = get_active_workspace()
-
-    def _lookup(scope: Dict[str, Any]) -> Optional[str]:
-        # Within a scope: per-context wins over cloud-level.
-        cfg = config_utils.Config(scope)
-        if override_configs is not None:
-            cfg = config_utils.Config(
-                cfg.get_nested(keys=(),
-                               default_value={},
-                               override_configs=override_configs))
-        if region is not None:
-            value = cfg.get_nested(keys=(cloud, 'context_configs', region,
-                                         'namespace'),
-                                   default_value=None)
-            if value is not None:
-                return value
-        return cfg.get_nested(keys=(cloud, 'namespace'), default_value=None)
-
-    # Workspace scope wins over global.
-    if workspace is not None:
-        ws_config = get_nested(keys=('workspaces', workspace),
-                               default_value=None)
-        if ws_config is not None:
-            value = _lookup(ws_config)
-            if value is not None:
-                return value
-
-    # Fall back to global scope.
-    return _lookup(_get_loaded_config())
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_NAMESPACE_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
