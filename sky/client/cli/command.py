@@ -7777,9 +7777,15 @@ def api_status(request_id_prefixes: Optional[List[str]],
     '-t',
     required=False,
     help='Service account token for authentication (starts with ``sky_``).')
+@click.option('--no-browser',
+              is_flag=True,
+              default=False,
+              help='Do not attempt to open a browser locally; print the '
+              'auth URL and wait for the user to open it manually. Useful '
+              'on headless machines (SSH sessions, containers, etc.).')
 @usage_lib.entrypoint
 def api_login(endpoint: Optional[str], relogin: bool,
-              service_account_token: Optional[str]):
+              service_account_token: Optional[str], no_browser: bool):
     """Logs into a SkyPilot API server.
 
     If your remote API server has enabled OAuth2 authentication, you can use
@@ -7798,11 +7804,17 @@ def api_login(endpoint: Optional[str], relogin: bool,
       # OAuth2 browser login
       sky api login -e https://api.example.com
       \b
+      # OAuth2 login without opening a browser locally (e.g. over SSH)
+      sky api login -e https://api.example.com --no-browser
+      \b
       # Service account token login
       sky api login -e https://api.example.com --token sky_abc123...
 
     """
-    sdk.api_login(endpoint, relogin, service_account_token)
+    sdk.api_login(endpoint,
+                  relogin,
+                  service_account_token,
+                  no_browser=no_browser)
 
 
 @api.command('logout', cls=_DocumentedCodeCommand)

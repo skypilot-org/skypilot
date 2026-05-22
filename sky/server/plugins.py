@@ -300,6 +300,35 @@ class BasePlugin(abc.ABC):
         """
         return []
 
+    @property
+    def viewer_allowlist(self) -> List['RBACRule']:
+        """Endpoints this plugin exposes to viewer-role users.
+
+        Override this property to opt the plugin's read endpoints in to
+        the strictly-read-only `viewer` role.  Endpoints NOT declared
+        here are denied for viewers by default.
+
+        Path patterns use the same Casbin `keyMatch2` syntax as
+        `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
+
+        Returns:
+            List of `RBACRule` instances (the same dataclass used by
+            `rbac_rules`).  The `description` field is optional; the
+            rule is interpreted as "allow viewers to call this
+            (path, method)".
+
+        Example:
+            @property
+            def viewer_allowlist(self):
+                return [
+                    RBACRule(path='/plugins/api/foo/list',
+                             method='GET'),
+                    RBACRule(path='/plugins/api/foo/status',
+                             method='POST'),
+                ]
+        """
+        return []
+
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):
         """Hook called by API server to let the plugin install itself."""
@@ -585,6 +614,69 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
         }
     """
     return _PLUGIN_RBAC_RULES
+
+
+_PLUGIN_VIEWER_ALLOWLIST: List[Dict[str, str]] = []
+
+
+def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Load viewer-allowlist entries from plugins without calling install().
+
+    Mirrors `load_plugin_rbac_rules`: instantiates each configured
+    plugin in API-server-loading contexts and reads its
+    `viewer_allowlist` property.  Side-effect-free.
+
+    Plugins that don't override `viewer_allowlist` inherit the
+    BasePlugin default (empty list), so default behaviour for any
+    plugin endpoint is "denied for viewer".
+
+    Returns:
+        Flat list of `{path, method}` records to add to the viewer
+        allowlist.
+    """
+    global _PLUGIN_VIEWER_ALLOWLIST
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    allowlist: List[Dict[str, str]] = []
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare viewer
+            # rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            for rule in plugin.viewer_allowlist:
+                allowlist.append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected viewer allowlist entry from '
+                             f'{class_path}: {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load viewer allowlist from '
+                           f'{class_path}: {e}')
+
+    _PLUGIN_VIEWER_ALLOWLIST = allowlist
+    return allowlist
+
+
+def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Return the cached viewer-allowlist entries collected from plugins."""
+    return _PLUGIN_VIEWER_ALLOWLIST
 
 
 def get_extension_context() -> Optional[ExtensionContext]:

@@ -69,6 +69,109 @@ async def test_metrics_endpoint_without_multiprocess():
             mock_gen.assert_called_once()
 
 
+def test_register_multiproc_cleanup_atexit_noop_without_env_var():
+    """No atexit registration in single-process / unit-test mode."""
+    with patch.dict(os.environ, {}, clear=False), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register:
+        if 'PROMETHEUS_MULTIPROC_DIR' in os.environ:
+            del os.environ['PROMETHEUS_MULTIPROC_DIR']
+        metrics.register_multiproc_cleanup_atexit()
+        mock_register.assert_not_called()
+
+
+def test_register_multiproc_cleanup_atexit_registers_when_enabled():
+    """When PROMETHEUS_MULTIPROC_DIR is set, register mark_process_dead(pid)."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register, \
+         patch('sky.server.metrics.os.getpid', return_value=4242):
+        metrics.register_multiproc_cleanup_atexit()
+        mock_register.assert_called_once_with(
+            metrics.multiprocess.mark_process_dead, 4242)
+
+
+def test_register_multiproc_cleanup_atexit_is_idempotent():
+    """Repeated calls in the same process only register once."""
+    with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}), \
+         patch.object(metrics, '_multiproc_cleanup_registered', False), \
+         patch('sky.server.metrics.atexit.register') as mock_register:
+        metrics.register_multiproc_cleanup_atexit()
+        metrics.register_multiproc_cleanup_atexit()
+        metrics.register_multiproc_cleanup_atexit()
+        assert mock_register.call_count == 1
+
+
+# End-to-end coverage of the atexit hook. Spawns a real subprocess that
+# writes a liveall gauge file, then exits — exercising the actual
+# `multiprocess.mark_process_dead` path (not mocked). With the fix it
+# reaps its own file; without it, the file leaks. Uses 'spawn' rather
+# than 'fork' so the child does not inherit this test process's atexit
+# handlers or already-imported registries.
+
+_CHILD_SCRIPT = """
+import os
+from prometheus_client import Gauge
+gauge = Gauge(
+    '__test_atexit_liveall',
+    'test',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+if os.environ.get('WITH_FIX'):
+    from sky.server import metrics
+    metrics.register_multiproc_cleanup_atexit()
+gauge.labels(pid=str(os.getpid())).set(5.2)
+# Write pid to a file rather than stdout — `import sky` logs to stdout
+# on a cold subprocess (skypilot_config debug lines).
+with open(os.environ['_PID_OUT'], 'w') as f:
+    f.write(str(os.getpid()))
+"""
+
+
+def _spawn_writer(multiproc_dir: str, with_fix: bool) -> int:
+    """Run the writer subprocess; return its pid."""
+    import subprocess  # local — only the e2e tests need it
+    import sys
+    import tempfile
+    env = os.environ.copy()
+    env['PROMETHEUS_MULTIPROC_DIR'] = multiproc_dir
+    pid_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pid')
+    pid_file.close()
+    env['_PID_OUT'] = pid_file.name
+    if with_fix:
+        env['WITH_FIX'] = '1'
+    else:
+        env.pop('WITH_FIX', None)
+    try:
+        # Generous timeout: a cold `from sky.server import metrics` in a fresh
+        # subprocess pulls in the full sky import chain (~20s on CI hardware).
+        subprocess.run(
+            [sys.executable, '-c', _CHILD_SCRIPT],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        with open(pid_file.name) as f:
+            return int(f.read().strip())
+    finally:
+        os.unlink(pid_file.name)
+
+
+def test_atexit_reaps_liveall_file_with_fix(tmp_path):
+    pid = _spawn_writer(str(tmp_path), with_fix=True)
+    leftover = sorted(os.listdir(tmp_path))
+    assert f'gauge_liveall_{pid}.db' not in leftover, leftover
+
+
+def test_without_fix_leaks_liveall_file(tmp_path):
+    pid = _spawn_writer(str(tmp_path), with_fix=False)
+    leftover = sorted(os.listdir(tmp_path))
+    assert f'gauge_liveall_{pid}.db' in leftover, leftover
+
+
 @pytest.mark.asyncio
 async def test_metrics_endpoint_with_multiprocess():
     """Test metrics endpoint in multiprocess mode."""
