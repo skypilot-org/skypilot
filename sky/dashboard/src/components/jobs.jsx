@@ -44,6 +44,7 @@ import {
   Download,
   ChevronDownIcon,
   ChevronRightIcon,
+  CheckIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -94,6 +95,23 @@ export const statusGroups = {
     'FAILED_CONTROLLER',
   ],
 };
+
+// Statuses shown as primary chips on the Statuses filter bar.
+// All other statuses are tucked behind the "More" dropdown to keep the
+// summary line balanced and avoid over-emphasizing failure variants.
+const PRIMARY_STATUSES = ['RUNNING', 'SUCCEEDED', 'FAILED'];
+const OTHER_STATUSES = [
+  'PENDING',
+  'SUBMITTED',
+  'STARTING',
+  'RECOVERING',
+  'CANCELLING',
+  'CANCELLED',
+  'FAILED_SETUP',
+  'FAILED_PRECHECKS',
+  'FAILED_NO_RESOURCE',
+  'FAILED_CONTROLLER',
+];
 
 // Status priority for aggregation (higher index = worse status)
 const STATUS_PRIORITY = {
@@ -464,6 +482,8 @@ export function ManagedJobsTable({
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -1072,6 +1092,18 @@ export function ManagedJobsTable({
 
   // Check if a job group is expanded
   const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
+
+  // Close the "More" status menu when clicking outside of it.
+  useEffect(() => {
+    if (!moreMenuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [moreMenuOpen]);
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -1722,95 +1754,183 @@ export function ManagedJobsTable({
         {/* Combined Status Filter */}
         <div className="flex items-center justify-between text-sm mb-1">
           <div className="flex flex-wrap items-center min-w-0">
-            <span className="mr-2 text-sm font-medium">Statuses:</span>
+            <span className="mr-2 text-sm font-medium">
+              Statuses
+              {!loading && totalNoFilter > 0 && (
+                <span className="ml-1 font-normal text-gray-400">
+                  ({totalNoFilter.toLocaleString()})
+                </span>
+              )}
+              :
+            </span>
             <div className="flex flex-wrap gap-2 items-center">
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <button
-                  key={status}
-                  onClick={() => handleStatusClick(status)}
-                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                    isStatusHighlighted(status) ||
-                    selectedStatuses.includes(status)
-                      ? getBadgeStyle(status)
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <span>{status}</span>
-                  <span
-                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              ))}
-              {totalNoFilter > 0 && (
-                <div className="flex items-center ml-2 gap-2">
-                  <span className="text-gray-500">(</span>
+              {/* Primary statuses: always rendered in fixed order so the bar
+                  doesn't jitter when counts change. */}
+              {PRIMARY_STATUSES.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                const highlighted =
+                  isStatusHighlighted(status) ||
+                  selectedStatuses.includes(status);
+                return (
                   <button
-                    onClick={() => {
-                      // When showing all jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('all');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'all' && showAllMode
-                        ? 'text-purple-700 underline'
-                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                      highlighted
+                        ? getBadgeStyle(status)
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
-                    show all jobs
+                    <span>{status}</span>
+                    <span
+                      className={`text-xs ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                    >
+                      {count}
+                    </span>
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
-                  <button
-                    onClick={() => {
-                      // When showing all active jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('active');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'active' && showAllMode
-                        ? 'text-green-700 underline'
-                        : 'text-gray-600 hover:text-green-700 hover:underline'
-                    }`}
+                );
+              })}
+              {/* Selected non-primary statuses surface as inline chips so the
+                  user can always see which filters are active without opening
+                  the dropdown. */}
+              {selectedStatuses
+                .filter((s) => !PRIMARY_STATUSES.includes(s))
+                .map((status) => {
+                  const count = statusCounts[status] ?? 0;
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => handleStatusClick(status)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
+                    >
+                      <span>{status}</span>
+                      <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              {/* More dropdown: holds the long tail of statuses
+                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
+              {(() => {
+                const otherSelectedCount = selectedStatuses.filter(
+                  (s) => !PRIMARY_STATUSES.includes(s)
+                ).length;
+                const otherTotalCount = OTHER_STATUSES.reduce(
+                  (sum, s) => sum + (statusCounts[s] ?? 0),
+                  0
+                );
+                return (
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      onClick={() => setMoreMenuOpen((v) => !v)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                        otherSelectedCount > 0
+                          ? 'bg-gray-200 text-gray-800'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                      aria-haspopup="true"
+                      aria-expanded={moreMenuOpen}
+                    >
+                      <span>More</span>
+                      {otherSelectedCount > 0 ? (
+                        <span className="text-xs bg-white/70 px-1.5 py-0.5 rounded">
+                          {otherSelectedCount} selected
+                        </span>
+                      ) : (
+                        otherTotalCount > 0 && (
+                          <span className="text-xs bg-gray-200 px-1.5 py-0.5 rounded">
+                            {otherTotalCount}
+                          </span>
+                        )
+                      )}
+                      <ChevronDownIcon
+                        className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {moreMenuOpen && (
+                      <div className="absolute left-0 z-20 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                        {OTHER_STATUSES.map((status) => {
+                          const count = statusCounts[status] ?? 0;
+                          const selected = selectedStatuses.includes(status);
+                          return (
+                            <button
+                              key={status}
+                              onClick={() => handleStatusClick(status)}
+                              className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
+                                selected ? 'bg-gray-50' : ''
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                <CheckIcon
+                                  className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-sky-blue' : 'text-transparent'}`}
+                                />
+                                <span
+                                  className={`truncate ${selected ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                >
+                                  {status}
+                                </span>
+                              </span>
+                              <span
+                                className={`ml-2 text-xs ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {totalNoFilter > 0 && (() => {
+                const selectTab = (tab) => {
+                  React.startTransition(() => {
+                    setActiveTab(tab);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                    setCurrentPage(1);
+                  });
+                };
+                const isActive = activeTab === 'active' && showAllMode;
+                const isAll = activeTab === 'all' && showAllMode;
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by activity"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 ml-2 shrink-0"
                   >
-                    show all active jobs
-                  </button>
-                  <span className="text-gray-500 mx-1">|</span>
-                  <button
-                    onClick={() => {
-                      // When showing all finished jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('finished');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'finished' && showAllMode
-                        ? 'text-blue-700 underline'
-                        : 'text-gray-600 hover:text-blue-700 hover:underline'
-                    }`}
-                  >
-                    show all finished jobs
-                  </button>
-                  <span className="text-gray-500">)</span>
-                </div>
-              )}
+                    <button
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => selectTab('active')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Active
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isAll}
+                      onClick={() => selectTab('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isAll
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
