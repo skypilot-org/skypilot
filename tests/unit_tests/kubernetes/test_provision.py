@@ -2823,11 +2823,12 @@ class TestInspectPodStatusInitContainerReason:
 
         results, log_msgs = self._run_wait(monkeypatch, [pending_init, running])
 
-        assert results[0] == [(False, "init container 'init-copy-home' running")
-                             ]
+        assert results[0] == [(False,
+                               "init container 'init-copy-home' running (1/1)")]
         init_logs = [m for m in log_msgs if 'init container' in m]
         assert len(init_logs) >= 1
         assert "'init-copy-home'" in init_logs[0]
+        assert '(1/1)' in init_logs[0]
         assert 'Pulling' not in init_logs[0]
 
     def test_pod_initializing_no_running_init_container(self, monkeypatch):
@@ -2887,8 +2888,8 @@ class TestInspectPodStatusInitContainerReason:
             ]
 
         results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        assert results[0] == [(False, "init container 'init-copy-home' running")
-                             ]
+        assert results[0] == [(False,
+                               "init container 'init-copy-home' running (2/2)")]
 
     def test_log_message_includes_image_during_pull(self, monkeypatch):
         """The provision log must include the image name during actual pull."""

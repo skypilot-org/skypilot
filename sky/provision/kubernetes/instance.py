@@ -700,14 +700,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
 
-    def _check_init_containers(pod) -> Optional[str]:
-        """Check init containers for errors and return running container name.
+    def _check_init_containers(pod) -> Optional[Tuple[str, int, int]]:
+        """Check init containers for errors and return running container info.
 
-        Returns the name of the currently running init container, or None.
+        Returns (name, 1-based index, total) of the currently running init
+        container, or None if none is running.
         Raises KubernetesError if any init container failed.
         """
-        running_name: Optional[str] = None
-        for init_status in pod.status.init_container_statuses:
+        init_statuses = pod.status.init_container_statuses
+        total = len(init_statuses)
+        running_info: Optional[Tuple[str, int, int]] = None
+        for idx, init_status in enumerate(init_statuses):
             init_terminated = init_status.state.terminated
             if init_terminated:
                 if init_terminated.exit_code != 0:
@@ -717,8 +720,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         'Failed to run init container for pod '
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
-            if (init_status.state.running is not None and running_name is None):
-                running_name = init_status.name
+            if (init_status.state.running is not None and running_info is None):
+                running_info = (init_status.name, idx + 1, total)
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
                     not in ['ContainerCreating', 'PodInitializing']):
@@ -733,7 +736,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     f'Failed to create init container for pod '
                     f'{pod.metadata.name}. Error details: '
                     f'{reason_text}: {msg}.')
-        return running_name
+        return running_info
 
     def _inspect_pod_status(pod):
         # Check if pod is terminated/preempted/failed (unchanged).
@@ -773,8 +776,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     if waiting.reason == 'PodInitializing':
                         running_init = _check_init_containers(pod)
                         if running_init is not None:
-                            init_reason = (f'init container '
-                                           f'{running_init!r} running')
+                            name, idx, total = running_init
+                            init_reason = (f'init container {name!r} '
+                                           f'running ({idx}/{total})')
                         else:
                             init_reason = 'init container running'
                     elif waiting.reason != 'ContainerCreating':
