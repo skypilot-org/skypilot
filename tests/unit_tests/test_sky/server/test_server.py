@@ -755,3 +755,60 @@ class TestResolveDynamicRoute:
             result = server._resolve_dynamic_route(str(d), 'cron')
         assert result is not None
         assert result.endswith('[...path].html')
+
+
+class TestRequestValidationErrorHandler:
+    """Tests for the global 422 RequestValidationError handler."""
+
+    def _make_client(self):
+        # pylint: disable=import-outside-toplevel
+        from fastapi.testclient import TestClient
+
+        from sky.server.requests import payloads
+
+        class _Body(payloads.RequestBody):
+            required_field: str
+
+        test_app = fastapi.FastAPI()
+        test_app.add_exception_handler(
+            fastapi.exceptions.RequestValidationError,
+            server.handle_request_validation_error,
+        )
+
+        @test_app.post('/_test')
+        async def _endpoint(body: _Body):
+            return {'ok': body.required_field}
+
+        return TestClient(test_app)
+
+    def test_input_field_is_omitted(self):
+        client = self._make_client()
+        resp = client.post('/_test', json={})
+        assert resp.status_code == 422
+        body = resp.json()
+        assert 'detail' in body
+        assert body['detail'], 'expected at least one error entry'
+        for err in body['detail']:
+            assert 'input' not in err, (f'`input` was echoed back: {err!r}')
+
+    def test_loc_msg_type_are_preserved(self):
+        client = self._make_client()
+        resp = client.post('/_test', json={})
+        assert resp.status_code == 422
+        err = resp.json()['detail'][0]
+        assert err.get('type') == 'missing'
+        assert err.get('loc') == ['body', 'required_field']
+        assert 'msg' in err
+
+    def test_server_side_default_values_are_not_leaked(self, monkeypatch):
+        # RequestBody.__init__ populates `env_vars` from the process
+        # environment, so without the handler the default 422 echoes
+        # those values back. Use a sentinel env var and assert the
+        # response body never contains it.
+        sentinel = 'a-sentinel-value-the-caller-never-sent'
+        monkeypatch.setenv('SKYPILOT_FAKE_SENTINEL', sentinel)
+
+        client = self._make_client()
+        resp = client.post('/_test', json={})
+        assert resp.status_code == 422
+        assert sentinel not in resp.text

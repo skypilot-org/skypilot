@@ -1051,6 +1051,28 @@ def handle_concurrent_worker_exhausted_error(
         })
 
 
+@app.exception_handler(fastapi.exceptions.RequestValidationError)
+async def handle_request_validation_error(
+        request: fastapi.Request, e: fastapi.exceptions.RequestValidationError):
+    """Return a 422 with the rejected `input` field omitted.
+
+    FastAPI's default 422 handler echoes the entire validated body
+    inside each error entry's `input` field. Request payloads in this
+    server frequently nest large config/env dicts, and clients already
+    know what they sent, so the echo only inflates error responses
+    without adding signal. Keep `loc`/`msg`/`type` so SDK callers can
+    still tell which field was bad.
+    """
+    del request  # request is not used
+    safe = [
+        {k: v for k, v in err.items() if k != 'input'} for err in e.errors()
+    ]
+    return fastapi.responses.JSONResponse(
+        status_code=422,
+        content={'detail': safe},
+    )
+
+
 @app.get('/token')
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
