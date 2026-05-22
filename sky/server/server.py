@@ -163,7 +163,28 @@ def _bearer_auth_401_response(content):
         content=content)
 
 
-def _try_set_basic_auth_user(request: fastapi.Request):
+def _basic_auth_lookup_and_verify(username: str,
+                                  password: str) -> Optional[models.User]:
+    """Synchronous DB lookup + bcrypt verification for basic auth.
+
+    Both the DB call and crypt_ctx.verify (bcrypt) are blocking and should
+    be run via asyncio.to_thread from middleware.
+    """
+    users = global_user_state.get_user_by_name(username)
+    if not users:
+        return None
+    username_encoded = username.encode('utf8')
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                common.crypt_ctx.verify(password, user.password)):
+            return user
+    return None
+
+
+async def _try_set_basic_auth_user(request: fastapi.Request):
     auth_header = request.headers.get('authorization')
     if not auth_header or not auth_header.lower().startswith('basic '):
         return
@@ -176,19 +197,10 @@ def _try_set_basic_auth_user(request: fastapi.Request):
     except Exception:  # pylint: disable=broad-except
         return
 
-    users = global_user_state.get_user_by_name(username)
-    if not users:
-        return
-
-    for user in users:
-        if not user.name or not user.password:
-            continue
-        username_encoded = username.encode('utf8')
-        db_username_encoded = user.name.encode('utf8')
-        if (username_encoded == db_username_encoded and
-                common.crypt_ctx.verify(password, user.password)):
-            request.state.auth_user = user
-            break
+    user = await asyncio.to_thread(_basic_auth_lookup_and_verify, username,
+                                   password)
+    if user is not None:
+        request.state.auth_user = user
 
 
 @middleware_utils.websocket_aware
@@ -207,10 +219,13 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return await call_next(request)
 
         permission_service = permission.permission_service
-        # Check the role permission
-        if permission_service.check_endpoint_permission(auth_user.id,
-                                                        request.url.path,
-                                                        request.method):
+        # Check the role permission. The permission check may touch the DB
+        # and the policy enforcer (file I/O + locks), so offload it to a
+        # thread to avoid blocking the event loop.
+        denied = await asyncio.to_thread(
+            permission_service.check_endpoint_permission, auth_user.id,
+            request.url.path, request.method)
+        if denied:
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -347,7 +362,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
-            _try_set_basic_auth_user(request)
+            await _try_set_basic_auth_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
@@ -366,23 +381,12 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception:  # pylint: disable=broad-except
             return _basic_auth_401_response('Invalid basic auth')
 
-        users = global_user_state.get_user_by_name(username)
-        if not users:
+        # DB lookup + bcrypt verify are blocking; run off the event loop.
+        user = await asyncio.to_thread(_basic_auth_lookup_and_verify, username,
+                                       password)
+        if user is None:
             return _basic_auth_401_response('Invalid credentials')
-
-        valid_user = False
-        for user in users:
-            if not user.name or not user.password:
-                continue
-            username_encoded = username.encode('utf8')
-            db_username_encoded = user.name.encode('utf8')
-            if (username_encoded == db_username_encoded and
-                    common.crypt_ctx.verify(password, user.password)):
-                valid_user = True
-                request.state.auth_user = user
-                break
-        if not valid_user:
-            return _basic_auth_401_response('Invalid credentials')
+        request.state.auth_user = user
 
         return await call_next(request)
 
@@ -456,8 +460,11 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # pylint: disable=import-outside-toplevel
             from sky.users.token_service import token_service
 
-            # Verify and decode JWT token
-            payload = token_service.verify_token(sa_token)
+            # Verify and decode JWT token. verify_token performs a one-time
+            # DB read to fetch/seed the JWT secret and runs HMAC-SHA256
+            # verification; offload to a thread so we never block the loop.
+            payload = await asyncio.to_thread(token_service.verify_token,
+                                              sa_token)
 
             if payload is None:
                 logger.warning('Service account token verification failed')
@@ -483,7 +490,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            token_row = global_user_state.get_service_account_token_by_hash(
+            token_row = await asyncio.to_thread(
+                global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
                 logger.warning(
@@ -499,7 +507,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = global_user_state.get_user(user_id)
+            user_info = await asyncio.to_thread(global_user_state.get_user,
+                                                user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -510,7 +519,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                global_user_state.update_service_account_token_last_used(
+                await asyncio.to_thread(
+                    global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
@@ -568,11 +578,14 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                              'auth user was already set.')
             return await call_next(request)
 
-        # Add user to database if auth_user is present
+        # Add user to database if auth_user is present. Both the DB upsert
+        # and the policy enforcer update are blocking; offload them.
         if auth_user is not None:
-            newly_added = global_user_state.add_or_update_user(auth_user)
+            newly_added = await asyncio.to_thread(
+                global_user_state.add_or_update_user, auth_user)
             if newly_added:
-                permission.permission_service.add_user_if_not_exists(
+                await asyncio.to_thread(
+                    permission.permission_service.add_user_if_not_exists,
                     auth_user.id)
 
         # Store user info in request.state for access by GET endpoints
