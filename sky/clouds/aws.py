@@ -1158,10 +1158,11 @@ class AWS(clouds.Cloud):
     def should_use_env_auth_for_s3(cls) -> bool:
         """Returns True if S3 should use environment-based auth.
 
-        When using non-static AWS credentials (SSO, IAM role, container role),
-        we should not embed credentials into rclone config. Instead, we should
-        use env_auth=true so that rclone uses the AWS SDK credential chain,
-        which properly handles temporary credentials and IAM roles.
+        When using non-static AWS credentials (SSO, IAM role, container role,
+        an assumed role), we should not embed credentials into rclone config.
+        Instead, we should use env_auth=true so that rclone uses the AWS SDK
+        credential chain, which properly handles temporary credentials and
+        IAM roles.
 
         Returns:
             True if environment-based auth should be used, False for static
@@ -1172,11 +1173,16 @@ class AWS(clouds.Cloud):
             return False
         # These credential types use temporary credentials that should not be
         # embedded in config files. They rely on the AWS SDK credential chain.
+        # ASSUME_ROLE covers both `aws sts assume-role` and the
+        # `assume-role-with-web-identity` flow used by EKS IRSA and any other
+        # OIDC federation, both of which mint short-lived session tokens that
+        # expire well before a remote VM gets to use them.
         non_static_types = {
             AWSIdentityType.SSO,
             AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE,
             AWSIdentityType.LOGIN,
+            AWSIdentityType.ASSUME_ROLE,
         }
         return identity_type in non_static_types
 
