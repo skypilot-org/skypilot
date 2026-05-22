@@ -1452,3 +1452,65 @@ def test_kubernetes_caps_preemption_hook_default_timeout():
         f'on Kubernetes (pod terminationGracePeriodSeconds limit). Got: '
         f"{out[0].get('timeout')!r}. If left uncapped, kubelet SIGKILLs "
         f'the hook at 600s while the skylet stores a misleading 3600s.')
+
+
+def test_kubernetes_cap_splits_multi_event_preemption_entry():
+    """Multi-event hooks must not have non-preemption timeouts clobbered.
+
+    A hook entry can list multiple events, e.g.
+    ``{events: [preemption, stop], timeout: 3600}``. The 600s K8s pod-grace
+    cap applies only to the *preemption* dispatch — the *stop* dispatch
+    (idle-timer teardown) has no such constraint and must honor the user's
+    3600s.
+
+    Today ``cap_preemption_hook_timeouts`` rewrites the single ``timeout``
+    field on the shared entry whenever ``'preemption' in events``,
+    silently truncating the stop-event timeout too. ``hook_executor.run``
+    then reads ``entry['timeout']`` per event and kills ``save.sh`` at
+    600s on a normal idle-timer stop — violating both the user's intent
+    and the function's own docstring ("Only ``preemption``-event entries
+    are affected; ``autostop``/``down`` hooks don't interact with the pod
+    grace.").
+
+    Fix: split a multi-event entry into one capped preemption entry plus
+    one uncapped non-preemption entry so each dispatch path sees the
+    correct timeout. Same ``run`` script, same effect — only the stored
+    timeout differs per event.
+    """
+    from sky.clouds.kubernetes import cap_preemption_hook_timeouts
+
+    hooks = [{
+        'run': 'save.sh',
+        'events': ['preemption', 'stop'],
+        'timeout': 3600,
+    }]
+    out = cap_preemption_hook_timeouts(hooks)
+    assert out is not None
+
+    # After the split, we expect two entries — one for the capped
+    # preemption dispatch and one for the uncapped non-preemption events.
+    preempt_entries = [e for e in out if e.get('events') == ['preemption']]
+    stop_entries = [e for e in out if 'stop' in (e.get('events') or [])]
+
+    assert len(preempt_entries) == 1, (
+        f'Multi-event entry should produce exactly one preemption-only '
+        f'entry after split. Got: {out!r}')
+    assert preempt_entries[0]['timeout'] == 600, (
+        f'Preemption entry must be capped to 600s on Kubernetes. Got '
+        f"timeout={preempt_entries[0]['timeout']}.")
+
+    assert len(stop_entries) == 1, (
+        f'Stop event must remain in some entry after split. Got: {out!r}')
+    assert stop_entries[0]['timeout'] == 3600, (
+        f"Non-preemption events keep the user's timeout (3600s); K8s "
+        f"grace doesn't apply to stop. Got "
+        f"timeout={stop_entries[0]['timeout']}. With the bug, the cap "
+        f"clobbers timeout on the shared entry and hook_executor.run('stop') "
+        f"silently SIGKILLs save.sh at 600s.")
+
+    # The preemption and non-preemption entries must be disjoint on
+    # event sets so the executor doesn't double-fire save.sh.
+    assert 'preemption' not in (stop_entries[0]['events']), (
+        f'After split, the non-preemption entry must not also contain '
+        f'preemption (would double-fire on preemption). Got events: '
+        f"{stop_entries[0]['events']!r}.")

@@ -162,18 +162,29 @@ def cap_preemption_hook_timeouts(
         return hooks
     out: List[Dict[str, Any]] = []
     for entry in hooks:
+        events = list(entry.get('events') or [])
         timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
-        if ('preemption' in (entry.get('events') or []) and
-                timeout > _PREEMPTION_GRACE_CAP_SECONDS):
+        if ('preemption' in events and timeout > _PREEMPTION_GRACE_CAP_SECONDS):
             sys.stderr.write(
                 f'WARNING: preemption-hook timeout {timeout}s on '
                 f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
                 f'(pod terminationGracePeriodSeconds limit; '
                 f'cluster-autoscaler --max-graceful-termination-sec). '
                 f'Raise the autoscaler flag if longer hooks are needed.\n')
-            new = dict(entry)
-            new['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
-            out.append(new)
+            other_events = [e for e in events if e != 'preemption']
+            # Split a multi-event entry so the K8s grace cap only
+            # applies to the preemption dispatch. The non-preemption
+            # events (stop/down) keep the user's original timeout —
+            # kubelet's SIGKILL boundary doesn't apply to idle-timer
+            # stops or `sky down` teardowns.
+            capped = dict(entry)
+            capped['events'] = ['preemption']
+            capped['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
+            out.append(capped)
+            if other_events:
+                uncapped = dict(entry)
+                uncapped['events'] = other_events
+                out.append(uncapped)
         else:
             out.append(entry)
     return out
