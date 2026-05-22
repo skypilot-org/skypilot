@@ -26,6 +26,7 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import importlib.metadata
 import io
 import json
 import os
@@ -5780,6 +5781,39 @@ def jobs_launch(
                     f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
                     f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
                     f'{ux_utils.RESET_BOLD}')
+
+
+# Plugin hook: allow downstream packages to attach options or wrap the
+# callback of `sky jobs launch`. Each entry point in the
+# ``sky.cli.jobs_launch_extensions`` group is called once at module import
+# with the jobs_launch click.Command. Failures are logged and do not block
+# CLI startup. Re-imports will call extensions again, so extensions must
+# guard against double-install.
+def _load_jobs_launch_extensions() -> None:
+    try:
+        eps = importlib.metadata.entry_points(
+            group='sky.cli.jobs_launch_extensions')
+    except TypeError:
+        # Python 3.9 fallback: entry_points() takes no kwargs.
+        eps = importlib.metadata.entry_points().get(
+            'sky.cli.jobs_launch_extensions', [])
+    # Editable installs can yield duplicates (pypa/setuptools#3649); dedupe
+    # by (name, value).
+    seen: Set[Tuple[str, str]] = set()
+    for ep in eps:
+        key = (ep.name, ep.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            ep.load()(jobs_launch)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to load sky.cli.jobs_launch_extensions entry point '
+                '%r: %s', ep.name, e)
+
+
+_load_jobs_launch_extensions()
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
