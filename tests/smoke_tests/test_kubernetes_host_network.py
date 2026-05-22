@@ -172,12 +172,24 @@ def test_kubernetes_host_network_multi_node_same_node():
                  f'      hostNetwork: true\n'
                  f'EOF')
 
-    # One self-contained command: capture the launch, assert it failed,
-    # and assert it failed *for the anti-affinity reason* (so an
-    # unrelated failure — image pull, quota — doesn't spuriously pass).
-    # grep -iE "anti-?affinity" matches the kube-scheduler phrasings
-    # ("...didn't match pod anti-affinity rules", "antiaffinity").
+    # One self-contained command: probe the cluster's node count, skip
+    # if multi-node (the single-node anti-affinity guarantee under test
+    # is not observable there — the launch correctly succeeds by
+    # spreading one pod per node, which is the cross-node capability
+    # mode b exists to unlock); otherwise capture the launch, assert
+    # it failed, and assert it failed *for the anti-affinity reason*
+    # (so an unrelated failure — image pull, quota — doesn't spuriously
+    # pass). grep -iE "anti-?affinity" matches the kube-scheduler
+    # phrasings ("...didn't match pod anti-affinity rules",
+    # "antiaffinity").
     expect_fail = (
+        f'NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null '
+        f'| wc -l); '
+        f'if [ "$NODE_COUNT" -gt 1 ] 2>/dev/null; then '
+        f'echo "SKIP: multi-node K8s detected ($NODE_COUNT nodes); '
+        f'single-node anti-affinity guarantee is not observable here '
+        f'(launch correctly succeeds by spreading pods across nodes)"; '
+        f'exit 0; fi; '
         f'set +e; '
         f'OUT=$(sky launch -y -c {name} --infra kubernetes '
         f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2 2>&1); '
