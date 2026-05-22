@@ -543,17 +543,40 @@ class _MessagesProxy:
 
 messages = _MessagesProxy()
 
-# Background executor for fire-and-forget Loki POSTs. Daemon threads so the
-# CLI/server can exit without blocking on in-flight requests; the atexit
-# hook below gives them a brief window to flush.
+# Background executor for async Loki POSTs. Daemon threads so the CLI/server
+# can exit without blocking on in-flight requests. The atexit hook drains
+# pending work with a hard wall-clock cap (_LOKI_DRAIN_MAX_S), independent
+# of any individual request's timeout, so the process always exits promptly
+# and remains responsive to SIGINT regardless of how Loki misbehaves.
 _loki_executor_lock = threading.Lock()
 _loki_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
 _loki_session: Optional['requests.Session'] = None
 _loki_pending_lock = threading.Lock()
 _loki_pending: 'List[concurrent.futures.Future]' = []
-# Prune completed futures from _loki_pending only when the list grows past
-# this threshold, instead of scanning the whole list on every send.
+# In-flight count (submitted but not yet done). Maintained explicitly so we
+# can cap submissions in O(1) without scanning _loki_pending, and so the cap
+# works even when nothing is draining (e.g. sustained Loki outage on the API
+# server). Protected by _loki_pending_lock.
+_loki_in_flight = 0
+# Cumulative count of sends dropped at submit because the in-flight cap was
+# reached. Bumped + logged at WARNING the first time it happens and every
+# 1000 thereafter, so a real Loki outage is visible in operator logs but
+# normal usage doesn't get spammed.
+_loki_drops_total = 0
+# Cap on outstanding sends across the whole process. Each pending payload
+# is ~2KB, so 1024 bounds the worst-case memory hit at ~2MB even if Loki
+# is unreachable for a long time. Well above any realistic burst from a
+# single CLI command (~12) or a busy API server.
+_LOKI_MAX_IN_FLIGHT = 1024
+# Prune done futures from _loki_pending when it grows past this. Keeps the
+# atexit drain snapshot from doing extra work in the common (healthy) case.
 _LOKI_PENDING_PRUNE_THRESHOLD = 64
+# Hard wall-clock cap on the atexit drain. Bounds CLI exit regardless of
+# DNS hangs, slow-byte servers, or anything else that can defeat the
+# per-request 0.5s timeout inside _post_to_loki. Sends still in flight at
+# the deadline are abandoned (the same way master abandons any individual
+# POST that hits its socket timeout).
+_LOKI_DRAIN_MAX_S = 0.5
 
 
 def _get_loki_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -572,24 +595,34 @@ def _get_loki_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _loki_executor
 
 
-def _flush_pending_loki_sends() -> None:
-    """Wait for all in-flight Loki sends on interpreter shutdown.
+def _on_loki_future_done(future: 'concurrent.futures.Future') -> None:
+    # pylint: disable=unused-argument
+    """Decrement the in-flight counter when a submitted POST finishes."""
+    global _loki_in_flight
+    with _loki_pending_lock:
+        if _loki_in_flight > 0:
+            _loki_in_flight -= 1
 
-    Each submitted POST is bounded by the 0.5s timeout inside
-    ``_post_to_loki``, so the worst-case overall drain is
-    ``ceil(pending / max_workers) * 0.5s`` even if Loki is unreachable.
-    For a healthy Loki the drain is typically well under that because
-    most POSTs submitted during the command already completed in the
-    background by the time we get here.
+
+def _flush_pending_loki_sends() -> None:
+    """Drain in-flight Loki sends on interpreter shutdown, bounded by
+    ``_LOKI_DRAIN_MAX_S``.
+
+    ``concurrent.futures.wait`` with a timeout returns control to Python
+    periodically, so SIGINT (Ctrl-C) is honored during the drain. After
+    the timeout, the executor is shut down without waiting and any
+    sends still in flight are abandoned. ``requests``' own ``timeout``
+    parameter doesn't actually bound wall-clock time (it doesn't cover
+    DNS, and on the read side it's a per-byte timeout), so we cannot
+    rely on it to keep the drain prompt; this wall-clock cap does.
     """
     with _loki_pending_lock:
         pending = [f for f in _loki_pending if not f.done()]
         _loki_pending.clear()
-    for f in pending:
-        try:
-            f.result()
-        except Exception:  # pylint: disable=broad-except
-            pass
+    if pending:
+        concurrent.futures.wait(pending, timeout=_LOKI_DRAIN_MAX_S)
+    if _loki_executor is not None:
+        _loki_executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _post_to_loki(payload: str, headers: Dict[str, str]) -> None:
@@ -649,14 +682,44 @@ def _send_to_loki(message_type: MessageType):
         }]
     }
     payload = json.dumps(payload)
-    # Run the POST in parallel on a daemon thread so the caller doesn't
-    # block on Loki's response, but still record the future so the
-    # atexit hook (_flush_pending_loki_sends) waits for every submitted
-    # POST to complete before the process exits. Net effect: Loki RTTs
-    # overlap with the caller's work and with each other (up to
-    # max_workers in parallel) instead of being sequential on the
-    # critical path, but no submitted send is silently dropped.
-    future = _get_loki_executor().submit(_post_to_loki, payload, headers)
+    # Drop new sends at the source when the in-flight queue is already at
+    # _LOKI_MAX_IN_FLIGHT. Prevents unbounded memory growth on a
+    # long-running API server during a sustained Loki outage, where
+    # nothing drains and the executor's internal work queue would
+    # otherwise grow linearly with request rate.
+    global _loki_in_flight, _loki_drops_total
+    with _loki_pending_lock:
+        if _loki_in_flight >= _LOKI_MAX_IN_FLIGHT:
+            _loki_drops_total += 1
+            if _loki_drops_total == 1 or _loki_drops_total % 1000 == 0:
+                logger.warning(
+                    f'Loki usage send backlog at cap '
+                    f'({_LOKI_MAX_IN_FLIGHT}); dropped '
+                    f'{_loki_drops_total} send(s) since startup. '
+                    f'This typically means the Loki ingest endpoint is '
+                    f'unreachable or slow.')
+            messages.reset(message_type)
+            return
+        _loki_in_flight += 1
+
+    # Run the POST on a worker thread so the caller doesn't block on
+    # Loki's response. Loki RTTs then overlap with the caller's work and
+    # with each other up to max_workers, instead of being sequential on
+    # the critical path. The atexit drain (_flush_pending_loki_sends)
+    # waits for in-flight sends to complete on process exit, bounded by
+    # _LOKI_DRAIN_MAX_S.
+    try:
+        future = _get_loki_executor().submit(_post_to_loki, payload, headers)
+    except RuntimeError:
+        # Executor has already been shut down (e.g. during atexit on a
+        # different thread). Roll back the in-flight reservation and
+        # drop the send.
+        with _loki_pending_lock:
+            if _loki_in_flight > 0:
+                _loki_in_flight -= 1
+        messages.reset(message_type)
+        return
+    future.add_done_callback(_on_loki_future_done)
     with _loki_pending_lock:
         _loki_pending.append(future)
         if len(_loki_pending) > _LOKI_PENDING_PRUNE_THRESHOLD:
