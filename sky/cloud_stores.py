@@ -837,17 +837,45 @@ if not token:
 
         repo_type, repo_id, revision, sub_path = data_utils.split_hf_repo_path(
             source)
-        allow_patterns = None
         if sub_path:
-            allow_patterns = [f'{sub_path.rstrip("/")}/*']
-        code = '\n'.join([
-            'import os',
-            'from huggingface_hub import snapshot_download',
-            self._TOKEN_HELPER,
-            (f'snapshot_download(repo_id={repo_id!r}, repo_type={repo_type!r}, '
-             f'revision={revision!r}, local_dir={destination!r}, '
-             f'allow_patterns={allow_patterns!r}, token=token)'),
-        ])
+            # ``snapshot_download`` preserves repo-relative paths under
+            # ``local_dir``. Staging into a temp dir and moving only the
+            # sub-path contents avoids producing ``<destination>/<sub_path>``
+            # (which doubles when the destination is named after sub_path).
+            sub_path_norm = sub_path.rstrip('/')
+            allow_pattern = f'{sub_path_norm}/*'
+            code = '\n'.join([
+                'import os',
+                'import shutil',
+                'import tempfile',
+                'from huggingface_hub import snapshot_download',
+                self._TOKEN_HELPER,
+                f'os.makedirs({destination!r}, exist_ok=True)',
+                'tmp_dir = tempfile.mkdtemp()',
+                'try:',
+                (f'    snapshot_download(repo_id={repo_id!r}, '
+                 f'repo_type={repo_type!r}, revision={revision!r}, '
+                 f'local_dir=tmp_dir, allow_patterns=[{allow_pattern!r}], '
+                 f'token=token)'),
+                (f'    src = os.path.join(tmp_dir, *{sub_path_norm!r}'
+                 f'.split("/"))'),
+                '    if os.path.isdir(src):',
+                '        for entry in os.listdir(src):',
+                (f'            shutil.move(os.path.join(src, entry), '
+                 f'os.path.join({destination!r}, entry))'),
+                'finally:',
+                '    shutil.rmtree(tmp_dir, ignore_errors=True)',
+            ])
+        else:
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import snapshot_download',
+                self._TOKEN_HELPER,
+                (f'snapshot_download(repo_id={repo_id!r}, '
+                 f'repo_type={repo_type!r}, revision={revision!r}, '
+                 f'local_dir={destination!r}, allow_patterns=None, '
+                 f'token=token)'),
+            ])
         return self._python_command(code)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:

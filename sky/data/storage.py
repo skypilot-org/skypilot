@@ -7,7 +7,9 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -5743,15 +5745,36 @@ class HuggingFaceStore(AbstractStore):
         os.makedirs(os.path.expanduser(local_path), exist_ok=True)
         expanded = os.path.expanduser(local_path)
         if self.is_repo:
-            # ``snapshot_download`` takes the bare ``ns/name`` id with the
-            # repo type as a separate kwarg.
-            self._api.snapshot_download(
-                repo_id=self.strip_repo_type_prefix(self._hf_id),
-                repo_type=self._repo_type,
-                revision=self._revision,
-                local_dir=expanded,
-                allow_patterns=self._allow_patterns_for_sub_path(),
-                token=self._token)
+            # ``snapshot_download`` preserves repo-relative paths under
+            # ``local_dir``. For a sub-path source we stage into a temp dir
+            # and move only the sub-path contents so the caller receives
+            # the contents (not a doubled ``<dest>/<sub_path>/...`` tree).
+            repo_id = self.strip_repo_type_prefix(self._hf_id)
+            if self._bucket_sub_path:
+                sub_path = self._bucket_sub_path.rstrip('/')
+                tmp_dir = tempfile.mkdtemp()
+                try:
+                    self._api.snapshot_download(
+                        repo_id=repo_id,
+                        repo_type=self._repo_type,
+                        revision=self._revision,
+                        local_dir=tmp_dir,
+                        allow_patterns=[f'{sub_path}/*'],
+                        token=self._token)
+                    src_dir = os.path.join(tmp_dir, *sub_path.split('/'))
+                    if os.path.isdir(src_dir):
+                        for entry in os.listdir(src_dir):
+                            shutil.move(os.path.join(src_dir, entry),
+                                        os.path.join(expanded, entry))
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+            else:
+                self._api.snapshot_download(repo_id=repo_id,
+                                            repo_type=self._repo_type,
+                                            revision=self._revision,
+                                            local_dir=expanded,
+                                            allow_patterns=None,
+                                            token=self._token)
             return
         src = f'{huggingface.HF_BUCKETS_URL_PREFIX}{self.name}'
         if self._bucket_sub_path:

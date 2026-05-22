@@ -554,6 +554,22 @@ class TestHfCloudStorage:
         assert 'snapshot_download' in command
         assert "'dataset'" in command
         assert 'subdir/*' in command
+        # ``snapshot_download`` preserves repo-relative paths, so a sub-path
+        # source must stage into a temp dir and move only the sub-path
+        # contents up to the destination. Otherwise files end up at
+        # ``/tmp/ds/subdir/...`` instead of ``/tmp/ds/...`` (doubling the
+        # sub-path when the destination is named after it).
+        assert 'tempfile.mkdtemp' in command
+        assert 'shutil.move' in command
+
+    def test_repo_dir_download_command_no_sub_path(self):
+        # When there's no sub-path, no temp staging is needed; the data is
+        # downloaded straight into the destination.
+        command = cloud_stores.HFCloudStorage().make_sync_dir_command(
+            'hf://datasets/ns/ds@main', '/tmp/ds')
+        assert 'snapshot_download' in command
+        assert 'tempfile' not in command
+        assert 'shutil' not in command
 
     @mock.patch('sky.cloud_stores.huggingface.get_token', return_value=None)
     @mock.patch('sky.cloud_stores.huggingface.api')
