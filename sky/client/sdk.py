@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -56,6 +57,7 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1184,6 +1186,25 @@ def tail_hook_logs(cluster_name: str,
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     return stream_and_get(request_id)
+
+
+# TODO(zpoint): drop the tail_autostop_logs deprecation alias after
+# v0.15.0. Replacement: tail_hook_logs(cluster_name, event='stop', ...).
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+    The autostop event was renamed to ``stop`` in the generalized
+    lifecycle-hooks framework. This shim emits a one-line stderr
+    deprecation warning and delegates to :func:`tail_hook_logs` so
+    master-version code keeps working through the v0.15.0 grace window.
+    """
+    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
+    return tail_hook_logs(cluster_name=cluster_name,
+                          event='stop',
+                          follow=follow,
+                          tail=tail)
 
 
 @usage_lib.entrypoint

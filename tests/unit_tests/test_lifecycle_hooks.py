@@ -1087,6 +1087,112 @@ def test_cli_hook_auto_select_with_cluster_only(monkeypatch):
     assert captured.get('event') is None
 
 
+def test_cli_autostop_alias_routes_to_hook_stop_with_deprecation(monkeypatch):
+    """`sky logs --autostop <cluster>` is the master-era CLI surface.
+
+    After the autostop→stop event rename it must still keep working as a
+    deprecation alias: rewrite the call to ``--hook stop`` and emit a
+    one-line stderr warning so existing user scripts don't break across
+    the v0.15.0 grace window. Design §1.7 pins the removal at v0.15.0.
+    """
+    from click.testing import CliRunner
+
+    from sky.client.cli import command as cli_command
+
+    captured = {}
+
+    def _fake_tail_hook_logs(cluster_name, event=None, follow=True, tail=0):
+        captured['cluster'] = cluster_name
+        captured['event'] = event
+        captured['follow'] = follow
+        return 0
+
+    monkeypatch.setattr('sky.client.sdk.tail_hook_logs', _fake_tail_hook_logs)
+
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(cli_command.logs,
+                           ['--autostop', '--no-follow', 'mycluster'])
+
+    assert result.exit_code == 0, (
+        f'CLI exit {result.exit_code}; output={result.output!r}; '
+        f'stderr={result.stderr!r}; exc={result.exception!r}. The '
+        f'`--autostop` flag must remain a deprecated alias (per design '
+        f'§1.7 — removal pinned at v0.15.0).')
+    assert captured.get('event') == 'stop', (
+        f'--autostop must route to --hook stop after the autostop→stop '
+        f"event rename. Got: event={captured.get('event')!r}.")
+    assert captured.get('cluster') == 'mycluster'
+    assert captured.get('follow') is False
+    assert 'deprecat' in (result.stderr or '').lower(), (
+        f'A stderr deprecation warning must be emitted. Got '
+        f'stderr={result.stderr!r}.')
+
+
+def test_cli_autostop_and_hook_flags_conflict(monkeypatch):
+    """Combining `--autostop` with `--hook <event>` must error cleanly.
+
+    The user is ambiguously asking for two log streams; we reject up
+    front rather than silently picking one.
+    """
+    from click.testing import CliRunner
+
+    from sky.client.cli import command as cli_command
+
+    monkeypatch.setattr(
+        'sky.client.sdk.tail_hook_logs', lambda *a, **kw: pytest.fail(
+            'tail_hook_logs must not be called when --autostop and '
+            '--hook conflict.'))
+
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(cli_command.logs,
+                           ['--autostop', '--hook', 'preemption', 'mycluster'])
+    assert result.exit_code != 0, (
+        f'--autostop + --hook should error; got exit 0. output='
+        f'{result.output!r}; stderr={result.stderr!r}.')
+
+
+def test_sdk_tail_autostop_logs_alias_delegates_to_tail_hook_logs(
+        monkeypatch, capsys):
+    """`sky.client.sdk.tail_autostop_logs` is the master-era SDK alias.
+
+    After the rename, it must still exist as a deprecated shim that
+    delegates to ``tail_hook_logs(event='stop')`` and emits a one-line
+    stderr deprecation warning. Same removal anchor as the CLI alias —
+    v0.15.0 per design §1.7.
+    """
+    from sky.client import sdk
+
+    assert hasattr(sdk, 'tail_autostop_logs'), (
+        'sky.client.sdk.tail_autostop_logs must exist as a deprecated '
+        'alias. Removal pinned at v0.15.0 (design §1.7).')
+
+    captured = {}
+
+    def _fake_tail_hook_logs(cluster_name, event=None, follow=True, tail=0):
+        captured['cluster'] = cluster_name
+        captured['event'] = event
+        captured['follow'] = follow
+        captured['tail'] = tail
+        return 0
+
+    monkeypatch.setattr('sky.client.sdk.tail_hook_logs', _fake_tail_hook_logs)
+
+    rc = sdk.tail_autostop_logs(cluster_name='mycluster', follow=False, tail=5)
+    assert rc == 0
+    assert captured == {
+        'cluster': 'mycluster',
+        'event': 'stop',
+        'follow': False,
+        'tail': 5,
+    }, (f'tail_autostop_logs must delegate to tail_hook_logs with '
+        f"event='stop' (autostop event was renamed to stop). Got: "
+        f'{captured!r}.')
+
+    err = capsys.readouterr().err
+    assert 'deprecat' in err.lower(), (
+        f'A stderr deprecation warning must be emitted. Got: {err!r}.')
+
+
 def test_cli_hook_explicit_event_still_works(monkeypatch):
     """`sky logs --hook stop mycluster` (explicit event) keeps
     working after the smart-callback fix."""

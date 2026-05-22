@@ -14,3 +14,14 @@ AUTOSTOP_HOOK_YAML = (
     'Use config.hooks: [{run, events: [stop|down], timeout}] '
     'instead (routed for you — autodown maps to `down`, autostop maps '
     'to `stop`).\n')
+
+AUTOSTOP_LOGS_CLI = (
+    'WARNING: `sky logs --autostop` is deprecated. Use `sky logs '
+    '--hook stop` instead (the autostop event was renamed to `stop` '
+    'in the generalized lifecycle-hooks framework). Routing for you.\n')
+
+TAIL_AUTOSTOP_LOGS_SDK = (
+    'WARNING: sky.client.sdk.tail_autostop_logs() is deprecated. Use '
+    'sky.client.sdk.tail_hook_logs(cluster_name, event=\'stop\') '
+    'instead (the autostop event was renamed to `stop` in the '
+    'generalized lifecycle-hooks framework). Routing for you.\n')

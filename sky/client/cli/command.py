@@ -88,6 +88,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -2591,6 +2592,16 @@ def queue(clusters: List[str],
               flag_value='',
               help='Stream a per-event lifecycle-hook log from the cluster. '
               'Omit the event name to auto-select whichever log exists.')
+# TODO(zpoint): drop the --autostop deprecation alias after v0.15.0.
+# Replacement: --hook stop.
+@click.option('--autostop',
+              'autostop_alias',
+              is_flag=True,
+              default=False,
+              hidden=True,
+              help='[DEPRECATED] Alias for `--hook stop`. The autostop '
+              'event was renamed to `stop` in the lifecycle-hooks '
+              'framework.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2631,6 +2642,7 @@ def logs(
     job_ids: Tuple[str, ...],
     provision: bool,
     hook_event: Optional[str],
+    autostop_alias: bool,
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2665,6 +2677,18 @@ def logs(
     lifecycle-hook log. Omit the event name to auto-select whichever
     log exists.
     """
+    # TODO(zpoint): drop the --autostop alias after v0.15.0 (see the
+    # decorator above). Until then: rewrite to --hook stop and emit a
+    # one-line stderr deprecation warning so master-era scripts keep
+    # working through the grace window.
+    if autostop_alias:
+        if hook_event is not None:
+            raise click.UsageError(
+                '--autostop is a deprecated alias for --hook stop and '
+                'cannot be combined with --hook.')
+        click.echo(hooks_deprecation.AUTOSTOP_LOGS_CLI, err=True, nl=False)
+        hook_event = 'stop'
+
     # Smart-parse the design-doc form `sky logs --hook <cluster>`:
     # Click greedily consumes the next token after --hook as the option
     # value, so the cluster name lands in `hook_event`. When the value
