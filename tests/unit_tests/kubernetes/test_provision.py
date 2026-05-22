@@ -2767,9 +2767,8 @@ class TestInspectPodStatusInitContainerReason:
         """While containers are in ContainerCreating, the event-based
         'Pulling' reason (with image name) should be reported."""
         monkeypatch.setattr(
-            instance, '_get_pod_pending_reason',
-            lambda *a, **kw: ('Pulling',
-                              'Pulling image "us-docker.pkg.dev/foo:v1"'))
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
 
         def pending_creating(pod):
             pod.status.phase = 'Pending'
@@ -2799,9 +2798,8 @@ class TestInspectPodStatusInitContainerReason:
         """When containers show PodInitializing with a running init
         container, the reason must reflect the init container name."""
         monkeypatch.setattr(
-            instance, '_get_pod_pending_reason',
-            lambda *a, **kw: ('Pulling',
-                              'Pulling image "us-docker.pkg.dev/foo:v1"'))
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
 
         def pending_init(pod):
             pod.status.phase = 'Pending'
@@ -2823,12 +2821,10 @@ class TestInspectPodStatusInitContainerReason:
                 self._make_running_container_status()
             ]
 
-        results, log_msgs = self._run_wait(monkeypatch,
-                                           [pending_init, running])
+        results, log_msgs = self._run_wait(monkeypatch, [pending_init, running])
 
-        assert results[0] == [
-            (False, "init container 'init-copy-home' running")
-        ]
+        assert results[0] == [(False, "init container 'init-copy-home' running")
+                             ]
         init_logs = [m for m in log_msgs if 'init container' in m]
         assert len(init_logs) >= 1
         assert "'init-copy-home'" in init_logs[0]
@@ -2891,16 +2887,14 @@ class TestInspectPodStatusInitContainerReason:
             ]
 
         results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        assert results[0] == [
-            (False, "init container 'init-copy-home' running")
-        ]
+        assert results[0] == [(False, "init container 'init-copy-home' running")
+                             ]
 
     def test_log_message_includes_image_during_pull(self, monkeypatch):
         """The provision log must include the image name during actual pull."""
         monkeypatch.setattr(
-            instance, '_get_pod_pending_reason',
-            lambda *a, **kw: ('Pulling',
-                              'Pulling image "registry.io/myimg:latest"'))
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "registry.io/myimg:latest"'))
 
         def pending_creating(pod):
             pod.status.phase = 'Pending'
@@ -2919,8 +2913,7 @@ class TestInspectPodStatusInitContainerReason:
                 self._make_running_container_status()
             ]
 
-        _, log_msgs = self._run_wait(monkeypatch,
-                                     [pending_creating, running])
+        _, log_msgs = self._run_wait(monkeypatch, [pending_creating, running])
         pending_logs = [m for m in log_msgs if 'is pending' in m]
         assert len(pending_logs) == 1
         assert 'Pulling' in pending_logs[0]
@@ -2930,9 +2923,8 @@ class TestInspectPodStatusInitContainerReason:
         """The provision log must NOT include stale image pull info
         when the pod is actually waiting for init containers."""
         monkeypatch.setattr(
-            instance, '_get_pod_pending_reason',
-            lambda *a, **kw: ('Pulling',
-                              'Pulling image "us-docker.pkg.dev/foo:v1"'))
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
 
         def pending_init(pod):
             pod.status.phase = 'Pending'

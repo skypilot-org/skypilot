@@ -717,8 +717,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         'Failed to run init container for pod '
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
-            if (init_status.state.running is not None and
-                    running_name is None):
+            if (init_status.state.running is not None and running_name is None):
                 running_name = init_status.name
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
