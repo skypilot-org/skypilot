@@ -161,6 +161,9 @@ def executor_initializer(proc_group: str):
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
