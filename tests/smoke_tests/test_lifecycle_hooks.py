@@ -119,7 +119,10 @@ def test_hook_lifecycle_combined(generic_cloud: str):
             'idle_minutes': 1,
             'down': False,
             # Legacy back-compat: should be routed into the hooks list.
-            'hook': f'echo {legacy_marker}',
+            # `seq 1 50` pads stop.log past 10 lines so the existing grep
+            # for `legacy_marker` also catches the `tail`-default-to-last-10
+            # regression in `tail_hook_logs` (PR #9064 Devin review).
+            'hook': f'echo {legacy_marker} && seq 1 50',
             'hook_timeout': 60,
         },
         'hooks': [

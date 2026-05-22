@@ -1349,3 +1349,106 @@ def test_set_autostop_skylet_side_routes_legacy_hook_arg_down_aware(
         'down'
     ], (f"down=True (autodown) must route legacy hook to events:[down]; "
         f"got: {stored[0]['events']!r}")
+
+
+# ---------------------------------------------------------------------------
+# Devin AI review findings — regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_tail_hook_logs_tail_zero_prints_all_lines(tmp_path):
+    """`tail_hook_logs(tail=0)` must print all lines, not POSIX last-10.
+
+    The docstring at ``cloud_vm_ray_backend.tail_hook_logs`` promises
+    "If 0, print all lines." The implementation built the shell command
+    as ``tail <flags> <path>`` where ``<flags>`` was empty when both
+    ``tail=0`` and ``follow=False`` — which is exactly the snapshot path
+    a user hits via ``sky logs --hook stop --no-follow``. A bare
+    ``tail <path>`` falls back to POSIX ``tail``'s default last-10
+    behavior, silently truncating the user's view of small hook logs
+    that fit in fewer than 10 lines is fine but logs with > 10 lines
+    (think: a hook that emits progress as it runs) lose their earliest
+    output.
+
+    Functionally verify by running the generated shell command against
+    a 30-line file and asserting all 30 lines come through.
+    """
+    from sky.backends import cloud_vm_ray_backend
+
+    captured = {}
+
+    class _FakeHandle:
+        pass
+
+    class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
+
+        def __init__(self):  # pylint: disable=super-init-not-called
+            pass
+
+        def run_on_head(self, handle, cmd, **kw):  # type: ignore[override]
+            del handle, kw
+            captured['cmd'] = cmd
+            return 0
+
+    _FakeBackend().tail_hook_logs(_FakeHandle(),
+                                  event='stop',
+                                  follow=False,
+                                  tail=0)
+    cmd = captured['cmd']
+
+    # Build a 30-line log file and substitute the head-node paths so we
+    # can execute the cmd locally without an actual cluster.
+    log = tmp_path / 'stop.log'
+    log.write_text('\n'.join(f'line{i}' for i in range(1, 31)) + '\n')
+    legacy = tmp_path / 'autostop_hook_nonexistent.log'
+    cmd_local = cmd.replace('~/.sky/hooks/stop.log', str(log)).replace(
+        f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}', str(legacy))
+
+    import subprocess
+    result = subprocess.run(['bash', '-c', cmd_local],
+                            capture_output=True,
+                            text=True,
+                            check=False)
+    assert result.returncode == 0, (
+        f'tail_hook_logs cmd exited non-zero: rc={result.returncode}, '
+        f'stderr={result.stderr!r}, cmd={cmd_local!r}')
+
+    out_lines = [l for l in result.stdout.splitlines() if l.startswith('line')]
+    assert len(out_lines) == 30, (
+        f'tail_hook_logs(tail=0, follow=False) should print all 30 lines per '
+        f'its docstring contract `If 0, print all lines.` — got {len(out_lines)}. '
+        f'With the bug, POSIX `tail` defaults to last-10 lines, dropping '
+        f'line1..line20. Full output:\n{result.stdout}')
+    assert 'line1' in out_lines, (
+        f'Earliest line (line1) must be present when tail=0; with the bug '
+        f'it is truncated. Got first lines: {out_lines[:5]!r}')
+
+
+def test_kubernetes_caps_preemption_hook_default_timeout():
+    """`cap_preemption_hook_timeouts` must apply the default 3600s when
+    a hook entry lacks an explicit ``timeout`` key, matching the runtime
+    behavior of ``hook_executor``.
+
+    Today all production callers normalize hooks via
+    ``Resources._normalize_hook_entry`` before reaching this function,
+    so the default never triggers in practice. But the function reads
+    as if a missing-timeout entry would NOT be capped (its default was
+    ``0`` < cap), while at runtime the executor would honor 3600s —
+    blowing past the 600s pod grace and getting SIGKILLed mid-run. This
+    test pins the function's default to match
+    ``DEFAULT_HOOK_TIMEOUT_SECONDS`` so any future caller that skips
+    normalization stays safe.
+    """
+    from sky.clouds.kubernetes import cap_preemption_hook_timeouts
+
+    # Entry with no ``timeout`` key — must be treated as DEFAULT (3600)
+    # and therefore capped to 600.
+    hooks = [{'run': 'a', 'events': ['preemption']}]
+    out = cap_preemption_hook_timeouts(hooks)
+    assert out is not None and len(out) == 1
+    assert out[0]['timeout'] == 600, (
+        f'Missing-timeout entry must be treated as the runtime default '
+        f'({constants.DEFAULT_HOOK_TIMEOUT_SECONDS}s) and capped to 600s '
+        f'on Kubernetes (pod terminationGracePeriodSeconds limit). Got: '
+        f"{out[0].get('timeout')!r}. If left uncapped, kubelet SIGKILLs "
+        f'the hook at 600s while the skylet stores a misleading 3600s.')

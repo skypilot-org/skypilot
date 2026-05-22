@@ -162,10 +162,11 @@ def cap_preemption_hook_timeouts(
         return hooks
     out: List[Dict[str, Any]] = []
     for entry in hooks:
-        if 'preemption' in (entry.get('events') or []) and entry.get(
-                'timeout', 0) > _PREEMPTION_GRACE_CAP_SECONDS:
+        timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        if ('preemption' in (entry.get('events') or []) and
+                timeout > _PREEMPTION_GRACE_CAP_SECONDS):
             sys.stderr.write(
-                f'WARNING: preemption-hook timeout {entry["timeout"]}s on '
+                f'WARNING: preemption-hook timeout {timeout}s on '
                 f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
                 f'(pod terminationGracePeriodSeconds limit; '
                 f'cluster-autoscaler --max-graceful-termination-sec). '

@@ -4884,6 +4884,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_flags = []
         if tail > 0:
             tail_flags.extend(['-n', str(tail)])
+        elif not follow:
+            tail_flags.extend(['-n', '+1'])
         if follow:
             tail_flags.append('-f')
         tail_flag_str = ' '.join(tail_flags)
@@ -5708,6 +5710,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
+            # On Kubernetes, cap any preemption-hook timeout to the pod's
+            # terminationGracePeriodSeconds cap so the stored value
+            # matches kubelet's actual SIGKILL boundary. Done before the
+            # gRPC/SSH branch so the SSH codegen fallback path also sees
+            # the capped values (otherwise pre-gRPC skylets on K8s would
+            # store misleading timeouts).
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
             if handle.is_grpc_enabled_with_flag:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
@@ -5720,12 +5730,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.hook = hook
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
-                # On Kubernetes, cap any preemption-hook timeout to the
-                # pod's terminationGracePeriodSeconds cap so the stored
-                # value matches kubelet's actual SIGKILL boundary.
-                if isinstance(handle.launched_resources.cloud,
-                              clouds.Kubernetes):
-                    hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
                 # v7+: send the full hooks list inline on the same RPC.
                 # Three states for the `hooks` arg:
                 #   None  → legacy/no-hook-aware caller; don't touch stored
