@@ -422,8 +422,8 @@ FAQ
   `hf-mount <https://github.com/huggingface/hf-mount>`_ FUSE backend.
   There are currently two known environment constraints:
 
-  1. **glibc >= 2.32 required.** The upstream Linux binaries for
-     hf-mount ``v0.3.1`` are dynamically linked against glibc 2.32+. They
+  1. **glibc >= 2.34 required.** The upstream Linux binaries for
+     hf-mount ``v0.6.5`` are dynamically linked against glibc 2.34+. They
      won't run on Ubuntu 20.04 (glibc 2.31, the default SkyPilot Kubernetes
      image) or older RHEL/CentOS releases. Fix: pick a newer base image in
      ``resources``:

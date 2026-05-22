@@ -157,13 +157,25 @@ def get_credential_file_mounts() -> Dict[str, str]:
         cache_path = os.path.expanduser(HF_TOKEN_PATH_ENV_CACHE)
         cache_dir = os.path.dirname(cache_path)
         os.makedirs(cache_dir, mode=0o700, exist_ok=True)
-        # Tighten perms on the dir in case it existed with a looser mode
-        # (os.makedirs with exist_ok=True ignores ``mode`` for pre-existing
-        # dirs). This is best-effort; cross-user ``~/.sky`` is not expected.
+        # ``os.makedirs`` with ``exist_ok=True`` ignores ``mode`` for
+        # pre-existing dirs, so tighten perms explicitly and verify the
+        # final mode before writing the token. We refuse to write if the
+        # dir is group- or world-accessible.
         try:
             os.chmod(cache_dir, 0o700)
-        except OSError:
-            pass
+        except OSError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'Failed to secure HF token cache directory '
+                    f'{cache_dir!r} (could not set mode 0o700): {e}') from e
+        actual_mode = stat.S_IMODE(os.stat(cache_dir).st_mode)
+        if actual_mode & 0o077:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'HF token cache directory {cache_dir!r} is group- '
+                    f'or world-accessible (mode={oct(actual_mode)}); '
+                    f'refusing to write token there. Tighten perms with: '
+                    f'chmod 700 {cache_dir!r}')
         # Create the file with 0o600 atomically so we never expose the token
         # to other users, not even for the brief window between ``open`` and
         # ``chmod``.

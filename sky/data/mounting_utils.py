@@ -401,7 +401,16 @@ def get_hf_mount_cmd(hf_id: str,
     # ``hf-mount start`` detaches into a background daemon and returns
     # quickly. The daemon logs to ``~/.hf-mount/logs/`` and records its PID
     # in ``~/.hf-mount/pids/``.
-    token_file_cmd = (f'TOKEN_FILE=$(eval echo {shlex.quote(token_file)}); '
+    # Expand a leading ``~/`` to ``$HOME/`` in Python so we don't have to
+    # invoke ``eval`` on the remote host. ``token_file`` is a SkyPilot-
+    # controlled path (defaults to ``HF_MOUNT_TOKEN_FILE``); we still
+    # quote the literal suffix to defend against unexpected characters.
+    if token_file.startswith('~/'):
+        suffix = token_file[2:]
+        token_file_expr = f'"$HOME"/{shlex.quote(suffix)}'
+    else:
+        token_file_expr = shlex.quote(token_file)
+    token_file_cmd = (f'TOKEN_FILE={token_file_expr}; '
                       'TOKEN_FILE_ARG=""; '
                       'if [ -f "$TOKEN_FILE" ]; then '
                       'TOKEN_FILE_ARG="--token-file $TOKEN_FILE"; '

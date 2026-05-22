@@ -1,5 +1,6 @@
 """Storage and Store Classes for Sky Data."""
 from abc import abstractmethod
+import concurrent.futures
 import dataclasses
 import enum
 import hashlib
@@ -5340,7 +5341,7 @@ class HuggingFaceStore(AbstractStore):
             repo_type, repo_id, revision, sub_path = (
                 data_utils.split_hf_repo_path(self.source))
             if sub_path and getattr(self, '_bucket_sub_path', None) is None:
-                self.bucket_sub_path = sub_path
+                self._bucket_sub_path = sub_path
             self._repo_type = repo_type
             self._revision = revision
             self._hf_id = self.hf_id_from_repo_parts(repo_type, repo_id)
@@ -5349,9 +5350,10 @@ class HuggingFaceStore(AbstractStore):
             elif self.name != self._hf_id:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSpecError(
-                        f'HF {self._repo_type} source {self.source!r} does '
-                        f'not match storage name {self.name!r}. Expected '
-                        f'name to be {self._hf_id!r} (or leave it unset).')
+                        f'Hugging Face {self._repo_type} source '
+                        f'{self.source!r} does not match storage name '
+                        f'{self.name!r}. Expected name to be '
+                        f'{self._hf_id!r} (or leave it unset).')
         else:
             # Bucket mode: ``self.name`` is the bucket id (ns/bucket).
             self._repo_type = None
@@ -5372,7 +5374,7 @@ class HuggingFaceStore(AbstractStore):
                 source_bucket_id, sub_path = data_utils.split_hf_path(
                     self.source)
                 if sub_path and getattr(self, '_bucket_sub_path', None) is None:
-                    self.bucket_sub_path = sub_path
+                    self._bucket_sub_path = sub_path
                 assert self.name == source_bucket_id, (
                     f'HF bucket is specified as path ({self.source}); '
                     f'storage name ({self.name!r}) must match the bucket id '
@@ -5638,6 +5640,9 @@ class HuggingFaceStore(AbstractStore):
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
+            # Classify all sources up front so we fail loud on any missing
+            # path before kicking off uploads.
+            dir_uploads: List[Tuple[str, str]] = []
             files_to_add: List[Tuple[str, str]] = []
             for raw_path in source_path_list:
                 path = os.path.abspath(os.path.expanduser(str(raw_path)))
@@ -5645,10 +5650,7 @@ class HuggingFaceStore(AbstractStore):
                     dir_dest = dest
                     if create_dirs:
                         dir_dest = f'{dest}/{os.path.basename(path)}'
-                    self._api.sync_bucket(path,
-                                          dir_dest,
-                                          token=self._token,
-                                          quiet=True)
+                    dir_uploads.append((path, dir_dest))
                 elif os.path.isfile(path):
                     remote_name = os.path.basename(path)
                     if sub_path:
@@ -5658,6 +5660,22 @@ class HuggingFaceStore(AbstractStore):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageUploadError(
                             f'Local source path does not exist: {path}')
+            # ``sync_bucket`` is already parallel internally (the HF SDK
+            # uploads files within a folder concurrently). A small pool
+            # here overlaps I/O between distinct source dirs.
+            if dir_uploads:
+                max_workers = min(len(dir_uploads), 4)
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=max_workers) as pool:
+                    futures = [
+                        pool.submit(self._api.sync_bucket,
+                                    p,
+                                    d,
+                                    token=self._token,
+                                    quiet=True) for p, d in dir_uploads
+                    ]
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
             if files_to_add:
                 self._api.batch_bucket_files(self.name,
                                              add=files_to_add,
