@@ -7,6 +7,7 @@ import filelock
 
 from sky import check as sky_check
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -679,6 +680,223 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
         True if the workspace is private, False if it's public.
     """
     return workspace_config.get('private', False)
+
+
+@usage_lib.entrypoint
+def batch_add_users_to_workspaces(workspace_names: List[str],
+                                  user_ids: List[str]) -> Dict[str, Any]:
+    """Adds users to the ``allowed_users`` of multiple private workspaces.
+
+    Per-workspace failures are isolated so a single bad workspace doesn't
+    block the rest of the batch. Public workspaces are rejected because
+    ``allowed_users`` has no effect there.
+
+    Args:
+        workspace_names: Names of workspaces to update.
+        user_ids: User IDs to add. Each is written as the username (if it
+            uniquely resolves) or the user_id (if there is ambiguity).
+
+    Returns:
+        ``{'succeeded': [workspace_name, ...], 'failed': [{
+            'workspace_name': ..., 'error': ...
+        }, ...]}``.
+    """
+    if not workspace_names:
+        raise ValueError('workspace_names must not be empty')
+    if not user_ids:
+        raise ValueError('user_ids must not be empty')
+
+    all_users = global_user_state.get_all_users()
+    entries_to_add: List[str] = []
+    failed: List[Dict[str, str]] = []
+    user_id_set = set()
+    for user_id in user_ids:
+        entry = workspaces_utils.preferred_identifier_for_user(
+            user_id, all_users=all_users)
+        if entry is None:
+            failed.append({
+                'workspace_name': '',
+                'error': f'User {user_id} does not exist',
+            })
+            continue
+        if user_id in user_id_set:
+            continue
+        user_id_set.add(user_id)
+        entries_to_add.append(entry)
+
+    if not entries_to_add:
+        return {'succeeded': [], 'failed': failed}
+
+    succeeded: List[str] = []
+    succeeded_users_for_policy: Dict[str, List[str]] = {}
+
+    def modifier(workspaces: Dict[str, Any]) -> None:
+        for workspace_name in workspace_names:
+            try:
+                if workspace_name not in workspaces:
+                    failed.append({
+                        'workspace_name': workspace_name,
+                        'error': f'Workspace {workspace_name!r} does not exist',
+                    })
+                    continue
+                current_config = workspaces[workspace_name]
+                if not current_config.get('private', False):
+                    failed.append({
+                        'workspace_name': workspace_name,
+                        'error':
+                            (f'Workspace {workspace_name!r} is not private; '
+                             'allowed_users has no effect.'),
+                    })
+                    continue
+                current_allowed = list(current_config.get('allowed_users', []))
+                # Resolve the currently-listed entries to user_ids so we
+                # don't add a duplicate row for users already present under
+                # a different form (username vs user_id).
+                resolved_current = set(
+                    workspaces_utils.get_workspace_users(current_config))
+                new_allowed = list(current_allowed)
+                added = False
+                for user_id, entry in zip(user_ids, [
+                        workspaces_utils.preferred_identifier_for_user(
+                            uid, all_users=all_users) for uid in user_ids
+                ]):
+                    if entry is None:
+                        # Already reported above.
+                        continue
+                    if user_id in resolved_current:
+                        continue
+                    new_allowed.append(entry)
+                    resolved_current.add(user_id)
+                    added = True
+                if not added:
+                    succeeded.append(workspace_name)
+                    continue
+                new_config = dict(current_config)
+                new_config['allowed_users'] = new_allowed
+                _validate_workspace_config(workspace_name, new_config)
+                _validate_workspace_config_changes_with_lock(
+                    workspace_name, current_config, new_config)
+                workspaces[workspace_name] = new_config
+                succeeded.append(workspace_name)
+                succeeded_users_for_policy[workspace_name] = (
+                    workspaces_utils.get_workspace_users(new_config))
+            except ValueError as e:
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': str(e),
+                })
+            except Exception as e:  # pylint: disable=broad-except
+                logger.exception(
+                    f'Failed to add users to workspace {workspace_name!r}')
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': str(e),
+                })
+
+    _update_workspaces_config(modifier)
+
+    permission_service = permission.permission_service
+    for workspace_name, users in succeeded_users_for_policy.items():
+        permission_service.update_workspace_policy(workspace_name, users)
+
+    return {'succeeded': succeeded, 'failed': failed}
+
+
+@usage_lib.entrypoint
+def batch_remove_users_from_workspaces(workspace_names: List[str],
+                                       user_ids: List[str]) -> Dict[str, Any]:
+    """Removes users from the ``allowed_users`` of multiple private workspaces.
+
+    Per-workspace failures are isolated. Removal of a user with active
+    resources in the workspace is rejected via the existing
+    ``_validate_workspace_config_changes`` "removed users" branch.
+
+    Args:
+        workspace_names: Names of workspaces to update.
+        user_ids: User IDs to remove. Both the user_id and the username
+            forms are stripped from each workspace's ``allowed_users``.
+
+    Returns:
+        ``{'succeeded': [workspace_name, ...], 'failed': [{
+            'workspace_name': ..., 'error': ...
+        }, ...]}``.
+    """
+    if not workspace_names:
+        raise ValueError('workspace_names must not be empty')
+    if not user_ids:
+        raise ValueError('user_ids must not be empty')
+
+    all_users = global_user_state.get_all_users()
+    user_entries_map: Dict[str, List[str]] = {}
+    failed: List[Dict[str, str]] = []
+    for user_id in user_ids:
+        entries = workspaces_utils.entries_for_user(user_id,
+                                                    all_users=all_users)
+        # If the user doesn't exist, entries_for_user returns [user_id]; we
+        # still allow removal in case the workspace has a stale entry.
+        user_entries_map[user_id] = entries
+
+    succeeded: List[str] = []
+    succeeded_users_for_policy: Dict[str, List[str]] = {}
+
+    def modifier(workspaces: Dict[str, Any]) -> None:
+        for workspace_name in workspace_names:
+            try:
+                if workspace_name not in workspaces:
+                    failed.append({
+                        'workspace_name': workspace_name,
+                        'error': f'Workspace {workspace_name!r} does not exist',
+                    })
+                    continue
+                current_config = workspaces[workspace_name]
+                if not current_config.get('private', False):
+                    failed.append({
+                        'workspace_name': workspace_name,
+                        'error':
+                            (f'Workspace {workspace_name!r} is not private; '
+                             'allowed_users has no effect.'),
+                    })
+                    continue
+                current_allowed = list(current_config.get('allowed_users', []))
+                entries_to_strip = set()
+                for entries in user_entries_map.values():
+                    entries_to_strip.update(entries)
+                new_allowed = [
+                    entry for entry in current_allowed
+                    if entry not in entries_to_strip
+                ]
+                if new_allowed == current_allowed:
+                    succeeded.append(workspace_name)
+                    continue
+                new_config = dict(current_config)
+                new_config['allowed_users'] = new_allowed
+                _validate_workspace_config(workspace_name, new_config)
+                _validate_workspace_config_changes_with_lock(
+                    workspace_name, current_config, new_config)
+                workspaces[workspace_name] = new_config
+                succeeded.append(workspace_name)
+                succeeded_users_for_policy[workspace_name] = (
+                    workspaces_utils.get_workspace_users(new_config))
+            except ValueError as e:
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': str(e),
+                })
+            except Exception as e:  # pylint: disable=broad-except
+                logger.exception(
+                    f'Failed to remove users from workspace {workspace_name!r}')
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': str(e),
+                })
+
+    _update_workspaces_config(modifier)
+
+    permission_service = permission.permission_service
+    for workspace_name, users in succeeded_users_for_policy.items():
+        permission_service.update_workspace_policy(workspace_name, users)
+
+    return {'succeeded': succeeded, 'failed': failed}
 
 
 @annotations.lru_cache(scope='request', maxsize=1)

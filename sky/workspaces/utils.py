@@ -1,11 +1,72 @@
 """Utils for workspaces."""
 import collections
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _build_username_to_ids_map(
+        all_users: List[models.User]) -> Dict[str, List[str]]:
+    name_to_ids: Dict[str, List[str]] = collections.defaultdict(list)
+    for user in all_users:
+        if user.name:
+            name_to_ids[user.name].append(user.id)
+    return name_to_ids
+
+
+def preferred_identifier_for_user(
+        user_id: str,
+        all_users: Optional[List[models.User]] = None) -> Optional[str]:
+    """Return the preferred ``allowed_users`` entry for a given user_id.
+
+    Prefers the username when it uniquely resolves back to ``user_id``;
+    otherwise falls back to ``user_id``. Returns ``None`` if no user exists
+    for the given id.
+    """
+    if all_users is None:
+        all_users = global_user_state.get_all_users()
+    user_info = None
+    for user in all_users:
+        if user.id == user_id:
+            user_info = user
+            break
+    if user_info is None:
+        return None
+    if not user_info.name:
+        return user_id
+    name_to_ids = _build_username_to_ids_map(all_users)
+    if len(name_to_ids.get(user_info.name, [])) == 1:
+        return user_info.name
+    return user_id
+
+
+def entries_for_user(
+        user_id: str,
+        all_users: Optional[List[models.User]] = None) -> List[str]:
+    """Return all ``allowed_users`` entries that resolve to ``user_id``.
+
+    Includes both the user_id itself and the username (when unique). Used to
+    strip every form of a user from a workspace's ``allowed_users`` list.
+    """
+    if all_users is None:
+        all_users = global_user_state.get_all_users()
+    user_info = None
+    for user in all_users:
+        if user.id == user_id:
+            user_info = user
+            break
+    if user_info is None:
+        return [user_id]
+    entries = [user_id]
+    if user_info.name:
+        name_to_ids = _build_username_to_ids_map(all_users)
+        if len(name_to_ids.get(user_info.name, [])) == 1:
+            entries.append(user_info.name)
+    return entries
 
 
 def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:

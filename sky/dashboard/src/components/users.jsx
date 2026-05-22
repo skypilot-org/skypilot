@@ -66,6 +66,11 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import {
+  BatchRoleDialog,
+  BatchAddToWorkspacesDialog,
+  BatchRemoveFromWorkspacesDialog,
+} from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { statusGroups } from '@/components/jobs';
 import {
@@ -1413,6 +1418,12 @@ function UsersTable({
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
 
+  // Multi-select state for batch operations on users.
+  // Only enabled when the current user is an admin (the checkbox column is
+  // hidden otherwise). System users cannot be selected.
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [bulkDialog, setBulkDialog] = useState(null); // 'role' | 'add' | 'remove'
+
   // Lookup dictionary for GPU type and infra filtering
   // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
   const [combinedLookup, setCombinedLookup] = useState({});
@@ -2073,6 +2084,72 @@ function UsersTable({
     }
   };
 
+  // Users that are eligible to be selected for batch operations.
+  // System users (e.g., dashboard, system API user) are excluded.
+  const selectableUsers = useMemo(
+    () => (filteredAndSortedUsers || []).filter((u) => u.userType !== 'system'),
+    [filteredAndSortedUsers]
+  );
+
+  const allOnPageSelected =
+    selectableUsers.length > 0 &&
+    selectableUsers.every((u) => selectedUserIds.has(u.userId));
+  const someOnPageSelected =
+    !allOnPageSelected &&
+    selectableUsers.some((u) => selectedUserIds.has(u.userId));
+
+  const showBulkColumn =
+    currentUserRole === 'admin' &&
+    !deduplicateUsers &&
+    !ingressBasicAuthEnabled;
+
+  const toggleSelectAllOnPage = () => {
+    const next = new Set(selectedUserIds);
+    if (allOnPageSelected) {
+      selectableUsers.forEach((u) => next.delete(u.userId));
+    } else {
+      selectableUsers.forEach((u) => next.add(u.userId));
+    }
+    setSelectedUserIds(next);
+  };
+
+  const toggleSelectOne = (userId) => {
+    const next = new Set(selectedUserIds);
+    if (next.has(userId)) {
+      next.delete(userId);
+    } else {
+      next.add(userId);
+    }
+    setSelectedUserIds(next);
+  };
+
+  const clearSelection = () => setSelectedUserIds(new Set());
+
+  const handleBulkDialogClose = async (fullySucceeded) => {
+    setBulkDialog(null);
+    if (fullySucceeded) {
+      clearSelection();
+      dashboardCache.invalidate(getUsers);
+      await fetchDataAndProcess(true);
+    } else {
+      // Refresh even on partial failure so the table reflects the rows that
+      // did succeed; keep the selection so the admin can retry failures.
+      dashboardCache.invalidate(getUsers);
+      await fetchDataAndProcess(false);
+    }
+  };
+
+  const openBulkDialog = async (kind) => {
+    await checkPermissionAndAct(`cannot perform bulk ${kind} on users`, () =>
+      setBulkDialog(kind)
+    );
+  };
+
+  const selectedUserObjects = useMemo(
+    () => (usersWithCounts || []).filter((u) => selectedUserIds.has(u.userId)),
+    [usersWithCounts, selectedUserIds]
+  );
+
   if (isLoading && usersWithCounts.length === 0 && !hasInitiallyLoaded) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -2128,11 +2205,65 @@ function UsersTable({
           {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
         </div>
       )}
+      {showBulkColumn && selectedUserIds.size > 0 && (
+        <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+          <div className="text-sm text-blue-800">
+            Selected:{' '}
+            <span className="font-medium">{selectedUserIds.size}</span> user(s)
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="ml-2 text-blue-700 underline hover:text-blue-900"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openBulkDialog('role')}
+              disabled={roleLoading}
+            >
+              Change role
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openBulkDialog('add')}
+              disabled={roleLoading}
+            >
+              Add to workspaces
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openBulkDialog('remove')}
+              disabled={roleLoading}
+            >
+              Remove from workspaces
+            </Button>
+          </div>
+        </div>
+      )}
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
+                {showBulkColumn && (
+                  <TableHead className="w-8 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all users on this page"
+                      checked={allOnPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someOnPageSelected;
+                      }}
+                      onChange={toggleSelectAllOnPage}
+                    />
+                  </TableHead>
+                )}
                 <TableHead
                   onClick={() => requestSort('usernameDisplay')}
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2208,6 +2339,18 @@ function UsersTable({
                     user.userId === currentUserId);
                 return (
                   <TableRow key={user.userId}>
+                    {showBulkColumn && (
+                      <TableCell className="w-8 whitespace-nowrap">
+                        {!isSystemUser && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select user ${user.usernameDisplay || user.userId}`}
+                            checked={selectedUserIds.has(user.userId)}
+                            onChange={() => toggleSelectOne(user.userId)}
+                          />
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="truncate" title={user.username}>
                       {user.usernameDisplay}
                     </TableCell>
@@ -2421,6 +2564,27 @@ function UsersTable({
           </Table>
         </div>
       </Card>
+      {bulkDialog === 'role' && (
+        <BatchRoleDialog
+          open={bulkDialog === 'role'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
+      {bulkDialog === 'add' && (
+        <BatchAddToWorkspacesDialog
+          open={bulkDialog === 'add'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
+      {bulkDialog === 'remove' && (
+        <BatchRemoveFromWorkspacesDialog
+          open={bulkDialog === 'remove'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
     </>
   );
 }

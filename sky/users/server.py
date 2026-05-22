@@ -185,6 +185,17 @@ def user_update(request: fastapi.Request,
             detail=f'Cannot update password for internal '
             f'API server user {user_info.name}')
 
+    # When demoting admin -> user, ensure the user has no active
+    # resources in private workspaces they will lose access to.
+    is_demotion = (need_update_role and role == rbac.RoleName.USER.value and
+                   target_user_roles and
+                   target_user_roles[0] == rbac.RoleName.ADMIN.value)
+    if is_demotion:
+        try:
+            resource_checker.check_user_role_demotion(user_info.id)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=400, detail=str(e))
+
     with _user_lock(user_info.id):
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
@@ -195,6 +206,95 @@ def user_update(request: fastapi.Request,
         if role and need_update_role:
             # Update user role in casbin policy
             permission.permission_service.update_role(user_info.id, role)
+
+
+@router.post('/batch_update')
+def user_batch_update(request: fastapi.Request,
+                      body: payloads.UserBatchUpdateBody) -> Dict[str, Any]:
+    """Updates the role for a batch of users.
+
+    Returns a per-user result with ``succeeded`` and ``failed`` lists so the
+    caller can show partial failures (e.g. one user is blocked
+    while others are not).
+    """
+    role = body.role
+    user_ids = body.user_ids
+    supported_roles = rbac.get_supported_roles()
+    if not role or role not in supported_roles:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid role: {role}')
+    if not user_ids:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='user_ids must not be empty')
+
+    # Only admin can run a batch role update.
+    current_user = request.state.auth_user
+    if current_user is not None:
+        current_user_roles = permission.permission_service.get_user_roles(
+            current_user.id)
+        if not current_user_roles:
+            raise fastapi.HTTPException(status_code=403, detail='Invalid user')
+        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+            raise fastapi.HTTPException(
+                status_code=403, detail='Only admin can update user roles')
+
+    # Pre-compute the post-batch admin set for the demotion check so
+    # we treat the rest of the batch consistently: if A and B are both admins
+    # and both being demoted, A losing access can't be saved by "but B is still
+    # an admin".
+    all_admin_user_ids = set(
+        permission.permission_service.get_users_for_role(
+            rbac.RoleName.ADMIN.value))
+    if role == rbac.RoleName.USER.value:
+        remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
+    else:
+        remaining_admin_user_ids = all_admin_user_ids | set(user_ids)
+
+    succeeded: List[str] = []
+    failed: List[Dict[str, str]] = []
+
+    for user_id in user_ids:
+        try:
+            user_info = global_user_state.get_user(user_id)
+            if user_info is None:
+                failed.append({
+                    'user_id': user_id,
+                    'error': f'User {user_id} does not exist'
+                })
+                continue
+            if user_info.id in [
+                    common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
+            ]:
+                failed.append({
+                    'user_id': user_id,
+                    'error': (f'Cannot update role for internal API server '
+                              f'user {user_info.name}')
+                })
+                continue
+            target_user_roles = (
+                permission.permission_service.get_user_roles(user_id))
+            need_update_role = (not target_user_roles or
+                                role != target_user_roles[0])
+            if not need_update_role:
+                # Already in the desired role; record as success no-op.
+                succeeded.append(user_id)
+                continue
+            # Demotion check.
+            if (role == rbac.RoleName.USER.value and target_user_roles and
+                    target_user_roles[0] == rbac.RoleName.ADMIN.value):
+                resource_checker.check_user_role_demotion(
+                    user_info.id,
+                    remaining_admin_user_ids=remaining_admin_user_ids)
+            with _user_lock(user_info.id):
+                permission.permission_service.update_role(user_info.id, role)
+            succeeded.append(user_id)
+        except ValueError as e:
+            failed.append({'user_id': user_id, 'error': str(e)})
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Failed to update role for user {user_id}')
+            failed.append({'user_id': user_id, 'error': str(e)})
+
+    return {'succeeded': succeeded, 'failed': failed}
 
 
 def _delete_user(user_id: str) -> None:

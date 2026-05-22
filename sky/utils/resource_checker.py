@@ -1,7 +1,7 @@
 """Resource checking utilities for finding active clusters and managed jobs."""
 
 import concurrent.futures
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import global_user_state
@@ -259,6 +259,105 @@ def _get_active_resources_by_names(
         ]
 
     return resource_clusters, resource_active_jobs
+
+
+def check_user_role_demotion(
+        user_id: str,
+        remaining_admin_user_ids: Optional[Set[str]] = None) -> None:
+    """Check whether an admin can be safely demoted to a regular user.
+
+    After demotion the user loses implicit access to all private workspaces
+    where they are not listed in ``allowed_users``. This function ensures
+    the user has no active clusters or managed jobs in private workspaces
+    they would lose access to.
+
+    Args:
+        user_id: The ID of the user being demoted.
+        remaining_admin_user_ids: Optional pre-computed set of user IDs that
+            will remain admins after the demotion. If not provided, it is
+            computed from the casbin policy.
+
+    Raises:
+        ValueError: If the user has active clusters or managed jobs in
+            private workspaces they would lose access to.
+    """
+    # Imports done lazily to avoid circular imports with permission/workspaces.
+    # pylint: disable=import-outside-toplevel
+    from sky import skypilot_config
+    from sky.users import permission
+    from sky.users import rbac
+    from sky.workspaces import utils as workspaces_utils
+
+    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    if not workspaces:
+        return
+
+    if remaining_admin_user_ids is None:
+        remaining_admin_user_ids = set(
+            permission.permission_service.get_users_for_role(
+                rbac.RoleName.ADMIN.value))
+        remaining_admin_user_ids.discard(user_id)
+
+    inaccessible_workspaces: List[str] = []
+    for workspace_name, workspace_config in workspaces.items():
+        if not workspace_config.get('private', False):
+            continue
+        allowed_user_ids = set(
+            workspaces_utils.get_workspace_users(workspace_config))
+        if (user_id in allowed_user_ids or user_id in remaining_admin_user_ids):
+            continue
+        inaccessible_workspaces.append(workspace_name)
+
+    if not inaccessible_workspaces:
+        return
+
+    all_clusters, all_managed_jobs = _get_active_resources()
+    workspace_set = set(inaccessible_workspaces)
+
+    workspace_resources: Dict[str, Dict[str, List[str]]] = {}
+    for cluster in all_clusters:
+        if cluster.get('user_hash') != user_id:
+            continue
+        ws = cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if ws not in workspace_set:
+            continue
+        workspace_resources.setdefault(ws, {'clusters': [], 'jobs': []})
+        workspace_resources[ws]['clusters'].append(cluster['name'])
+    for job in all_managed_jobs:
+        if job.get('user_hash') != user_id:
+            continue
+        ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if ws not in workspace_set:
+            continue
+        workspace_resources.setdefault(ws, {'clusters': [], 'jobs': []})
+        workspace_resources[ws]['jobs'].append(str(job['job_id']))
+
+    if not workspace_resources:
+        return
+
+    user_info = global_user_state.get_user(user_id)
+    user_display = (user_info.name if user_info and user_info.name else user_id)
+
+    error_lines = []
+    for ws, res in workspace_resources.items():
+        parts = []
+        if res['clusters']:
+            n_clusters = len(res['clusters'])
+            cluster_list = ', '.join(res['clusters'])
+            parts.append(f'{n_clusters} active cluster(s): {cluster_list}')
+        if res['jobs']:
+            n_jobs = len(res['jobs'])
+            job_list = ', '.join(res['jobs'])
+            parts.append(f'{n_jobs} active managed job(s): {job_list}')
+        joined = ' and '.join(parts)
+        error_lines.append(f'  - workspace {ws!r}: {joined}')
+
+    raise ValueError(
+        f'Cannot demote user {user_display!r} from admin to user because '
+        f'they have active resources in private workspaces where they are '
+        f'not in allowed_users:\n' + '\n'.join(error_lines) +
+        '\nPlease either terminate these resources or add the user to the '
+        'allowed_users of those workspaces first.')
 
 
 def _get_active_resources(

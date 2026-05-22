@@ -744,6 +744,63 @@ export async function updateConfig(config) {
   }
 }
 
+export async function batchAddUsersToWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_add_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchAddUsersToWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchAddUsersToWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(requestId, 'batchAddUsersToWorkspaces');
+  } catch (error) {
+    console.error('Failed to batch add users to workspaces:', error);
+    throw error;
+  }
+}
+
+export async function batchRemoveUsersFromWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_remove_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchRemoveUsersFromWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchRemoveUsersFromWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(
+      requestId,
+      'batchRemoveUsersFromWorkspaces'
+    );
+  } catch (error) {
+    console.error('Failed to batch remove users from workspaces:', error);
+    throw error;
+  }
+}
+
 // Run sky check to refresh cloud credentials
 // This is useful when refreshing the infra page to detect new clouds
 export async function runSkyCheck() {

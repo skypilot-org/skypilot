@@ -79,6 +79,8 @@ class RequestName(str, enum.Enum):
     WORKSPACES_DELETE = 'workspaces.delete'
     WORKSPACES_GET_CONFIG = 'workspaces.get_config'
     WORKSPACES_UPDATE_CONFIG = 'workspaces.update_config'
+    WORKSPACES_BATCH_ADD_USERS = 'workspaces.batch_add_users'
+    WORKSPACES_BATCH_REMOVE_USERS = 'workspaces.batch_remove_users'
     # SSH node pools requests
     SSH_NODE_POOLS_UP = 'ssh_node_pools.up'
     SSH_NODE_POOLS_DOWN = 'ssh_node_pools.down'
