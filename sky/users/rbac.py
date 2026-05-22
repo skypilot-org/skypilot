@@ -103,7 +103,7 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'POST'
     },
     {
-        'path': '/autostop_logs',
+        'path': '/hook_logs',
         'method': 'POST'
     },
     # --- Managed jobs reads ---
