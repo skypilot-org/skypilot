@@ -47,9 +47,7 @@ _LAZY_MODULES = (huggingface_hub,)
 @annotations.lru_cache(scope='global')
 def api():
     """Returns a cached ``HfApi`` instance."""
-    # Import here rather than top-level so ``sky`` import stays cheap.
-    from huggingface_hub import HfApi  # pylint: disable=import-outside-toplevel
-    return HfApi()
+    return huggingface_hub.HfApi()
 
 
 def get_token() -> Optional[str]:
