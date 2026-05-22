@@ -44,24 +44,17 @@ def set_clean_server_env(env: Dict[str, str]) -> None:
         _clean_server_env = dict(env)
 
 
-def get_clean_server_env() -> Dict[str, str]:
-    """Return a copy of the server's pre-request-pollution env.
+def get_clean_server_env() -> Optional[Dict[str, str]]:
+    """Return a copy of the server's pre-request-pollution env, or None.
 
-    Used by LocalProcessCommandRunner.run as the env for spawned
-    subprocesses, so consolidation-mode controllers don't inherit
-    per-request env mutations applied by override_request_env_and_config.
-
-    Raises RuntimeError if the snapshot was never installed. The only
-    legitimate caller is on the API server (main process: post
-    capture_clean_server_env() at startup; worker process: post
-    set_clean_server_env() in executor_initializer). Falling back to
-    os.environ here would silently re-introduce the leak this module
-    exists to prevent.
+    None means no snapshot was captured in this process — which is the
+    correct state outside the API server (e.g. a Slurm skylet running a
+    LocalProcessCommandRunner against the local node). Callers should pass
+    the result through to `subprocess.Popen(env=...)`: a real dict on the
+    API server gives spawned subprocesses the clean snapshot, and None
+    falls back to inheriting `os.environ`, which is the right default in
+    non-API-server contexts.
     """
     if _clean_server_env is None:
-        raise RuntimeError(
-            'get_clean_server_env() called before the snapshot was '
-            'installed. The main API server process must call '
-            'capture_clean_server_env() at startup, and workers must call '
-            'set_clean_server_env() from executor_initializer.')
+        return None
     return dict(_clean_server_env)

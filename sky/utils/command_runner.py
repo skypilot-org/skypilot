@@ -1727,6 +1727,11 @@ class LocalProcessCommandRunner(CommandRunner):
         from the server's pre-pollution snapshot. controller_envs that the
         caller wants on top are already prepended to the run script as
         `export` lines, so they layer in correctly.
+
+        In non-API-server contexts (e.g. a Slurm skylet running locally on
+        a Slurm node) no snapshot has been captured;
+        get_clean_server_env() returns None and subprocess.Popen falls
+        back to inheriting os.environ — which is the right default there.
         """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 

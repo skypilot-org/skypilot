@@ -24,8 +24,6 @@ import os
 import subprocess
 import tempfile
 
-import pytest
-
 from sky.jobs import recovery_strategy
 from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
@@ -73,11 +71,13 @@ class TestCleanServerEnvCapture:
         snap2 = clean_env_module.get_clean_server_env()
         assert 'MUTATED_AFTER_GET' not in snap2
 
-    def test_get_before_capture_raises(self):
-        # Don't call capture_clean_server_env() — get should raise rather
-        # than silently fall back to (potentially polluted) os.environ.
-        with pytest.raises(RuntimeError, match='before the snapshot was'):
-            clean_env_module.get_clean_server_env()
+    def test_get_before_capture_returns_none(self):
+        # Don't call capture_clean_server_env(). Outside the API server
+        # (e.g. on a Slurm skylet that uses LocalProcessCommandRunner
+        # locally), no snapshot is installed; get should return None so
+        # the caller can fall back to subprocess.Popen's default
+        # os.environ inheritance.
+        assert clean_env_module.get_clean_server_env() is None
 
 
 class TestPopenEnvOverrideMechanism:
