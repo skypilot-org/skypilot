@@ -1743,14 +1743,30 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.HF:
+                    # Build the base URL without any embedded sub-path; the
+                    # canonical sub-path lives in ``_bucket_sub_path`` and is
+                    # appended via ``get_bucket_sub_path_prefix`` below
+                    # (mirroring the other store types). Stripping first
+                    # avoids doubling the sub-path when the source URL
+                    # already embeds it.
                     if storage.source is not None and not isinstance(
                             storage.source, list) and data_utils.is_hf_path(
                                 storage.source):
-                        blob_path = storage.source
+                        if data_utils.is_hf_bucket_path(storage.source):
+                            bucket_id, _ = data_utils.split_hf_path(
+                                storage.source)
+                            blob_path = f'hf://buckets/{bucket_id}'
+                        else:
+                            repo_type, repo_id, revision, _ = (
+                                data_utils.split_hf_repo_path(storage.source))
+                            hf_id = (storage_lib.HuggingFaceStore.
+                                     hf_id_from_repo_parts(repo_type, repo_id))
+                            blob_path = f'hf://{hf_id}'
+                            if revision:
+                                blob_path = f'{blob_path}@{revision}'
                     else:
-                        blob_path = 'hf://buckets/' + storage.name
-                        blob_path = storage.get_bucket_sub_path_prefix(
-                            blob_path)
+                        blob_path = f'hf://buckets/{storage.name}'
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
