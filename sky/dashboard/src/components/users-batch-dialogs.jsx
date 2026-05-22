@@ -12,12 +12,22 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { batchUpdateUserRoles } from '@/data/connectors/users';
 import {
   batchAddUsersToWorkspaces,
   batchRemoveUsersFromWorkspaces,
   getWorkspaces,
 } from '@/data/connectors/workspaces';
+import dashboardCache from '@/lib/cache';
+
+const FOOTER_BUTTON_CLASS = 'min-w-[80px]';
 
 /**
  * Renders the per-item result summary returned by the batch endpoints.
@@ -29,15 +39,15 @@ function ResultSummary({ result, idKey, idLabel }) {
   const succeeded = result.succeeded || [];
   const failed = result.failed || [];
   return (
-    <div className="text-sm space-y-2">
-      <div>
-        <span className="font-medium text-green-700">
+    <div className="space-y-3 py-2 text-sm">
+      <div className="text-gray-700">
+        <span className="font-medium text-green-600">
           {succeeded.length} succeeded
         </span>
         {failed.length > 0 && (
           <>
             {', '}
-            <span className="font-medium text-red-700">
+            <span className="font-medium text-red-600">
               {failed.length} failed
             </span>
           </>
@@ -45,15 +55,17 @@ function ResultSummary({ result, idKey, idLabel }) {
         .
       </div>
       {failed.length > 0 && (
-        <div className="border border-red-200 rounded p-2 bg-red-50 max-h-48 overflow-y-auto">
-          <div className="text-xs font-medium text-red-700 mb-1">Failures:</div>
-          <ul className="list-disc list-inside space-y-1">
+        <div className="border border-gray-200 rounded-md max-h-48 overflow-y-auto">
+          <div className="px-3 py-2 text-xs font-medium text-gray-700 border-b border-gray-200 bg-gray-50">
+            Failures
+          </div>
+          <ul className="divide-y divide-gray-100">
             {failed.map((f, i) => (
-              <li key={i} className="text-xs text-red-700">
-                <span className="font-mono">
+              <li key={i} className="px-3 py-2 text-xs text-gray-700">
+                <span className="font-mono text-gray-500">
                   {idLabel}={f[idKey]}
                 </span>
-                : {f.error}
+                <span className="ml-2 text-red-600">{f.error}</span>
               </li>
             ))}
           </ul>
@@ -69,12 +81,37 @@ ResultSummary.propTypes = {
   idLabel: PropTypes.string.isRequired,
 };
 
-export function BatchRoleDialog({
-  open,
-  onClose,
-  selectedUsers, // [{ userId, usernameDisplay, role }]
-  onCompleted,
-}) {
+function SelectedUsersPanel({ selectedUsers, includeRole = false }) {
+  return (
+    <div className="border border-gray-200 rounded-md">
+      <div className="px-3 py-2 text-xs font-medium text-gray-700 border-b border-gray-200 bg-gray-50">
+        {includeRole
+          ? 'Affected users'
+          : `Selected users (${selectedUsers.length})`}
+      </div>
+      <div className="max-h-32 overflow-y-auto divide-y divide-gray-100">
+        {selectedUsers.map((u) => (
+          <div
+            key={u.userId}
+            className="px-3 py-1.5 text-xs text-gray-700 truncate"
+          >
+            {u.usernameDisplay || u.userId}
+            {includeRole && (
+              <span className="text-gray-400"> ({u.role || '-'})</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+SelectedUsersPanel.propTypes = {
+  selectedUsers: PropTypes.array.isRequired,
+  includeRole: PropTypes.bool,
+};
+
+export function BatchRoleDialog({ open, onClose, selectedUsers }) {
   const [role, setRole] = useState('user');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -96,7 +133,6 @@ export function BatchRoleDialog({
       const userIds = selectedUsers.map((u) => u.userId);
       const res = await batchUpdateUserRoles(userIds, role);
       setResult(res);
-      onCompleted?.(res);
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -126,36 +162,32 @@ export function BatchRoleDialog({
 
         {!result && (
           <>
-            <div className="space-y-3 py-2">
-              <div>
+            <div className="flex flex-col gap-4 py-2">
+              <div className="grid gap-2">
                 <label
                   htmlFor="batch-role-select"
-                  className="block text-sm font-medium text-gray-700 mb-1"
+                  className="text-sm font-medium text-gray-700"
                 >
                   New role
                 </label>
-                <select
-                  id="batch-role-select"
+                <Select
                   value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue text-sm"
+                  onValueChange={setRole}
                   disabled={submitting}
                 >
-                  <option value="admin">Admin</option>
-                  <option value="user">User</option>
-                </select>
+                  <SelectTrigger
+                    id="batch-role-select"
+                    className="w-full focus:ring-0 focus:ring-offset-0"
+                  >
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="user">User</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="text-xs text-gray-500 border border-gray-200 rounded p-2 max-h-32 overflow-y-auto">
-                <div className="font-medium text-gray-700 mb-1">
-                  Affected users
-                </div>
-                {selectedUsers.map((u) => (
-                  <div key={u.userId} className="truncate">
-                    {u.usernameDisplay || u.userId}
-                    <span className="text-gray-400"> ({u.role || '-'})</span>
-                  </div>
-                ))}
-              </div>
+              <SelectedUsersPanel selectedUsers={selectedUsers} includeRole />
               {error && <div className="text-sm text-red-600">{error}</div>}
             </div>
             <DialogFooter>
@@ -163,10 +195,16 @@ export function BatchRoleDialog({
                 variant="outline"
                 onClick={() => onClose(false)}
                 disabled={submitting}
+                className={FOOTER_BUTTON_CLASS}
               >
                 Cancel
               </Button>
-              <Button onClick={handleApply} disabled={submitting}>
+              <Button
+                variant="default"
+                onClick={handleApply}
+                disabled={submitting}
+                className={`bg-sky-600 text-white hover:bg-sky-700 ${FOOTER_BUTTON_CLASS}`}
+              >
                 {submitting ? (
                   <>
                     <CircularProgress size={14} className="mr-2" /> Applying...
@@ -186,6 +224,7 @@ export function BatchRoleDialog({
               <Button
                 variant="outline"
                 onClick={() => onClose(allDoneSuccessfully)}
+                className={FOOTER_BUTTON_CLASS}
               >
                 Close
               </Button>
@@ -201,7 +240,6 @@ BatchRoleDialog.propTypes = {
   open: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
   selectedUsers: PropTypes.array.isRequired,
-  onCompleted: PropTypes.func,
 };
 
 function WorkspacePickerDialog({
@@ -212,7 +250,6 @@ function WorkspacePickerDialog({
   applyLabel,
   selectedUsers,
   variant, // 'add' | 'remove'
-  onCompleted,
 }) {
   const [workspaces, setWorkspaces] = useState({});
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
@@ -224,20 +261,78 @@ function WorkspacePickerDialog({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setPicked(new Set());
     setSubmitting(false);
     setResult(null);
     setError(null);
     setLoadingWorkspaces(true);
     setLoadError(null);
-    getWorkspaces()
+    // Use the shared cache so we hit the same path other dashboard pages use
+    // and avoid making a fresh /workspaces poll for every dialog open.
+    const fetchWithRetry = async () => {
+      const maxAttempts = 3;
+      let lastErr = null;
+      for (let i = 0; i < maxAttempts; i++) {
+        try {
+          return await dashboardCache.get(getWorkspaces);
+        } catch (e) {
+          lastErr = e;
+          // Brief backoff between retries to give the API task time to
+          // finish on slow servers. This addresses transient polling
+          // failures on a fresh /workspaces request.
+          if (i < maxAttempts - 1) {
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
+      }
+      throw lastErr;
+    };
+    fetchWithRetry()
       .then((data) => {
+        if (cancelled) return;
         setWorkspaces(data || {});
       })
       .catch((e) => {
-        setLoadError(e?.message || String(e));
+        if (cancelled) return;
+        console.error('Failed to load workspaces for batch dialog', e);
+        // Try to extract a meaningful server-side message from the raw
+        // error string emitted by getWorkspaces ("Error fetching workspace
+        // data for request ID <id>: <innerDetail>") — innerDetail may be a
+        // JSON string with nested {type, message} or already be an object
+        // serialized as "[object Object]".
+        const rawMessage = e?.message || String(e);
+        let detail = '';
+        try {
+          // Look for the JSON tail after the request-id prefix.
+          const jsonStart = rawMessage.indexOf('{');
+          if (jsonStart !== -1) {
+            const tail = rawMessage.slice(jsonStart);
+            const parsed = JSON.parse(tail);
+            if (parsed && typeof parsed.message === 'string') {
+              detail = parsed.message;
+            }
+          }
+        } catch (_parseErr) {
+          /* Fall through to the generic message below. */
+        }
+        if (!detail && !rawMessage.includes('[object Object]')) {
+          // The raw message is human-readable already (e.g. when
+          // pollForTaskCompletion has already extracted a message).
+          detail = rawMessage;
+        }
+        setLoadError(
+          detail
+            ? `Unable to load workspaces: ${detail}`
+            : 'Unable to load workspaces. Check the API server config.'
+        );
       })
-      .finally(() => setLoadingWorkspaces(false));
+      .finally(() => {
+        if (!cancelled) setLoadingWorkspaces(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   const privateWorkspaces = useMemo(() => {
@@ -246,15 +341,6 @@ function WorkspacePickerDialog({
       .map(([name, cfg]) => ({ name, config: cfg }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [workspaces]);
-
-  const userIdSet = useMemo(
-    () => new Set(selectedUsers.map((u) => u.userId)),
-    [selectedUsers]
-  );
-  const usernameSet = useMemo(
-    () => new Set(selectedUsers.map((u) => u.username).filter(Boolean)),
-    [selectedUsers]
-  );
 
   // For the 'remove' variant: show which selected users are currently in
   // each workspace's allowed_users so admins can see what will change.
@@ -280,15 +366,19 @@ function WorkspacePickerDialog({
     setError(null);
     try {
       const workspaceNames = Array.from(picked);
-      const userIds = Array.from(userIdSet);
+      const userIds = selectedUsers.map((u) => u.userId);
       let res;
       if (variant === 'add') {
         res = await batchAddUsersToWorkspaces(workspaceNames, userIds);
       } else {
         res = await batchRemoveUsersFromWorkspaces(workspaceNames, userIds);
       }
+      // Invalidate the workspaces cache so the next dialog open (or any
+      // other workspace consumer) sees the new allowed_users instead of
+      // a stale snapshot. Without this, opening Remove after an Add shows
+      // "No selected user is in this workspace".
+      dashboardCache.invalidate(getWorkspaces);
       setResult(res);
-      onCompleted?.(res);
     } catch (e) {
       setError(e?.message || String(e));
     } finally {
@@ -314,76 +404,66 @@ function WorkspacePickerDialog({
 
         {!result && (
           <>
-            <div className="space-y-3 py-2">
+            <div className="flex flex-col gap-4 py-2">
               {loadingWorkspaces && (
                 <div className="flex items-center text-sm text-gray-500">
                   <CircularProgress size={14} className="mr-2" />
                   Loading workspaces...
                 </div>
               )}
-              {loadError && (
+              {!loadingWorkspaces && loadError && (
                 <div className="text-sm text-red-600">{loadError}</div>
               )}
-              {!loadingWorkspaces && !loadError && (
-                <>
-                  {privateWorkspaces.length === 0 ? (
-                    <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                      There are no private workspaces. Allowed users only apply
-                      to private workspaces.
-                    </div>
-                  ) : (
-                    <div className="border border-gray-200 rounded max-h-64 overflow-y-auto">
-                      {privateWorkspaces.map(({ name, config }) => {
-                        const isChecked = picked.has(name);
-                        const currentMembers =
-                          variant === 'remove'
-                            ? computeCurrentMembers(config)
-                            : null;
-                        return (
-                          <label
-                            key={name}
-                            className="flex items-start gap-2 p-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              className="mt-1"
-                              checked={isChecked}
-                              onChange={() => togglePick(name)}
-                              disabled={submitting}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-700 truncate">
-                                {name}
-                              </div>
-                              {variant === 'remove' && (
-                                <div className="text-xs text-gray-500 mt-0.5">
-                                  {currentMembers.length === 0
-                                    ? 'No selected user is in this workspace (no-op).'
-                                    : `Will remove: ${currentMembers
-                                        .map(
-                                          (u) => u.usernameDisplay || u.userId
-                                        )
-                                        .join(', ')}`}
-                                </div>
-                              )}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-              <div className="text-xs text-gray-500 border border-gray-200 rounded p-2 max-h-32 overflow-y-auto">
-                <div className="font-medium text-gray-700 mb-1">
-                  Selected users ({selectedUsers.length})
-                </div>
-                {selectedUsers.map((u) => (
-                  <div key={u.userId} className="truncate">
-                    {u.usernameDisplay || u.userId}
+              {!loadingWorkspaces &&
+                !loadError &&
+                privateWorkspaces.length === 0 && (
+                  <div className="text-sm text-gray-600 border border-gray-200 rounded-md px-3 py-2 bg-gray-50">
+                    No private workspaces are configured. Allowed users only
+                    apply to private workspaces.
                   </div>
-                ))}
-              </div>
+                )}
+              {!loadingWorkspaces &&
+                !loadError &&
+                privateWorkspaces.length > 0 && (
+                  <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto">
+                    {privateWorkspaces.map(({ name, config }) => {
+                      const isChecked = picked.has(name);
+                      const currentMembers =
+                        variant === 'remove'
+                          ? computeCurrentMembers(config)
+                          : null;
+                      return (
+                        <label
+                          key={name}
+                          className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={isChecked}
+                            onChange={() => togglePick(name)}
+                            disabled={submitting}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-gray-700 truncate">
+                              {name}
+                            </div>
+                            {variant === 'remove' && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                {currentMembers.length === 0
+                                  ? 'No selected user is in this workspace (no-op).'
+                                  : `Will remove: ${currentMembers
+                                      .map((u) => u.usernameDisplay || u.userId)
+                                      .join(', ')}`}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              <SelectedUsersPanel selectedUsers={selectedUsers} />
               {error && <div className="text-sm text-red-600">{error}</div>}
             </div>
             <DialogFooter>
@@ -391,21 +471,42 @@ function WorkspacePickerDialog({
                 variant="outline"
                 onClick={() => onClose(false)}
                 disabled={submitting}
+                className={FOOTER_BUTTON_CLASS}
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handleApply}
-                disabled={submitting || picked.size === 0}
-              >
-                {submitting ? (
-                  <>
-                    <CircularProgress size={14} className="mr-2" /> Applying...
-                  </>
-                ) : (
-                  applyLabel
-                )}
-              </Button>
+              {variant === 'remove' ? (
+                <Button
+                  variant="destructive"
+                  onClick={handleApply}
+                  disabled={submitting || picked.size === 0}
+                  className={FOOTER_BUTTON_CLASS}
+                >
+                  {submitting ? (
+                    <>
+                      <CircularProgress size={14} className="mr-2" />{' '}
+                      Removing...
+                    </>
+                  ) : (
+                    applyLabel
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  variant="default"
+                  onClick={handleApply}
+                  disabled={submitting || picked.size === 0}
+                  className={`bg-sky-600 text-white hover:bg-sky-700 ${FOOTER_BUTTON_CLASS}`}
+                >
+                  {submitting ? (
+                    <>
+                      <CircularProgress size={14} className="mr-2" /> Adding...
+                    </>
+                  ) : (
+                    applyLabel
+                  )}
+                </Button>
+              )}
             </DialogFooter>
           </>
         )}
@@ -421,6 +522,7 @@ function WorkspacePickerDialog({
               <Button
                 variant="outline"
                 onClick={() => onClose(allDoneSuccessfully)}
+                className={FOOTER_BUTTON_CLASS}
               >
                 Close
               </Button>
@@ -440,7 +542,6 @@ WorkspacePickerDialog.propTypes = {
   applyLabel: PropTypes.string.isRequired,
   selectedUsers: PropTypes.array.isRequired,
   variant: PropTypes.oneOf(['add', 'remove']).isRequired,
-  onCompleted: PropTypes.func,
 };
 
 export function BatchAddToWorkspacesDialog(props) {

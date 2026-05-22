@@ -288,6 +288,15 @@ def check_user_role_demotion(
     from sky.users import rbac
     from sky.workspaces import utils as workspaces_utils
 
+    # Ensure the in-memory workspaces config is fresh. /users/update and
+    # /users/batch_update are sync FastAPI handlers, so they don't go through
+    # the executor's reload_for_new_request pipeline -- their per-request
+    # context is inherited from the global one, which is frozen at server
+    # startup. Without this reload, a workspace add (which writes the file
+    # and refreshes its own per-request context) is invisible to a
+    # subsequent demotion check, and we'd incorrectly block the demotion.
+    # Use the file-locked variant to serialize with concurrent writers.
+    skypilot_config.safe_reload_config()
     workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
     if not workspaces:
         return

@@ -728,7 +728,7 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
         return {'succeeded': [], 'failed': failed}
 
     succeeded: List[str] = []
-    succeeded_users_for_policy: Dict[str, List[str]] = {}
+    permission_service = permission.permission_service
 
     def modifier(workspaces: Dict[str, Any]) -> None:
         for workspace_name in workspace_names:
@@ -773,13 +773,20 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                     continue
                 new_config = dict(current_config)
                 new_config['allowed_users'] = new_allowed
+                # Schema check only. The active-resource validation in
+                # _validate_workspace_config_changes is a no-op for pure
+                # adds (it only fires on removed users / private toggles),
+                # so we skip it here.
                 _validate_workspace_config(workspace_name, new_config)
-                _validate_workspace_config_changes_with_lock(
-                    workspace_name, current_config, new_config)
                 workspaces[workspace_name] = new_config
-                succeeded.append(workspace_name)
-                succeeded_users_for_policy[workspace_name] = (
+                # Update casbin policy inside the file lock so the config
+                # file and the policy table can't drift out of sync if the
+                # process crashes between the two updates. update_workspace
+                # follows the same pattern.
+                permission_service.update_workspace_policy(
+                    workspace_name,
                     workspaces_utils.get_workspace_users(new_config))
+                succeeded.append(workspace_name)
             except ValueError as e:
                 failed.append({
                     'workspace_name': workspace_name,
@@ -794,10 +801,6 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 })
 
     _update_workspaces_config(modifier)
-
-    permission_service = permission.permission_service
-    for workspace_name, users in succeeded_users_for_policy.items():
-        permission_service.update_workspace_policy(workspace_name, users)
 
     return {'succeeded': succeeded, 'failed': failed}
 
@@ -836,65 +839,97 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
         # still allow removal in case the workspace has a stale entry.
         user_entries_map[user_id] = entries
 
+    entries_to_strip: Set[str] = set()
+    for entries in user_entries_map.values():
+        entries_to_strip.update(entries)
+
     succeeded: List[str] = []
-    succeeded_users_for_policy: Dict[str, List[str]] = {}
+    # Pre-pass OUTSIDE the global config file lock: validate per-workspace
+    # changes (which acquire a per-workspace lock). The single-workspace
+    # update_workspace path also validates before acquiring the config
+    # file lock, so we match that nesting order to avoid an ABBA deadlock
+    # against any caller that holds the workspace lock and waits on the
+    # config lock.
+    current_config = skypilot_config.to_dict()
+    current_workspaces = current_config.get('workspaces', {})
+    validated_new_configs: Dict[str, Dict[str, Any]] = {}
+
+    for workspace_name in workspace_names:
+        try:
+            if workspace_name not in current_workspaces:
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': f'Workspace {workspace_name!r} does not exist',
+                })
+                continue
+            current_ws_config = current_workspaces[workspace_name]
+            if not current_ws_config.get('private', False):
+                failed.append({
+                    'workspace_name': workspace_name,
+                    'error': (f'Workspace {workspace_name!r} is not private; '
+                              'allowed_users has no effect.'),
+                })
+                continue
+            current_allowed = list(current_ws_config.get('allowed_users', []))
+            new_allowed = [
+                entry for entry in current_allowed
+                if entry not in entries_to_strip
+            ]
+            if new_allowed == current_allowed:
+                succeeded.append(workspace_name)
+                continue
+            new_ws_config = dict(current_ws_config)
+            new_ws_config['allowed_users'] = new_allowed
+            _validate_workspace_config(workspace_name, new_ws_config)
+            _validate_workspace_config_changes_with_lock(
+                workspace_name, current_ws_config, new_ws_config)
+            validated_new_configs[workspace_name] = new_ws_config
+        except ValueError as e:
+            failed.append({
+                'workspace_name': workspace_name,
+                'error': str(e),
+            })
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(
+                f'Failed to validate removal from workspace {workspace_name!r}')
+            failed.append({
+                'workspace_name': workspace_name,
+                'error': str(e),
+            })
+
+    if not validated_new_configs:
+        return {'succeeded': succeeded, 'failed': failed}
+
+    permission_service = permission.permission_service
 
     def modifier(workspaces: Dict[str, Any]) -> None:
-        for workspace_name in workspace_names:
+        for workspace_name, new_ws_config in validated_new_configs.items():
             try:
+                # Defensive re-check: the workspace might have been deleted
+                # between validation and acquiring the file lock.
                 if workspace_name not in workspaces:
                     failed.append({
                         'workspace_name': workspace_name,
                         'error': f'Workspace {workspace_name!r} does not exist',
                     })
                     continue
-                current_config = workspaces[workspace_name]
-                if not current_config.get('private', False):
-                    failed.append({
-                        'workspace_name': workspace_name,
-                        'error':
-                            (f'Workspace {workspace_name!r} is not private; '
-                             'allowed_users has no effect.'),
-                    })
-                    continue
-                current_allowed = list(current_config.get('allowed_users', []))
-                entries_to_strip = set()
-                for entries in user_entries_map.values():
-                    entries_to_strip.update(entries)
-                new_allowed = [
-                    entry for entry in current_allowed
-                    if entry not in entries_to_strip
-                ]
-                if new_allowed == current_allowed:
-                    succeeded.append(workspace_name)
-                    continue
-                new_config = dict(current_config)
-                new_config['allowed_users'] = new_allowed
-                _validate_workspace_config(workspace_name, new_config)
-                _validate_workspace_config_changes_with_lock(
-                    workspace_name, current_config, new_config)
-                workspaces[workspace_name] = new_config
+                workspaces[workspace_name] = new_ws_config
+                # Update casbin policy inside the file lock so the config
+                # file and the policy table can't drift out of sync if the
+                # process crashes between the two updates.
+                permission_service.update_workspace_policy(
+                    workspace_name,
+                    workspaces_utils.get_workspace_users(new_ws_config))
                 succeeded.append(workspace_name)
-                succeeded_users_for_policy[workspace_name] = (
-                    workspaces_utils.get_workspace_users(new_config))
-            except ValueError as e:
-                failed.append({
-                    'workspace_name': workspace_name,
-                    'error': str(e),
-                })
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
-                    f'Failed to remove users from workspace {workspace_name!r}')
+                    f'Failed to apply removal for workspace {workspace_name!r}')
                 failed.append({
                     'workspace_name': workspace_name,
                     'error': str(e),
                 })
 
     _update_workspaces_config(modifier)
-
-    permission_service = permission.permission_service
-    for workspace_name, users in succeeded_users_for_policy.items():
-        permission_service.update_workspace_policy(workspace_name, users)
 
     return {'succeeded': succeeded, 'failed': failed}
 

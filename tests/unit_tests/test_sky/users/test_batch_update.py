@@ -73,6 +73,8 @@ class TestUserBatchUpdate:
                 return _mk_user(uid, name='good')
             if uid == constants.SKYPILOT_SYSTEM_USER_ID:
                 return _mk_user(uid, name='system')
+            if uid == constants.SKYPILOT_SYSTEM_VIEWER_USER_ID:
+                return _mk_user(uid, name='system-viewer')
             if uid == common.SERVER_ID:
                 return _mk_user(uid, name='server')
             return None
@@ -80,8 +82,11 @@ class TestUserBatchUpdate:
         mock_get_user.side_effect = fake_get_user
 
         body = payloads.UserBatchUpdateBody(user_ids=[
-            'good', constants.SKYPILOT_SYSTEM_USER_ID, common.SERVER_ID,
-            'unknown'
+            'good',
+            constants.SKYPILOT_SYSTEM_USER_ID,
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+            common.SERVER_ID,
+            'unknown',
         ],
                                             role='admin')
 
@@ -89,8 +94,12 @@ class TestUserBatchUpdate:
 
         assert result['succeeded'] == ['good']
         failed_ids = sorted(f['user_id'] for f in result['failed'])
-        assert failed_ids == sorted(
-            [constants.SKYPILOT_SYSTEM_USER_ID, common.SERVER_ID, 'unknown'])
+        assert failed_ids == sorted([
+            constants.SKYPILOT_SYSTEM_USER_ID,
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+            common.SERVER_ID,
+            'unknown',
+        ])
         # update_role only called for the good user.
         mock_update_role.assert_called_once_with('good', 'admin')
 
@@ -149,6 +158,33 @@ class TestUserBatchUpdate:
         assert mock_update_role.call_count == 2
 
     @mock.patch('sky.users.server._user_lock')
+    @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.global_user_state.get_user')
+    def test_demotion_check_also_fires_for_admin_to_viewer(
+            self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
+            mock_update_role, mock_demotion_check, mock_user_lock,
+            admin_request):
+        mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
+                                                     __exit__=mock.MagicMock())
+        mock_get_users_for_role.return_value = ['u1']  # u1 is the only admin
+        mock_get_user_roles.return_value = ['admin']
+        mock_get_user.return_value = _mk_user('u1', name='alice')
+
+        body = payloads.UserBatchUpdateBody(user_ids=['u1'], role='viewer')
+        result = server.user_batch_update(admin_request, body)
+
+        assert result == {'succeeded': ['u1'], 'failed': []}
+        mock_demotion_check.assert_called_once()
+        # When demoting to viewer, the target is removed from the remaining
+        # admin set (same as demoting to user).
+        _, kwargs = mock_demotion_check.call_args
+        assert kwargs['remaining_admin_user_ids'] == set()
+        mock_update_role.assert_called_once_with('u1', 'viewer')
+
+    @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -173,6 +209,15 @@ class TestUserBatchUpdate:
 
 class TestUserRoleDemotion:
     """Tests for resource_checker.check_user_role_demotion."""
+
+    # check_user_role_demotion calls skypilot_config.safe_reload_config() at
+    # the top to guarantee fresh workspace data for sync endpoint callers
+    # (see resource_checker.py). Stub it out in unit tests so we don't hit
+    # the real filesystem / file lock.
+    @pytest.fixture(autouse=True)
+    def _stub_safe_reload(self):
+        with mock.patch('sky.skypilot_config.safe_reload_config'):
+            yield
 
     @mock.patch('sky.utils.resource_checker._get_active_resources')
     @mock.patch('sky.skypilot_config.get_nested')

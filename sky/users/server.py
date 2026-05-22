@@ -185,11 +185,11 @@ def user_update(request: fastapi.Request,
             detail=f'Cannot update password for internal '
             f'API server user {user_info.name}')
 
-    # When demoting admin -> user, ensure the user has no active
-    # resources in private workspaces they will lose access to.
-    is_demotion = (need_update_role and role == rbac.RoleName.USER.value and
-                   target_user_roles and
-                   target_user_roles[0] == rbac.RoleName.ADMIN.value)
+    # When demoting from admin to a non-admin role, ensure the user has no
+    # active resources in private workspaces they will lose access to.
+    is_demotion = (need_update_role and target_user_roles and
+                   target_user_roles[0] == rbac.RoleName.ADMIN.value and
+                   role != rbac.RoleName.ADMIN.value)
     if is_demotion:
         try:
             resource_checker.check_user_role_demotion(user_info.id)
@@ -245,10 +245,12 @@ def user_batch_update(request: fastapi.Request,
     all_admin_user_ids = set(
         permission.permission_service.get_users_for_role(
             rbac.RoleName.ADMIN.value))
-    if role == rbac.RoleName.USER.value:
-        remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
-    else:
+    if role == rbac.RoleName.ADMIN.value:
         remaining_admin_user_ids = all_admin_user_ids | set(user_ids)
+    else:
+        # Any non-admin target (user, viewer, ...) removes the targets from
+        # the admin set.
+        remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
 
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
@@ -262,9 +264,7 @@ def user_batch_update(request: fastapi.Request,
                     'error': f'User {user_id} does not exist'
                 })
                 continue
-            if user_info.id in [
-                    common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
-            ]:
+            if user_info.id in _INTERNAL_USER_IDS:
                 failed.append({
                     'user_id': user_id,
                     'error': (f'Cannot update role for internal API server '
@@ -279,9 +279,12 @@ def user_batch_update(request: fastapi.Request,
                 # Already in the desired role; record as success no-op.
                 succeeded.append(user_id)
                 continue
-            # Demotion check.
-            if (role == rbac.RoleName.USER.value and target_user_roles and
-                    target_user_roles[0] == rbac.RoleName.ADMIN.value):
+            # When demoting from admin to a non-admin role (user / viewer),
+            # ensure the user has no active resources in private workspaces
+            # they will lose implicit access to.
+            if (target_user_roles and
+                    target_user_roles[0] == rbac.RoleName.ADMIN.value and
+                    role != rbac.RoleName.ADMIN.value):
                 resource_checker.check_user_role_demotion(
                     user_info.id,
                     remaining_admin_user_ids=remaining_admin_user_ids)

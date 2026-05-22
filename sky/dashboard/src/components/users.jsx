@@ -2206,43 +2206,46 @@ function UsersTable({
         </div>
       )}
       {showBulkColumn && selectedUserIds.size > 0 && (
-        <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded">
-          <div className="text-sm text-blue-800">
+        <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-sky-50 border border-sky-200 rounded-md">
+          <div className="text-sm text-gray-700">
             Selected:{' '}
-            <span className="font-medium">{selectedUserIds.size}</span> user(s)
+            <span className="font-medium text-sky-blue">
+              {selectedUserIds.size}
+            </span>{' '}
+            user(s)
             <button
               type="button"
               onClick={clearSelection}
-              className="ml-2 text-blue-700 underline hover:text-blue-900"
+              className="ml-2 text-sky-blue hover:text-sky-blue-bright underline"
             >
               Clear
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
               onClick={() => openBulkDialog('role')}
               disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Change role
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
+              type="button"
               onClick={() => openBulkDialog('add')}
               disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add to workspaces
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
+              type="button"
               onClick={() => openBulkDialog('remove')}
               disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Remove from workspaces
-            </Button>
+            </button>
           </div>
         </div>
       )}
