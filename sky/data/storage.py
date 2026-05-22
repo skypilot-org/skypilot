@@ -5522,8 +5522,6 @@ class HuggingFaceStore(AbstractStore):
         errors = huggingface.hf_hub_errors()
         try:
             info = self._api.bucket_info(self.name, token=self._token)
-            self._validate_existing_bucket()
-            return info, False
         except Exception as e:  # pylint: disable=broad-except
             not_found_types = tuple(cls for cls in (
                 getattr(errors, 'RepositoryNotFoundError', None),
@@ -5561,6 +5559,12 @@ class HuggingFaceStore(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     f'Failed to connect to HF bucket {self.name!r}: '
                     f'{e}') from e
+        # Validate after the connection succeeded so StorageSpecError (e.g.
+        # mounting an externally-created bucket without ``source:``) keeps
+        # its actionable message instead of being wrapped as a connection
+        # failure by the broad ``except`` above.
+        self._validate_existing_bucket()
+        return info, False
 
     def _create_hf_bucket(self, bucket_id: str) -> StorageHandle:
         """Creates an HF bucket with ``exist_ok=True`` for idempotency."""
