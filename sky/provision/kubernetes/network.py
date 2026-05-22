@@ -90,11 +90,8 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports, for template rendering. Use the same
-    # `namespace` resolved above (from `provider_config`) so the ingress URL
-    # path matches where the Service is actually created — required for
-    # workspace/per-context namespace overrides where the kubeconfig context's
-    # default namespace and the cluster's chosen namespace can differ.
+    # URL path namespace must match the Service's namespace (resolved above
+    # from `provider_config`); per-workspace overrides can make these differ.
     service_details = [
         (f'{cluster_name_on_cloud}--skypilot-svc--{port}', port,
          _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
