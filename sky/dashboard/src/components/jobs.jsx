@@ -753,20 +753,15 @@ export function ManagedJobsTable({
 
   // Initial load - runs immediately on mount, don't wait for full preloading
   // The preloader will warm the cache in background, but we fetch jobs data
-  // right away so the table displays as fast as possible. When the Mine
-  // scope is active we wait until the current user has loaded so the
-  // first fetch already carries userMatch — avoids an extra "Everyone"
-  // round-trip that would briefly flash other users' jobs.
+  // right away so the table displays as fast as possible. The initial
+  // fetch fires with userMatch=undefined (Everyone) and is followed by a
+  // narrow refetch when currentUser resolves — that's cheaper than
+  // blocking the whole page on the /users/role round-trip.
   React.useEffect(() => {
-    if (!isInitialFetch.current) return;
-    const explicitUserFilter = (filters || []).find(
-      (f) => (f.property || '').toLowerCase() === 'user' && f.value
-    );
-    if (userScope === 'mine' && !currentUser && !explicitUserFilter) return;
     fetchData({ includeStatus: true });
     isInitialFetch.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, userScope]);
+  }, []);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
