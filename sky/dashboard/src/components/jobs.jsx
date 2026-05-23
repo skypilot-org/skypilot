@@ -1093,6 +1093,19 @@ export function ManagedJobsTable({
   // Check if a job group is expanded
   const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
 
+  // After ~1s of a non-initial load, fade a spinner overlay onto the
+  // table so the user knows their toggle/filter click is in-flight.
+  // We delay so quick (sub-second) fetches don't flash a spinner.
+  const [showSlowSpinner, setShowSlowSpinner] = useState(false);
+  useEffect(() => {
+    if (!loading || isInitialLoad) {
+      setShowSlowSpinner(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setShowSlowSpinner(true), 1000);
+    return () => clearTimeout(t);
+  }, [loading, isInitialLoad]);
+
   // Close the "More" status menu when clicking outside of it.
   useEffect(() => {
     if (!moreMenuOpen) return undefined;
@@ -1997,7 +2010,15 @@ export function ManagedJobsTable({
         )}
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto relative">
+          {showSlowSpinner && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 pointer-events-none transition-opacity"
+              aria-hidden="true"
+            >
+              <CircularProgress size={28} />
+            </div>
+          )}
           <Table className="min-w-full border-collapse">
             <TableHeader>
               <TableRow>
