@@ -1826,107 +1826,6 @@ export function ManagedJobsTable({
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
-              {/* Toggles render BEFORE the chips so their position is
-                  anchored to the start of the bar. As status counts and
-                  the More pill text change in response to a click, only
-                  the items after the toggles shift — the toggles
-                  themselves stay put, which is easier to track than the
-                  earlier layout where chip-width changes pushed the
-                  toggles around. */}
-              {totalNoFilter > 0 && (() => {
-                const selectTab = (tab) => {
-                  React.startTransition(() => {
-                    setActiveTab(tab);
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                    setCurrentPage(1);
-                  });
-                };
-                const isActive = activeTab === 'active' && showAllMode;
-                const isAll = activeTab === 'all' && showAllMode;
-                return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by activity"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => selectTab('active')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isActive
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      Active
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isAll}
-                      onClick={() => selectTab('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isAll
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All
-                    </button>
-                  </div>
-                );
-              })()}
-              {(() => {
-                if (totalNoFilter === 0 || !currentUser) return null;
-                const explicitUserFilter = (filters || []).find(
-                  (f) =>
-                    (f.property || '').toLowerCase() === 'user' && f.value
-                );
-                const isMine = explicitUserFilter
-                  ? String(explicitUserFilter.value) === currentUser.id ||
-                    String(explicitUserFilter.value) === currentUser.name
-                  : userScope === 'mine';
-                const isEveryone = !explicitUserFilter && userScope === 'all';
-                const selectScope = (scope) => {
-                  React.startTransition(() => {
-                    setUserScope(scope);
-                    setCurrentPage(1);
-                  });
-                };
-                return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by owner"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isMine}
-                      onClick={() => selectScope('mine')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isMine
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      Mine
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isEveryone}
-                      onClick={() => selectScope('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isEveryone
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      Everyone
-                    </button>
-                  </div>
-                );
-              })()}
               {/* Primary statuses: always rendered in fixed order so the bar
                   doesn't jitter when counts change. The count badge uses
                   tabular-nums + a fixed min-width so the chip width stays
@@ -2062,6 +1961,100 @@ export function ManagedJobsTable({
                         })}
                       </div>
                     )}
+                  </div>
+                );
+              })()}
+              {totalNoFilter > 0 && (() => {
+                const selectTab = (tab) => {
+                  React.startTransition(() => {
+                    setActiveTab(tab);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                    setCurrentPage(1);
+                  });
+                };
+                const isActive = activeTab === 'active' && showAllMode;
+                const isAll = activeTab === 'all' && showAllMode;
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by activity"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => selectTab('active')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Active
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isAll}
+                      onClick={() => selectTab('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isAll
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All
+                    </button>
+                  </div>
+                );
+              })()}
+              {(() => {
+                if (totalNoFilter === 0 || !currentUser) return null;
+                const explicitUserFilter = (filters || []).find(
+                  (f) =>
+                    (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const isMine = explicitUserFilter
+                  ? String(explicitUserFilter.value) === currentUser.id ||
+                    String(explicitUserFilter.value) === currentUser.name
+                  : userScope === 'mine';
+                const isEveryone = !explicitUserFilter && userScope === 'all';
+                const selectScope = (scope) => {
+                  React.startTransition(() => {
+                    setUserScope(scope);
+                    setCurrentPage(1);
+                  });
+                };
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by owner"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={isMine}
+                      onClick={() => selectScope('mine')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isMine
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Mine
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isEveryone}
+                      onClick={() => selectScope('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isEveryone
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Everyone
+                    </button>
                   </div>
                 );
               })()}
