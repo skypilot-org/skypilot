@@ -500,6 +500,11 @@ export function ManagedJobsTable({
   // filter wins; see effectiveUserMatch in fetchData).
   const [userScope, setUserScope] = useState('mine');
   const [currentUser, setCurrentUser] = useState(null);
+  // True once the /users/role lookup has resolved (with a real user, with
+  // the 'local'/anonymous sentinel, or by erroring out). Used to gate the
+  // initial fetch so we never make the expensive unscoped Everyone request
+  // ahead of the Mine narrow.
+  const [userResolved, setUserResolved] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -751,35 +756,34 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - wait for currentUser (resolved via the shared
-  // getCurrentUserInfo() cache, usually already warm) before firing the
-  // first jobs fetch. Going Mine-first matters on tenants with tens of
-  // thousands of finished jobs: the Everyone query is expensive (full
-  // count + status aggregation) and we'd pay it twice — once on the
-  // unscoped initial fetch, once on the narrow Mine refetch — if we
-  // didn't gate. With the cache warm this gate adds essentially zero
-  // latency. If currentUser doesn't resolve (anonymous / role endpoint
-  // down) we still fire the initial fetch with userMatch=undefined so
-  // the page doesn't get stuck on the spinner.
+  // Initial load - wait for the /users/role lookup to settle (real
+  // user, 'local' sentinel, or error) before firing the first jobs
+  // fetch. Going Mine-first matters on tenants with tens of thousands
+  // of finished jobs: the Everyone query is expensive (full count +
+  // status aggregation) and we'd pay it twice — once on the unscoped
+  // initial fetch, once on the narrow Mine refetch — if we didn't gate.
+  // With the shared cache warm this gate adds essentially zero latency;
+  // cold loads pay a single ~200ms /users/role wait.
   React.useEffect(() => {
     if (!isInitialFetch.current) return;
+    if (!userResolved) return;
     fetchData({ includeStatus: true });
     isInitialFetch.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser]);
+  }, [userResolved]);
 
-  // Safety net: if /users/role takes more than 1.5s, give up waiting and
-  // fall back to the Everyone fetch so the page still renders. Cheap
-  // because getCurrentUserInfo() is cached — most page loads resolve
-  // well under this timeout.
+  // Safety net: if /users/role somehow never resolves (network hang),
+  // fall back to the unscoped fetch so the page still renders. Almost
+  // never triggers in practice — getCurrentUserInfo() catches its own
+  // errors and resolves with the 'local' sentinel.
   React.useEffect(() => {
     if (!isInitialFetch.current) return undefined;
     const t = setTimeout(() => {
       if (isInitialFetch.current) {
-        fetchData({ includeStatus: true });
-        isInitialFetch.current = false;
+        setUserScope('all');
+        setUserResolved(true);
       }
-    }, 1500);
+    }, 3000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1143,8 +1147,11 @@ export function ManagedJobsTable({
   // getCurrentUserInfo() cache in client.js so we don't pay the
   // /users/role round-trip more than once per page session (sidebar /
   // config / etc. typically already populated the cache by the time we
-  // get here). The 'local' sentinel id means the caller is anonymous —
-  // treat that the same as null so we don't send userMatch='local'.
+  // get here). The 'local' sentinel id means the caller is anonymous
+  // (no auth / basic-auth without a logged-in user) — there's no
+  // meaningful "Mine" view in that case, so flip to Everyone and hide
+  // the Mine/Everyone toggle so the dashboard works the way every
+  // unauthenticated tenant expects.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1153,10 +1160,15 @@ export function ManagedJobsTable({
         if (cancelled) return;
         if (info && info.id && info.id !== 'local') {
           setCurrentUser({ id: info.id, name: info.name || info.id });
+        } else {
+          setUserScope('all');
         }
       } catch (e) {
-        // Swallow: toggle simply degrades to "Everyone" if we can't id
-        // the caller.
+        // Role endpoint unreachable — assume no usable identity and
+        // default to Everyone rather than leaving the page stuck.
+        if (!cancelled) setUserScope('all');
+      } finally {
+        if (!cancelled) setUserResolved(true);
       }
     })();
     return () => {
