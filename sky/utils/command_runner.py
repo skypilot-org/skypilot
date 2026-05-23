@@ -2048,4 +2048,3 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                  log_path=log_path,
                                  stream_logs=stream_logs,
                                  max_retry=max_retry)
-
