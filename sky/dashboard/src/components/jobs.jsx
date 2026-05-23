@@ -1883,19 +1883,26 @@ export function ManagedJobsTable({
               {/* More dropdown: holds the long tail of statuses
                   (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
               {(() => {
-                const otherSelectedCount = selectedStatuses.filter(
-                  (s) => !PRIMARY_STATUSES.includes(s)
+                // Count dropdown items currently included in the filter
+                // (either explicitly via selectedStatuses or implicitly
+                // because Active is selected). When the user is in any
+                // narrowed state, surface that count on the pill so the
+                // button itself signals filtering is active.
+                const otherIncludedCount = OTHER_STATUSES.filter((s) =>
+                  isStatusHighlighted(s)
                 ).length;
                 const otherTotalCount = OTHER_STATUSES.reduce(
                   (sum, s) => sum + (statusCounts[s] ?? 0),
                   0
                 );
+                const isNarrowed =
+                  activeTab !== 'all' || selectedStatuses.length > 0;
                 return (
                   <div className="relative" ref={moreMenuRef}>
                     <button
                       onClick={() => setMoreMenuOpen((v) => !v)}
                       className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
-                        otherSelectedCount > 0
+                        isNarrowed
                           ? 'bg-gray-200 text-gray-800'
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                       }`}
@@ -1903,9 +1910,9 @@ export function ManagedJobsTable({
                       aria-expanded={moreMenuOpen}
                     >
                       <span>More</span>
-                      {otherSelectedCount > 0 ? (
+                      {isNarrowed ? (
                         <span className="text-xs bg-white/70 px-1.5 py-0.5 rounded">
-                          {otherSelectedCount} selected
+                          {otherIncludedCount} selected
                         </span>
                       ) : (
                         otherTotalCount > 0 && (
