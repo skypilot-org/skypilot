@@ -2232,7 +2232,18 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && isInitialLoad ? (
+              {(loading ||
+                (userScope === 'mine' &&
+                  currentUser &&
+                  everyoneTotal === null)) &&
+              paginatedData.length === 0 ? (
+                // Show the loading row both on initial fetch AND whenever
+                // a refetch starts with an empty table (e.g. right after
+                // clicking "View all jobs" or flipping the My Jobs/All
+                // Jobs toggle from a zero-row scope). Also covers the
+                // brief window between the empty Mine fetch returning
+                // and the Everyone probe answering, so the user doesn't
+                // flash through "No active jobs" before the CTA renders.
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
@@ -2384,6 +2395,8 @@ export function ManagedJobsTable({
                               onClick={() => {
                                 React.startTransition(() => {
                                   setUserScope('all');
+                                  setSelectedStatuses([]);
+                                  setShowAllMode(true);
                                   setCurrentPage(1);
                                 });
                               }}
