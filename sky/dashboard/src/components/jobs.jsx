@@ -1147,12 +1147,18 @@ export function ManagedJobsTable({
   // submitted anything yet, but N jobs from others are out there —
   // click to see them". Avoids leaving the user staring at a blank
   // table wondering whether SkyPilot has any activity at all.
+  //
+  // We use the client-side rendered row count (data.length) as the
+  // empty signal rather than the server's totalNoFilter — totalNoFilter
+  // currently reflects the unfiltered (including-other-users) total and
+  // doesn't honor userMatch, so it would suppress this CTA for any
+  // installation where other users have jobs.
   const [everyoneTotal, setEveryoneTotal] = useState(null);
   useEffect(() => {
     if (userScope !== 'mine') return;
     if (!currentUser) return;
     if (loading || isInitialLoad) return;
-    if (totalNoFilter !== 0) return;
+    if (data.length > 0) return;
     if (everyoneTotal !== null) return;
     let cancelled = false;
     (async () => {
@@ -1176,7 +1182,7 @@ export function ManagedJobsTable({
     currentUser,
     loading,
     isInitialLoad,
-    totalNoFilter,
+    data.length,
     everyoneTotal,
   ]);
 
@@ -2309,7 +2315,6 @@ export function ManagedJobsTable({
                         !controllerLaunching &&
                         (userScope === 'mine' &&
                         currentUser &&
-                        totalNoFilter === 0 &&
                         everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
                             <p className="text-gray-700">
