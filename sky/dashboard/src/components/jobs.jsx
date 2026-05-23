@@ -30,6 +30,7 @@ import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
+import { apiClient } from '@/data/connectors/client';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -493,6 +494,12 @@ export function ManagedJobsTable({
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
+  // Default to scoping the table to the current user's jobs. Flips to
+  // 'all' when the user clicks the Everyone toggle, or implicitly when
+  // they pick a different user via the FilterDropdown (explicit user
+  // filter wins; see effectiveUserMatch in fetchData).
+  const [userScope, setUserScope] = useState('mine');
+  const [currentUser, setCurrentUser] = useState(null);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -604,11 +611,20 @@ export function ManagedJobsTable({
 
         // Build params for jobsCacheManager
         const jobIdFilter = getFilterValue('id');
+        // Explicit user picked via FilterDropdown wins over the Mine/Everyone
+        // toggle. Otherwise, scope to the current user when toggle is "mine".
+        const explicitUserMatch = getFilterValue('user');
+        const effectiveUserMatch =
+          explicitUserMatch !== undefined
+            ? explicitUserMatch
+            : userScope === 'mine' && currentUser
+              ? currentUser.id
+              : undefined;
         const params = {
           allUsers: true,
           jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
-          userMatch: getFilterValue('user'),
+          userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
@@ -710,6 +726,8 @@ export function ManagedJobsTable({
       computedStatuses,
       sortBy,
       sortOrder,
+      userScope,
+      currentUser,
     ]
   );
 
@@ -735,13 +753,20 @@ export function ManagedJobsTable({
 
   // Initial load - runs immediately on mount, don't wait for full preloading
   // The preloader will warm the cache in background, but we fetch jobs data
-  // right away so the table displays as fast as possible
+  // right away so the table displays as fast as possible. When the Mine
+  // scope is active we wait until the current user has loaded so the
+  // first fetch already carries userMatch — avoids an extra "Everyone"
+  // round-trip that would briefly flash other users' jobs.
   React.useEffect(() => {
+    if (!isInitialFetch.current) return;
+    const explicitUserFilter = (filters || []).find(
+      (f) => (f.property || '').toLowerCase() === 'user' && f.value
+    );
+    if (userScope === 'mine' && !currentUser && !explicitUserFilter) return;
     fetchData({ includeStatus: true });
-    // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentUser, userScope]);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
@@ -1096,6 +1121,31 @@ export function ManagedJobsTable({
 
   // Check if a job group is expanded
   const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
+
+  // Fetch the current user once so the Mine/Everyone toggle can scope
+  // results to the logged-in user. Falls back to null if unauthenticated
+  // or the role endpoint fails, which forces the table into the
+  // Everyone view (no userMatch is sent).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await apiClient.get('/users/role');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+        if (data && data.id) {
+          setCurrentUser({ id: data.id, name: data.name || data.id });
+        }
+      } catch (e) {
+        // Swallow: toggle simply degrades to "Everyone" if we can't id
+        // the caller.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // After ~1s of a non-initial load, fade a spinner overlay onto the
   // table so the user knows their toggle/filter click is in-flight.
@@ -1950,6 +2000,65 @@ export function ManagedJobsTable({
                       }`}
                     >
                       All
+                    </button>
+                  </div>
+                );
+              })()}
+              {(() => {
+                // Mine/Everyone toggle. Suppressed when there are no jobs at
+                // all (parallels the Active/All toggle's gating) and also
+                // when the current user couldn't be resolved (anonymous /
+                // basic-auth path): the toggle has no meaningful "Mine".
+                if (totalNoFilter === 0 || !currentUser) return null;
+                const explicitUserFilter = (filters || []).find(
+                  (f) =>
+                    (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                // If the user picked a specific user via FilterDropdown,
+                // that wins. We light up "Mine" only when that pick happens
+                // to match the current user; otherwise neither segment is
+                // highlighted so it's clear an explicit narrow filter is in
+                // effect.
+                const isMine = explicitUserFilter
+                  ? String(explicitUserFilter.value) === currentUser.id ||
+                    String(explicitUserFilter.value) === currentUser.name
+                  : userScope === 'mine';
+                const isEveryone = !explicitUserFilter && userScope === 'all';
+                const selectScope = (scope) => {
+                  React.startTransition(() => {
+                    setUserScope(scope);
+                    setCurrentPage(1);
+                  });
+                };
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by owner"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 ml-2 shrink-0"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={isMine}
+                      onClick={() => selectScope('mine')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isMine
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Mine
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isEveryone}
+                      onClick={() => selectScope('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isEveryone
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Everyone
                     </button>
                   </div>
                 );
