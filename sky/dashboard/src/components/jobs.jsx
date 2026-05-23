@@ -30,7 +30,7 @@ import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { apiClient } from '@/data/connectors/client';
+import { apiClient, getCurrentUserInfo } from '@/data/connectors/client';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -751,15 +751,36 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - runs immediately on mount, don't wait for full preloading
-  // The preloader will warm the cache in background, but we fetch jobs data
-  // right away so the table displays as fast as possible. The initial
-  // fetch fires with userMatch=undefined (Everyone) and is followed by a
-  // narrow refetch when currentUser resolves — that's cheaper than
-  // blocking the whole page on the /users/role round-trip.
+  // Initial load - wait for currentUser (resolved via the shared
+  // getCurrentUserInfo() cache, usually already warm) before firing the
+  // first jobs fetch. Going Mine-first matters on tenants with tens of
+  // thousands of finished jobs: the Everyone query is expensive (full
+  // count + status aggregation) and we'd pay it twice — once on the
+  // unscoped initial fetch, once on the narrow Mine refetch — if we
+  // didn't gate. With the cache warm this gate adds essentially zero
+  // latency. If currentUser doesn't resolve (anonymous / role endpoint
+  // down) we still fire the initial fetch with userMatch=undefined so
+  // the page doesn't get stuck on the spinner.
   React.useEffect(() => {
+    if (!isInitialFetch.current) return;
     fetchData({ includeStatus: true });
     isInitialFetch.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
+  // Safety net: if /users/role takes more than 1.5s, give up waiting and
+  // fall back to the Everyone fetch so the page still renders. Cheap
+  // because getCurrentUserInfo() is cached — most page loads resolve
+  // well under this timeout.
+  React.useEffect(() => {
+    if (!isInitialFetch.current) return undefined;
+    const t = setTimeout(() => {
+      if (isInitialFetch.current) {
+        fetchData({ includeStatus: true });
+        isInitialFetch.current = false;
+      }
+    }, 1500);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1118,19 +1139,20 @@ export function ManagedJobsTable({
   const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
 
   // Fetch the current user once so the Mine/Everyone toggle can scope
-  // results to the logged-in user. Falls back to null if unauthenticated
-  // or the role endpoint fails, which forces the table into the
-  // Everyone view (no userMatch is sent).
+  // results to the logged-in user. Routes through the shared
+  // getCurrentUserInfo() cache in client.js so we don't pay the
+  // /users/role round-trip more than once per page session (sidebar /
+  // config / etc. typically already populated the cache by the time we
+  // get here). The 'local' sentinel id means the caller is anonymous —
+  // treat that the same as null so we don't send userMatch='local'.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const response = await apiClient.get('/users/role');
-        if (!response.ok) return;
-        const data = await response.json();
+        const info = await getCurrentUserInfo();
         if (cancelled) return;
-        if (data && data.id) {
-          setCurrentUser({ id: data.id, name: data.name || data.id });
+        if (info && info.id && info.id !== 'local') {
+          setCurrentUser({ id: info.id, name: info.name || info.id });
         }
       } catch (e) {
         // Swallow: toggle simply degrades to "Everyone" if we can't id
