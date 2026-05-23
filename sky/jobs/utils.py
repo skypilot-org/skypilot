@@ -470,6 +470,12 @@ async def get_job_status(
             potential_transient_error_reason = (
                 'Job status check timed out after '
                 f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
+        elif isinstance(e, subprocess.TimeoutExpired):
+            # The inner subprocess timeout (set slightly below the outer
+            # wait_for) fires first, killing the kubectl child. Treat the
+            # same as the outer asyncio.TimeoutError: transient, retry.
+            potential_transient_error_reason = (
+                f'Job status check subprocess timed out after {e.timeout}s')
         # TODO(cooperc): Gracefully handle these exceptions in the backend.
         elif isinstance(e, ValueError):
             # If the cluster yaml is deleted in the middle of getting the
