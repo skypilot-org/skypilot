@@ -2100,8 +2100,18 @@ export function ManagedJobsTable({
                   : userScope === 'mine';
                 const isEveryone = !explicitUserFilter && userScope === 'all';
                 const selectScope = (scope) => {
+                  // Reset status narrowing the same way the Active/All
+                  // toggle does — without this, a status chip selected
+                  // in one scope (e.g., RUNNING in My Jobs) carries
+                  // over to the other and the table renders empty
+                  // because that status has zero rows under the new
+                  // scope. Leave activeTab alone so a user who picked
+                  // Active in one scope keeps that activity filter
+                  // when they switch scope.
                   React.startTransition(() => {
                     setUserScope(scope);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
                     setCurrentPage(1);
                   });
                 };
