@@ -1147,6 +1147,44 @@ export function ManagedJobsTable({
     };
   }, []);
 
+  // When the Mine view comes up empty, fire a one-shot probe for the
+  // Everyone total so the empty state can tell the user "you haven't
+  // submitted anything yet, but N jobs from others are out there —
+  // click to see them". Avoids leaving the user staring at a blank
+  // table wondering whether SkyPilot has any activity at all.
+  const [everyoneTotal, setEveryoneTotal] = useState(null);
+  useEffect(() => {
+    if (userScope !== 'mine') return;
+    if (!currentUser) return;
+    if (loading || isInitialLoad) return;
+    if (totalNoFilter !== 0) return;
+    if (everyoneTotal !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await jobsCacheManager.getPaginatedJobs({
+          allUsers: true,
+          page: 1,
+          limit: 1,
+        });
+        if (cancelled) return;
+        setEveryoneTotal(resp?.totalNoFilter ?? resp?.total ?? 0);
+      } catch (e) {
+        if (!cancelled) setEveryoneTotal(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    userScope,
+    currentUser,
+    loading,
+    isInitialLoad,
+    totalNoFilter,
+    everyoneTotal,
+  ]);
+
   // After ~1s of a non-initial load, fade a spinner overlay onto the
   // table so the user knows their toggle/filter click is in-flight.
   // We delay so quick (sub-second) fetches don't flash a spinner.
@@ -1964,55 +2002,55 @@ export function ManagedJobsTable({
                   </div>
                 );
               })()}
-              {totalNoFilter > 0 && (() => {
-                const selectTab = (tab) => {
-                  React.startTransition(() => {
-                    setActiveTab(tab);
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                    setCurrentPage(1);
-                  });
-                };
-                const isActive = activeTab === 'active' && showAllMode;
-                const isAll = activeTab === 'all' && showAllMode;
-                return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by activity"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => selectTab('active')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isActive
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
+              {totalNoFilter > 0 &&
+                (() => {
+                  const selectTab = (tab) => {
+                    React.startTransition(() => {
+                      setActiveTab(tab);
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                      setCurrentPage(1);
+                    });
+                  };
+                  const isActive = activeTab === 'active' && showAllMode;
+                  const isAll = activeTab === 'all' && showAllMode;
+                  return (
+                    <div
+                      role="tablist"
+                      aria-label="Filter jobs by activity"
+                      className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
                     >
-                      Active
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isAll}
-                      onClick={() => selectTab('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isAll
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All
-                    </button>
-                  </div>
-                );
-              })()}
+                      <button
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => selectTab('active')}
+                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                          isActive
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Active
+                      </button>
+                      <button
+                        role="tab"
+                        aria-selected={isAll}
+                        onClick={() => selectTab('all')}
+                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                          isAll
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        All
+                      </button>
+                    </div>
+                  );
+                })()}
               {(() => {
                 if (totalNoFilter === 0 || !currentUser) return null;
                 const explicitUserFilter = (filters || []).find(
-                  (f) =>
-                    (f.property || '').toLowerCase() === 'user' && f.value
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 );
                 const isMine = explicitUserFilter
                   ? String(explicitUserFilter.value) === currentUser.id ||
@@ -2272,9 +2310,38 @@ export function ManagedJobsTable({
                           </div>
                         </div>
                       )}
-                      {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500">No active jobs</p>
-                      )}
+                      {!controllerStopped &&
+                        !controllerLaunching &&
+                        (userScope === 'mine' &&
+                        currentUser &&
+                        totalNoFilter === 0 &&
+                        everyoneTotal > 0 ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md">
+                            <p className="text-gray-700">
+                              You haven&apos;t submitted any managed jobs yet.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {everyoneTotal.toLocaleString()} job
+                              {everyoneTotal === 1 ? '' : 's'} from other users
+                              — switch to Everyone to see them.
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                React.startTransition(() => {
+                                  setUserScope('all');
+                                  setCurrentPage(1);
+                                });
+                              }}
+                              className="text-sky-blue hover:text-sky-blue-bright"
+                            >
+                              View everyone&apos;s jobs
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-gray-500">No active jobs</p>
+                        ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
