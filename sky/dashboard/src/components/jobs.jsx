@@ -2114,7 +2114,7 @@ export function ManagedJobsTable({
                           : 'text-gray-600 hover:text-gray-900'
                       }`}
                     >
-                      Mine
+                      My Jobs
                     </button>
                     <button
                       role="tab"
@@ -2126,7 +2126,7 @@ export function ManagedJobsTable({
                           : 'text-gray-600 hover:text-gray-900'
                       }`}
                     >
-                      Everyone
+                      All Jobs
                     </button>
                   </div>
                 );
@@ -2357,7 +2357,7 @@ export function ManagedJobsTable({
                             <p className="text-sm text-gray-500">
                               {everyoneTotal.toLocaleString()} job
                               {everyoneTotal === 1 ? '' : 's'} from other users
-                              — switch to Everyone to see them.
+                              — switch to All Jobs to see them.
                             </p>
                             <Button
                               variant="outline"
@@ -2370,7 +2370,7 @@ export function ManagedJobsTable({
                               }}
                               className="text-sky-blue hover:text-sky-blue-bright"
                             >
-                              View everyone&apos;s jobs
+                              View all jobs
                             </Button>
                           </div>
                         ) : (
