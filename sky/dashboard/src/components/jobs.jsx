@@ -2037,7 +2037,13 @@ export function ManagedJobsTable({
                   </div>
                 );
               })()}
-              {totalNoFilter > 0 &&
+              {/* Show the toggles whenever there are jobs anywhere in the
+                  view we could switch to — including the Everyone scope
+                  when the user's own list is empty. Without the
+                  everyoneTotal fallback, a user with zero personal jobs
+                  would lose the toggle and have only the empty-state
+                  CTA, with no way to switch back to Mine afterward. */}
+              {(totalNoFilter > 0 || (everyoneTotal && everyoneTotal > 0)) &&
                 (() => {
                   const selectTab = (tab) => {
                     React.startTransition(() => {
@@ -2083,7 +2089,16 @@ export function ManagedJobsTable({
                   );
                 })()}
               {(() => {
-                if (totalNoFilter === 0 || !currentUser) return null;
+                if (!currentUser) return null;
+                // Hide only when there are zero jobs in any scope —
+                // otherwise users with empty Mine views still need
+                // the toggle so they can return to Mine after taking
+                // the "View all jobs" CTA.
+                if (
+                  totalNoFilter === 0 &&
+                  !(everyoneTotal && everyoneTotal > 0)
+                )
+                  return null;
                 const explicitUserFilter = (filters || []).find(
                   (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 );
