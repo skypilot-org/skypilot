@@ -98,16 +98,18 @@ export const statusGroups = {
 };
 
 // Statuses shown as primary chips on the Statuses filter bar.
-// All other statuses are tucked behind the "More" dropdown to keep the
-// summary line balanced and avoid over-emphasizing failure variants.
-const PRIMARY_STATUSES = ['RUNNING', 'SUCCEEDED', 'FAILED'];
+// Ordered along the typical job lifecycle (STARTING → RUNNING →
+// SUCCEEDED) so the bar reads left-to-right as a progress story.
+// FAILED and other terminal variants live in the "More" dropdown to
+// keep the summary line calm.
+const PRIMARY_STATUSES = ['STARTING', 'RUNNING', 'SUCCEEDED'];
 const OTHER_STATUSES = [
   'PENDING',
   'SUBMITTED',
-  'STARTING',
   'RECOVERING',
   'CANCELLING',
   'CANCELLED',
+  'FAILED',
   'FAILED_SETUP',
   'FAILED_PRECHECKS',
   'FAILED_NO_RESOURCE',
@@ -168,14 +170,16 @@ export function getAggregatedStatus(tasks) {
 }
 
 // Define filter options for the filter dropdown
+// Name is first so it's the default when users open the dropdown —
+// users typically search by job name, not ID.
 const PROPERTY_OPTIONS = [
-  {
-    label: 'ID',
-    value: 'id',
-  },
   {
     label: 'Name',
     value: 'name',
+  },
+  {
+    label: 'ID',
+    value: 'id',
   },
   {
     label: 'User',
@@ -1918,21 +1922,27 @@ export function ManagedJobsTable({
                       <div className="absolute left-0 z-20 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
                         {OTHER_STATUSES.map((status) => {
                           const count = statusCounts[status] ?? 0;
-                          const selected = selectedStatuses.includes(status);
+                          // A status is included in the current view either
+                          // explicitly (selectedStatuses) or implicitly via
+                          // the Active/All toggle (e.g. PENDING/STARTING are
+                          // implicitly included when Active is selected).
+                          // Both cases should light up the check + label.
+                          const included = isStatusHighlighted(status);
+                          const explicit = selectedStatuses.includes(status);
                           return (
                             <button
                               key={status}
                               onClick={() => handleStatusClick(status)}
                               className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
-                                selected ? 'bg-gray-50' : ''
+                                explicit ? 'bg-gray-50' : ''
                               }`}
                             >
                               <span className="flex items-center gap-2 min-w-0">
                                 <CheckIcon
-                                  className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-sky-blue' : 'text-transparent'}`}
+                                  className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
                                 />
                                 <span
-                                  className={`truncate ${selected ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                  className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
                                 >
                                   {status}
                                 </span>
