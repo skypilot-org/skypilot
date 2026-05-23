@@ -618,12 +618,16 @@ export function ManagedJobsTable({
         const jobIdFilter = getFilterValue('id');
         // Explicit user picked via FilterDropdown wins over the Mine/Everyone
         // toggle. Otherwise, scope to the current user when toggle is "mine".
+        // Send the username (not the id/hash): the server resolves
+        // `user_match` via `get_user_by_name_match` which does a LIKE on the
+        // `name` column. Passing the hash on multi-user tenants where id and
+        // name differ would silently return zero results.
         const explicitUserMatch = getFilterValue('user');
         const effectiveUserMatch =
           explicitUserMatch !== undefined
             ? explicitUserMatch
             : userScope === 'mine' && currentUser
-              ? currentUser.id
+              ? currentUser.name
               : undefined;
         const params = {
           allUsers: true,
@@ -994,6 +998,20 @@ export function ManagedJobsTable({
     ).length;
     return { active, finished };
   }, [data]);
+
+  // Non-primary statuses currently selected — surface them as inline chips
+  // alongside the More dropdown so active filters are always visible.
+  const nonPrimarySelectedStatuses = React.useMemo(
+    () => selectedStatuses.filter((s) => !PRIMARY_STATUSES.includes(s)),
+    [selectedStatuses]
+  );
+
+  // Total count of jobs across all "other" (More dropdown) statuses; surfaced
+  // on the dropdown pill so users see how many jobs the long tail covers.
+  const otherStatusesTotalCount = React.useMemo(
+    () => OTHER_STATUSES.reduce((sum, s) => sum + (statusCounts[s] ?? 0), 0),
+    [statusCounts]
+  );
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -1930,23 +1948,21 @@ export function ManagedJobsTable({
               {/* Selected non-primary statuses surface as inline chips so the
                   user can always see which filters are active without opening
                   the dropdown. */}
-              {selectedStatuses
-                .filter((s) => !PRIMARY_STATUSES.includes(s))
-                .map((status) => {
-                  const count = statusCounts[status] ?? 0;
-                  return (
-                    <button
-                      key={status}
-                      onClick={() => handleStatusClick(status)}
-                      className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
-                    >
-                      <span>{status}</span>
-                      <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
+              {nonPrimarySelectedStatuses.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                return (
+                  <button
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
+                  >
+                    <span>{status}</span>
+                    <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
               {/* More dropdown: holds the long tail of statuses
                   (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
               {(() => {
@@ -1958,10 +1974,7 @@ export function ManagedJobsTable({
                 const otherIncludedCount = OTHER_STATUSES.filter((s) =>
                   isStatusHighlighted(s)
                 ).length;
-                const otherTotalCount = OTHER_STATUSES.reduce(
-                  (sum, s) => sum + (statusCounts[s] ?? 0),
-                  0
-                );
+                const otherTotalCount = otherStatusesTotalCount;
                 const isNarrowed =
                   activeTab !== 'all' || selectedStatuses.length > 0;
                 return (
