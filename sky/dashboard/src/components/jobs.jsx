@@ -1996,7 +1996,7 @@ export function ManagedJobsTable({
                       />
                     </button>
                     {moreMenuOpen && (
-                      <div className="absolute left-0 z-20 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                      <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
                         {OTHER_STATUSES.map((status) => {
                           const count = statusCounts[status] ?? 0;
                           // A status is included in the current view either
@@ -2037,13 +2037,13 @@ export function ManagedJobsTable({
                   </div>
                 );
               })()}
-              {/* Show the toggles whenever there are jobs anywhere in the
-                  view we could switch to — including the Everyone scope
-                  when the user's own list is empty. Without the
-                  everyoneTotal fallback, a user with zero personal jobs
-                  would lose the toggle and have only the empty-state
-                  CTA, with no way to switch back to Mine afterward. */}
-              {(totalNoFilter > 0 || (everyoneTotal && everyoneTotal > 0)) &&
+              {/* Activity toggle stays visible past the loading state.
+                  Hiding it on totalNoFilter===0 stranded users who'd
+                  narrowed Everyone with a filter that returned zero,
+                  or whose Mine view was empty — they had no easy way
+                  back. The toggle is harmless when the table is empty
+                  and indispensable as soon as anything else changes. */}
+              {!isInitialLoad &&
                 (() => {
                   const selectTab = (tab) => {
                     React.startTransition(() => {
@@ -2090,15 +2090,7 @@ export function ManagedJobsTable({
                 })()}
               {(() => {
                 if (!currentUser) return null;
-                // Hide only when there are zero jobs in any scope —
-                // otherwise users with empty Mine views still need
-                // the toggle so they can return to Mine after taking
-                // the "View all jobs" CTA.
-                if (
-                  totalNoFilter === 0 &&
-                  !(everyoneTotal && everyoneTotal > 0)
-                )
-                  return null;
+                if (isInitialLoad) return null;
                 const explicitUserFilter = (filters || []).find(
                   (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 );
@@ -2364,6 +2356,8 @@ export function ManagedJobsTable({
                         !controllerLaunching &&
                         (userScope === 'mine' &&
                         currentUser &&
+                        activeTab === 'all' &&
+                        showAllMode &&
                         everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
                             <p className="text-gray-700">
@@ -2371,8 +2365,8 @@ export function ManagedJobsTable({
                             </p>
                             <p className="text-sm text-gray-500">
                               {everyoneTotal.toLocaleString()} job
-                              {everyoneTotal === 1 ? '' : 's'} from other users
-                              — switch to All Jobs to see them.
+                              {everyoneTotal === 1 ? '' : 's'} in total — switch
+                              to All Jobs to see them.
                             </p>
                             <Button
                               variant="outline"
