@@ -1821,15 +1821,7 @@ export function ManagedJobsTable({
         {/* Combined Status Filter */}
         <div className="flex items-center justify-between text-sm mb-1">
           <div className="flex flex-wrap items-center min-w-0">
-            <span className="mr-2 text-sm font-medium">
-              Statuses
-              {!loading && totalNoFilter > 0 && (
-                <span className="ml-1 font-normal text-gray-400 tabular-nums">
-                  ({totalNoFilter.toLocaleString()})
-                </span>
-              )}
-              :
-            </span>
+            <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
