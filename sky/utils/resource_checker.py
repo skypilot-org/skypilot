@@ -322,15 +322,18 @@ def load_fresh_workspaces() -> Dict[str, Any]:
 
 
 def check_user_role_demotion(
-    user_id: str,
-    remaining_admin_user_ids: Optional[Set[str]] = None,
-    workspaces: Optional[Dict[str, Any]] = None,
-    active_resources: Optional[Tuple[List[Dict[str, Any]],
-                                     List[Dict[str, Any]]]] = None,
-    active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str, Any]]],
-                                             Dict[str, List[Dict[str,
-                                                                 Any]]]]] = None
-) -> None:
+        user_id: str,
+        remaining_admin_user_ids: Optional[Set[str]] = None,
+        workspaces: Optional[Dict[str, Any]] = None,
+        active_resources: Optional[Tuple[List[Dict[str, Any]],
+                                         List[Dict[str, Any]]]] = None,
+        active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str,
+                                                                     Any]]],
+                                                 Dict[str,
+                                                      List[Dict[str,
+                                                                Any]]]]] = None,
+        user_display: Optional[str] = None,
+        workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None) -> None:
     """Check whether an admin can be safely demoted to a regular user.
 
     After demotion the user loses implicit access to all private workspaces
@@ -357,6 +360,20 @@ def check_user_role_demotion(
             per-user lookup is O(1) instead of an O(C+J) scan, giving
             O(N + C + J) total for a batch instead of O(N * (C+J)).
             Takes precedence over ``active_resources`` if both are set.
+        user_display: Optional pre-resolved display string (username or
+            user_id) used in the error message. Batch callers that already
+            hold the user model should pass this to skip the per-call
+            ``global_user_state.get_user`` lookup that's only used to
+            format the error string.
+        workspaces_allowed_users: Optional pre-resolved map of
+            ``workspace_name -> set(allowed_user_ids)`` for private
+            workspaces. Batch callers should resolve each private
+            workspace's ``allowed_users`` once (via
+            ``workspaces_utils.get_workspace_users`` with a shared
+            ``all_users`` list) and pass the map. Without this, each
+            invocation re-calls ``get_workspace_users`` for every
+            private workspace, and each of those re-fetches
+            ``get_all_users()`` from the DB.
 
     Raises:
         ValueError: If the user has active clusters or managed jobs in
@@ -388,8 +405,14 @@ def check_user_role_demotion(
     for workspace_name, workspace_config in workspaces.items():
         if not workspace_config.get('private', False):
             continue
-        allowed_user_ids = set(
-            workspaces_utils.get_workspace_users(workspace_config))
+        # Prefer the pre-resolved set (batch path) to avoid re-calling
+        # get_workspace_users -> get_all_users for every workspace.
+        if (workspaces_allowed_users is not None and
+                workspace_name in workspaces_allowed_users):
+            allowed_user_ids = workspaces_allowed_users[workspace_name]
+        else:
+            allowed_user_ids = set(
+                workspaces_utils.get_workspace_users(workspace_config))
         if (user_id in allowed_user_ids or user_id in remaining_admin_user_ids):
             continue
         inaccessible_workspaces.append(workspace_name)
@@ -434,8 +457,10 @@ def check_user_role_demotion(
     if not workspace_resources:
         return
 
-    user_info = global_user_state.get_user(user_id)
-    user_display = (user_info.name if user_info and user_info.name else user_id)
+    if user_display is None:
+        user_info = global_user_state.get_user(user_id)
+        user_display = (user_info.name
+                        if user_info and user_info.name else user_id)
 
     error_lines = []
     for ws, res in workspace_resources.items():

@@ -6,7 +6,7 @@ import os
 import re
 import secrets
 import time
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Optional, Set
 
 import fastapi
 import filelock
@@ -23,6 +23,7 @@ from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
+from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -238,13 +239,27 @@ def user_batch_update(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=403, detail='Only admin can update user roles')
 
+    # Pre-fetch user + role state ONCE for the whole batch so the per-user
+    # loop is O(1) dict lookups instead of N * (DB get_user + casbin
+    # get_user_roles). For a batch of size N, this drops the per-iteration
+    # round-trip cost from O(N) to O(supported_roles) total.
+    all_users = global_user_state.get_all_users()
+    all_users_map = {u.id: u for u in all_users}
+    users_to_role: Dict[str, str] = {}
+    for supported_role in supported_roles:
+        for uid in permission.permission_service.get_users_for_role(
+                supported_role):
+            users_to_role[uid] = supported_role
+    all_admin_user_ids = {
+        uid for uid, r in users_to_role.items()
+        if r == rbac.RoleName.ADMIN.value
+    }
+
     # Pre-compute the post-batch admin set for the demotion check so
     # we treat the rest of the batch consistently: if A and B are both admins
     # and both being demoted, A losing access can't be saved by "but B is still
     # an admin".
-    all_admin_user_ids = set(
-        permission.permission_service.get_users_for_role(
-            rbac.RoleName.ADMIN.value))
+    batch_workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None
     if role == rbac.RoleName.ADMIN.value:
         remaining_admin_user_ids = all_admin_user_ids | set(user_ids)
         # Promotion -> nobody needs the demotion check, so no need to fetch
@@ -263,13 +278,28 @@ def user_batch_update(request: fastapi.Request,
         batch_active_resources_by_user = (
             resource_checker.index_active_resources_by_user_hash(
                 resource_checker.get_active_resources()))
+        # Pre-resolve each private workspace's allowed_users -> user_id set
+        # ONCE for the batch. Without this, check_user_role_demotion
+        # iterates private workspaces and calls get_workspace_users for
+        # each (every call re-fetches get_all_users() from the DB),
+        # giving N * P * get_all_users() round-trips in a batch.
+        batch_name_to_ids = workspaces_utils.build_username_to_ids_map(
+            all_users)
+        batch_workspaces_allowed_users = {}
+        for ws_name, ws_cfg in batch_workspaces.items():
+            if ws_cfg.get('private', False):
+                batch_workspaces_allowed_users[ws_name] = set(
+                    workspaces_utils.get_workspace_users(
+                        ws_cfg,
+                        all_users=all_users,
+                        name_to_ids=batch_name_to_ids))
 
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
 
     for user_id in user_ids:
         try:
-            user_info = global_user_state.get_user(user_id)
+            user_info = all_users_map.get(user_id)
             if user_info is None:
                 failed.append({
                     'user_id': user_id,
@@ -283,8 +313,8 @@ def user_batch_update(request: fastapi.Request,
                               f'user {user_info.name}')
                 })
                 continue
-            target_user_roles = (
-                permission.permission_service.get_user_roles(user_id))
+            current_role = users_to_role.get(user_id)
+            target_user_roles = [current_role] if current_role else []
             need_update_role = (not target_user_roles or
                                 role != target_user_roles[0])
             if not need_update_role:
@@ -303,7 +333,9 @@ def user_batch_update(request: fastapi.Request,
                     user_info.id,
                     remaining_admin_user_ids=remaining_admin_user_ids,
                     workspaces=batch_workspaces,
-                    active_resources_by_user=batch_active_resources_by_user)
+                    active_resources_by_user=batch_active_resources_by_user,
+                    user_display=user_info.name or user_info.id,
+                    workspaces_allowed_users=batch_workspaces_allowed_users)
             with _user_lock(user_info.id):
                 permission.permission_service.update_role(user_info.id, role)
             succeeded.append(user_id)

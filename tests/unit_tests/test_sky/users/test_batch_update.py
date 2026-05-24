@@ -33,18 +33,22 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_user')
-    def test_promote_two_users_to_admin(self, mock_get_user,
+    @mock.patch('sky.global_user_state.get_all_users')
+    def test_promote_two_users_to_admin(self, mock_get_all_users,
                                         mock_get_users_for_role,
                                         mock_get_user_roles, mock_update_role,
                                         mock_demotion_check, mock_user_lock,
                                         admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_users_for_role.return_value = []
+        mock_get_all_users.return_value = [
+            _mk_user('u1', name='name-u1'),
+            _mk_user('u2', name='name-u2'),
+        ]
+        # Both users are currently role=user; nobody is admin or viewer.
+        mock_get_users_for_role.side_effect = (lambda r: ['u1', 'u2']
+                                               if r == 'user' else [])
         mock_get_user_roles.return_value = ['user']
-        mock_get_user.side_effect = lambda uid: _mk_user(uid,
-                                                         name=f'name-{uid}')
 
         body = payloads.UserBatchUpdateBody(user_ids=['u1', 'u2'], role='admin')
 
@@ -59,27 +63,26 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.get_all_users')
     def test_internal_user_and_missing_user_are_isolated_failures(
-            self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
-            mock_update_role, mock_user_lock, admin_request):
+            self, mock_get_all_users, mock_get_users_for_role,
+            mock_get_user_roles, mock_update_role, mock_user_lock,
+            admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_users_for_role.return_value = []
+        # 'unknown' is intentionally NOT in get_all_users so the lookup
+        # returns None and the batch records it as a failure.
+        known_users = [
+            _mk_user('good', name='good'),
+            _mk_user(constants.SKYPILOT_SYSTEM_USER_ID, name='system'),
+            _mk_user(constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+                     name='system-viewer'),
+            _mk_user(common.SERVER_ID, name='server'),
+        ]
+        mock_get_all_users.return_value = known_users
+        mock_get_users_for_role.side_effect = (
+            lambda r: [u.id for u in known_users] if r == 'user' else [])
         mock_get_user_roles.return_value = ['user']
-
-        def fake_get_user(uid):
-            if uid == 'good':
-                return _mk_user(uid, name='good')
-            if uid == constants.SKYPILOT_SYSTEM_USER_ID:
-                return _mk_user(uid, name='system')
-            if uid == constants.SKYPILOT_SYSTEM_VIEWER_USER_ID:
-                return _mk_user(uid, name='system-viewer')
-            if uid == common.SERVER_ID:
-                return _mk_user(uid, name='server')
-            return None
-
-        mock_get_user.side_effect = fake_get_user
 
         body = payloads.UserBatchUpdateBody(user_ids=[
             'good',
@@ -131,18 +134,22 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.get_all_users')
     def test_demotion_failure_isolated_to_offending_user(
-            self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
-            mock_update_role, mock_demotion_check, mock_user_lock,
-            mock_load_fresh_workspaces, mock_get_active_resources,
-            admin_request):
+            self, mock_get_all_users, mock_get_users_for_role,
+            mock_get_user_roles, mock_update_role, mock_demotion_check,
+            mock_user_lock, mock_load_fresh_workspaces,
+            mock_get_active_resources, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_users_for_role.return_value = ['u1', 'u2', 'u3']  # all admins
+        mock_get_all_users.return_value = [
+            _mk_user('u1', name='name-u1'),
+            _mk_user('u2', name='name-u2'),
+            _mk_user('u3', name='name-u3'),
+        ]
+        mock_get_users_for_role.side_effect = (lambda r: ['u1', 'u2', 'u3']
+                                               if r == 'admin' else [])
         mock_get_user_roles.return_value = ['admin']
-        mock_get_user.side_effect = lambda uid: _mk_user(uid,
-                                                         name=f'name-{uid}')
 
         def fake_demotion_check(uid, **_kwargs):
             if uid == 'u2':
@@ -171,17 +178,18 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.get_all_users')
     def test_demotion_check_also_fires_for_admin_to_viewer(
-            self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
-            mock_update_role, mock_demotion_check, mock_user_lock,
-            mock_load_fresh_workspaces, mock_get_active_resources,
-            admin_request):
+            self, mock_get_all_users, mock_get_users_for_role,
+            mock_get_user_roles, mock_update_role, mock_demotion_check,
+            mock_user_lock, mock_load_fresh_workspaces,
+            mock_get_active_resources, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_users_for_role.return_value = ['u1']  # u1 is the only admin
+        mock_get_all_users.return_value = [_mk_user('u1', name='alice')]
+        mock_get_users_for_role.side_effect = (lambda r: ['u1']
+                                               if r == 'admin' else [])
         mock_get_user_roles.return_value = ['admin']
-        mock_get_user.return_value = _mk_user('u1', name='alice')
 
         body = payloads.UserBatchUpdateBody(user_ids=['u1'], role='viewer')
         result = server.user_batch_update(admin_request, body)
@@ -198,16 +206,18 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_user')
-    def test_noop_when_role_unchanged(self, mock_get_user,
+    @mock.patch('sky.global_user_state.get_all_users')
+    def test_noop_when_role_unchanged(self, mock_get_all_users,
                                       mock_get_users_for_role,
                                       mock_get_user_roles, mock_update_role,
                                       mock_user_lock, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_users_for_role.return_value = []
+        mock_get_all_users.return_value = [_mk_user('u1', name='alice')]
+        # u1 is already an admin; the batch is a no-op.
+        mock_get_users_for_role.side_effect = (lambda r: ['u1']
+                                               if r == 'admin' else [])
         mock_get_user_roles.return_value = ['admin']
-        mock_get_user.return_value = _mk_user('u1', name='alice')
 
         body = payloads.UserBatchUpdateBody(user_ids=['u1'], role='admin')
 

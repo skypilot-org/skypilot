@@ -274,9 +274,8 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_private_changed_to_public(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from private to public."""
-        mock_get_users.side_effect = lambda config: (['user1', 'user2']
-                                                     if config.get('private')
-                                                     else [])
+        mock_get_users.side_effect = lambda config, **_kw: (
+            ['user1', 'user2'] if config.get('private') else [])
         mock_get_users_for_role.return_value = []
         current_config = {
             'private': True,
@@ -305,9 +304,8 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_private_changed_to_private(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing workspace from public to private."""
-        mock_get_users.side_effect = lambda config: (['user1', 'user2']
-                                                     if config.get('private')
-                                                     else [])
+        mock_get_users.side_effect = lambda config, **_kw: (
+            ['user1', 'user2'] if config.get('private') else [])
         mock_get_users_for_role.return_value = []
         current_config = {
             'private': False,
@@ -341,7 +339,7 @@ class TestWorkspaceManagement(unittest.TestCase):
     def test_compare_workspace_configs_allowed_users_changed(
             self, mock_get_users_for_role, mock_get_users):
         """Test changing allowed users without changing private setting."""
-        mock_get_users.side_effect = lambda config: config.get(
+        mock_get_users.side_effect = lambda config, **_kw: config.get(
             'allowed_users', [])
         mock_get_users_for_role.return_value = []
         current_config = {
@@ -412,7 +410,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         new_config = {'private': True, 'allowed_users': ['user1']}
 
         # Mock get_workspace_users to return different values for different configs
-        def mock_get_users_side_effect(config):
+        def mock_get_users_side_effect(config, **_kw):
             if config.get('allowed_users') == ['*']:
                 return ['*']
             else:

@@ -104,7 +104,10 @@ def entries_for_user(
     return entries
 
 
-def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
+def get_workspace_users(
+        workspace_config: Dict[str, Any],
+        all_users: Optional[List[models.User]] = None,
+        name_to_ids: Optional[Dict[str, List[str]]] = None) -> List[str]:
     """Get the users that should have access to a workspace.
 
     workspace_config is a dict with the following keys:
@@ -115,6 +118,10 @@ def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
 
     Args:
         workspace_config: The configuration of the workspace.
+        all_users: Optional pre-fetched list of all users so batch callers
+            don't pay a fresh ``get_all_users()`` per workspace.
+        name_to_ids: Optional pre-built username -> [user_id] map (see
+            ``build_username_to_ids_map``). Pair with ``all_users``.
 
     Returns:
         List of user IDs that should have access to the workspace.
@@ -124,24 +131,24 @@ def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
     if workspace_config.get('private', False):
         user_ids = []
         workspace_user_name_or_ids = workspace_config.get('allowed_users', [])
-        all_users = global_user_state.get_all_users()
+        if all_users is None:
+            all_users = global_user_state.get_all_users()
         all_user_ids = {user.id for user in all_users}
-        all_user_map = collections.defaultdict(list)
-        for user in all_users:
-            all_user_map[user.name].append(user.id)
+        if name_to_ids is None:
+            name_to_ids = build_username_to_ids_map(all_users)
 
         # Resolve user names to IDs
         for user_name_or_id in workspace_user_name_or_ids:
             if user_name_or_id in all_user_ids:
                 user_ids.append(user_name_or_id)
-            elif user_name_or_id in all_user_map:
-                if len(all_user_map[user_name_or_id]) > 1:
-                    user_ids_str = ', '.join(all_user_map[user_name_or_id])
+            elif user_name_or_id in name_to_ids:
+                if len(name_to_ids[user_name_or_id]) > 1:
+                    user_ids_str = ', '.join(name_to_ids[user_name_or_id])
                     raise ValueError(
                         f'User {user_name_or_id!r} has multiple IDs: '
                         f'{user_ids_str}. Please specify the user '
                         f'ID instead.')
-                user_ids.append(all_user_map[user_name_or_id][0])
+                user_ids.append(name_to_ids[user_name_or_id][0])
             else:
                 logger.warning(
                     f'User {user_name_or_id!r} not found in all users')
