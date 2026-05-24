@@ -46,6 +46,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CheckIcon,
+  InfoIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -882,6 +883,19 @@ export function ManagedJobsTable({
     setSelectedStatuses([]);
     setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
+
+  // Switch ownership scope (My Jobs vs All Jobs). Resets status narrowing
+  // so a status chip selected in one scope (e.g. RUNNING in My Jobs)
+  // doesn't carry over and silently empty the table under the new scope.
+  // Leaves `activeTab` alone — Active/All is orthogonal to ownership.
+  const selectScope = React.useCallback((scope) => {
+    React.startTransition(() => {
+      setUserScope(scope);
+      setSelectedStatuses([]);
+      setShowAllMode(true);
+      setCurrentPage(1);
+    });
+  }, []);
 
   // Populate valueList for filter dropdown
   useEffect(() => {
@@ -2112,22 +2126,6 @@ export function ManagedJobsTable({
                     String(explicitUserFilter.value) === currentUser.name
                   : userScope === 'mine';
                 const isEveryone = !explicitUserFilter && userScope === 'all';
-                const selectScope = (scope) => {
-                  // Reset status narrowing the same way the Active/All
-                  // toggle does — without this, a status chip selected
-                  // in one scope (e.g., RUNNING in My Jobs) carries
-                  // over to the other and the table renders empty
-                  // because that status has zero rows under the new
-                  // scope. Leave activeTab alone so a user who picked
-                  // Active in one scope keeps that activity filter
-                  // when they switch scope.
-                  React.startTransition(() => {
-                    setUserScope(scope);
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                    setCurrentPage(1);
-                  });
-                };
                 return (
                   <div
                     role="tablist"
@@ -2157,6 +2155,44 @@ export function ManagedJobsTable({
                       }`}
                     >
                       All Jobs
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Scope hint: when filtered to the current user's jobs,
+                  remind them and offer a one-click path to All Jobs.
+                  Sits at the tail of the chip + toggle row (same flex-wrap
+                  container) so it flows inline with the filter bar on
+                  wide screens and wraps below on narrow ones. Suppress
+                  in the empty state (the CTA already says this) and
+                  when an explicit user filter has overridden the toggle. */}
+              {(() => {
+                const explicitUserFilter = (filters || []).find(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const showHint =
+                  userScope === 'mine' &&
+                  currentUser &&
+                  !explicitUserFilter &&
+                  !isInitialLoad &&
+                  paginatedData.length > 0;
+                if (!showHint) return null;
+                return (
+                  <div
+                    className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                    <span className="text-gray-700">
+                      Showing your jobs only.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => selectScope('all')}
+                      className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                    >
+                      View all jobs
                     </button>
                   </div>
                 );
