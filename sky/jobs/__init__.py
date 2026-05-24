@@ -1,6 +1,7 @@
 """Managed jobs."""
 import pathlib
 
+from sky.jobs import runtime as _managed_job_runtime
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
@@ -29,6 +30,14 @@ from sky.jobs.utils import ManagedJobCodeGen
 
 pathlib.Path(JOBS_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)
+
+# Register the OSS Slurm-native v1 managed-job runtime. Plugins that
+# ship their own ManagedJobRuntime (e.g. K8s v1) append to the chain
+# later via the same ``register`` API.
+# pylint: disable=wrong-import-position
+from sky.provision.slurm.managed_job_runtime import SlurmManagedJobRuntime
+
+_managed_job_runtime.register(SlurmManagedJobRuntime())
 __all__ = [
     # Constants
     'JOBS_CONTROLLER_TEMPLATE',
