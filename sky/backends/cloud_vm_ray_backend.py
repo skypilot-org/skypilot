@@ -4591,7 +4591,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         job_ids: Optional[List[int]] = None,
-        stream_logs: bool = True
+        stream_logs: bool = True,
+        timeout: Optional[int] = None,
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
         if handle.is_grpc_enabled_with_flag:
             try:
@@ -4608,11 +4609,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.debug(f'gRPC failed, falling back to SSH: {e}')
 
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
+        # If timeout is set, pass it to the underlying command runner.
+        # log_lib.run_with_log uses a threading.Timer to kill the subprocess
+        # (and its kubectl exec child) if the deadline is hit, then raises
+        # subprocess.TimeoutExpired. Without this, the caller's
+        # asyncio.wait_for can fire but cannot terminate the subprocess —
+        # leaking a kubectl process that keeps holding TCP connections and
+        # consuming CPU.
+        kwargs: Dict[str, Any] = {}
+        if timeout is not None:
+            kwargs['timeout'] = timeout
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
-                                                      separate_stderr=True)
+                                                      separate_stderr=True,
+                                                      **kwargs)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
         statuses = job_lib.load_statuses_payload(stdout)

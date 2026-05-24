@@ -1,5 +1,6 @@
 import asyncio
 import pathlib
+import subprocess
 import tempfile
 import time
 from unittest import mock
@@ -107,6 +108,38 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     # Verify only one attempt was made (no retry in get_job_status)
     # === Checking the job status... ===
     assert mock_logger.info.call_count == 1
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_subprocess_timeout(mock_get_handle, mock_logger):
+    """Test that a subprocess.TimeoutExpired in the backend call is treated
+    as a transient error (with a reason set), not a fatal failure.
+
+    This is the path where the inner subprocess `timeout=` fires before the
+    outer asyncio.wait_for — keeping the kubectl child reaped while still
+    triggering retry-with-backoff in the controller.
+    """
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    def raise_subprocess_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd='kubectl exec ...', timeout=20)
+
+    mock_backend.get_job_status = raise_subprocess_timeout
+
+    job_status, error_reason = await utils.get_job_status(
+        backend=mock_backend, cluster_name='test-cluster', job_id=1)
+
+    assert job_status is None
+    assert error_reason is not None, (
+        'subprocess.TimeoutExpired must set a transient reason so the '
+        'controller backs off instead of forcing recovery')
+    assert 'subprocess timed out after 20s' in error_reason
 
 
 @pytest.mark.asyncio
