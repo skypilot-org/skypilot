@@ -1,10 +1,13 @@
 """Slurm instance provisioning."""
 
+import base64
+import importlib.resources
 import os
 import shlex
 import tempfile
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
@@ -13,6 +16,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
+from sky.data import data_utils
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
@@ -26,9 +30,66 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky import provision as provision_lib
+    from sky import task as task_lib
+
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
+
+# -------- v1 (Slurm-native managed jobs) detection and gating -------- #
+#
+# v1 managed jobs submit a real ``sbatch`` whose script body is the
+# user's setup+run command — exiting when user code exits — instead
+# of today's ``sleep infinity`` + ``srun --jobid`` pattern. The v1
+# branch is selected at provision time by the provider-config marker
+# below; the legacy ``_create_virtual_instance`` path stays untouched
+# and runs by default.
+
+SLURM_MANAGED_JOB_V1_RUNTIME = 'managed_job_v1'
+
+# Opt-out env var. v1 is on by default; users who rely on the
+# long-lived sleep-infinity allocation (e.g. ``sky exec`` against a
+# managed-job cluster) can fall back to legacy.
+_DISABLE_V1_JOBS_ENV = 'SKYPILOT_SLURM_DISABLE_V1_JOBS'
+# Config-file analog: ``slurm.use_v1: false``.
+_V1_CONFIG_KEY = ('slurm', 'use_v1')
+
+# Base64-encoded ``git_clone.sh`` for embedding in the sbatch script
+# preamble. Reuses the same script as the regular path so token auth,
+# SSH key auth, shallow clones, ref-type detection, and incremental
+# updates all work identically. The env vars ``GIT_URL``,
+# ``GIT_BRANCH``/``GIT_TAG``/``GIT_COMMIT_HASH``, ``GIT_TOKEN``, and
+# ``GIT_SSH_KEY`` are already set as task envs by
+# ``task.py:_set_git_envs_and_secrets``.
+try:
+    _git_clone_script = importlib.resources.files('sky.utils').joinpath(
+        'git_clone.sh')
+    _GIT_CLONE_SCRIPT_B64: Optional[str] = base64.b64encode(
+        _git_clone_script.read_bytes()).decode()
+except (FileNotFoundError, AttributeError):
+    _GIT_CLONE_SCRIPT_B64 = None
+    logger.debug('git_clone.sh not found; git workdir support in the v1 '
+                 'fast path will be limited')
+
+
+def is_managed_job_v1_provider_config(provider_config: Dict[str, Any]) -> bool:
+    """Whether the provider config selects the Slurm v1 managed-job path."""
+    return provider_config.get(
+        'skypilot_runtime') == SLURM_MANAGED_JOB_V1_RUNTIME
+
+
+def is_slurm_managed_jobs_v1_enabled() -> bool:
+    """Whether Slurm v1 managed jobs are enabled.
+
+    On by default. Opt out by setting
+    ``SKYPILOT_SLURM_DISABLE_V1_JOBS=1`` or
+    ``slurm.use_v1: false`` in ``~/.sky/config.yaml``.
+    """
+    if os.environ.get(_DISABLE_V1_JOBS_ENV) == '1':
+        return False
+    return bool(skypilot_config.get_nested(_V1_CONFIG_KEY, True))
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -855,6 +916,9 @@ def query_instances(
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
+    if is_managed_job_v1_provider_config(config.provider_config):
+        return _create_managed_job_v1(region, cluster_name,
+                                      cluster_name_on_cloud, config)
     return _create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
                                     config)
 
@@ -1171,3 +1235,552 @@ def get_command_runners(
     ]
 
     return runners
+
+
+# -------- v1 managed-job: predicates, template override, provision -------- #
+
+
+def _all_resource_alternatives_are_slurm(task: 'task_lib.Task') -> bool:
+    """Whether every resource alternative on the task is Slurm."""
+    # pylint: disable=import-outside-toplevel
+    from sky import clouds as sky_clouds
+
+    resources = list(task.resources)
+    if not resources:
+        return False
+    return all(resource.cloud is not None and
+               resource.cloud.is_same_cloud(sky_clouds.Slurm())
+               for resource in resources)
+
+
+def _get_unsupported_v1_inputs(task: 'task_lib.Task') -> List[str]:
+    """Return user inputs that force fallback from the v1 template."""
+    unsupported: List[str] = []
+    local_file_mounts = task.get_local_to_remote_file_mounts() or {}
+    has_local_workdir = (task.workdir is not None and
+                         isinstance(task.workdir, str))
+    storage_mounts = task.storage_mounts
+    if has_local_workdir:
+        unsupported.append(f'workdir: {task.workdir!r}')
+    if local_file_mounts:
+        for dst, src in local_file_mounts.items():
+            unsupported.append(f'file_mounts: {src!r} -> {dst!r}')
+    if storage_mounts:
+        for mnt_path, storage in storage_mounts.items():
+            unsupported.append(
+                f'storage_mounts: {storage.name!r} -> {mnt_path!r}')
+    return unsupported
+
+
+def will_use_v1_template(
+    task: 'task_lib.Task',
+    *,
+    is_launched_by_jobs_controller: bool = True,
+) -> bool:
+    """Whether this task will be claimed by the Slurm v1 template.
+
+    Keep this predicate in sync with ``template_override()``.
+    """
+    if (not is_slurm_managed_jobs_v1_enabled() or
+            not is_launched_by_jobs_controller):
+        return False
+    if not _all_resource_alternatives_are_slurm(task):
+        return False
+    return not _get_unsupported_v1_inputs(task)
+
+
+def template_override(
+    task: 'task_lib.Task',
+    *,
+    _extra_launch_context: Dict[str, Any],
+    _is_launched_by_jobs_controller: bool,
+) -> Optional['provision_lib.TemplateSpec']:
+    """Claim v1 Slurm managed-job tasks and return their template spec."""
+    # pylint: disable=import-outside-toplevel
+    from sky import provision as provision_lib
+    from sky import task as task_lib
+    from sky.backends import backend_utils
+
+    del _extra_launch_context  # No per-task context consumed yet.
+
+    if not will_use_v1_template(
+            task,
+            is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+    ):
+        unsupported = _get_unsupported_v1_inputs(task)
+        if (is_slurm_managed_jobs_v1_enabled() and
+                _is_launched_by_jobs_controller and
+                _all_resource_alternatives_are_slurm(task) and unsupported):
+            logger.warning(
+                'Falling back to legacy Slurm managed-jobs path: jobs with '
+                'local file mounts, workdir, or storage mounts are not '
+                'supported on the v1 fast path. Unsupported inputs:\n  ' +
+                '\n  '.join(unsupported) +
+                '\nUse a git workdir or cloud storage (s3://, gs://, etc.) '
+                'to opt into the v1 fast path.')
+        return None
+
+    resources = list(task.resources)
+    envs = task_lib.get_plaintext_envs_and_secrets(task.envs_and_secrets)
+
+    resource = resources[0]
+    sbatch_options: Dict[str, Any] = {}
+    cluster_overrides = resource.cluster_config_overrides
+    if cluster_overrides:
+        # Surface task-level sbatch_options into the template; cluster /
+        # partition level options are merged later by
+        # ``Slurm.make_deploy_resources_variables`` and threaded through
+        # the standard template variables (``sbatch_options``).
+        task_sbatch = cluster_overrides.get(
+            'slurm', {}).get('sbatch_options') if isinstance(
+                cluster_overrides, dict) else None
+        if isinstance(task_sbatch, dict):
+            sbatch_options.update(task_sbatch)
+
+    workdir = task.workdir
+    workdir_config: Optional[Dict[str, Any]] = None
+    if workdir is not None:
+        # Local workdirs are blocked by ``will_use_v1_template`` above —
+        # this branch only handles the git-dict form.
+        assert isinstance(
+            workdir,
+            dict), (f'Expected git workdir (dict), got {type(workdir)}')
+        workdir_config = {'git': workdir}
+
+    file_mounts: Optional[Dict[str, str]] = None
+    if task.file_mounts:
+        file_mounts = dict(task.file_mounts)
+
+    container_image = resource.extract_docker_image()
+
+    return provision_lib.TemplateSpec(
+        template_path='slurm-managed-job-v1.yml.j2',
+        variables={
+            'setup': task.setup,
+            'run': task.run,
+            'envs': envs,
+            'num_nodes': task.num_nodes,
+            'num_gpus_per_node': backend_utils.get_num_gpus_per_node(task),
+            'workdir': workdir_config,
+            'file_mounts': file_mounts,
+            'sbatch_options': sbatch_options or None,
+            'container_image': container_image,
+        },
+    )
+
+
+def _build_workdir_block(workdir: Optional[Dict[str, Any]]) -> str:
+    """Build sbatch preamble commands for the git workdir, or empty."""
+    if not workdir:
+        return ''
+    if 'git' not in workdir:
+        return ''
+    if _GIT_CLONE_SCRIPT_B64 is None:
+        raise RuntimeError(
+            'git_clone.sh not found; cannot use git workdir with the v1 '
+            'fast path')
+    # The git_clone.sh script expects to be invoked with the target
+    # workdir as its only positional argument. ``SKY_REMOTE_WORKDIR`` is
+    # the canonical destination used elsewhere; expand ~ to $HOME so
+    # bash double-quote semantics work.
+    remote_workdir = skylet_constants.SKY_REMOTE_WORKDIR.replace('~', '$HOME')
+    return (
+        '# === Workdir: git clone via git_clone.sh ===\n'
+        f"echo '{_GIT_CLONE_SCRIPT_B64}' | base64 -d > /tmp/sky_git_clone.sh\n"
+        f'bash /tmp/sky_git_clone.sh "{remote_workdir}"\n'
+        'rm -f /tmp/sky_git_clone.sh\n'
+        f'cd "{remote_workdir}"\n')
+
+
+def _build_file_mounts_block(file_mounts: Optional[Dict[str, str]]) -> str:
+    """Build sbatch preamble commands for cloud-URI file mounts, or empty."""
+    if not file_mounts:
+        return ''
+    # pylint: disable=import-outside-toplevel
+    from sky import cloud_stores
+
+    commands: List[str] = []
+    for remote_path, source in file_mounts.items():
+        if not data_utils.is_cloud_store_url(source):
+            logger.warning('Slurm v1 fast path: skipping non-cloud-URL '
+                           f'file mount {source} -> {remote_path}')
+            continue
+        try:
+            storage = cloud_stores.get_storage_from_path(source)
+            if storage.is_directory(source):
+                mkdir_cmd = f'mkdir -p {shlex.quote(remote_path)}'
+                sync_cmd = storage.make_sync_dir_command(
+                    source=source, destination=remote_path)
+            else:
+                mkdir_cmd = (f'mkdir -p $(dirname {shlex.quote(remote_path)})')
+                sync_cmd = storage.make_sync_file_command(
+                    source=source, destination=remote_path)
+            commands.append(f'{mkdir_cmd} && {sync_cmd}')
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                f'Slurm v1 fast path: cannot generate sync command for '
+                f'{source} -> {remote_path}',
+                exc_info=True)
+    if not commands:
+        return ''
+    return '# === File Mounts ===\n' + '\n'.join(commands) + '\n'
+
+
+def _build_env_exports(envs: Optional[Dict[str, str]]) -> str:
+    """Render env exports as bash ``export`` lines."""
+    if not envs:
+        return ''
+    lines = ['# === Env vars ===']
+    for key, value in envs.items():
+        lines.append(f'export {key}={shlex.quote(str(value))}')
+    return '\n'.join(lines) + '\n'
+
+
+def _build_v1_sbatch_script(
+    *,
+    cluster_name_on_cloud: str,
+    num_nodes: int,
+    log_path: str,
+    resources: Dict[str, Any],
+    setup: Optional[str],
+    run: Optional[str],
+    envs: Dict[str, str],
+    workdir: Optional[Dict[str, Any]],
+    file_mounts: Optional[Dict[str, str]],
+    container_image: Optional[str],
+    extra_sbatch_directives: str,
+) -> str:
+    """Build the v1 sbatch script whose body is the user's setup+run.
+
+    Pattern: a single ``srun --nodes=N --ntasks-per-node=1`` whose body
+    is ``bash -c '<setup> && <run>'``. Container support wraps the same
+    srun with pyxis flags. No ``sleep infinity``; the job exits when
+    user code exits and Slurm marks it COMPLETED / FAILED naturally.
+    """
+    accelerator_type = resources.get('accelerator_type')
+    accelerator_count_raw = resources.get('accelerator_count')
+    try:
+        accelerator_count = int(
+            accelerator_count_raw) if accelerator_count_raw is not None else 0
+    except (TypeError, ValueError):
+        accelerator_count = 0
+
+    gpu_directive = ''
+    if accelerator_count > 0:
+        if (accelerator_type is not None and
+                accelerator_type.upper() != 'NONE'):
+            gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
+                             f'{accelerator_count}')
+        else:
+            gpu_directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+
+    mem_directive = ''
+    if float(resources.get('memory', 0)) > 0:
+        mem_in_mb = int(float(resources['memory']) * 1024)
+        mem_directive = f'#SBATCH --mem={mem_in_mb}M'
+
+    cpus = int(resources.get('cpus', 1))
+
+    # Compose the inner user command. ``set -o pipefail`` is the only
+    # global shell flag we impose — legacy doesn't add ``-e`` or ``-u``
+    # and user setup blocks routinely rely on ``+u`` (sourcing
+    # unset-var-tolerant rc files) and ``|| true``-style guards.
+    user_setup = (setup or '').strip()
+    user_run = (run or '').strip()
+    if user_setup and user_run:
+        user_script = f'set -o pipefail\n{user_setup}\n{user_run}'
+    elif user_setup:
+        user_script = f'set -o pipefail\n{user_setup}'
+    elif user_run:
+        user_script = f'set -o pipefail\n{user_run}'
+    else:
+        user_script = 'set -o pipefail\n# no setup / run specified'
+    quoted_user_script = shlex.quote(user_script)
+
+    # Container args (pyxis/enroot). Per-job container name (suffix with
+    # SLURM_JOB_ID) so a half-extracted rootfs from a killed previous
+    # attempt cannot collide with this attempt.
+    container_args = ''
+    if container_image:
+        container_name_base = slurm_utils.pyxis_container_name(
+            cluster_name_on_cloud)
+        container_args = (
+            f'--container-image={shlex.quote(container_image)} '
+            f'--container-name={shlex.quote(container_name_base)}-'
+            f'${{SLURM_JOB_ID}} '
+            f'--container-remap-root '
+            f'--container-writable ')
+
+    label_flag = '--label ' if num_nodes > 1 else ''
+    srun_line = (f'srun --nodes={num_nodes} --ntasks-per-node=1 '
+                 f'{label_flag}--unbuffered {container_args}'
+                 f'bash -c {quoted_user_script}')
+
+    workdir_block = _build_workdir_block(workdir)
+    file_mounts_block = _build_file_mounts_block(file_mounts)
+    env_exports = _build_env_exports(envs)
+
+    # pylint: disable=line-too-long
+    return (f'#!/bin/bash\n'
+            f'#SBATCH --job-name={cluster_name_on_cloud}\n'
+            f'#SBATCH --output={log_path}\n'
+            f'#SBATCH --error={log_path}\n'
+            f'#SBATCH --nodes={num_nodes}\n'
+            f'#SBATCH --wait-all-nodes=1\n'
+            f'#SBATCH --no-requeue\n'
+            f'#SBATCH --cpus-per-task={cpus}\n'
+            f'{mem_directive}\n'
+            f'{gpu_directive}'
+            f'{extra_sbatch_directives}\n'
+            f'\n'
+            f'{workdir_block}'
+            f'{file_mounts_block}'
+            f'{env_exports}'
+            f'\n'
+            f'{srun_line}\n')
+
+
+def _create_managed_job_v1(
+        region: str, cluster_name: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Create a Slurm v1 managed job (single real ``sbatch``).
+
+    Replaces the ``sleep infinity`` + ``srun --jobid`` pattern: the
+    sbatch script body IS the user's task. When user code exits, the
+    Slurm job finishes; state propagates to ``sacct`` naturally.
+
+    Preserves the legacy prologue invariants (COMPLETING-drain +
+    existing-job reattach) so concurrent recovery attempts cannot trip
+    over each other.
+    """
+    provider_config = config.provider_config
+    ssh_config_dict = provider_config['ssh']
+    ssh_host = ssh_config_dict['hostname']
+    ssh_port = int(ssh_config_dict['port'])
+    ssh_user = ssh_config_dict['user']
+    ssh_key = ssh_config_dict.get('private_key', None)
+    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    identities_only = ssh_config_dict.get('identities_only', False)
+    partition = slurm_utils.get_partition_from_config(provider_config)
+
+    client = slurm.SlurmClient(
+        ssh_host,
+        ssh_port,
+        ssh_user,
+        ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
+        identities_only=identities_only,
+    )
+
+    # ---- Drain COMPLETING jobs before submitting. Ported verbatim ----
+    # ---- from ``_create_virtual_instance``. Without this, recovery ----
+    # ---- attempt N+1 races attempt N's teardown and trips the ----
+    # ---- ``assert len(jobs_state) == 1`` invariant in ----
+    # ---- terminate_instances. ----
+    completing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['completing'],
+    )
+    start_time = time.time()
+    while (completing_jobs and
+           time.time() - start_time < _JOB_TERMINATION_TIMEOUT_SECONDS):
+        logger.debug(f'Found {len(completing_jobs)} completing jobs. '
+                     f'Waiting for them to finish: {completing_jobs}')
+        time.sleep(POLL_INTERVAL_SECONDS)
+        completing_jobs = client.query_jobs(
+            cluster_name_on_cloud,
+            ['completing'],
+        )
+    if completing_jobs:
+        raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
+                           'completing state after '
+                           f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s. '
+                           'This is typically due to non-killable processes '
+                           'associated with the job.')
+
+    # ---- Reattach if a previous attempt is already PENDING/RUNNING. ----
+    # ---- Without this, a controller restart mid-attempt would submit ----
+    # ---- a duplicate job. ----
+    existing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['pending', 'running'],
+    )
+    provision_timeout: int = provider_config.get('provision_timeout', -1)
+
+    num_nodes = config.count
+    last_status_msg = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        if parts:
+            msg = f'Launching ({", ".join(parts)})'
+        else:
+            msg = 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+
+    if existing_jobs:
+        assert len(existing_jobs) == 1, (
+            f'Multiple jobs found with name {cluster_name_on_cloud}: '
+            f'{existing_jobs}')
+
+        job_id = existing_jobs[0]
+        logger.debug(f'V1 job with name {cluster_name_on_cloud} already '
+                     f'exists (JOBID: {job_id}); reattaching.')
+
+        _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                            _on_pending)
+        nodes, _ = client.get_job_nodes(job_id)
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
+        return common.ProvisionRecord(
+            provider_name='slurm',
+            region=region,
+            zone=partition,
+            cluster_name=cluster_name_on_cloud,
+            head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+            resumed_instance_ids=[],
+            created_instance_ids=[
+                slurm_utils.instance_id(job_id, n) for n in nodes
+            ],
+            runtime_metadata=common.ProvisionRuntimeMetadata(
+                has_ray=False,
+                has_skylet=False,
+                has_job_queue=False,
+                ssh_available=False,
+                runtime_setup_done=True,
+                workdir_synced=True,
+                file_mounts_synced=True,
+                setup_done=True,
+                run_started=True,
+            ),
+        )
+
+    # ---- Fresh submission ----
+    login_node_runner = command_runner.SSHCommandRunner(
+        (ssh_host, ssh_port),
+        ssh_user,
+        ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
+        enable_interactive_auth=True,
+        disable_identities_only=not identities_only,
+    )
+    remote_home_dir = login_node_runner.get_remote_home_dir()
+
+    # Resolve workdir (must be on a shared FS — same contract as legacy).
+    workdir_cfg = skypilot_config.get_effective_region_config(
+        cloud='slurm', region=region, keys=('workdir',), default_value=None)
+    if workdir_cfg is not None:
+        remote_env = client.get_env()
+        workdir_cfg = slurm_utils.expand_path_vars(workdir_cfg, remote_env)
+
+    sky_base_dir = workdir_cfg if workdir_cfg is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    log_path = _sbatch_log_path(sky_base_dir, '%j')
+
+    provision_script_path = _sbatch_provision_script_path(
+        sky_base_dir, cluster_name_on_cloud)
+    provision_scripts_dir = os.path.dirname(provision_script_path)
+
+    # Read the persisted v1 execution payload from the provider config.
+    setup = provider_config.get('setup')
+    run = provider_config.get('run')
+    envs = provider_config.get('envs') or {}
+    workdir_payload = provider_config.get('workdir')
+    file_mounts_payload = provider_config.get('file_mounts')
+    container_image = provider_config.get('container_image')
+    sbatch_options = provider_config.get('sbatch_options') or {}
+
+    # Build user-supplied + auto-generated sbatch directives. We still
+    # consult partition info to compute a sensible ``--time`` default.
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
+    if partition_info is None:
+        raise ValueError(f'Partition info for {partition} not found '
+                         f'for SLURM cluster {slurm_cluster}')
+    extra_sbatch_directives = _build_sbatch_directives(sbatch_options,
+                                                       partition_info,
+                                                       partition)
+
+    resources = config.node_config
+
+    sbatch_script = _build_v1_sbatch_script(
+        cluster_name_on_cloud=cluster_name_on_cloud,
+        num_nodes=num_nodes,
+        log_path=log_path,
+        resources=resources,
+        setup=setup,
+        run=run,
+        envs=envs,
+        workdir=workdir_payload,
+        file_mounts=file_mounts_payload,
+        container_image=container_image,
+        extra_sbatch_directives=extra_sbatch_directives,
+    )
+
+    cmd = f'mkdir -p {provision_scripts_dir}'
+    rc, stdout, stderr = login_node_runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc,
+        cmd,
+        'Failed to create provision scripts directory on login node.',
+        stderr=f'{stdout}\n{stderr}')
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=True) as f:
+        f.write(sbatch_script)
+        f.flush()
+        login_node_runner.rsync(f.name,
+                                provision_script_path,
+                                up=True,
+                                stream_logs=False)
+
+    job_id = client.submit_job(partition, cluster_name_on_cloud,
+                               provision_script_path)
+    logger.debug(f'Submitted v1 Slurm job {job_id} to partition {partition} '
+                 f'for cluster {cluster_name_on_cloud} with {num_nodes} nodes')
+
+    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                        _on_pending)
+    nodes, _ = client.get_job_nodes(job_id)
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
+
+    created_instance_ids = [
+        slurm_utils.instance_id(job_id, node) for node in nodes
+    ]
+
+    return common.ProvisionRecord(
+        provider_name='slurm',
+        region=region,
+        zone=partition,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+        resumed_instance_ids=[],
+        created_instance_ids=created_instance_ids,
+        runtime_metadata=common.ProvisionRuntimeMetadata(
+            has_ray=False,
+            has_skylet=False,
+            has_job_queue=False,
+            ssh_available=False,
+            runtime_setup_done=True,
+            workdir_synced=True,
+            file_mounts_synced=True,
+            setup_done=True,
+            run_started=True,
+        ),
+    )
