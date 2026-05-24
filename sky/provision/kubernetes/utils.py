@@ -3466,10 +3466,16 @@ def ensure_custom_image_container_runs_as_root(
 
 
 def _apply_run_as_root_to_ray_node_container(spec: Dict[str, Any]) -> None:
-    for container in spec.get('containers', []):
+    containers = spec.get('containers')
+    if not isinstance(containers, list):
+        return
+    for container in containers:
         if container.get('name') != RAY_NODE_CONTAINER_NAME:
             continue
-        sec_ctx = container.setdefault('securityContext', {})
+        sec_ctx = container.get('securityContext')
+        if not isinstance(sec_ctx, dict):
+            sec_ctx = {}
+            container['securityContext'] = sec_ctx
         if 'runAsUser' in sec_ctx or sec_ctx.get('runAsNonRoot') is True:
             return
         sec_ctx['runAsUser'] = 0

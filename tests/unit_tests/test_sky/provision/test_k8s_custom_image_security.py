@@ -40,6 +40,22 @@ def test_ensure_custom_image_respects_existing_run_as_user():
     assert 'runAsGroup' not in container['securityContext']
 
 
+def test_ensure_custom_image_handles_null_security_context():
+    cluster_yaml = _minimal_cluster_yaml()
+    container = cluster_yaml['available_node_types']['ray_head_default'][
+        'node_config']['spec']['containers'][0]
+    container['securityContext'] = None
+    kubernetes_utils.ensure_custom_image_container_runs_as_root(cluster_yaml)
+    assert container['securityContext']['runAsUser'] == 0
+
+
+def test_ensure_custom_image_handles_null_containers_list():
+    cluster_yaml = _minimal_cluster_yaml()
+    cluster_yaml['available_node_types']['ray_head_default']['node_config'][
+        'spec']['containers'] = None
+    kubernetes_utils.ensure_custom_image_container_runs_as_root(cluster_yaml)
+
+
 def test_ensure_custom_image_respects_run_as_non_root():
     cluster_yaml = _minimal_cluster_yaml()
     container = cluster_yaml['available_node_types']['ray_head_default'][
