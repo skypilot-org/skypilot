@@ -1642,11 +1642,36 @@ class Task:
             storage_to_construct = sorted(storages,
                                           key=lambda x: len(x.stores),
                                           reverse=True)
+            # Compute the task's preferred (store_type, region) lazily and
+            # only once. Both code paths below need it: user-specified stores
+            # created inside ``construct()`` use it to pick a region (so an
+            # Azure bucket lands in the same region as the cluster instead of
+            # the hardcoded ``eastus`` default), and stores created when the
+            # user did not specify any ``store:`` use it too. See #8504.
+            preferred_cache: Optional[Tuple[storage_lib.StoreType,
+                                            Optional[str]]] = None
+
+            def get_preferred() -> Tuple[storage_lib.StoreType, Optional[str]]:
+                nonlocal preferred_cache
+                if preferred_cache is None:
+                    preferred_cache = self._get_preferred_store()
+                return preferred_cache
+
             for storage in storage_to_construct:
-                storage.construct()
+                try:
+                    preferred_store_type, preferred_region = get_preferred()
+                except (exceptions.NoCloudAccessError, ValueError):
+                    # Hint-only path: tolerate cases where the task's compute
+                    # cloud has no associated storage (e.g. Kubernetes,
+                    # Lambda) and ``_get_preferred_store`` raises. If the
+                    # storage actually needs a default store, the lazy call
+                    # below will re-raise with the original error.
+                    preferred_store_type, preferred_region = None, None
+                storage.construct(preferred_store_type=preferred_store_type,
+                                  preferred_region=preferred_region)
                 assert storage.name is not None, storage
                 if not storage.stores:
-                    store_type, store_region = self._get_preferred_store()
+                    store_type, store_region = get_preferred()
                     self.storage_plans[storage] = store_type
                     storage.add_store(store_type, store_region)
                 else:
