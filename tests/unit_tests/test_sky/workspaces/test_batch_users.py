@@ -165,8 +165,15 @@ class TestBatchAddUsersToWorkspaces:
         result = core.batch_add_users_to_workspaces(['p1'], ['unknown'])
         # No real workspaces touched; the unknown user surfaces as a failure.
         assert result['succeeded'] == []
-        assert any(f['error'].startswith('User unknown does not exist')
-                   for f in result['failed'])
+        unknown_failures = [
+            f for f in result['failed']
+            if f['error'].startswith('User unknown does not exist')
+        ]
+        assert len(unknown_failures) == 1
+        # The failure is not workspace-scoped, so workspace_name uses the
+        # '-' placeholder (not an empty string, which would render as
+        # "workspace=" in the UI).
+        assert unknown_failures[0]['workspace_name'] == '-'
         # Modifier never reached config-update path.
         mock_update_config.assert_not_called()
 

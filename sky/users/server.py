@@ -250,16 +250,19 @@ def user_batch_update(request: fastapi.Request,
         # Promotion -> nobody needs the demotion check, so no need to fetch
         # workspaces / active resources.
         batch_workspaces = None
-        batch_active_resources = None
+        batch_active_resources_by_user = None
     else:
         # Any non-admin target (user, viewer, ...) removes the targets from
         # the admin set.
         remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
-        # Fetch the inputs the per-user demotion check needs ONCE for the
-        # whole batch so we don't re-reload the YAML config and re-fetch
-        # all clusters + managed jobs N times.
+        # Fetch + index the inputs the per-user demotion check needs ONCE
+        # for the whole batch. This drops the per-user O(C+J) filter scan
+        # to an O(1) dict lookup, so the whole batch is O(N + C + J)
+        # instead of O(N * (C+J)).
         batch_workspaces = resource_checker.load_fresh_workspaces()
-        batch_active_resources = resource_checker.get_active_resources()
+        batch_active_resources_by_user = (
+            resource_checker.index_active_resources_by_user_hash(
+                resource_checker.get_active_resources()))
 
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
@@ -300,7 +303,7 @@ def user_batch_update(request: fastapi.Request,
                     user_info.id,
                     remaining_admin_user_ids=remaining_admin_user_ids,
                     workspaces=batch_workspaces,
-                    active_resources=batch_active_resources)
+                    active_resources_by_user=batch_active_resources_by_user)
             with _user_lock(user_info.id):
                 permission.permission_service.update_role(user_info.id, role)
             succeeded.append(user_id)

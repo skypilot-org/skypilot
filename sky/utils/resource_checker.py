@@ -1,5 +1,6 @@
 """Resource checking utilities for finding active clusters and managed jobs."""
 
+import collections
 import concurrent.futures
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -281,6 +282,31 @@ def get_active_resources() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     return _get_active_resources()
 
 
+def index_active_resources_by_user_hash(
+    active_resources: Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]
+) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
+    """Group (clusters, jobs) by ``user_hash`` for O(1) per-user lookup.
+
+    For a batch of N users, building this index ONCE up-front and passing it
+    via ``check_user_role_demotion(..., active_resources_by_user=...)``
+    drops the per-user filter from O(C+J) to O(C_user + J_user), giving
+    O(N + C + J) total instead of O(N * (C+J)).
+    """
+    clusters_by_user: Dict[str, List[Dict[str,
+                                          Any]]] = collections.defaultdict(list)
+    jobs_by_user: Dict[str, List[Dict[str,
+                                      Any]]] = collections.defaultdict(list)
+    for cluster in active_resources[0]:
+        user_hash = cluster.get('user_hash')
+        if user_hash:
+            clusters_by_user[user_hash].append(cluster)
+    for job in active_resources[1]:
+        user_hash = job.get('user_hash')
+        if user_hash:
+            jobs_by_user[user_hash].append(job)
+    return clusters_by_user, jobs_by_user
+
+
 def load_fresh_workspaces() -> Dict[str, Any]:
     """Reload the skypilot config from disk and return the workspaces dict.
 
@@ -300,7 +326,10 @@ def check_user_role_demotion(
     remaining_admin_user_ids: Optional[Set[str]] = None,
     workspaces: Optional[Dict[str, Any]] = None,
     active_resources: Optional[Tuple[List[Dict[str, Any]],
-                                     List[Dict[str, Any]]]] = None
+                                     List[Dict[str, Any]]]] = None,
+    active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str, Any]]],
+                                             Dict[str, List[Dict[str,
+                                                                 Any]]]]] = None
 ) -> None:
     """Check whether an admin can be safely demoted to a regular user.
 
@@ -322,6 +351,12 @@ def check_user_role_demotion(
             tuple. When called in a batch loop, the caller should fetch
             this once via ``get_active_resources()`` and pass it in to
             avoid the per-call cluster+jobs fetch.
+        active_resources_by_user: Optional pre-built
+            ``(clusters_by_user_hash, jobs_by_user_hash)`` index from
+            ``index_active_resources_by_user_hash``. When provided, the
+            per-user lookup is O(1) instead of an O(C+J) scan, giving
+            O(N + C + J) total for a batch instead of O(N * (C+J)).
+            Takes precedence over ``active_resources`` if both are set.
 
     Raises:
         ValueError: If the user has active clusters or managed jobs in
@@ -362,24 +397,34 @@ def check_user_role_demotion(
     if not inaccessible_workspaces:
         return
 
-    if active_resources is None:
-        all_clusters, all_managed_jobs = _get_active_resources()
+    # Resolve the demoted user's clusters / jobs. Prefer the pre-built
+    # index (O(1) lookup) when the batch caller supplied one; fall back
+    # to the linear filter over the raw (clusters, jobs) tuple.
+    if active_resources_by_user is not None:
+        clusters_by_user, jobs_by_user = active_resources_by_user
+        user_clusters = clusters_by_user.get(user_id, [])
+        user_jobs = jobs_by_user.get(user_id, [])
     else:
-        all_clusters, all_managed_jobs = active_resources
-    workspace_set = set(inaccessible_workspaces)
+        if active_resources is None:
+            all_clusters, all_managed_jobs = _get_active_resources()
+        else:
+            all_clusters, all_managed_jobs = active_resources
+        user_clusters = [
+            c for c in all_clusters if c.get('user_hash') == user_id
+        ]
+        user_jobs = [
+            j for j in all_managed_jobs if j.get('user_hash') == user_id
+        ]
 
+    workspace_set = set(inaccessible_workspaces)
     workspace_resources: Dict[str, Dict[str, List[str]]] = {}
-    for cluster in all_clusters:
-        if cluster.get('user_hash') != user_id:
-            continue
+    for cluster in user_clusters:
         ws = cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
         if ws not in workspace_set:
             continue
         workspace_resources.setdefault(ws, {'clusters': [], 'jobs': []})
         workspace_resources[ws]['clusters'].append(cluster['name'])
-    for job in all_managed_jobs:
-        if job.get('user_hash') != user_id:
-            continue
+    for job in user_jobs:
         ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
         if ws not in workspace_set:
             continue

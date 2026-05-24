@@ -729,19 +729,27 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
 
     # Resolve each user_id to its preferred allowed_users entry ONCE for the
     # whole batch (avoids O(W * N * M) work where W=workspaces, N=batch,
-    # M=total users). Preserve the input order for stable test output.
+    # M=total users). Build name_to_ids and user_id_to_user once so
+    # preferred_identifier_for_user is O(1) instead of O(M) per call.
     all_users = global_user_state.get_all_users()
     name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
+    user_id_to_user = workspaces_utils.build_user_id_to_user_map(all_users)
     user_id_to_entry: Dict[str, str] = {}
     failed: List[Dict[str, str]] = []
     for user_id in user_ids:
         if user_id in user_id_to_entry:
             continue
         entry = workspaces_utils.preferred_identifier_for_user(
-            user_id, all_users=all_users, name_to_ids=name_to_ids)
+            user_id,
+            all_users=all_users,
+            name_to_ids=name_to_ids,
+            user_id_to_user=user_id_to_user)
         if entry is None:
+            # User resolution failure is not workspace-scoped; use a
+            # placeholder so the UI doesn't render "workspace=" with an
+            # empty value.
             failed.append({
-                'workspace_name': '',
+                'workspace_name': '-',
                 'error': f'User {user_id} does not exist',
             })
             continue
@@ -846,16 +854,19 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     if not user_ids:
         raise ValueError('user_ids must not be empty')
 
-    # Build the username->ids map once for the batch so each
-    # entries_for_user call below is O(1) lookup instead of O(M) rebuild.
+    # Build the lookup maps once for the batch so each entries_for_user call
+    # is O(1) instead of O(M) rebuild + O(M) linear scan.
     all_users = global_user_state.get_all_users()
     name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
+    user_id_to_user = workspaces_utils.build_user_id_to_user_map(all_users)
     user_entries_map: Dict[str, List[str]] = {}
     failed: List[Dict[str, str]] = []
     for user_id in user_ids:
-        entries = workspaces_utils.entries_for_user(user_id,
-                                                    all_users=all_users,
-                                                    name_to_ids=name_to_ids)
+        entries = workspaces_utils.entries_for_user(
+            user_id,
+            all_users=all_users,
+            name_to_ids=name_to_ids,
+            user_id_to_user=user_id_to_user)
         # If the user doesn't exist, entries_for_user returns [user_id]; we
         # still allow removal in case the workspace has a stale entry.
         user_entries_map[user_id] = entries

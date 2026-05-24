@@ -121,6 +121,8 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.workspaces.delete': (),
     'sky.workspaces.get': (),
     'sky.workspaces.get_config': (),
+    'sky.workspaces.batch_add_users': (),
+    'sky.workspaces.batch_remove_users': (),
     'sky.recipes.list': (),
     'sky.recipes.get': (),
     'sky.recipes.delete': (),

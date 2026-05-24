@@ -23,26 +23,49 @@ def build_username_to_ids_map(
     return name_to_ids
 
 
+def build_user_id_to_user_map(
+        all_users: List[models.User]) -> Dict[str, models.User]:
+    """Build a user_id -> User map. Exposed so batch callers can avoid the
+    O(len(all_users)) linear scan inside ``preferred_identifier_for_user`` /
+    ``entries_for_user``.
+    """
+    return {user.id: user for user in all_users}
+
+
+def _resolve_user_info(
+        user_id: str, all_users: Optional[List[models.User]],
+        user_id_to_user: Optional[Dict[str,
+                                       models.User]]) -> Optional[models.User]:
+    if user_id_to_user is not None:
+        return user_id_to_user.get(user_id)
+    # Defensive: a future caller could pass both args as None.
+    if all_users is None:
+        return None
+    for user in all_users:
+        if user.id == user_id:
+            return user
+    return None
+
+
 def preferred_identifier_for_user(
         user_id: str,
         all_users: Optional[List[models.User]] = None,
-        name_to_ids: Optional[Dict[str, List[str]]] = None) -> Optional[str]:
+        name_to_ids: Optional[Dict[str, List[str]]] = None,
+        user_id_to_user: Optional[Dict[str,
+                                       models.User]] = None) -> Optional[str]:
     """Return the preferred ``allowed_users`` entry for a given user_id.
 
     Prefers the username when it uniquely resolves back to ``user_id``;
     otherwise falls back to ``user_id``. Returns ``None`` if no user exists
     for the given id.
 
-    ``name_to_ids`` is an optional pre-built map (see
-    ``build_username_to_ids_map``) for batch callers to avoid recomputing it.
+    ``name_to_ids`` and ``user_id_to_user`` are optional pre-built maps
+    (see ``build_username_to_ids_map`` / ``build_user_id_to_user_map``) so
+    batch callers can avoid the O(M) scan + O(M) map rebuild on every call.
     """
     if all_users is None:
         all_users = global_user_state.get_all_users()
-    user_info = None
-    for user in all_users:
-        if user.id == user_id:
-            user_info = user
-            break
+    user_info = _resolve_user_info(user_id, all_users, user_id_to_user)
     if user_info is None:
         return None
     if not user_info.name:
@@ -57,22 +80,19 @@ def preferred_identifier_for_user(
 def entries_for_user(
         user_id: str,
         all_users: Optional[List[models.User]] = None,
-        name_to_ids: Optional[Dict[str, List[str]]] = None) -> List[str]:
+        name_to_ids: Optional[Dict[str, List[str]]] = None,
+        user_id_to_user: Optional[Dict[str, models.User]] = None) -> List[str]:
     """Return all ``allowed_users`` entries that resolve to ``user_id``.
 
     Includes both the user_id itself and the username (when unique). Used to
     strip every form of a user from a workspace's ``allowed_users`` list.
 
-    ``name_to_ids`` is an optional pre-built map (see
-    ``build_username_to_ids_map``) for batch callers.
+    ``name_to_ids`` and ``user_id_to_user`` are optional pre-built maps
+    for batch callers; see ``preferred_identifier_for_user``.
     """
     if all_users is None:
         all_users = global_user_state.get_all_users()
-    user_info = None
-    for user in all_users:
-        if user.id == user_id:
-            user_info = user
-            break
+    user_info = _resolve_user_info(user_id, all_users, user_id_to_user)
     if user_info is None:
         return [user_id]
     entries = [user_id]
