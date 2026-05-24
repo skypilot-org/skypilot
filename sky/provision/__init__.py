@@ -133,6 +133,18 @@ def get_registered_provisioner(cloud_name: str) -> Optional[Provisioner]:
     return _registered_provisioners.get(cloud_name.lower())
 
 
+# Register the OSS Slurm provisioner with its v1 managed-job template
+# override hook. The slurm module's routed lifecycle functions
+# (``run_instances``, ``terminate_instances`` etc.) are still picked
+# up by the existing cloud-name lookup in ``_route_to_cloud_impl`` —
+# this registration only adds the ``template_override`` capability.
+register_provisioner(
+    'slurm',
+    module=slurm,
+    template_override=slurm.instance.template_override,
+)
+
+
 def _route_to_cloud_impl(func):
 
     @functools.wraps(func)
