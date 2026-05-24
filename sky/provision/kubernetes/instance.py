@@ -21,6 +21,7 @@ from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
+from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -977,8 +978,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         'echo "apt update complete."; ')
 
     install_ssh_k8s_cmd = (
-        'prefix_cmd() '
-        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        skylet_constants.PREFIX_CMD_SHELL_SNIPPET + ' ' +
+        skylet_constants.REQUIRE_ROOT_OR_SUDO_SHELL_SNIPPET + ' '
         'export DEBIAN_FRONTEND=noninteractive;'
         'echo "Installing missing packages..."; '
         'for i in {1..5}; do '

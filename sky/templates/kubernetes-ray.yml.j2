@@ -761,10 +761,23 @@ available_node_types:
               {%- endfor %}
               {%- endif %}
 
-              # Helper function to conditionally use sudo
+              # Helper function to conditionally use sudo. Only prefix with sudo
+              # when sudo is installed; many minimal container images omit it.
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
-              prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
-              [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
+              prefix_cmd() {
+                if [ "$(id -u)" -eq 0 ]; then
+                  echo ""
+                elif command -v sudo >/dev/null 2>&1; then
+                  echo "sudo"
+                else
+                  echo ""
+                fi
+              }
+              [ "$(id -u)" -eq 0 ] && function sudo() { "$@"; } || true;
+              if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+                echo "SkyPilot node setup requires root or sudo, but this container runs as $(id -un) (uid $(id -u)) without sudo installed. For Kubernetes custom images, set config.kubernetes.pod_config.spec.containers[].securityContext.runAsUser: 0." >&2
+                exit 1
+              fi
 
               {% for path in volume_mount_rw_paths %}
               # Fix write permissions for volume mount if needed.

@@ -3444,6 +3444,39 @@ def resolve_effective_pod_config(
     return kubernetes_config
 
 
+RAY_NODE_CONTAINER_NAME = 'ray-node'
+
+
+def ensure_custom_image_container_runs_as_root(
+        cluster_yaml_obj: Dict[str, Any]) -> None:
+    """Set ``runAsUser: 0`` on the ray-node container for custom images.
+
+    Minimal container images (e.g. NVIDIA NGC) often default to a non-root
+    user without ``sudo``, which breaks SkyPilot's apt/ssh bootstrap. This is
+    applied only when the user has not already set ``runAsUser`` or
+    ``runAsNonRoot`` via ``pod_config``.
+    """
+    for node_type_cfg in cluster_yaml_obj.get('available_node_types',
+                                              {}).values():
+        node_config = node_type_cfg.get('node_config', {})
+        spec = node_config.get('spec')
+        if not isinstance(spec, dict):
+            continue
+        _apply_run_as_root_to_ray_node_container(spec)
+
+
+def _apply_run_as_root_to_ray_node_container(spec: Dict[str, Any]) -> None:
+    for container in spec.get('containers', []):
+        if container.get('name') != RAY_NODE_CONTAINER_NAME:
+            continue
+        sec_ctx = container.setdefault('securityContext', {})
+        if 'runAsUser' in sec_ctx or sec_ctx.get('runAsNonRoot') is True:
+            return
+        sec_ctx['runAsUser'] = 0
+        sec_ctx.setdefault('runAsGroup', 0)
+        return
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],

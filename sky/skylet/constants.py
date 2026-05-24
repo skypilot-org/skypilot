@@ -211,6 +211,24 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
                            f'mkdir -p ~/.sky/sky_app && '
                            f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
+# Shell helpers for container bootstrap (Kubernetes/Docker). ``prefix_cmd``
+# only emits ``sudo`` when sudo is installed; many minimal images omit it.
+PREFIX_CMD_SHELL_SNIPPET = (
+    'prefix_cmd() { '
+    'if [ "$(id -u)" -eq 0 ]; then echo ""; '
+    'elif command -v sudo >/dev/null 2>&1; then echo "sudo"; '
+    'else echo ""; fi; }; '
+    '[ "$(id -u)" -eq 0 ] && function sudo() { "$@"; } || true;')
+
+# Fail fast when bootstrap needs root but the container is non-root without
+# sudo.
+REQUIRE_ROOT_OR_SUDO_SHELL_SNIPPET = (
+    'if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then '
+    'echo "SkyPilot node setup requires root or sudo, but this container '
+    'runs as $(id -un) (uid $(id -u)) without sudo installed. '
+    'For Kubernetes custom images, set pod_config securityContext '
+    'runAsUser: 0." >&2; exit 1; fi;')
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.

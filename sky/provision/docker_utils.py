@@ -21,8 +21,7 @@ logger = sky_logging.init_logger(__name__)
 # but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
 # See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
-    'prefix_cmd() '
-    '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+    constants.PREFIX_CMD_SHELL_SNIPPET + ' && '
     'export -p | grep -v RAY_RUNTIME_ENV_HOOK > ~/container_env_var.sh && '
     '$(prefix_cmd) '
     'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')

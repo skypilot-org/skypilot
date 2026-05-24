@@ -1259,6 +1259,9 @@ def write_cluster_config(
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
+        if to_provision.extract_docker_image() is not None:
+            kubernetes_utils.ensure_custom_image_container_runs_as_root(
+                combined_yaml_obj)
         # Write the updated YAML back to the file
         yaml_utils.dump_yaml(tmp_yaml_path, combined_yaml_obj)
 
