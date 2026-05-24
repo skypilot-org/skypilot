@@ -1,7 +1,7 @@
 """Workspace management core."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import filelock
 
@@ -226,15 +226,23 @@ def _compare_workspace_configs(
 
 
 def _validate_workspace_config_changes_with_lock(
-        workspace_name: str, current_config: Dict[str, Any],
-        new_config: Dict[str, Any]) -> None:
+    workspace_name: str,
+    current_config: Dict[str, Any],
+    new_config: Dict[str, Any],
+    active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
+                                                   List[Dict[str,
+                                                             Any]]]] = None,
+) -> None:
     lock_id = backend_utils.workspace_lock_id(workspace_name)
     lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
     try:
         with locks.get_lock(lock_id, lock_timeout):
             # Validate the configuration changes based on active resources
-            _validate_workspace_config_changes(workspace_name, current_config,
-                                               new_config)
+            _validate_workspace_config_changes(
+                workspace_name,
+                current_config,
+                new_config,
+                active_resources_for_workspace=active_resources_for_workspace)
     except locks.LockTimeout as e:
         raise RuntimeError(
             f'Failed to validate workspace {workspace_name!r} due to '
@@ -243,9 +251,14 @@ def _validate_workspace_config_changes_with_lock(
             f'{common_utils.format_exception(e)}') from None
 
 
-def _validate_workspace_config_changes(workspace_name: str,
-                                       current_config: Dict[str, Any],
-                                       new_config: Dict[str, Any]) -> None:
+def _validate_workspace_config_changes(
+    workspace_name: str,
+    current_config: Dict[str, Any],
+    new_config: Dict[str, Any],
+    active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
+                                                   List[Dict[str,
+                                                             Any]]]] = None,
+) -> None:
     """Validate workspace configuration changes based on active resources.
 
     This function implements the logic:
@@ -261,6 +274,12 @@ def _validate_workspace_config_changes(workspace_name: str,
         workspace_name: The name of the workspace.
         current_config: The current workspace configuration.
         new_config: The new workspace configuration.
+        active_resources_for_workspace: Optional pre-fetched
+            ``(clusters, managed_jobs)`` tuple already filtered to this
+            workspace. Batch callers should fetch this once for all
+            workspaces in the batch (via
+            ``resource_checker._get_active_resources_for_workspaces``) and
+            pass the per-workspace slice to avoid the per-call fetch.
 
     Raises:
         ValueError: If the configuration change is not allowed due to active
@@ -289,7 +308,8 @@ def _validate_workspace_config_changes(workspace_name: str,
 
                 error_summary, missed_users_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
-                        config_comparison.allowed_users_new, [workspace_name]))
+                        config_comparison.allowed_users_new, [workspace_name],
+                        active_resources=active_resources_for_workspace))
                 if error_summary:
                     error_msg=f'Cannot change workspace {workspace_name!r}' \
                     f' to private '
@@ -316,7 +336,8 @@ def _validate_workspace_config_changes(workspace_name: str,
                     f' active resources in workspace {workspace_name!r}.')
                 error_summary, missed_users_names, missed_user_dict = (
                     resource_checker.check_users_workspaces_active_resources(
-                        config_comparison.allowed_users_new, [workspace_name]))
+                        config_comparison.allowed_users_new, [workspace_name],
+                        active_resources=active_resources_for_workspace))
                 if error_summary:
                     error_user_ids = []
                     for user_id in config_comparison.removed_users:
@@ -706,25 +727,27 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
     if not user_ids:
         raise ValueError('user_ids must not be empty')
 
+    # Resolve each user_id to its preferred allowed_users entry ONCE for the
+    # whole batch (avoids O(W * N * M) work where W=workspaces, N=batch,
+    # M=total users). Preserve the input order for stable test output.
     all_users = global_user_state.get_all_users()
-    entries_to_add: List[str] = []
+    name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
+    user_id_to_entry: Dict[str, str] = {}
     failed: List[Dict[str, str]] = []
-    user_id_set = set()
     for user_id in user_ids:
+        if user_id in user_id_to_entry:
+            continue
         entry = workspaces_utils.preferred_identifier_for_user(
-            user_id, all_users=all_users)
+            user_id, all_users=all_users, name_to_ids=name_to_ids)
         if entry is None:
             failed.append({
                 'workspace_name': '',
                 'error': f'User {user_id} does not exist',
             })
             continue
-        if user_id in user_id_set:
-            continue
-        user_id_set.add(user_id)
-        entries_to_add.append(entry)
+        user_id_to_entry[user_id] = entry
 
-    if not entries_to_add:
+    if not user_id_to_entry:
         return {'succeeded': [], 'failed': failed}
 
     succeeded: List[str] = []
@@ -756,13 +779,7 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                     workspaces_utils.get_workspace_users(current_config))
                 new_allowed = list(current_allowed)
                 added = False
-                for user_id, entry in zip(user_ids, [
-                        workspaces_utils.preferred_identifier_for_user(
-                            uid, all_users=all_users) for uid in user_ids
-                ]):
-                    if entry is None:
-                        # Already reported above.
-                        continue
+                for user_id, entry in user_id_to_entry.items():
                     if user_id in resolved_current:
                         continue
                     new_allowed.append(entry)
@@ -829,12 +846,16 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     if not user_ids:
         raise ValueError('user_ids must not be empty')
 
+    # Build the username->ids map once for the batch so each
+    # entries_for_user call below is O(1) lookup instead of O(M) rebuild.
     all_users = global_user_state.get_all_users()
+    name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
     user_entries_map: Dict[str, List[str]] = {}
     failed: List[Dict[str, str]] = []
     for user_id in user_ids:
         entries = workspaces_utils.entries_for_user(user_id,
-                                                    all_users=all_users)
+                                                    all_users=all_users,
+                                                    name_to_ids=name_to_ids)
         # If the user doesn't exist, entries_for_user returns [user_id]; we
         # still allow removal in case the workspace has a stale entry.
         user_entries_map[user_id] = entries
@@ -853,6 +874,27 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     current_config = skypilot_config.to_dict()
     current_workspaces = current_config.get('workspaces', {})
     validated_new_configs: Dict[str, Dict[str, Any]] = {}
+
+    # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
+    # Otherwise each per-workspace _validate_workspace_config_changes call
+    # would re-query clusters + managed jobs from scratch (the
+    # managed-jobs fetch in particular is a blocking RPC to the
+    # controller), giving O(W * (C+J)) instead of O(C+J).
+    # pylint: disable=protected-access
+    batch_clusters, batch_jobs = (
+        resource_checker._get_active_resources_for_workspaces(workspace_names))
+    ws_resources: Dict[str, Tuple[List[Dict[str, Any]],
+                                  List[Dict[str, Any]]]] = {
+                                      name: ([], []) for name in workspace_names
+                                  }
+    for cluster in batch_clusters:
+        ws = cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if ws in ws_resources:
+            ws_resources[ws][0].append(cluster)
+    for job in batch_jobs:
+        ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if ws in ws_resources:
+            ws_resources[ws][1].append(job)
 
     for workspace_name in workspace_names:
         try:
@@ -882,7 +924,10 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             new_ws_config['allowed_users'] = new_allowed
             _validate_workspace_config(workspace_name, new_ws_config)
             _validate_workspace_config_changes_with_lock(
-                workspace_name, current_ws_config, new_ws_config)
+                workspace_name,
+                current_ws_config,
+                new_ws_config,
+                active_resources_for_workspace=ws_resources[workspace_name])
             validated_new_configs[workspace_name] = new_ws_config
         except ValueError as e:
             failed.append({

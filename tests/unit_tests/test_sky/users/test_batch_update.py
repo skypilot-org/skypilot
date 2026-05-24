@@ -122,6 +122,10 @@ class TestUserBatchUpdate:
             server.user_batch_update(admin_request, body)
         assert exc_info.value.status_code == 400
 
+    @mock.patch('sky.utils.resource_checker.get_active_resources',
+                return_value=([], []))
+    @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
+                return_value={})
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
     @mock.patch('sky.users.permission.permission_service.update_role')
@@ -131,6 +135,7 @@ class TestUserBatchUpdate:
     def test_demotion_failure_isolated_to_offending_user(
             self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
             mock_update_role, mock_demotion_check, mock_user_lock,
+            mock_load_fresh_workspaces, mock_get_active_resources,
             admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
@@ -139,7 +144,7 @@ class TestUserBatchUpdate:
         mock_get_user.side_effect = lambda uid: _mk_user(uid,
                                                          name=f'name-{uid}')
 
-        def fake_demotion_check(uid, remaining_admin_user_ids=None):
+        def fake_demotion_check(uid, **_kwargs):
             if uid == 'u2':
                 raise ValueError(
                     "user 'u2' has active resources in 'private-ws'")
@@ -157,6 +162,10 @@ class TestUserBatchUpdate:
         # update_role only called for the two that passed the check.
         assert mock_update_role.call_count == 2
 
+    @mock.patch('sky.utils.resource_checker.get_active_resources',
+                return_value=([], []))
+    @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
+                return_value={})
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.utils.resource_checker.check_user_role_demotion')
     @mock.patch('sky.users.permission.permission_service.update_role')
@@ -166,6 +175,7 @@ class TestUserBatchUpdate:
     def test_demotion_check_also_fires_for_admin_to_viewer(
             self, mock_get_user, mock_get_users_for_role, mock_get_user_roles,
             mock_update_role, mock_demotion_check, mock_user_lock,
+            mock_load_fresh_workspaces, mock_get_active_resources,
             admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())

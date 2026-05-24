@@ -247,10 +247,19 @@ def user_batch_update(request: fastapi.Request,
             rbac.RoleName.ADMIN.value))
     if role == rbac.RoleName.ADMIN.value:
         remaining_admin_user_ids = all_admin_user_ids | set(user_ids)
+        # Promotion -> nobody needs the demotion check, so no need to fetch
+        # workspaces / active resources.
+        batch_workspaces = None
+        batch_active_resources = None
     else:
         # Any non-admin target (user, viewer, ...) removes the targets from
         # the admin set.
         remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
+        # Fetch the inputs the per-user demotion check needs ONCE for the
+        # whole batch so we don't re-reload the YAML config and re-fetch
+        # all clusters + managed jobs N times.
+        batch_workspaces = resource_checker.load_fresh_workspaces()
+        batch_active_resources = resource_checker.get_active_resources()
 
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
@@ -281,13 +290,17 @@ def user_batch_update(request: fastapi.Request,
                 continue
             # When demoting from admin to a non-admin role (user / viewer),
             # ensure the user has no active resources in private workspaces
-            # they will lose implicit access to.
+            # they will lose implicit access to. Reuse the per-batch
+            # pre-fetched workspaces + active resources to keep this O(C+J)
+            # for the whole batch instead of O(N * (C+J)).
             if (target_user_roles and
                     target_user_roles[0] == rbac.RoleName.ADMIN.value and
                     role != rbac.RoleName.ADMIN.value):
                 resource_checker.check_user_role_demotion(
                     user_info.id,
-                    remaining_admin_user_ids=remaining_admin_user_ids)
+                    remaining_admin_user_ids=remaining_admin_user_ids,
+                    workspaces=batch_workspaces,
+                    active_resources=batch_active_resources)
             with _user_lock(user_info.id):
                 permission.permission_service.update_role(user_info.id, role)
             succeeded.append(user_id)

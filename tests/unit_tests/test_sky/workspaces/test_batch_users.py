@@ -179,6 +179,17 @@ class TestBatchAddUsersToWorkspaces:
 
 class TestBatchRemoveUsersFromWorkspaces:
 
+    # batch_remove_users_from_workspaces pre-fetches active resources for the
+    # whole workspace batch via _get_active_resources_for_workspaces (which
+    # hits the cluster DB + managed-jobs controller). Stub it out so unit
+    # tests don't hit the real backends.
+    @pytest.fixture(autouse=True)
+    def _stub_active_resources(self):
+        with mock.patch(
+                'sky.utils.resource_checker._get_active_resources_for_workspaces',
+                return_value=([], [])):
+            yield
+
     @staticmethod
     def _patch_initial_workspaces(workspaces):
         """Patch skypilot_config.to_dict to return the given workspaces.

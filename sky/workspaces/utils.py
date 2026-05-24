@@ -9,8 +9,13 @@ from sky import sky_logging
 logger = sky_logging.init_logger(__name__)
 
 
-def _build_username_to_ids_map(
+def build_username_to_ids_map(
         all_users: List[models.User]) -> Dict[str, List[str]]:
+    """Build a name -> [user_id] map. Exposed so batch callers can compute it
+    once and pass it to ``preferred_identifier_for_user`` /
+    ``entries_for_user`` per user, instead of rebuilding it on every call
+    (each rebuild is O(len(all_users))).
+    """
     name_to_ids: Dict[str, List[str]] = collections.defaultdict(list)
     for user in all_users:
         if user.name:
@@ -20,12 +25,16 @@ def _build_username_to_ids_map(
 
 def preferred_identifier_for_user(
         user_id: str,
-        all_users: Optional[List[models.User]] = None) -> Optional[str]:
+        all_users: Optional[List[models.User]] = None,
+        name_to_ids: Optional[Dict[str, List[str]]] = None) -> Optional[str]:
     """Return the preferred ``allowed_users`` entry for a given user_id.
 
     Prefers the username when it uniquely resolves back to ``user_id``;
     otherwise falls back to ``user_id``. Returns ``None`` if no user exists
     for the given id.
+
+    ``name_to_ids`` is an optional pre-built map (see
+    ``build_username_to_ids_map``) for batch callers to avoid recomputing it.
     """
     if all_users is None:
         all_users = global_user_state.get_all_users()
@@ -38,7 +47,8 @@ def preferred_identifier_for_user(
         return None
     if not user_info.name:
         return user_id
-    name_to_ids = _build_username_to_ids_map(all_users)
+    if name_to_ids is None:
+        name_to_ids = build_username_to_ids_map(all_users)
     if len(name_to_ids.get(user_info.name, [])) == 1:
         return user_info.name
     return user_id
@@ -46,11 +56,15 @@ def preferred_identifier_for_user(
 
 def entries_for_user(
         user_id: str,
-        all_users: Optional[List[models.User]] = None) -> List[str]:
+        all_users: Optional[List[models.User]] = None,
+        name_to_ids: Optional[Dict[str, List[str]]] = None) -> List[str]:
     """Return all ``allowed_users`` entries that resolve to ``user_id``.
 
     Includes both the user_id itself and the username (when unique). Used to
     strip every form of a user from a workspace's ``allowed_users`` list.
+
+    ``name_to_ids`` is an optional pre-built map (see
+    ``build_username_to_ids_map``) for batch callers.
     """
     if all_users is None:
         all_users = global_user_state.get_all_users()
@@ -63,7 +77,8 @@ def entries_for_user(
         return [user_id]
     entries = [user_id]
     if user_info.name:
-        name_to_ids = _build_username_to_ids_map(all_users)
+        if name_to_ids is None:
+            name_to_ids = build_username_to_ids_map(all_users)
         if len(name_to_ids.get(user_info.name, [])) == 1:
             entries.append(user_info.name)
     return entries

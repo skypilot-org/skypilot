@@ -139,22 +139,33 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
 
 
 def check_users_workspaces_active_resources(
-        user_ids: List[str],
-        workspace_names: List[str]) -> Tuple[str, List[str], Dict[str, str]]:
+    user_ids: List[str],
+    workspace_names: List[str],
+    active_resources: Optional[Tuple[List[Dict[str, Any]],
+                                     List[Dict[str, Any]]]] = None
+) -> Tuple[str, List[str], Dict[str, str]]:
     """Check if all the active clusters or managed jobs in workspaces
        belong to the user_ids. If not, return the error message.
 
     Args:
         user_ids: List of user_id.
         workspace_names: List of workspace_name.
+        active_resources: Optional pre-fetched ``(clusters, managed_jobs)``
+            tuple already filtered to the given ``workspace_names``. Batch
+            callers should fetch this once via
+            ``_get_active_resources_for_workspaces`` and pass it in to avoid
+            paying the per-call fetch cost in a loop.
 
     Returns:
         resource_error_summary: str
         missed_users_names: List[str]
         missed_user_dict: Dict[str, str]
     """
-    all_clusters, all_managed_jobs = _get_active_resources_for_workspaces(
-        workspace_names)
+    if active_resources is None:
+        all_clusters, all_managed_jobs = _get_active_resources_for_workspaces(
+            workspace_names)
+    else:
+        all_clusters, all_managed_jobs = active_resources
     resource_errors = []
     missed_users = set()
     active_cluster_names = []
@@ -261,9 +272,36 @@ def _get_active_resources_by_names(
     return resource_clusters, resource_active_jobs
 
 
+def get_active_resources() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Public alias for ``_get_active_resources``. Exposed so batch callers
+    can fetch the (clusters, managed_jobs) tuple once and pass it to multiple
+    ``check_user_role_demotion`` / ``check_users_workspaces_active_resources``
+    calls instead of paying the fetch cost per call.
+    """
+    return _get_active_resources()
+
+
+def load_fresh_workspaces() -> Dict[str, Any]:
+    """Reload the skypilot config from disk and return the workspaces dict.
+
+    Exposed so batch callers can do the reload + read once and pass the
+    workspaces dict to multiple ``check_user_role_demotion`` calls.
+    Individual callers should rely on the default ``workspaces=None`` of
+    ``check_user_role_demotion`` instead.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky import skypilot_config
+    skypilot_config.safe_reload_config()
+    return skypilot_config.get_nested(('workspaces',), default_value={})
+
+
 def check_user_role_demotion(
-        user_id: str,
-        remaining_admin_user_ids: Optional[Set[str]] = None) -> None:
+    user_id: str,
+    remaining_admin_user_ids: Optional[Set[str]] = None,
+    workspaces: Optional[Dict[str, Any]] = None,
+    active_resources: Optional[Tuple[List[Dict[str, Any]],
+                                     List[Dict[str, Any]]]] = None
+) -> None:
     """Check whether an admin can be safely demoted to a regular user.
 
     After demotion the user loses implicit access to all private workspaces
@@ -276,6 +314,14 @@ def check_user_role_demotion(
         remaining_admin_user_ids: Optional pre-computed set of user IDs that
             will remain admins after the demotion. If not provided, it is
             computed from the casbin policy.
+        workspaces: Optional pre-fetched workspaces config (from
+            ``load_fresh_workspaces()``). When called in a batch loop, the
+            caller should fetch this once and pass it in to avoid the
+            per-call ``safe_reload_config`` + YAML read overhead.
+        active_resources: Optional pre-fetched ``(clusters, managed_jobs)``
+            tuple. When called in a batch loop, the caller should fetch
+            this once via ``get_active_resources()`` and pass it in to
+            avoid the per-call cluster+jobs fetch.
 
     Raises:
         ValueError: If the user has active clusters or managed jobs in
@@ -283,21 +329,17 @@ def check_user_role_demotion(
     """
     # Imports done lazily to avoid circular imports with permission/workspaces.
     # pylint: disable=import-outside-toplevel
-    from sky import skypilot_config
     from sky.users import permission
     from sky.users import rbac
     from sky.workspaces import utils as workspaces_utils
 
-    # Ensure the in-memory workspaces config is fresh. /users/update and
-    # /users/batch_update are sync FastAPI handlers, so they don't go through
-    # the executor's reload_for_new_request pipeline -- their per-request
-    # context is inherited from the global one, which is frozen at server
-    # startup. Without this reload, a workspace add (which writes the file
-    # and refreshes its own per-request context) is invisible to a
-    # subsequent demotion check, and we'd incorrectly block the demotion.
-    # Use the file-locked variant to serialize with concurrent writers.
-    skypilot_config.safe_reload_config()
-    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    if workspaces is None:
+        # Single-call path. /users/update and /users/batch_update are sync
+        # FastAPI handlers and don't go through the executor's
+        # reload_for_new_request pipeline; without this reload they would
+        # read the global config snapshot from server startup and miss any
+        # allowed_users writes from a recent /workspaces/batch_add_users.
+        workspaces = load_fresh_workspaces()
     if not workspaces:
         return
 
@@ -320,7 +362,10 @@ def check_user_role_demotion(
     if not inaccessible_workspaces:
         return
 
-    all_clusters, all_managed_jobs = _get_active_resources()
+    if active_resources is None:
+        all_clusters, all_managed_jobs = _get_active_resources()
+    else:
+        all_clusters, all_managed_jobs = active_resources
     workspace_set = set(inaccessible_workspaces)
 
     workspace_resources: Dict[str, Dict[str, List[str]]] = {}
