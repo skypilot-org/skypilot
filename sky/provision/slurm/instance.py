@@ -271,6 +271,34 @@ def _wait_for_job_nodes(
             last_state = state
 
         if state is None:
+            # ``squeue --jobs <id>`` returns empty for terminal jobs by
+            # default (squeue's default filter only shows
+            # pending/running). For a fast-failing v1 job (e.g.
+            # OOM-killed within seconds), we'll observe PENDING then
+            # None even though the job is well within MinJobAge.
+            # Consult sacct to distinguish "terminated already" from
+            # "genuinely not found".
+            sacct_state = _v1_sacct_job_state(client, job_id)
+            _SLURM_TERMINAL = ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT',
+                               'NODE_FAIL', 'BOOT_FAIL', 'OUT_OF_MEMORY',
+                               'DEADLINE', 'SPECIAL_EXIT', 'PREEMPTED',
+                               'REVOKED')
+            if sacct_state in _SLURM_TERMINAL:
+                # The job ran (possibly very briefly) and is already
+                # done. Return cleanly so the caller can build a
+                # ProvisionRecord from sacct's NodeList; the managed-job
+                # controller's first ``get_job_status`` poll will then
+                # surface the terminal state via the chain registry,
+                # and the user-code-failure / SUCCEEDED branch will
+                # fire. Without this, the provisioner raises and the
+                # controller misclassifies fast-failing user code
+                # (e.g. OOM-kill) as an infrastructure error.
+                logger.info(
+                    f'Job {job_id} reached terminal state {sacct_state} '
+                    'before _wait_for_job_nodes observed nodes; returning '
+                    'cleanly so the caller surfaces the terminal status '
+                    'via the managed-job runtime.')
+                return
             raise RuntimeError(f'Job {job_id} not found. It may have been '
                                'cancelled or failed.')
 
@@ -2286,6 +2314,24 @@ def _create_managed_job_v1(
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
     nodes, _ = client.get_job_nodes(job_id)
+    if not nodes:
+        # Fast-failing job: terminal before _wait_for_job_nodes saw a
+        # node allocation. ``get_job_nodes`` (scontrol show job) returns
+        # empty for terminal jobs; fall back to sacct's NodeList, which
+        # records the node the job actually ran on. The ProvisionRecord
+        # we return is still valid — the controller's next
+        # ``get_job_status`` poll will surface the terminal state via
+        # the chain registry and the user-code-failure /
+        # cluster-up-job-failed branch will fire.
+        nodes = _v1_sacct_node_list(client, job_id) or []
+        if not nodes:
+            raise RuntimeError(
+                f'V1 Slurm job {job_id} terminated before nodes were '
+                'observable and sacct has no NodeList record; cannot '
+                'construct a ProvisionRecord.')
+        logger.info(
+            f'V1 Slurm job {job_id} finished fast; recovered '
+            f'NodeList={nodes} from sacct.')
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching', cluster_name=cluster_name))
 
