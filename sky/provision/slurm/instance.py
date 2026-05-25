@@ -1389,6 +1389,25 @@ def _terminate_managed_job_v1(cluster_name_on_cloud: str,
 # state space documented at
 # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES — see
 # also ``managed_job_runtime._slurm_state_to_job_status``.
+# Reverse map for the small set of state-filter keywords
+# ``query_jobs`` accepts against ``squeue --states <filter>``.
+# Filter words are lower-case; the upper-case canonical Slurm state
+# token is what ``_V1_SLURM_STATE_TO_CLUSTER_STATUS`` keys on. Used
+# by ``_query_instances_v1`` so we don't re-query the job's state —
+# the filter we asked for IS the state, and re-querying via
+# ``squeue --jobs <id>`` is unreliable on clusters with aggressive
+# ``MinJobAge`` (the by-id lookup ages out faster than the by-state
+# filter).
+_STATE_FILTER_TO_SLURM_STATE: Dict[str, str] = {
+    'pending': 'PENDING',
+    'running': 'RUNNING',
+    'completing': 'COMPLETING',
+    'completed': 'COMPLETED',
+    'cancelled': 'CANCELLED',
+    'failed': 'FAILED',
+    'node_fail': 'NODE_FAIL',
+}
+
 _V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[str, Optional[status_lib.ClusterStatus]] = {
     'PENDING': status_lib.ClusterStatus.INIT,
     'CONFIGURING': status_lib.ClusterStatus.INIT,
@@ -1509,15 +1528,20 @@ def _query_instances_v1(
             logger.debug(f'V1 query_instances: squeue query for state '
                          f'{state_filter!r} failed: {e}')
             continue
+        # The state filter we used IS the canonical state — derive the
+        # upper-case label from it directly. Re-querying via
+        # ``client.get_job_state(job_id)`` is unreliable on clusters
+        # with aggressive ``MinJobAge``: ``squeue --states=failed``
+        # surfaces the job_id but the follow-up ``squeue --jobs <id>``
+        # returns nothing because the by-id lookup has already aged
+        # out. The state filter is the ground truth.
+        state = _STATE_FILTER_TO_SLURM_STATE.get(state_filter)
+        if state is None:
+            # Unknown state_filter in the loop above — programming
+            # error; skip rather than coerce.
+            continue
         for job_id in job_ids:
             seen_job_ids.add(job_id)
-            # Re-read the precise state to land on the upper-case label
-            # that ``_V1_SLURM_STATE_TO_CLUSTER_STATUS`` keys on.
-            state = client.get_job_state(job_id)
-            if state is None:
-                # Aged out between the two calls — fall through to
-                # sacct below.
-                continue
             sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(state)
             if sky_status is None:
                 if non_terminated_only:
