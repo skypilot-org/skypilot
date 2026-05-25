@@ -16,7 +16,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
-from sky.data import data_utils
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
@@ -1396,8 +1395,14 @@ def _build_file_mounts_block(file_mounts: Optional[Dict[str, str]]) -> str:
     """Build sbatch preamble commands for cloud-URI file mounts, or empty."""
     if not file_mounts:
         return ''
+    # Lazy imports: ``sky.data.data_utils`` and ``sky.cloud_stores``
+    # both transitively import ``sky.clouds``. Importing them at
+    # module level creates a cycle when this module is loaded as part
+    # of the managed-job controller subprocess's import order (which
+    # starts at ``sky.clouds`` itself).
     # pylint: disable=import-outside-toplevel
     from sky import cloud_stores
+    from sky.data import data_utils
 
     commands: List[str] = []
     for remote_path, source in file_mounts.items():
