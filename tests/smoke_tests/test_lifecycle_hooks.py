@@ -779,54 +779,144 @@ def test_hook_k8s_autodown_fires_down_event():
 
 
 # ---------------------------------------------------------------------------
-# YAML round-trip: a task YAML with `config.hooks:` must survive
-# Task.to_yaml_config -> from_yaml_config without tripping the user-input
-# rejection that catches a misplaced `resources.hooks:` field.
+# K8s autodown analog of test_hook_lifecycle_combined.
 #
-# Pre-fix (148927858): Resources.to_yaml_config emitted _hooks under the
-# resources sub-dict, so the dumped YAML had `resources.hooks` even
-# though the user wrote `config.hooks`. The server-side reload then
-# tripped Task.from_yaml_config's rejection of `resources.hooks` and
-# every `sky launch` with config.hooks failed. The fix lifts _hooks to
-# the task-level `config.hooks` during serialization.
+# On Kubernetes the only idle-timer path is autodown (no STOP feature),
+# so everything that the VM-side combined test exercises against the
+# `stop` event must be re-exercised on K8s against `down`. One launch
+# + one autodown cycle verifies the union of:
+#   - legacy `autostop.{hook, hook_timeout, down: true}` YAML → stderr
+#     deprecation warning at launch + routing to the `down` event
+#   - default events fill-in (hook with only `run` defaults to all three)
+#   - multi-line `run` with literal "EOF" round-trips through skylet
+#     sqlite (JSON encode/decode preserves embedded "EOF")
+#   - multi-event filter `[down, preemption]` fires on autodown and the
+#     marker appears in down.log
+#   - hook timeout kills the script mid-run; teardown continues and the
+#     log captures the partial output
+#   - `preemption.log` is NOT written (autodown only fires `down`, the
+#     multi-event filter's preemption side stays inactive)
 #
-# This is a no-cluster smoke (just `sky launch --dryrun`) so it runs
-# quickly on every cloud and catches the bug at the validation phase.
+# Reads down.log via `kubectl exec` into the still-Terminating pod
+# during the hook's sleep window — the same pattern as the simpler
+# `test_hook_k8s_autodown_fires_down_event` above.
 # ---------------------------------------------------------------------------
-@pytest.mark.no_dependency
-def test_hook_config_hooks_yaml_round_trip_dryrun():
+@pytest.mark.kubernetes
+def test_hook_k8s_autodown_lifecycle_combined():
+    name = smoke_tests_utils.get_cluster_name()
+    legacy_marker = f'k8s-legacy-{time.time()}'
+    multi_event_marker = f'k8s-multi-{time.time()}'
+    timeout_marker = f'k8s-partial-{time.time()}'
+    # Multi-line run with literal "EOF" tests JSON round-trip through
+    # skylet's sqlite storage (no accidental heredoc-style termination).
+    multiline_run = (f'echo line1\n'
+                     f'echo {multi_event_marker}\n'
+                     f'EOF\n'
+                     f'echo done')
     yaml_path = _write_yaml({
+        'autostop': {
+            'idle_minutes': 1,
+            'down': True,
+            # Legacy back-compat: routed to the `down` event because
+            # autostop.down=True == autodown. `seq 1 50` pads the
+            # output past 10 lines so the existing grep also catches
+            # any `tail`-default-to-last-10 regression in the kubectl
+            # cat path here.
+            'hook': f'echo {legacy_marker} && seq 1 50 && sleep 180',
+            'hook_timeout': 240,
+        },
         'hooks': [
+            # Defaults check: omitting `events:` should fill in all three.
             {
-                'run': 'echo a',
-                'events': ['stop'],
-                'timeout': 60,
+                'run': 'true',
             },
+            # Multi-event filter + multi-line + EOF survival.
             {
-                'run': 'echo b',
+                'run': multiline_run,
+                'events': ['down', 'preemption'],
+            },
+            # Hook timeout: prints, then sleeps past the 5s timeout.
+            {
+                'run': f'echo {timeout_marker} && sleep 9999',
                 'events': ['down'],
+                'timeout': 5,
             },
         ],
     })
+    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+                 f'2>/dev/null | grep {name} | head -n1')
+    cat_log = (f'pod=$({pod_query}) && '
+               f'kubectl exec --context kind-skypilot "$pod" -- '
+               f'cat /home/sky/.sky/hooks/down.log')
+    # Poll until the legacy hook's marker appears (it writes first
+    # because the legacy autostop.hook routes into the hooks list and
+    # the executor runs entries in order). The legacy hook also
+    # contains `seq 1 50` + `sleep 180`, so the pod stays accessible
+    # via kubectl exec for the full window.
+    poll_for_log = (
+        f'for i in $(seq 1 60); do '
+        f'  out=$({cat_log} 2>/dev/null) || true; '
+        f'  if echo "$out" | grep -q "{legacy_marker}"; then '
+        f'    echo "Found legacy_marker after ${{i}} poll(s)"; '
+        f'    exit 0; '
+        f'  fi; '
+        f'  sleep 5; '
+        f'done; '
+        f'echo "REGRESSION: legacy_marker never appeared in down.log"; '
+        f'exit 1')
     test = smoke_tests_utils.Test(
-        'test_hook_config_hooks_yaml_round_trip_dryrun',
+        'test_hook_k8s_autodown_lifecycle_combined',
         [
-            # `sky launch --dryrun` dumps the task to YAML and sends it
-            # to the server, which re-loads. Pre-fix this raised the
-            # `resources.hooks` rejection on the server because
-            # Resources.to_yaml_config emitted hooks under resources.
-            f'SKYPILOT_DEBUG=0 sky launch -y --dryrun {yaml_path} 2>&1 | '
-            f'tee /tmp/dryrun_out.log && '
-            # No error mentioning resources.hooks should fire.
-            f'! grep -i "resources.hooks" /tmp/dryrun_out.log || '
-            f'(echo "REGRESSION: hooks emitted under resources on '
-            f'round-trip; server rejected with the resources.hooks '
-            f'reject message." && false)',
+            # Capture stderr so we can verify the legacy autostop.hook
+            # deprecation warning fires at launch time on K8s autodown.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra kubernetes --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} 2>&1) && '
+            # (1) legacy autostop.hook → stderr deprecation warning
+            f'echo "$s" | grep -i "deprecated"',
+            # Poll for the legacy_marker to appear in down.log. This
+            # also verifies the legacy hook was routed to `down` (not
+            # the renamed-away `stop`) since autostop.down=True.
+            poll_for_log,
+            # (2) Multi-event hook with `events:[down, preemption]`
+            # ALSO fires on autodown — its marker appears in down.log.
+            f'out=$({cat_log}) && echo "$out" | grep "{multi_event_marker}"',
+            # (3) Multi-line `run` round-tripped through sqlite intact:
+            # both "line1" / "EOF" / "done" lines from the multi-line
+            # entry appear (no heredoc-style early termination).
+            f'out=$({cat_log}) && echo "$out" | grep -q "line1" && '
+            f'echo "$out" | grep -q "EOF" && echo "$out" | grep -q "done"',
+            # (4) Timeout-killed hook still wrote its initial echo
+            # before sleep 9999 was killed at the 5s mark.
+            f'out=$({cat_log}) && echo "$out" | grep "{timeout_marker}"',
+            # (5) Multi-event filter: preemption.log must NOT exist —
+            # the `events:[down, preemption]` hook only fires on the
+            # event that matched (down here), not on preemption.
+            f'pod=$({pod_query}) && '
+            f'kubectl exec --context kind-skypilot "$pod" -- '
+            f'test ! -e /home/sky/.sky/hooks/preemption.log',
+            # Wait for autodown to complete (sleep 180 in legacy hook +
+            # teardown). Cluster row is gone after autodown finishes.
+            'sleep 240',
+            f'! sky status {name} 2>/dev/null | grep -E '
+            f'"^{name}\\s+.*(UP|STOPPED)"',
         ],
-        teardown=None,
-        timeout=120,
+        f'sky down -y {name} --purge || true',
+        timeout=smoke_tests_utils.get_timeout('kubernetes') + 300,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# NOTE: a previous `test_hook_config_hooks_yaml_round_trip_dryrun`
+# smoke test (pinning that ``config.hooks:`` survives
+# Task.to_yaml_config → from_yaml_config without tripping the
+# ``resources.hooks`` rejection) was removed: it is redundant with the
+# in-process unit test ``test_resources_round_trip_preserves_hooks``
+# in ``tests/unit_tests/test_lifecycle_hooks.py``. Both exercise the
+# same Python object graph — the smoke version added only the
+# SDK→server transport, which uses the same Task.from_yaml_config on
+# both sides, so no new code path was being exercised. The unit test
+# runs in milliseconds and pins the regression at the right layer.
 
 
 # ---------------------------------------------------------------------------

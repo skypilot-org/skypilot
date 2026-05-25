@@ -988,3 +988,59 @@ class TestBackwardCompatibility:
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_autostop_hook_sdk_legacy_param(self, generic_cloud: str):
+        """Pin: SDK-side ``sky.autostop(cluster, idle_minutes=N, hook=...)``
+        routes the legacy ``hook=`` arg into the new hooks-list framework
+        and the cluster enters AUTOSTOPPING (hook actively running)
+        before reaching STOPPED.
+
+        The ``hook=`` parameter on ``sky.autostop()`` is a master-era SDK
+        signature kept for back-compat (the canonical new way is
+        ``config.hooks:`` in YAML). This test pins the regression fixed
+        in ``AutostopCodeGen.set_autostop`` v7+ ``else:`` branch — see
+        ``sky/skylet/autostop_lib.py`` — where the codegen had been
+        dropping the legacy ``hook`` arg and unconditionally emitting
+        ``set_hooks([])``, wiping the routed entry. Result pre-fix: the
+        cluster went ``UP → STOPPED`` directly, skipping the
+        AUTOSTOPPING window entirely.
+
+        The bigger ``test_client_server_compatibility_new_server`` above
+        also exercises this path as part of a full mixed-version dance,
+        but that test takes ~15+ minutes and combines many concerns.
+        This focused smoke takes ~3 minutes (one launch + one autostop
+        poll), so a future regression of the v7+ codegen branch fires
+        this test specifically and identifies the bug directly. K8s is
+        excluded because ``autostop.down=False`` (autostop, not
+        autodown) is not supported on Kubernetes.
+        """
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        commands = [
+            # Launch a plain cluster (no hooks at launch). The skylet
+            # has no hook entry stored at this point.
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} '
+            f'--fast {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml',
+            # The legacy SDK signature: hook= passed without an
+            # explicit hooks= list. This is the exact call shape that
+            # broke quicktest-core 5 builds in a row before the codegen
+            # fix landed.
+            f'{self.ACTIVATE_CURRENT} && '
+            f'python -c "import sky; '
+            f'sky.get(sky.autostop('
+            f"'{cluster_name}', idle_minutes=1, hook='sleep 90'))"
+            f'"',
+            # AUTOSTOPPING must be observed before STOPPED. Pre-fix
+            # this poll would never see the state (the cluster skipped
+            # AUTOSTOPPING because the hook list was wiped) and the
+            # 300s timeout would fire — exactly the symptom seen in
+            # quicktest-core #3242, #3244, #3257, #3258, #3261.
+            f'{self.ACTIVATE_CURRENT} && ' +
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=cluster_name,
+                cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                timeout=300),
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down -y {cluster_name}'
+        self.run_compatibility_test(cluster_name, commands, teardown)
