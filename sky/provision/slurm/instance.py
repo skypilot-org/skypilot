@@ -840,6 +840,11 @@ def query_instances(
     del cluster_name, retry_if_missing  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
+    if is_managed_job_v1_provider_config(provider_config):
+        return _query_instances_v1(cluster_name_on_cloud,
+                                   provider_config,
+                                   non_terminated_only=non_terminated_only)
+
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
@@ -1358,6 +1363,168 @@ def _terminate_managed_job_v1(cluster_name_on_cloud: str,
         f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) did not leave '
         f'RUNNING within {_V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS}s after '
         'scancel. The controller may briefly observe a stale state.')
+
+
+# Mapping from upper-case Slurm states (as returned by ``squeue`` /
+# ``sacct``) to a SkyPilot ``ClusterStatus``. Terminal states map to
+# ``None`` so callers can short-circuit cleanup. Aligned with the
+# state space documented at
+# https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES — see
+# also ``managed_job_runtime._slurm_state_to_job_status``.
+_V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[
+    str, Optional[status_lib.ClusterStatus]] = {
+        'PENDING': status_lib.ClusterStatus.INIT,
+        'CONFIGURING': status_lib.ClusterStatus.INIT,
+        'RESV_DEL_HOLD': status_lib.ClusterStatus.INIT,
+        'REQUEUED': status_lib.ClusterStatus.INIT,
+        'REQUEUE_HOLD': status_lib.ClusterStatus.INIT,
+        'REQUEUE_FED': status_lib.ClusterStatus.INIT,
+        'RESIZING': status_lib.ClusterStatus.INIT,
+        'RUNNING': status_lib.ClusterStatus.UP,
+        'COMPLETING': status_lib.ClusterStatus.UP,
+        'SIGNALING': status_lib.ClusterStatus.UP,
+        'STAGE_OUT': status_lib.ClusterStatus.UP,
+        'SUSPENDED': status_lib.ClusterStatus.UP,
+        # Terminal — ``None`` means "no longer an instance".
+        'COMPLETED': None,
+        'CANCELLED': None,
+        'FAILED': None,
+        'TIMEOUT': None,
+        'NODE_FAIL': None,
+        'BOOT_FAIL': None,
+        'DEADLINE': None,
+        'OUT_OF_MEMORY': None,
+        'PREEMPTED': None,
+        'REVOKED': None,
+        'SPECIAL_EXIT': None,
+    }
+
+
+def _v1_sacct_job_state(client: 'slurm.SlurmClient',
+                        job_id_or_name: str) -> Optional[str]:
+    """Query ``sacct`` for the parent-row terminal state of a job.
+
+    Used by ``_query_instances_v1`` to surface terminal state for jobs
+    that have aged past squeue's ``MinJobAge`` window (default 300s) —
+    PLAN.md gap #12. ``--name`` is accepted by sacct, so we can key on
+    either job id or cluster_name_on_cloud.
+
+    Returns the upper-cased state of the most recent matching allocation
+    row, or ``None`` if sacct returns nothing parseable.
+    """
+    # Use ``-X`` (= ``--allocations``) to skip step rows. Quoting note:
+    # the caller may pass a numeric job id or a cluster name; both are
+    # safe to substitute (cluster names are validated against
+    # ``CLUSTER_NAME_VALID_REGEX``, and job ids are numeric).
+    is_numeric = job_id_or_name.isdigit()
+    key_flag = '-j' if is_numeric else '--name'
+    cmd = (f'sacct {key_flag} {job_id_or_name} --format=JobID,State '
+           '--parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0:
+        return None
+    # Take the *last* row — sacct lists rows oldest-first, and on
+    # recovery_strategy reuse the same cluster name can have multiple
+    # historical rows. The last one is the most recent attempt.
+    last_state: Optional[str] = None
+    for line in stdout.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        state = parts[1].strip()
+        # ``CANCELLED by <uid>`` collapses to ``CANCELLED``.
+        if state.startswith('CANCELLED'):
+            state = 'CANCELLED'
+        if state:
+            last_state = state.upper()
+    return last_state
+
+
+def _query_instances_v1(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    *,
+    non_terminated_only: bool,
+) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
+    """v1 ``query_instances``: squeue + sacct merge.
+
+    Legacy ``query_instances`` queries ``squeue`` only, so a job that
+    aged past ``MinJobAge`` (default 300s) disappears from the result
+    map. For v1 managed jobs that's a correctness problem — the
+    controller needs to observe terminal state for short-lived jobs to
+    decide success/failure. So we additionally consult ``sacct``.
+
+    Returns a ``{instance_id: (cluster_status, reason)}`` map keyed on
+    ``slurm_utils.instance_id(job_id, node)`` for live jobs, or on the
+    bare ``cluster_name_on_cloud`` for terminal-only sacct surfacing
+    (we have no node list to fan out across).
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+    statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                              Optional[str]]] = {}
+    seen_job_ids: set = set()
+
+    # --- squeue: live jobs (pending/running/completing/...) and recent ---
+    # --- terminal jobs within the MinJobAge window. ---
+    for state_filter in [
+            'pending', 'running', 'completing', 'completed', 'cancelled',
+            'failed', 'node_fail'
+    ]:
+        try:
+            job_ids = client.query_jobs(cluster_name_on_cloud, [state_filter])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'V1 query_instances: squeue query for state '
+                         f'{state_filter!r} failed: {e}')
+            continue
+        for job_id in job_ids:
+            seen_job_ids.add(job_id)
+            # Re-read the precise state to land on the upper-case label
+            # that ``_V1_SLURM_STATE_TO_CLUSTER_STATUS`` keys on.
+            state = client.get_job_state(job_id)
+            if state is None:
+                # Aged out between the two calls — fall through to
+                # sacct below.
+                continue
+            sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(state)
+            if sky_status is None:
+                if non_terminated_only:
+                    continue
+                try:
+                    reason = client.get_job_reason(job_id)
+                except Exception:  # pylint: disable=broad-except
+                    reason = None
+                statuses[job_id] = (None, reason)
+                continue
+            try:
+                nodes, _ = client.get_job_nodes(job_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # PENDING jobs may not yet have nodes; the empty result
+                # below is fine. Other failures we surface as no nodes.
+                logger.debug(f'V1 query_instances: get_job_nodes({job_id}) '
+                             f'failed: {e}')
+                nodes = []
+            if not nodes:
+                # Surface the job-id keyed entry so the caller sees the
+                # cluster is in INIT.
+                statuses[job_id] = (sky_status, None)
+                continue
+            for node in nodes:
+                instance_id = slurm_utils.instance_id(job_id, node)
+                statuses[instance_id] = (sky_status, None)
+
+    # --- sacct: terminal state for jobs aged past MinJobAge. ---
+    # Only consult sacct if squeue didn't already produce a live entry,
+    # and only when the caller actually wants terminal state.
+    if not non_terminated_only and not statuses:
+        sacct_state = _v1_sacct_job_state(client, cluster_name_on_cloud)
+        if sacct_state is not None:
+            sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(sacct_state)
+            # sacct's most-recent terminal state is keyed on the cluster
+            # name (we have no per-node fanout once the job is gone).
+            statuses[cluster_name_on_cloud] = (sky_status, sacct_state)
+
+    return statuses
 
 
 def _all_resource_alternatives_are_slurm(task: 'task_lib.Task') -> bool:
