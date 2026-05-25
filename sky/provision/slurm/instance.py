@@ -113,6 +113,10 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'mem',
     'gres',
     'partition',
+    # --signal controls SIGTERM/SIGKILL delivery on scancel/walltime. A user
+    # override (e.g. KILL@10) skips SIGTERM grace and can truncate the log
+    # tail before our tail_logs / cleanup completes.
+    'signal',
 })
 
 
