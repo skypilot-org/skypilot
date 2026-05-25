@@ -972,6 +972,7 @@ export function Users() {
           setValueList={setValueList}
           deduplicateUsers={deduplicateUsers}
           setLastFetchedTime={setLastFetchedTime}
+          setCreateError={setCreateError}
         />
       ) : activeMainTab === 'service-accounts' ? (
         serviceAccountTokenEnabled && (
@@ -1407,6 +1408,7 @@ function UsersTable({
   setValueList,
   deduplicateUsers,
   setLastFetchedTime,
+  setCreateError,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -2059,7 +2061,7 @@ function UsersTable({
   const handleSaveEdit = async (userId) => {
     if (!userId || !currentEditingRole) {
       console.error('User ID or role is missing.');
-      alert('Error: User ID or role is missing.');
+      setCreateError(new Error('User ID or role is missing.'));
       return;
     }
     setIsLoading(true); // Or use parent setLoading
@@ -2078,7 +2080,8 @@ function UsersTable({
       handleCancelEdit(); // Exit edit mode
     } catch (error) {
       console.error('Failed to update user role:', error);
-      alert(`Error updating role: ${error.message}`);
+      handleCancelEdit();
+      setCreateError(error);
     } finally {
       setIsLoading(false); // Or use parent setLoading
     }
@@ -2205,27 +2208,38 @@ function UsersTable({
           {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
         </div>
       )}
-      {showBulkColumn && selectedUserIds.size > 0 && (
+      {showBulkColumn && (
+        // Bar is always rendered (with disabled buttons + an empty-state
+        // hint when nothing is selected) so checking a row doesn't insert
+        // a new row above the table and shift the row under the cursor.
         <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-sky-50 border border-sky-200 rounded-md">
           <div className="text-sm text-gray-700">
-            Selected:{' '}
-            <span className="font-medium text-sky-blue">
-              {selectedUserIds.size}
-            </span>{' '}
-            user(s)
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="ml-2 text-sky-blue hover:text-sky-blue-bright underline"
-            >
-              Clear
-            </button>
+            {selectedUserIds.size > 0 ? (
+              <>
+                Selected:{' '}
+                <span className="font-medium text-sky-blue">
+                  {selectedUserIds.size}
+                </span>{' '}
+                user(s)
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="ml-2 text-sky-blue hover:text-sky-blue-bright underline"
+                >
+                  Clear
+                </button>
+              </>
+            ) : (
+              <span className="text-gray-500">
+                Select users to enable batch actions
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => openBulkDialog('role')}
-              disabled={roleLoading}
+              disabled={roleLoading || selectedUserIds.size === 0}
               className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Change role
@@ -2233,7 +2247,7 @@ function UsersTable({
             <button
               type="button"
               onClick={() => openBulkDialog('add')}
-              disabled={roleLoading}
+              disabled={roleLoading || selectedUserIds.size === 0}
               className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add to workspaces
@@ -2241,7 +2255,7 @@ function UsersTable({
             <button
               type="button"
               onClick={() => openBulkDialog('remove')}
-              disabled={roleLoading}
+              disabled={roleLoading || selectedUserIds.size === 0}
               className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Remove from workspaces
@@ -2608,6 +2622,7 @@ UsersTable.propTypes = {
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
   setLastFetchedTime: PropTypes.func,
+  setCreateError: PropTypes.func.isRequired,
 };
 
 // Service Account Tokens Management Component

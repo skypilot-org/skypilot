@@ -159,6 +159,14 @@ def user_update(request: fastapi.Request,
                                  (role != target_user_roles[0]))
     current_user = request.state.auth_user
     if current_user is not None:
+        # This is a sync FastAPI handler, so it doesn't go through the
+        # executor's reload_for_new_request pipeline that normally
+        # populates the per-request user context. Without this, downstream
+        # calls (e.g. resource_checker -> queue_v2 ->
+        # get_accessible_workspace_names) would fall back to the local
+        # machine user and silently filter out anything in private
+        # workspaces the local user can't see.
+        common_utils.set_current_user(current_user)
         current_user_roles = permission.permission_service.get_user_roles(
             current_user.id)
         if not current_user_roles:
@@ -231,6 +239,9 @@ def user_batch_update(request: fastapi.Request,
     # Only admin can run a batch role update.
     current_user = request.state.auth_user
     if current_user is not None:
+        # Sync FastAPI handler -- see comment in user_update for why we
+        # have to set the per-request user context here ourselves.
+        common_utils.set_current_user(current_user)
         current_user_roles = permission.permission_service.get_user_roles(
             current_user.id)
         if not current_user_roles:
@@ -373,7 +384,13 @@ def _delete_user(user_id: str) -> None:
 
 
 @router.post('/delete')
-def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
+def user_delete(request: fastapi.Request,
+                user_delete_body: payloads.UserDeleteBody) -> None:
+    current_user = request.state.auth_user
+    if current_user is not None:
+        # Sync FastAPI handler -- see comment in user_update for why we
+        # have to set the per-request user context here ourselves.
+        common_utils.set_current_user(current_user)
     user_id = user_delete_body.user_id
     _delete_user(user_id)
 

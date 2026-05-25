@@ -477,11 +477,12 @@ def check_user_role_demotion(
         error_lines.append(f'  - workspace {ws!r}: {joined}')
 
     raise ValueError(
-        f'Cannot demote user {user_display!r} from admin to user because '
-        f'they have active resources in private workspaces where they are '
-        f'not in allowed_users:\n' + '\n'.join(error_lines) +
-        '\nPlease either terminate these resources or add the user to the '
-        'allowed_users of those workspaces first.')
+        f'Cannot demote user {user_display!r} from admin to user: user '
+        f'{user_display!r} has active resources in private workspaces '
+        f'where {user_display!r} is not in allowed_users:\n' +
+        '\n'.join(error_lines) +
+        f'\nPlease either terminate these resources or add {user_display!r} '
+        'to the allowed_users of those workspaces first.')
 
 
 def _get_active_resources(
@@ -494,7 +495,10 @@ def _get_active_resources(
     """
 
     def get_all_clusters() -> List[Dict[str, Any]]:
-        return global_user_state.get_clusters()
+        # Exclude is_managed=True clusters: those are the clusters that
+        # back managed jobs and are already represented (and labeled) by
+        # the managed-jobs queue below.
+        return global_user_state.get_clusters(exclude_managed_clusters=True)
 
     def get_all_managed_jobs() -> List[Dict[str, Any]]:
         # pylint: disable=import-outside-toplevel

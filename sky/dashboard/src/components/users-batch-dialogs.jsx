@@ -65,7 +65,11 @@ function ResultSummary({ result, idKey, idLabel }) {
                 <span className="font-mono text-gray-500">
                   {idLabel}={f[idKey]}
                 </span>
-                <span className="ml-2 text-red-600">{f.error}</span>
+                {/* whitespace-pre-wrap renders the \n in server error
+                    messages as actual line breaks. */}
+                <span className="ml-2 text-red-600 whitespace-pre-wrap">
+                  {f.error}
+                </span>
               </li>
             ))}
           </ul>
