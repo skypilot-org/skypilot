@@ -268,64 +268,16 @@ function WorkspacePickerDialog({
     setError(null);
     setLoadingWorkspaces(true);
     setLoadError(null);
-    // Use the shared cache so we hit the same path other dashboard pages use
-    // and avoid making a fresh /workspaces poll for every dialog open.
-    const fetchWithRetry = async () => {
-      const maxAttempts = 3;
-      let lastErr = null;
-      for (let i = 0; i < maxAttempts; i++) {
-        try {
-          return await dashboardCache.get(getWorkspaces);
-        } catch (e) {
-          lastErr = e;
-          // Brief backoff between retries to give the API task time to
-          // finish on slow servers. This addresses transient polling
-          // failures on a fresh /workspaces request.
-          if (i < maxAttempts - 1) {
-            await new Promise((r) => setTimeout(r, 300));
-          }
-        }
-      }
-      throw lastErr;
-    };
-    fetchWithRetry()
+    dashboardCache
+      .get(getWorkspaces)
       .then((data) => {
         if (cancelled) return;
         setWorkspaces(data || {});
       })
       .catch((e) => {
         if (cancelled) return;
-        console.error('Failed to load workspaces for batch dialog', e);
-        // Try to extract a meaningful server-side message from the raw
-        // error string emitted by getWorkspaces ("Error fetching workspace
-        // data for request ID <id>: <innerDetail>") — innerDetail may be a
-        // JSON string with nested {type, message} or already be an object
-        // serialized as "[object Object]".
-        const rawMessage = e?.message || String(e);
-        let detail = '';
-        try {
-          // Look for the JSON tail after the request-id prefix.
-          const jsonStart = rawMessage.indexOf('{');
-          if (jsonStart !== -1) {
-            const tail = rawMessage.slice(jsonStart);
-            const parsed = JSON.parse(tail);
-            if (parsed && typeof parsed.message === 'string') {
-              detail = parsed.message;
-            }
-          }
-        } catch (_parseErr) {
-          /* Fall through to the generic message below. */
-        }
-        if (!detail && !rawMessage.includes('[object Object]')) {
-          // The raw message is human-readable already (e.g. when
-          // pollForTaskCompletion has already extracted a message).
-          detail = rawMessage;
-        }
-        setLoadError(
-          detail
-            ? `Unable to load workspaces: ${detail}`
-            : 'Unable to load workspaces. Check the API server config.'
-        );
+        console.error('Error fetching workspaces:', e);
+        setLoadError('Unable to load workspaces. Please try again.');
       })
       .finally(() => {
         if (!cancelled) setLoadingWorkspaces(false);
