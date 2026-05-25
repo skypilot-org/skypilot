@@ -151,7 +151,7 @@ def _list_accelerators(
         return {}, {}, {}
 
     # Verify that the credentials are still valid.
-    if not kubernetes_utils.check_credentials(context)[0]:
+    if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)

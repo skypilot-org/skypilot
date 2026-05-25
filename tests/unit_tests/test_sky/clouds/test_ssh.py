@@ -615,5 +615,22 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
             self.assertEqual(call.kwargs.get('cloud'), 'ssh')
 
 
+class TestSSHCheckSingleContextForwardsCloud(unittest.TestCase):
+    """SSH `_check_single_context` must forward `cloud='ssh'`.
+
+    Without this forwarding, a global ``kubernetes.namespace`` would
+    leak into the SSH `sky check` probe and could falsely fail/pass
+    against a namespace the user does not actually target.
+    """
+
+    @patch('sky.provision.kubernetes.utils.check_credentials')
+    def test_forwards_ssh_cloud_key(self, mock_check_credentials):
+        mock_check_credentials.return_value = (True, None)
+        ssh.SSH._check_single_context('ssh-some-ctx')
+        mock_check_credentials.assert_called_once_with('ssh-some-ctx',
+                                                       run_optional_checks=True,
+                                                       cloud='ssh')
+
+
 if __name__ == '__main__':
     unittest.main()

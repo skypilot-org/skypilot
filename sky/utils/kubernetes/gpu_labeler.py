@@ -316,7 +316,8 @@ def label_gpus_server(context: Optional[str] = None,
         Dict with 'success' boolean and 'message' string.
     """
     # Check prerequisites
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason, flush=True)  # Will be streamed to client
         return {'success': False, 'message': reason}
@@ -374,7 +375,8 @@ def main():
         context = args.context
 
     # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason)
         sys.exit(1)

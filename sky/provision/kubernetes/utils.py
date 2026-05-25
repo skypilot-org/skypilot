@@ -2373,21 +2373,31 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
 
 def check_credentials(context: Optional[str],
                       timeout: int = kubernetes.API_TIMEOUT,
-                      run_optional_checks: bool = False) -> \
+                      run_optional_checks: bool = False,
+                      cloud: str = 'kubernetes') -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
+
+    The RBAC probe ``list_namespaced_pod`` is issued against the
+    workspace-resolved namespace (via ``get_namespace``) rather than the
+    raw kubeconfig context default, so a user who only has access to
+    their workspace's configured namespace is not reported as broken.
 
     Args:
         context (Optional[str]): The Kubernetes context to use. If none, uses
             in-cluster auth to check credentials, if available.
         timeout (int): Timeout in seconds for the test API call
+        run_optional_checks (bool): Whether to run additional soft checks
+            (exec-based auth, GPU labels) after the credential probe.
+        cloud (str): Top-level config key the namespace resolver consults
+            (e.g. ``'kubernetes'`` vs ``'ssh'``).
 
     Returns:
         bool: True if credentials are valid, False otherwise
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        namespace = get_kube_config_context_namespace(context)
+        namespace = get_namespace(context=context, cloud=cloud)
         kubernetes.core_api(context).list_namespaced_pod(
             namespace, limit=1, _request_timeout=timeout)
         # This call is "free" because this function is a cached call,

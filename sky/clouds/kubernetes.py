@@ -1240,7 +1240,7 @@ class Kubernetes(clouds.Cloud):
 
         try:
             check_result = kubernetes_utils.check_credentials(
-                context, run_optional_checks=True)
+                context, run_optional_checks=True, cloud=cls._REPR.lower())
             if check_result[0]:
                 if check_result[1] is not None:
                     return True, (_bright_green_color('enabled.') +

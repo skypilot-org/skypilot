@@ -4338,3 +4338,99 @@ class TestGetNamespace:
             workspace=None,
             override_configs=None,
         )
+
+
+class TestCheckCredentials:
+    """Tests for `check_credentials`: probe namespace resolution.
+
+    The probe ``list_namespaced_pod`` was historically issued against
+    the raw kubeconfig context default. With workspace- and cloud-level
+    namespace overrides supported, the probe must use the resolved
+    namespace so users with RBAC only on their workspace's namespace
+    are not falsely reported as broken by ``sky check``.
+    """
+
+    def _patch_common(self):
+        """Patch the side-effects `check_credentials` triggers besides the probe.
+
+        Returns the active-context patches so individual tests can
+        configure them; everything else is short-circuited.
+        """
+        patches = [
+            patch('sky.provision.kubernetes.utils.kubernetes.core_api'),
+            patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'),
+            patch('sky.provision.kubernetes.utils.get_kubeconfig_paths',
+                  return_value=['~/.kube/config']),
+        ]
+        return [p.start() for p in patches], patches
+
+    def _stop(self, patches):
+        for p in patches:
+            p.stop()
+
+    @patch('sky.provision.kubernetes.utils.get_namespace')
+    def test_probes_workspace_resolved_namespace(self, mock_get_namespace):
+        """Probe uses the workspace/cloud-resolved namespace, not kubeconfig.
+
+        With ``kubernetes.namespace: team-a`` configured, the
+        ``list_namespaced_pod`` call must target ``team-a`` so users
+        without RBAC on the kubeconfig default are not falsely reported
+        as broken by ``sky check``.
+        """
+        mocks, patches = self._patch_common()
+        mock_core_api = mocks[0]
+        try:
+            mock_get_namespace.return_value = 'team-a'
+
+            ok, reason = utils.check_credentials(context='shared-ctx')
+
+            assert ok is True
+            assert reason is None
+            mock_get_namespace.assert_called_once_with(context='shared-ctx',
+                                                       cloud='kubernetes')
+            mock_core_api.return_value.list_namespaced_pod.assert_called_once()
+            args, _ = (mock_core_api.return_value.list_namespaced_pod.call_args)
+            assert args[0] == 'team-a'
+        finally:
+            self._stop(patches)
+
+    @patch('sky.provision.kubernetes.utils.get_namespace')
+    def test_falls_back_to_kubeconfig_default_when_unconfigured(
+            self, mock_get_namespace):
+        """When no namespace override is set the kubeconfig default is used.
+
+        Pinned to preserve pre-feature behaviour: a user without any
+        workspace or global ``kubernetes.namespace`` should see the
+        same probe target as before.
+        """
+        mocks, patches = self._patch_common()
+        mock_core_api = mocks[0]
+        try:
+            mock_get_namespace.return_value = 'kubeconfig-default'
+
+            ok, _ = utils.check_credentials(context='shared-ctx')
+
+            assert ok is True
+            args, _ = (mock_core_api.return_value.list_namespaced_pod.call_args)
+            assert args[0] == 'kubeconfig-default'
+        finally:
+            self._stop(patches)
+
+    @patch('sky.provision.kubernetes.utils.get_namespace')
+    def test_forwards_explicit_cloud(self, mock_get_namespace):
+        """`cloud` arg is forwarded to `get_namespace`.
+
+        Required so that the SSH path's credential check resolves
+        under ``ssh.*`` and a global ``kubernetes.namespace`` setting
+        does not bleed into SSH ``sky check`` results.
+        """
+        mocks, patches = self._patch_common()
+        try:
+            mock_get_namespace.return_value = 'kubeconfig-default'
+
+            utils.check_credentials(context='ssh-cluster', cloud='ssh')
+
+            mock_get_namespace.assert_called_once_with(context='ssh-cluster',
+                                                       cloud='ssh')
+        finally:
+            self._stop(patches)
