@@ -22,6 +22,10 @@
 #   The trainer connects to the router endpoint on port 30000.
 #
 # Usage:
+#   # First, create the shared volume for policy weight sync:
+#   sky volume apply llm/rl-post-training-jobgroup/rlhf-policy-volume.yaml
+#
+#   # Then launch the job group:
 #   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
 #
 # The components communicate over the job group network using DNS names:
@@ -69,14 +73,21 @@ resources:
   accelerators: H100:1
   memory: 32+
   infra: kubernetes
+  image_id: docker:lmsysorg/sglang:v0.5.9
 
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
 
+# Shared volume between trainer and rollout-server. The trainer writes
+# updated policy weights here every N steps; the rollout-server's SGLang
+# reads from the same path via /update_weights_from_disk. Create the
+# volume first with: sky volume apply llm/rl-post-training-jobgroup/rlhf-policy-volume.yaml
+volumes:
+  /shared/policy: rlhf-policy
+
 setup: |
-  # Install system dependencies (libnuma is required by SGLang kernel)
-  sudo apt-get update && sudo apt-get install -y libnuma-dev
-  uv pip install "sglang[all]" sglang-router --system
+  python -c 'import sglang'
+  python -c 'import sglang_router' || python -m pip install sglang-router
 
 run: |
   echo "Starting rollout server with SGLang..."
@@ -84,9 +95,9 @@ run: |
   echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
   echo "Model: ${MODEL_NAME}"
 
-  # Start SGLang server in background
+  # Start SGLang server in background.
   python -m sglang.launch_server \
-    --model ${MODEL_NAME} \
+    --model-path ${MODEL_NAME} \
     --host 0.0.0.0 \
     --port 30001 &
   SGLANG_PID=$!
@@ -177,10 +188,20 @@ num_nodes: 2
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
   NUM_EPOCHS: 3
+  STEPS_PER_EPOCH: 100
   BATCH_SIZE: 4
+  POLICY_SYNC_INTERVAL: 10
+  POLICY_SYNC_MAX_ATTEMPTS: 30
+  POLICY_SYNC_RETRY_INTERVAL: 10
+  ROLLOUT_SERVER_NUM_NODES: 2
 
 file_mounts:
   /code: llm/rl-post-training-jobgroup/code
+
+# Shared with rollout-server — trainer saves updated weights here every
+# --policy-sync-interval steps; rollout-server reloads them in place.
+volumes:
+  /shared/policy: rlhf-policy
 
 setup: |
   uv pip install torch transformers accelerate httpx --system
@@ -194,13 +215,22 @@ run: |
   # The rollout head node provides load balancing across all SGLang instances
   DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
   ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30000"
+  ROLLOUT_SYNC_SERVERS=""
+  for i in $(seq 0 $((ROLLOUT_SERVER_NUM_NODES - 1))); do
+    if [ -n "${ROLLOUT_SYNC_SERVERS}" ]; then
+      ROLLOUT_SYNC_SERVERS="${ROLLOUT_SYNC_SERVERS},"
+    fi
+    ROLLOUT_SYNC_SERVERS="${ROLLOUT_SYNC_SERVERS}rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:30001"
+  done
   REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
   REPLAY_BUFFER="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
 
   echo "Data server: ${DATA_SERVER}"
   echo "Rollout server (load balanced): ${ROLLOUT_SERVER}"
+  echo "Rollout sync servers: ${ROLLOUT_SYNC_SERVERS}"
   echo "Reward server: ${REWARD_SERVER}"
   echo "Replay buffer: ${REPLAY_BUFFER}"
+  DONE_MARKER="/shared/policy/ppo-trainer-${SKYPILOT_TASK_ID}.done"
 
   # Wait for services to be ready
   echo "Waiting for services to be available..."
@@ -209,7 +239,9 @@ run: |
   # Only run training on rank 0 (coordinator)
   if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
     echo "Starting training on coordinator node..."
+    rm -f "${DONE_MARKER}"
     cd /code
+    set +e
     python trainer.py \
       --data-server ${DATA_SERVER} \
       --rollout-server ${ROLLOUT_SERVER} \
@@ -217,10 +249,22 @@ run: |
       --replay-buffer ${REPLAY_BUFFER} \
       --model ${MODEL_NAME} \
       --batch-size ${BATCH_SIZE} \
-      --num-epochs ${NUM_EPOCHS}
+      --num-epochs ${NUM_EPOCHS} \
+      --steps-per-epoch ${STEPS_PER_EPOCH} \
+      --policy-sync-path /shared/policy/latest \
+      --policy-sync-interval ${POLICY_SYNC_INTERVAL} \
+      --policy-sync-max-attempts ${POLICY_SYNC_MAX_ATTEMPTS} \
+      --policy-sync-retry-interval ${POLICY_SYNC_RETRY_INTERVAL} \
+      --policy-sync-servers "${ROLLOUT_SYNC_SERVERS}"
+    TRAIN_EXIT=$?
+    touch "${DONE_MARKER}"
+    exit ${TRAIN_EXIT}
   else
-    echo "Worker node ${SKYPILOT_NODE_RANK} ready for distributed training"
+    echo "Worker node ${SKYPILOT_NODE_RANK} waiting for coordinator completion"
     # In a full implementation, worker nodes would join distributed training
-    # For this demo, they just wait
-    sleep infinity
+    # For this demo, they exit once the coordinator finishes.
+    while [ ! -f "${DONE_MARKER}" ]; do
+      sleep 10
+    done
+    echo "Coordinator finished; worker node ${SKYPILOT_NODE_RANK} exiting"
   fi

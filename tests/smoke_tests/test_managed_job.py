@@ -76,8 +76,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=360
-                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
+                timeout=360 if generic_cloud
+                in ['azure', 'gcp', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -1204,11 +1204,25 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_account_name=storage_account_name)
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{az_check_file_count} | grep 1')
-        non_persistent_bucket_removed_check_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+        az_ls_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.AZURE, storage_name)
+        # Azure controller cleanup (worker VM teardown plus blob container
+        # deletion) regularly exceeds the universal `sleep 50` post-SUCCEEDED
+        # wait. Poll for up to 300s for the container to be removed.
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name,
-            f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+            name, 'start_time=$SECONDS; '
+            'timeout_s=300; '
+            'while true; do '
+            '  if (( $SECONDS - start_time > timeout_s )); then '
+            '    echo "Timeout waiting for non-persistent bucket removal"; '
+            '    exit 1; '
+            '  fi; '
+            f'  if ! ({az_ls_cmd}) > /dev/null 2>&1; then '
+            '    echo "Bucket removed."; break; '
+            '  fi; '
+            '  echo "Bucket still present, retrying in 10s..."; '
+            '  sleep 10; '
+            'done')
         timeout *= 2
     elif generic_cloud in ('kubernetes', 'slurm'):
         # With Kubernetes, we don't know which object storage provider is used.
