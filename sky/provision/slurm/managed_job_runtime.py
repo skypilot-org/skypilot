@@ -4,17 +4,13 @@ Lives in OSS alongside the Slurm provisioner. Owns the runtime-side
 adapter for the Slurm-native managed-jobs path: status reads from
 ``sacct``/``squeue``, log tailing reads ``--output`` files, and so on.
 
-Phase 2 implements ``get_job_status``, ``get_job_submitted_at``,
-``get_job_ended_at``, ``get_exit_codes``, ``download_logs`` and
-``tail_logs``. Log streaming is kept inline here for now;
-``PLAN.md`` notes we'll factor it into ``log_streaming.py`` later.
+Log-tail streaming machinery lives in
+``sky/provision/slurm/log_streaming.py`` per PLAN.md "File layout";
+``download_logs`` stays here (it's a single ``cat`` + write-to-disk).
 """
 import datetime
 import os
 import shlex
-import subprocess
-import sys
-import threading
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -31,7 +27,6 @@ from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.utils import command_runner
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -72,12 +67,6 @@ _FAILED_STATES = frozenset({
 _CANCELLED_STATES = frozenset({'CANCELLED', 'REVOKED'})
 
 _TERMINAL_STATES = (_SUCCEEDED_STATES | _FAILED_STATES | _CANCELLED_STATES)
-
-# Cadence for the side-thread polling sacct during follow-mode log tail.
-_TAIL_TERMINAL_POLL_SECONDS = 5
-# How long after sacct reports a terminal state we let the SSH tail
-# subprocess drain stdout before forcibly closing it.
-_TAIL_DRAIN_SECONDS = 5
 
 
 class _Target:
@@ -577,192 +566,24 @@ class SlurmManagedJobRuntime:
         if log_path is None:
             return None
 
+        # Lazy-import the streamer module — its import edge points back
+        # at this module's ``_Target`` (under ``TYPE_CHECKING``) and we
+        # want to keep the runtime module's import surface unchanged.
         # pylint: disable=import-outside-toplevel
-        from sky.utils import context as context_lib
+        from sky.provision.slurm import log_streaming
 
-        ctx = context_lib.get()
-        out = ctx.output_stream(sys.stdout) if ctx else sys.stdout
-
-        def _write(msg: str) -> None:
-            out.write(msg)
-            out.flush()
-
-        runner = _login_node_runner(target.ssh_config)
-        base_ssh = runner.ssh_base_command(
-            ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
-            port_forward=None,
-            connect_timeout=None)
-
-        # Build the remote ``tail`` invocation.
-        quoted_path = shlex.quote(log_path)
-        if tail_offset is not None and tail_offset > 0:
-            # ``tail -c +<bytes>`` starts at byte offset (1-indexed),
-            # which is a strict improvement over K8s v1 (PLAN.md "Log
-            # tailing"). Saved-log replay uses line-based offsets; live
-            # tail with a byte offset only triggers from controller-side
-            # callers that compute the offset against the same file.
-            remote_cmd = (f'tail -c +{int(tail_offset) + 1} '
-                          f'{"-F" if follow else ""} {quoted_path} 2>/dev/null')
-        elif follow:
-            remote_cmd = f'tail -F {quoted_path} 2>/dev/null'
-        else:
-            n = tail if (tail is not None and tail > 0) else None
-            tail_flag = f'-n {n}' if n is not None else '-n +1'
-            remote_cmd = f'tail {tail_flag} {quoted_path} 2>/dev/null'
-
-        if not follow:
-            return self._tail_once(base_ssh, remote_cmd, _write, target, client)
-        return self._tail_follow(base_ssh, remote_cmd, _write, target, client)
-
-    def _tail_once(
-        self,
-        base_ssh: List[str],
-        remote_cmd: str,
-        write_fn,
-        target: _Target,
-        client: 'slurm.SlurmClient',
-    ) -> int:
-        # Pass ``remote_cmd`` as a single argv element. SSH joins any
-        # remaining args with spaces into one command string for the
-        # remote shell, so a single arg with shell metachars (``|``,
-        # ``2>/dev/null``) is preserved verbatim. Compare
-        # ``command_runner.run`` which sets ``shell=True`` locally and
-        # therefore needs ``shlex.quote``; here ``subprocess`` uses argv
-        # mode so no extra quoting is needed.
-        full_cmd = base_ssh + [remote_cmd]
-        try:
-            proc = subprocess.run(full_cmd,
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE,
-                                  check=False)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Slurm v1 tail (one-shot) failed: {e}')
-            return exceptions.JobExitCode.FAILED.value
-        if proc.stdout:
-            write_fn(proc.stdout.decode('utf-8', errors='replace'))
-        # Render the same footer as the follow path so the saved-log
-        # consumer sees a consistent shape.
-        state = self._read_terminal_state(client, target.job_id)
-        if state is not None:
-            write_fn(
-                ux_utils.finishing_message(f'Job finished (status: {state}).') +
-                '\n')
-            return _state_to_job_exit_code(state)
-        # Non-terminal one-shot read — return NOT_FINISHED so the caller
-        # falls through to the standard already-running path.
-        return exceptions.JobExitCode.NOT_FINISHED.value
-
-    def _tail_follow(
-        self,
-        base_ssh: List[str],
-        remote_cmd: str,
-        write_fn,
-        target: _Target,
-        client: 'slurm.SlurmClient',
-    ) -> int:
-        # See ``_tail_once`` for argv vs shell-quote reasoning.
-        full_cmd = base_ssh + [remote_cmd]
-        try:
-            proc = subprocess.Popen(
-                full_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                # Line-buffered text isn't reliable through SSH; read bytes.
-                bufsize=0,
-            )
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to spawn Slurm v1 tail subprocess: {e}')
-            return exceptions.JobExitCode.FAILED.value
-
-        assert proc.stdout is not None
-        stdout_fd = proc.stdout.fileno()
-
-        terminal_state: Dict[str, Optional[str]] = {'value': None}
-        stop_event = threading.Event()
-
-        def _poll_state() -> None:
-            while not stop_event.is_set():
-                try:
-                    state = client.get_job_state(target.job_id)
-                    if state is None:
-                        state = _sacct_get_state(client, target.job_id)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'sacct poll failed: {e}')
-                    state = None
-                if state is not None and state in _TERMINAL_STATES:
-                    terminal_state['value'] = state
-                    # Give the SSH ``tail -F`` subprocess a short window
-                    # to flush anything still in flight, then send it a
-                    # SIGTERM so the blocking ``os.read`` in the main
-                    # thread returns 0 and we proceed to the footer.
-                    if stop_event.wait(_TAIL_DRAIN_SECONDS):
-                        return
-                    try:
-                        proc.terminate()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-                    return
-                if stop_event.wait(_TAIL_TERMINAL_POLL_SECONDS):
-                    return
-
-        poll_thread = threading.Thread(target=_poll_state, daemon=True)
-        poll_thread.start()
-
-        try:
-            # Stream bytes as they arrive. The poll thread is
-            # responsible for ``proc.terminate()`` once it observes a
-            # terminal sacct state, which closes the SSH pipe and lets
-            # ``os.read`` return 0 here so we drop out cleanly. Reading
-            # the raw fd avoids relying on ``BufferedReader`` behavior
-            # across Python versions.
-            while True:
-                try:
-                    chunk = os.read(stdout_fd, 4096)
-                except OSError:
-                    chunk = b''
-                if not chunk:
-                    break
-                write_fn(chunk.decode('utf-8', errors='replace'))
-        finally:
-            stop_event.set()
-            try:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=_TAIL_DRAIN_SECONDS)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=_TAIL_DRAIN_SECONDS)
-            except Exception:  # pylint: disable=broad-except
-                pass
-            poll_thread.join(timeout=_TAIL_DRAIN_SECONDS)
-
-        state = terminal_state['value']
-        if state is None:
-            # Watchdog never observed terminal; do one last sacct query
-            # so the footer reflects whatever Slurm now reports.
-            state = self._read_terminal_state(client, target.job_id)
-
-        if state is not None:
-            write_fn(
-                ux_utils.finishing_message(f'Job finished (status: {state}).') +
-                '\n')
-            return _state_to_job_exit_code(state)
-        # No terminal observed and tail dropped — surface as failed so
-        # the controller's existing decision branches handle it.
-        return exceptions.JobExitCode.FAILED.value
-
-    def _read_terminal_state(self, client: 'slurm.SlurmClient',
-                             job_id: str) -> Optional[str]:
-        try:
-            state = client.get_job_state(job_id)
-            if state is None:
-                state = _sacct_get_state(client, job_id)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Terminal state lookup failed: {e}')
-            return None
-        if state is None or state not in _TERMINAL_STATES:
-            return None
-        return state
+        streamer = log_streaming.make_streamer_from_target(
+            target,
+            log_path,
+            client,
+            terminal_states=_TERMINAL_STATES,
+            sacct_get_state=_sacct_get_state,
+            state_to_job_exit_code=_state_to_job_exit_code,
+            follow=follow,
+            tail=tail,
+            tail_offset=tail_offset,
+        )
+        return streamer.run()
 
     def job_group_envs(
         self,
