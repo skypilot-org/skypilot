@@ -258,3 +258,43 @@ def test_start_dispatches_correct_cloud(cloud, loop):
 def test_start_unknown_cloud_raises():
     with pytest.raises(ValueError):
         preemption_poller.start('oracle')
+
+
+# ---- skylet boot wiring: SIGTERM handler must be installed when -----------
+# ---- VM poller is running, otherwise the poller's SIGTERM kills the -------
+# ---- skylet without firing the preemption hook --------------------------
+
+
+def test_should_install_sigterm_handler_on_kubernetes(monkeypatch):
+    """On K8s the handler MUST be installed: kubelet's preStop sends
+    SIGTERM via ``pgrep`` and the handler is the only thing that claims
+    the preemption slot and runs hooks. K8s short-circuits cloud
+    detection (returns None), so the K8s gate runs independently."""
+    from sky.skylet import skylet
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '10.0.0.1')
+    assert skylet._should_install_preemption_sigterm_handler(
+        detected_cloud=None) is True
+
+
+@pytest.mark.parametrize('cloud', ['aws', 'gcp', 'azure'])
+def test_should_install_sigterm_handler_on_vm_cloud(monkeypatch, cloud):
+    """On any VM cloud where the poller will run, the handler MUST be
+    installed. The poller signals preemption by sending SIGTERM to the
+    skylet's own PID — without a handler that SIGTERM kills the
+    process before any hook executes, defeating the entire purpose of
+    PR2."""
+    from sky.skylet import skylet
+    monkeypatch.delenv('KUBERNETES_SERVICE_HOST', raising=False)
+    assert skylet._should_install_preemption_sigterm_handler(
+        detected_cloud=cloud) is True
+
+
+def test_should_not_install_sigterm_handler_when_no_signal_source(monkeypatch):
+    """Bare-metal / Slurm / local-dev: no K8s env var, no cloud
+    metadata endpoint reachable. Installing a SIGTERM handler here
+    would mask normal-shutdown signal handling for no benefit (nothing
+    will ever send SIGTERM in a way that should route to hooks)."""
+    from sky.skylet import skylet
+    monkeypatch.delenv('KUBERNETES_SERVICE_HOST', raising=False)
+    assert skylet._should_install_preemption_sigterm_handler(
+        detected_cloud=None) is False

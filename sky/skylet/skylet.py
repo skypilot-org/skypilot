@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from typing import Optional
 
 import grpc
 
@@ -163,19 +164,28 @@ def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
     sys.exit(0)
 
 
-def _should_install_preemption_sigterm_handler() -> bool:
-    """True iff the skylet is running inside a Kubernetes pod.
+def _should_install_preemption_sigterm_handler(
+        detected_cloud: Optional[str]) -> bool:
+    """True iff any preemption signal source can reach this skylet.
 
-    SIGTERM-driven preemption handling is K8s-specific: kubelet sends
-    SIGTERM to pod containers on delete / scale-down / eviction. On VM
-    clouds (AWS/GCP/Azure), preemption is detected via the metadata
-    poller (introduced in PR2), so installing a SIGTERM handler here
-    would be dead code and could mask normal-shutdown signal handling.
+    Two routes feed the same SIGTERM-driven preemption hook path:
 
-    Detection uses the standard ``KUBERNETES_SERVICE_HOST`` env var
-    that the kubelet injects into every pod.
+      - **K8s**: kubelet's preStop pgrep's the skylet PID and sends
+        SIGTERM directly. Detection via the standard
+        ``KUBERNETES_SERVICE_HOST`` env var that kubelet injects.
+      - **VM clouds (AWS/GCP/Azure)**: the in-process
+        ``preemption_poller`` daemon polls the cloud's metadata
+        endpoint and sends SIGTERM to skylet's own PID on detected
+        reclaim. If the handler isn't installed here, that SIGTERM
+        kills skylet without firing the preemption hook — defeating
+        the entire PR2 detection path.
+
+    Bare-metal / Slurm / local-dev: no K8s env var, no cloud metadata
+    endpoint reachable. Returning False keeps SIGTERM's default
+    process-exit behavior intact so no signal handling is masked.
     """
-    return 'KUBERNETES_SERVICE_HOST' in os.environ
+    is_k8s = 'KUBERNETES_SERVICE_HOST' in os.environ
+    return is_k8s or detected_cloud is not None
 
 
 def main():
@@ -190,13 +200,19 @@ def main():
     # Clear any stale teardown-claim marker from a prior crashed skylet so
     # this fresh boot does not see a blocked slot.
     hook_executor.clear_teardown_claim()
-    if _should_install_preemption_sigterm_handler():
+
+    # Detect cloud first so we can decide BOTH whether the SIGTERM
+    # handler is needed AND whether to start the VM-side poller. The
+    # handler must be installed on both K8s (kubelet signals it) and
+    # VM clouds (the poller signals it) — see
+    # ``_should_install_preemption_sigterm_handler``.
+    cloud = _detect_cloud_for_preemption_poller()
+    if _should_install_preemption_sigterm_handler(detected_cloud=cloud):
         signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    # Start per-cloud preemption poller. Skipped on Kubernetes and
-    # anywhere without a cloud metadata endpoint (the SIGTERM handler
-    # already covers K8s preemption via kubelet signals).
-    cloud = _detect_cloud_for_preemption_poller()
+    # Start per-cloud preemption poller on VM clouds only. K8s pods
+    # already have the preStop SIGTERM path; bare-metal / Slurm have
+    # no signal source at all.
     if cloud is not None:
         logger.info(f'Starting VM preemption poller for cloud={cloud}')
         preemption_poller.start(cloud)
