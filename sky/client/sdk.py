@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -56,6 +57,7 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1157,40 +1159,52 @@ def tail_provision_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(52)
 @annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails a per-event lifecycle-hook log on the cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of ``stop``, ``preemption``, ``down``. When None,
+            auto-selects whichever log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
     Returns:
         Exit code 0 on streaming success; non-zero on failure.
-
-    Request Raises:
-        ValueError: if arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
-        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
     """
-    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
-                                     follow=follow,
-                                     tail=tail)
-
+    body = payloads.HookLogsBody(cluster_name=cluster_name,
+                                 event=event,
+                                 follow=follow,
+                                 tail=tail)
     response = server_common.make_authenticated_request(
-        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+        'POST', '/hook_logs', json=json.loads(body.model_dump_json()))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     return stream_and_get(request_id)
+
+
+# TODO(zpoint): drop the tail_autostop_logs deprecation alias after
+# v0.15.0. Replacement: tail_hook_logs(cluster_name, event='stop', ...).
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+    The autostop event was renamed to ``stop`` in the generalized
+    lifecycle-hooks framework. This shim emits a one-line stderr
+    deprecation warning and delegates to :func:`tail_hook_logs` so
+    master-version code keeps working through the v0.15.0 grace window.
+    """
+    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
+    return tail_hook_logs(cluster_name=cluster_name,
+                          event='stop',
+                          follow=follow,
+                          tail=tail)
 
 
 @usage_lib.entrypoint
@@ -1494,7 +1508,7 @@ def autostop(
             hook fails, autostop will still proceed but a warning will be
             logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
             be terminated if it exceeds this timeout.
 
     Returns:

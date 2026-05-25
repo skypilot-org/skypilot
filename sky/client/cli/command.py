@@ -88,6 +88,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import directory_utils
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -459,6 +460,26 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     """
     del ctx, param  # Unused.
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
+
+
+_VALID_HOOK_EVENTS = ('stop', 'preemption', 'down')
+
+
+def _validate_hook_event(ctx: click.Context, param: click.Parameter,
+                         value: Optional[str]) -> Optional[str]:
+    """Pass-through validator for ``sky logs --hook [event]``.
+
+    Accepts any string. The user-facing form ``sky logs --hook
+    <cluster>`` (no event) lets the cluster name slip into this
+    callback as the option value, because Click greedily consumes the
+    next token as the option value. We can't reject those tokens at
+    callback time because positional parsing happens later and
+    ``ctx.args`` is already empty here. Instead, the real validation
+    + auto-select swap lives in :func:`logs` so it can see both fields
+    together.
+    """
+    del ctx, param  # unused; kept for compatibility with click's signature
+    return value
 
 
 def _get_click_major_version():
@@ -2564,10 +2585,24 @@ def queue(clusters: List[str],
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--hook',
+              'hook_event',
+              callback=_validate_hook_event,
+              default=None,
+              is_flag=False,
+              flag_value='',
+              help='Stream a per-event lifecycle-hook log from the cluster. '
+              'Omit the event name to auto-select whichever log exists.')
+# TODO(zpoint): drop the --autostop deprecation alias after v0.15.0.
+# Replacement: --hook stop.
 @click.option('--autostop',
+              'autostop_alias',
               is_flag=True,
               default=False,
-              help='Stream the autostop hook logs from the cluster.')
+              hidden=True,
+              help='[DEPRECATED] Alias for `--hook stop`. The autostop '
+              'event was renamed to `stop` in the lifecycle-hooks '
+              'framework.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2596,17 +2631,19 @@ def queue(clusters: List[str],
           '[default: --follow]'))
 @_TAIL_OPTION
 @click.argument('cluster',
-                required=True,
+                required=False,
+                default=None,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
-    cluster: str,
+    cluster: Optional[str],
     job_ids: Tuple[str, ...],
     provision: bool,
-    autostop: bool,  # pylint: disable=redefined-outer-name
+    hook_event: Optional[str],
+    autostop_alias: bool,
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2637,9 +2674,44 @@ def logs(
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
 
-    5. If ``--autostop`` is specified, stream the autostop hook logs from the
-    cluster. This shows the output of the autostop hook script.
+    5. If ``--hook [event]`` is specified, stream the per-event
+    lifecycle-hook log. Omit the event name to auto-select whichever
+    log exists.
     """
+    # TODO(zpoint): drop the --autostop alias after v0.15.0 (see the
+    # decorator above). Until then: rewrite to --hook stop and emit a
+    # one-line stderr deprecation warning so master-era scripts keep
+    # working through the grace window.
+    if autostop_alias:
+        if hook_event is not None:
+            raise click.UsageError(
+                '--autostop is a deprecated alias for --hook stop and '
+                'cannot be combined with --hook.')
+        click.echo(hooks_deprecation.AUTOSTOP_LOGS_CLI, err=True, nl=False)
+        hook_event = 'stop'
+
+    # Smart-parse the no-event form `sky logs --hook <cluster>` (omit
+    # the event name to auto-select whichever hook log exists on the
+    # cluster). Click greedily consumes the next token after --hook as
+    # the option value, so the cluster name lands in `hook_event`.
+    # When the value isn't a valid event name and we have no
+    # positional CLUSTER, treat it as the cluster name and route to
+    # auto-select (event='').
+    if (hook_event is not None and hook_event != '' and
+            hook_event not in _VALID_HOOK_EVENTS):
+        if cluster is None:
+            cluster = hook_event
+            hook_event = ''
+        else:
+            valid = ', '.join(repr(v) for v in _VALID_HOOK_EVENTS)
+            raise click.UsageError(
+                f'Invalid value for --hook: {hook_event!r} is not one of '
+                f'{valid}.')
+    if cluster is None:
+        raise click.UsageError('Missing argument \'CLUSTER\'.')
+    # Sentinel `''` means --hook was passed without an event argument.
+    hook_auto_select = (hook_event == '')
+
     if worker is not None:
         if not provision:
             raise click.UsageError(
@@ -2647,19 +2719,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
-    if provision and autostop:
+    if provision and (hook_event is not None):
         raise click.UsageError(
-            '--provision and --autostop cannot be used together.')
+            '--provision and --hook cannot be used together.')
 
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
 
-    if autostop and (sync_down or status or job_ids or worker is not None):
-        raise click.UsageError(
-            '--autostop cannot be combined with job log options '
-            '(--sync-down/--status/--worker/job IDs).')
+    if hook_event is not None and (sync_down or status or job_ids or
+                                   worker is not None):
+        raise click.UsageError('--hook cannot be combined with job log options '
+                               '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(
@@ -2682,12 +2754,12 @@ def logs(
                                     follow=follow,
                                     tail=tail or 0))
 
-    if autostop:
-        # Same as provision — autostop hook output is small.
+    if hook_event is not None:
         sys.exit(
-            sdk.tail_autostop_logs(cluster_name=cluster,
-                                   follow=follow,
-                                   tail=tail or 0))
+            sdk.tail_hook_logs(cluster_name=cluster,
+                               event=None if hook_auto_select else hook_event,
+                               follow=follow,
+                               tail=tail or 0))
 
     if sync_down:
         with rich_utils.client_status(

@@ -155,6 +155,49 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
                 task.update_file_mounts({fm.mount_path: tmp_path})
 
 
+def _compute_set_autostop_args_for_hooks_only_relaunch(
+        cluster_name: str, hooks_payload: List[Dict[str,
+                                                    Any]]) -> Dict[str, Any]:
+    """Build set_autostop kwargs when a re-launch updates only hooks.
+
+    The `elif hooks_payload is not None:` branch in `_execute` updates
+    stored hooks on the skylet without the user re-passing
+    ``--idle-minutes-to-autostop`` (or YAML autostop) — for example,
+    re-launching a cluster with a new preemption hook. Previously this
+    path passed ``idle_minutes_to_autostop=-1`` (= "unset autostop"),
+    which silently wiped any prior autostop config.
+
+    We instead read the prior autostop value + ``to_down`` flag from
+    local state and pass them through, so re-launches that change only
+    hooks preserve the cluster's existing autostop. ``wait_for`` is not
+    persisted client-side; on this path it defaults back to
+    ``jobs_and_ssh`` (the documented default), which is the same value a
+    user would get on a fresh ``sky autostop``.
+
+    The helper is named ``set_autostop`` because the underlying RPC
+    that propagates hooks IS ``SetAutostop`` (hooks ride on it for
+    wire-compat reasons — see
+    ``sky/schemas/proto/autostopv1.proto``). If a future PR adds a
+    dedicated ``SetHooks`` RPC, this helper's name and call site can
+    track that rename.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        prior_idle_minutes = -1
+        prior_to_down = False
+    else:
+        prior_idle_minutes = record.get('autostop', -1)
+        if prior_idle_minutes is None:
+            prior_idle_minutes = -1
+        prior_to_down = bool(record.get('to_down', False))
+    return dict(
+        idle_minutes_to_autostop=prior_idle_minutes,
+        wait_for=None,
+        down=prior_to_down,
+        hooks=hooks_payload,
+    )
+
+
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
@@ -387,16 +430,12 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-        hook: Optional[str] = None
-        hook_timeout: Optional[int] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
-                hook = resource_autostop_config.hook
-                hook_timeout = resource_autostop_config.hook_timeout
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -572,6 +611,30 @@ def _execute_dag(
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
+            task_hooks = resources[0].hooks
+            # Hooks payload sent to skylet:
+            #   None  → "leave stored hooks alone" (first launch w/o hooks)
+            #   []    → "clear stored hooks" (re-launch dropping hooks)
+            #   [...] → "replace stored hooks"
+            if task_hooks is not None:
+                hooks_payload: Optional[List[Dict[str, Any]]] = task_hooks
+            elif cluster_exists:
+                hooks_payload = []
+            else:
+                hooks_payload = None
+            # Synthesize the legacy pre-v7 hook/hook_timeout pair from
+            # the new-style hooks list. Match the event equivalent for
+            # this launch: ``down`` for autodown, ``stop`` otherwise.
+            # AutostopCodeGen.set_autostop dual-emits both fields so
+            # pre-v7 skylets keep working until v0.15.0.
+            hook: Optional[str] = None
+            hook_timeout: Optional[int] = None
+            legacy_event = 'down' if down else 'stop'
+            for entry in (resources[0].hooks or []):
+                if legacy_event in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -580,7 +643,18 @@ def _execute_dag(
                                      wait_for,
                                      down,
                                      hook=hook,
-                                     hook_timeout=hook_timeout)
+                                     hook_timeout=hook_timeout,
+                                     hooks=hooks_payload)
+            elif hooks_payload is not None:
+                # Hooks can fire on preemption/down independent of
+                # autostop — persist them even when autostop is disabled.
+                # Re-launches with hooks dropped from YAML hit this with
+                # hooks_payload=[] so the skylet clears its stored hooks.
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                kwargs = _compute_set_autostop_args_for_hooks_only_relaunch(
+                    handle.cluster_name, hooks_payload)
+                backend.set_autostop(handle, **kwargs)
 
         job_id = None
         if Stage.EXEC in stages:
