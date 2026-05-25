@@ -2147,30 +2147,44 @@ def _create_managed_job_v1(
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                             _on_pending)
         nodes, _ = client.get_job_nodes(job_id)
-        rich_utils.force_update_status(
-            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
-        return common.ProvisionRecord(
-            provider_name='slurm',
-            region=region,
-            zone=partition,
-            cluster_name=cluster_name_on_cloud,
-            head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
-            resumed_instance_ids=[],
-            created_instance_ids=[
-                slurm_utils.instance_id(job_id, n) for n in nodes
-            ],
-            runtime_metadata=common.ProvisionRuntimeMetadata(
-                has_ray=False,
-                has_skylet=False,
-                has_job_queue=False,
-                ssh_available=False,
-                runtime_setup_done=True,
-                workdir_synced=True,
-                file_mounts_synced=True,
-                setup_done=True,
-                run_started=True,
-            ),
-        )
+        if not nodes:
+            # The existing job left PENDING but has no allocated nodes —
+            # it has already reached a terminal state (RUNNING → FAILED /
+            # COMPLETED very quickly, common on v1 where the sbatch script
+            # IS the user code). Don't reattach to a corpse; fall through
+            # to a fresh submission. Without this guard ``nodes[0]`` below
+            # IndexErrors and the controller treats the recovery launch as
+            # crashed.
+            logger.info(
+                f'V1 existing job {job_id} for {cluster_name_on_cloud} has '
+                'no allocated nodes (already terminal); falling through to '
+                'fresh submission.')
+        else:
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching',
+                                         cluster_name=cluster_name))
+            return common.ProvisionRecord(
+                provider_name='slurm',
+                region=region,
+                zone=partition,
+                cluster_name=cluster_name_on_cloud,
+                head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+                resumed_instance_ids=[],
+                created_instance_ids=[
+                    slurm_utils.instance_id(job_id, n) for n in nodes
+                ],
+                runtime_metadata=common.ProvisionRuntimeMetadata(
+                    has_ray=False,
+                    has_skylet=False,
+                    has_job_queue=False,
+                    ssh_available=False,
+                    runtime_setup_done=True,
+                    workdir_synced=True,
+                    file_mounts_synced=True,
+                    setup_done=True,
+                    run_started=True,
+                ),
+            )
 
     # ---- Fresh submission ----
     login_node_runner = command_runner.SSHCommandRunner(
