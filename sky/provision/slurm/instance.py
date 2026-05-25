@@ -1674,6 +1674,52 @@ def _v1_sacct_node_list(client: 'slurm.SlurmClient',
     return nodes if nodes else None
 
 
+def _v1_sacct_latest_attempt(
+        client: 'slurm.SlurmClient',
+        cluster_name_on_cloud: str) -> Optional[Tuple[str, List[str]]]:
+    """Recover the most-recent attempt's (job_id, NodeList) from sacct.
+
+    For v1 jobs that have already terminated (typical for fast-failing
+    jobs like OOM-killed user code), ``squeue --jobs <id>`` returns
+    nothing because squeue's default filter excludes terminal states.
+    sacct retains the record within ``MinJobAge`` and can be queried by
+    ``--name``. Returns the most recent allocation row's job_id and
+    NodeList, or ``None`` if sacct has no record.
+    """
+    cmd = (f'sacct --name {cluster_name_on_cloud} '
+           '--format=JobID,NodeList --parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0 or not stdout.strip():
+        return None
+    # sacct lists rows oldest-first. The last row is the most recent
+    # attempt (controller may have recovered under the same name).
+    last_job_id: Optional[str] = None
+    last_nodelist_raw: Optional[str] = None
+    for line in stdout.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        last_job_id = parts[0].strip()
+        last_nodelist_raw = parts[1].strip()
+    if not last_job_id or not last_nodelist_raw or last_nodelist_raw == 'None':
+        return None
+    # NodeList from sacct: for single-node, plain hostname. For multi-
+    # node, Slurm's hostlist syntax (e.g. ``node[1-3]``). For now we
+    # only fully support single-node. Multi-node v1 jobs would need
+    # ``scontrol show hostnames <list>`` to expand — log a debug and
+    # take the raw string so single-node and simple comma-separated
+    # cases work without an extra round-trip.
+    if '[' in last_nodelist_raw:
+        logger.debug(f'V1 sacct returned hostlist {last_nodelist_raw!r}; '
+                     'multi-node expansion is not yet implemented in the '
+                     'fast-terminal fallback path.')
+        nodes = [last_nodelist_raw]
+    else:
+        nodes = [n for n in last_nodelist_raw.split(',') if n]
+    return last_job_id, nodes
+
+
 def _get_cluster_info_v1(
         cluster_name_on_cloud: str,
         provider_config: Dict[str, Any]) -> Optional[common.ClusterInfo]:
@@ -1694,47 +1740,54 @@ def _get_cluster_info_v1(
     """
     client = _slurm_client_from_provider_config(provider_config)
 
+    job_id: Optional[str] = None
+    nodes: List[str] = []
+
+    # First try squeue's "live" set (pending/running/completing). If a
+    # live job exists, prefer it.
     try:
-        running_jobs = client.query_jobs(cluster_name_on_cloud, ['running'])
+        live_jobs = client.query_jobs(cluster_name_on_cloud,
+                                      ['pending', 'running', 'completing'])
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'V1 get_cluster_info: squeue query failed: {e}')
-        return None
+        live_jobs = []
 
-    if not running_jobs:
-        # No running job — return empty so caller treats as "no instances
-        # yet" / cluster torn down.
-        return common.ClusterInfo(
-            instances={},
-            head_instance_id=None,
-            provider_name='slurm',
-            provider_config=provider_config,
-        )
-    assert len(running_jobs) == 1, (
-        f'Multiple running jobs found for v1 cluster '
-        f'{cluster_name_on_cloud}: {running_jobs}. Expected single-job-per'
-        '-name (enforced by _create_managed_job_v1).')
-
-    job_id = running_jobs[0]
-    nodes: List[str] = []
-    try:
-        nodes, _ = client.get_job_nodes(job_id)
-    except Exception as e:  # pylint: disable=broad-except
-        # Fall back to sacct — the job may have just exited and squeue
-        # is briefly out of sync, or get_job_nodes' scontrol-show-node
-        # invocation hit a transient.
-        logger.debug(f'V1 get_cluster_info: get_job_nodes({job_id}) failed: '
-                     f'{e}; trying sacct.')
-        recovered = _v1_sacct_node_list(client, job_id)
-        if recovered:
-            nodes = recovered
+    if live_jobs:
+        if len(live_jobs) > 1:
+            # Multiple "live" jobs for the same name — pick the highest
+            # (Slurm assigns monotonic IDs). Don't assert; recovery
+            # attempts may briefly overlap.
+            job_id = str(max(int(j) for j in live_jobs))
+        else:
+            job_id = live_jobs[0]
+        try:
+            nodes, _ = client.get_job_nodes(job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'V1 get_cluster_info: get_job_nodes({job_id}) '
+                         f'failed: {e}; trying sacct NodeList fallback.')
+            recovered = _v1_sacct_node_list(client, job_id)
+            if recovered:
+                nodes = recovered
 
     if not nodes:
-        # Give the caller a None so it can fall through to its safe
-        # default rather than emitting an empty-instances ClusterInfo
-        # that downstream code might interpret as "definitely no
-        # nodes".
-        logger.debug(f'V1 get_cluster_info: no nodes resolved for job '
-                     f'{job_id}; returning None.')
+        # No live job, or live job has no nodes yet — fall back to
+        # sacct's most recent attempt. This is the typical case for
+        # fast-failing v1 jobs: get_cluster_info is called after
+        # _create_managed_job_v1 returns but the sbatch has already
+        # OOM/FAILED, so squeue's live filter returns empty.
+        recovered = _v1_sacct_latest_attempt(client, cluster_name_on_cloud)
+        if recovered is not None:
+            job_id, nodes = recovered
+            logger.debug(f'V1 get_cluster_info: recovered job {job_id} with '
+                         f'nodes={nodes} from sacct (no live job).')
+
+    if not nodes or job_id is None:
+        # Nothing in sacct either. Return None so the caller falls
+        # through to its safe default. The managed-job controller's
+        # status poll will surface "no cluster" and the launch
+        # finalization treats this as a provisioning failure.
+        logger.debug(f'V1 get_cluster_info: no live job and no sacct '
+                     f'record for {cluster_name_on_cloud}; returning None.')
         return None
 
     instances: Dict[str, List[common.InstanceInfo]] = {}
