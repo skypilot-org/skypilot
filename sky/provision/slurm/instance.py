@@ -1029,6 +1029,10 @@ def terminate_instances(
             'worker_only=True is not supported for Slurm, this is a no-op.')
         return
 
+    if is_managed_job_v1_provider_config(provider_config):
+        _terminate_managed_job_v1(cluster_name_on_cloud, provider_config)
+        return
+
     # Check if we are running inside a Slurm cluster (only happens with
     # autodown, where the Skylet invokes terminate_instances on the remote
     # cluster). In this case, use local execution instead of SSH.
@@ -1237,6 +1241,123 @@ def get_command_runners(
 
 
 # -------- v1 managed-job: predicates, template override, provision -------- #
+
+# Bounded wait used by the v1 ``terminate_instances`` branch to confirm
+# that ``scancel`` actually moved the job out of RUNNING before we let
+# the controller continue with a possibly-stale state. Slurm's default
+# ``KillWait`` is 30s; we use a slightly larger ceiling so a SIGTERM
+# followed by the eventual SIGKILL has time to land before we give up.
+_V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS = 30
+_V1_SCANCEL_POLL_INTERVAL_SECONDS = 1
+
+
+def _slurm_client_from_provider_config(
+        provider_config: Dict[str, Any]) -> 'slurm.SlurmClient':
+    """Build a ``SlurmClient`` from a v1 provider config's ssh block."""
+    ssh_config_dict = provider_config['ssh']
+    return slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict['port']),
+        ssh_config_dict['user'],
+        ssh_config_dict.get('private_key', None),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=ssh_config_dict.get('identities_only', False),
+    )
+
+
+def _resolve_v1_job_id(
+        client: 'slurm.SlurmClient',
+        cluster_name_on_cloud: str,
+        cluster_info: Optional[common.ClusterInfo] = None) -> Optional[str]:
+    """Resolve the Slurm job_id for a v1 cluster.
+
+    Identity contract (PLAN.md block-ship #4): the primary source is the
+    structured ``tags['job_id']`` populated by ``get_cluster_info``;
+    fallback is a name-keyed ``squeue`` query, which is safe on the v1
+    path because the COMPLETING-drain + existing-job reattach invariants
+    in ``_create_managed_job_v1`` guarantee a single live job per name.
+    """
+    # Primary: structured tag from cached ClusterInfo.
+    if cluster_info is not None and cluster_info.head_instance_id is not None:
+        head = cluster_info.get_head_instance()
+        if head is not None:
+            tag = head.tags.get('job_id') if head.tags else None
+            if tag:
+                return str(tag)
+    # Fallback: name-keyed query (single match enforced upstream).
+    matches = client.query_jobs(cluster_name_on_cloud, ['pending', 'running'])
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return None
+    raise RuntimeError(
+        f'Multiple Slurm jobs found for v1 cluster {cluster_name_on_cloud}: '
+        f'{matches}. Expected at most one — single-job-per-name is a v1 '
+        'invariant.')
+
+
+def _terminate_managed_job_v1(cluster_name_on_cloud: str,
+                              provider_config: Dict[str, Any]) -> None:
+    """Cancel the v1 Slurm job by job_id and wait briefly for RUNNING exit.
+
+    Uses ``scancel <jobid>`` against the resolved primary identity (per
+    PLAN.md block-ship #4), not ``scancel --name=...`` — the latter
+    stays on the legacy path. After scancel we poll briefly so the
+    controller does not continue with a stale RUNNING reading.
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+
+    job_id = _resolve_v1_job_id(client, cluster_name_on_cloud)
+    if job_id is None:
+        logger.debug(f'V1 Slurm job for {cluster_name_on_cloud} not found in '
+                     'squeue; assuming already terminated.')
+        return
+
+    state = client.get_job_state(job_id)
+    if state is None:
+        logger.debug(f'V1 Slurm job {job_id} no longer in squeue; assuming '
+                     'already terminated.')
+        return
+
+    terminal_states = {
+        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+        'SPECIAL_EXIT', 'BOOT_FAIL', 'OUT_OF_MEMORY', 'DEADLINE', 'REVOKED'
+    }
+    if state in terminal_states:
+        logger.debug(f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) already '
+                     f'in terminal state {state}; nothing to do.')
+        return
+    if state == 'COMPLETING':
+        logger.debug(f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) already '
+                     'completing; nothing to do.')
+        return
+
+    if state in ('PENDING', 'CONFIGURING'):
+        # Pending jobs haven't allocated nodes; scancel without signal.
+        client.cancel_job_by_id(job_id, signal=None)
+    else:
+        # RUNNING / SUSPENDED / SIGNALING / STAGE_OUT: send SIGTERM with --full
+        # so the batch shell + its srun children receive the signal.
+        client.cancel_job_by_id(job_id, signal='TERM', full=True)
+
+    # Wait briefly for the job to leave RUNNING. Without this the
+    # controller may read a stale RUNNING state on its next status poll
+    # and conclude the cancel "didn't take".
+    start = time.time()
+    while (time.time() - start < _V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS):
+        state = client.get_job_state(job_id)
+        if state is None:
+            # Aged out of squeue; reach for sacct to confirm terminal.
+            return
+        if state in terminal_states or state == 'COMPLETING':
+            return
+        time.sleep(_V1_SCANCEL_POLL_INTERVAL_SECONDS)
+
+    logger.warning(
+        f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) did not leave '
+        f'RUNNING within {_V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS}s after '
+        'scancel. The controller may briefly observe a stale state.')
 
 
 def _all_resource_alternatives_are_slurm(task: 'task_lib.Task') -> bool:

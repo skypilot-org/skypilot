@@ -224,6 +224,37 @@ class SlurmClient:
                                            stream_logs=False)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
+    def cancel_job_by_id(self,
+                         job_id: str,
+                         signal: Optional[str] = None,
+                         full: bool = False) -> None:
+        """Cancel a Slurm job by job ID.
+
+        Unlike ``cancel_jobs_by_name`` (which targets ``--name`` and can
+        race with a concurrent same-name attempt), this targets a specific
+        job ID, which is the identity contract for v1 managed jobs (the
+        ``job_id`` resolved from ``head_instance.tags['job_id']``).
+
+        Args:
+            job_id: The Slurm job ID to cancel.
+            signal: Optional signal to send to the job.
+            full: If True, signals the batch script and its children processes.
+                By default, signals other than SIGKILL are not sent to the
+                batch step (the shell script).
+        """
+        cmd = f'scancel {job_id}'
+        if signal is not None:
+            cmd += f' --signal {signal}'
+        if full:
+            cmd += ' --full'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           f'Failed to cancel job {job_id}.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+        logger.debug(f'Successfully cancelled job {job_id}: {stdout}')
+
     def info(self) -> str:
         """Get Slurm cluster information.
 
