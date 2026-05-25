@@ -469,13 +469,14 @@ def _validate_hook_event(ctx: click.Context, param: click.Parameter,
                          value: Optional[str]) -> Optional[str]:
     """Pass-through validator for ``sky logs --hook [event]``.
 
-    Accepts any string. The design-doc form ``sky logs --hook
-    <cluster>`` lets the cluster name slip in here (because Click
-    greedily consumes the next token as the option value). We can't
-    reject those tokens at callback time because positional parsing
-    happens later and ``ctx.args`` is already empty here. Instead, the
-    real validation + auto-select swap lives in :func:`logs` so it can
-    see both fields together.
+    Accepts any string. The user-facing form ``sky logs --hook
+    <cluster>`` (no event) lets the cluster name slip into this
+    callback as the option value, because Click greedily consumes the
+    next token as the option value. We can't reject those tokens at
+    callback time because positional parsing happens later and
+    ``ctx.args`` is already empty here. Instead, the real validation
+    + auto-select swap lives in :func:`logs` so it can see both fields
+    together.
     """
     del ctx, param  # unused; kept for compatibility with click's signature
     return value
@@ -2689,11 +2690,13 @@ def logs(
         click.echo(hooks_deprecation.AUTOSTOP_LOGS_CLI, err=True, nl=False)
         hook_event = 'stop'
 
-    # Smart-parse the design-doc form `sky logs --hook <cluster>`:
-    # Click greedily consumes the next token after --hook as the option
-    # value, so the cluster name lands in `hook_event`. When the value
-    # isn't a valid event name and we have no positional CLUSTER, treat
-    # it as the cluster name and route to auto-select (event='').
+    # Smart-parse the no-event form `sky logs --hook <cluster>` (omit
+    # the event name to auto-select whichever hook log exists on the
+    # cluster). Click greedily consumes the next token after --hook as
+    # the option value, so the cluster name lands in `hook_event`.
+    # When the value isn't a valid event name and we have no
+    # positional CLUSTER, treat it as the cluster name and route to
+    # auto-select (event='').
     if (hook_event is not None and hook_event != '' and
             hook_event not in _VALID_HOOK_EVENTS):
         if cluster is None:

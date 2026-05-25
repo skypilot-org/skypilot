@@ -1081,7 +1081,7 @@ def test_cli_hook_auto_select_with_cluster_only(monkeypatch):
     assert captured.get('cluster') == 'mycluster', (
         f'Expected cluster=mycluster; got {captured!r}. The fix should '
         f'route `sky logs --hook mycluster` as "auto-select on '
-        f'mycluster" — the design doc form.')
+        f'mycluster" — the no-event "auto-select" CLI form.')
     # Auto-select means event passed to SDK is None (empty sentinel
     # rewritten by the CLI).
     assert captured.get('event') is None
@@ -1093,7 +1093,9 @@ def test_cli_autostop_alias_routes_to_hook_stop_with_deprecation(monkeypatch):
     After the autostop→stop event rename it must still keep working as a
     deprecation alias: rewrite the call to ``--hook stop`` and emit a
     one-line stderr warning so existing user scripts don't break across
-    the v0.15.0 grace window. Design §1.7 pins the removal at v0.15.0.
+    the v0.15.0 grace window. The removal anchor is pinned at v0.15.0
+    in ``sky/utils/hooks_deprecation.py`` alongside the matching
+    ``autostop.hook`` YAML and ``tail_autostop_logs`` SDK deprecations.
     """
     from click.testing import CliRunner
 
@@ -1116,8 +1118,9 @@ def test_cli_autostop_alias_routes_to_hook_stop_with_deprecation(monkeypatch):
     assert result.exit_code == 0, (
         f'CLI exit {result.exit_code}; output={result.output!r}; '
         f'stderr={result.stderr!r}; exc={result.exception!r}. The '
-        f'`--autostop` flag must remain a deprecated alias (per design '
-        f'§1.7 — removal pinned at v0.15.0).')
+        f'`--autostop` flag must remain a deprecated alias for master-era '
+        f'callers; removal pinned at v0.15.0 in '
+        f'sky/utils/hooks_deprecation.py.')
     assert captured.get('event') == 'stop', (
         f'--autostop must route to --hook stop after the autostop→stop '
         f"event rename. Got: event={captured.get('event')!r}.")
@@ -1157,14 +1160,15 @@ def test_sdk_tail_autostop_logs_alias_delegates_to_tail_hook_logs(
 
     After the rename, it must still exist as a deprecated shim that
     delegates to ``tail_hook_logs(event='stop')`` and emits a one-line
-    stderr deprecation warning. Same removal anchor as the CLI alias —
-    v0.15.0 per design §1.7.
+    stderr deprecation warning. Same removal anchor as the CLI alias:
+    v0.15.0, pinned in ``sky/utils/hooks_deprecation.py``.
     """
     from sky.client import sdk
 
     assert hasattr(sdk, 'tail_autostop_logs'), (
         'sky.client.sdk.tail_autostop_logs must exist as a deprecated '
-        'alias. Removal pinned at v0.15.0 (design §1.7).')
+        'alias for master-era callers; removal pinned at v0.15.0 in '
+        'sky/utils/hooks_deprecation.py.')
 
     captured = {}
 

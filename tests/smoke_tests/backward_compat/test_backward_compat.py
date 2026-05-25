@@ -918,8 +918,12 @@ class TestBackwardCompatibility:
     def test_autostop_hook_compatibility(self, generic_cloud: str):
         """Master's `autostop.hook` YAML works end-to-end across versions.
 
-        Exercises the lifecycle-hooks back-compat contract from PR1's
-        design doc §1.7:
+        Exercises the lifecycle-hooks back-compat contract: master-era
+        callers using ``resources.autostop.hook`` / ``hook_timeout``
+        keep working against this PR's generalized hooks framework,
+        and the resulting hook log is readable via the new
+        ``sky logs --hook stop`` CLI. Removal of the legacy surfaces
+        is pinned at v0.15.0 (see ``sky/utils/hooks_deprecation.py``).
 
         BASE side (pre-PR1 SkyPilot)
           - Launch with master's ``resources.autostop.hook`` YAML.
