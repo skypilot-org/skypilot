@@ -921,6 +921,7 @@ class Kubernetes(clouds.Cloud):
         namespace = kubernetes_utils.get_namespace(
             context=context,
             override_configs=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
         )
 
         # Detect hostNetwork before the template is rendered so the probe

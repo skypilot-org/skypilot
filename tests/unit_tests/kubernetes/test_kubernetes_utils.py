@@ -4317,3 +4317,24 @@ class TestGetNamespace:
         result = utils.get_namespace()
         assert result == 'current-ctx-default'
         mock_kubeconfig.assert_called_once_with(None)
+
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.skypilot_config'
+           '.get_effective_namespace')
+    def test_forwards_explicit_cloud(self, mock_effective, mock_kubeconfig):
+        """Explicit `cloud` arg is forwarded to the resolver.
+
+        Callers reused across cloud classes (e.g. Kubernetes and SSH node
+        pools) need to scope namespace lookups to their own cloud key so
+        configuration set under one cloud does not bleed into another.
+        """
+        mock_effective.return_value = None
+        mock_kubeconfig.return_value = 'kubeconfig-default'
+        result = utils.get_namespace(context='ssh-cluster', cloud='ssh')
+        assert result == 'kubeconfig-default'
+        mock_effective.assert_called_once_with(
+            cloud='ssh',
+            region='ssh-cluster',
+            workspace=None,
+            override_configs=None,
+        )

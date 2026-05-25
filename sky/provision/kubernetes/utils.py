@@ -2894,7 +2894,8 @@ def get_kube_config_context_namespace(
 
 def get_namespace(context: Optional[str] = None,
                   workspace: Optional[str] = None,
-                  override_configs: Optional[Dict[str, Any]] = None) -> str:
+                  override_configs: Optional[Dict[str, Any]] = None,
+                  cloud: str = 'kubernetes') -> str:
     """Resolve the Kubernetes namespace for ``context``, with fallback.
 
     Calls ``skypilot_config.get_effective_namespace`` to resolve the
@@ -2903,9 +2904,12 @@ def get_namespace(context: Optional[str] = None,
 
     Drop-in replacement for ``get_kube_config_context_namespace`` at
     sites that have a workspace in scope.
+
+    ``cloud`` selects the top-level config key the resolver consults
+    (e.g. ``'kubernetes'`` vs ``'ssh'``).
     """
     config_namespace = skypilot_config.get_effective_namespace(
-        cloud='kubernetes',
+        cloud=cloud,
         region=context,
         workspace=workspace,
         override_configs=override_configs,

@@ -514,6 +514,106 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '9000')
 
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_namespace')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_ssh_cloud_does_not_leak_global_kubernetes_namespace(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_get_effective_namespace, mock_is_exec_auth,
+            mock_get_accelerator_label_keys, mock_get_kubeconfig_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """Global ``kubernetes.namespace`` must not leak into SSH launches.
+
+        SSH pools resolve namespaces under the ``ssh.*`` config key, so a
+        ``kubernetes.namespace`` set at the top level must not influence
+        where an SSH pod lands. When the SSH path has nothing configured,
+        the namespace must fall back to the kubeconfig context default.
+        """
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        mock_get_current_context.return_value = 'ssh-my-cluster'
+        mock_get_kubeconfig_namespace.return_value = 'kubeconfig-default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Simulate `kubernetes.namespace: prod-ns` set globally, with no
+        # `ssh.namespace` configured (the SSH schema does not carry one).
+        def effective_namespace_side_effect(cloud,
+                                            region=None,
+                                            workspace=None,
+                                            override_configs=None):
+            if cloud == 'kubernetes':
+                return 'prod-ns'
+            return None
+
+        mock_get_effective_namespace.side_effect = (
+            effective_namespace_side_effect)
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            if keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+
+        mock_get_image.return_value = 'test-image:latest'
+
+        ssh_cloud = ssh.SSH()
+        self.assertEqual(ssh_cloud._REPR, 'SSH')
+
+        deploy_vars = ssh_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # SSH launch must land in the kubeconfig default, NOT `prod-ns`.
+        self.assertIn('k8s_namespace', deploy_vars)
+        self.assertEqual(deploy_vars['k8s_namespace'], 'kubeconfig-default')
+        self.assertNotEqual(deploy_vars['k8s_namespace'], 'prod-ns')
+
+        # The resolver must be consulted with cloud='ssh', so the global
+        # `kubernetes.namespace` entry can't apply.
+        namespace_calls = [
+            call for call in mock_get_effective_namespace.call_args_list
+            if call.kwargs.get('region') == 'ssh-my-cluster'
+        ]
+        self.assertTrue(
+            namespace_calls,
+            'get_effective_namespace was not consulted for SSH '
+            'launch')
+        for call in namespace_calls:
+            self.assertEqual(call.kwargs.get('cloud'), 'ssh')
+
 
 if __name__ == '__main__':
     unittest.main()
