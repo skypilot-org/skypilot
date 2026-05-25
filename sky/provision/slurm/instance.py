@@ -1541,6 +1541,38 @@ def _query_instances_v1(
     return statuses
 
 
+def _v1_precondition_cleanup(
+        login_node_runner: 'command_runner.SSHCommandRunner', sky_base_dir: str,
+        cluster_name_on_cloud: str) -> None:
+    """Purge residue from a prior v1 attempt under the same cluster name.
+
+    PLAN.md gap #10: if a previous attempt was killed under SIGKILL or
+    OOM, its EXIT trap (which would have removed
+    ``{sky_base_dir}/.sky_clusters/<cluster_name_on_cloud>``) never
+    ran. Submitting attempt N+1 without clearing that residue can leave
+    stale log markers, ready-signal files, or container init flags in
+    place, confusing the new attempt.
+
+    Best-effort: failures (e.g. NFS hiccup) are logged and tolerated —
+    the new attempt's sbatch script will still proceed; we just risk
+    seeing the stale residue if cleanup didn't take. The legacy path's
+    EXIT trap was the only place this was previously removed.
+    """
+    cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                             cluster_name_on_cloud)
+    cmd = f'rm -rf {shlex.quote(cluster_home_dir)}'
+    rc, stdout, stderr = login_node_runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    if rc != 0:
+        logger.warning(f'V1 precondition cleanup of {cluster_home_dir} '
+                       f'failed (rc={rc}): {stdout}\n{stderr}. Continuing '
+                       'with submission; stale residue may be visible to '
+                       'the new attempt.')
+    else:
+        logger.debug(f'V1 precondition cleanup of {cluster_home_dir} ok.')
+
+
 def _v1_sacct_node_list(client: 'slurm.SlurmClient',
                         job_id: str) -> Optional[List[str]]:
     """Recover the per-job node list from ``sacct`` when squeue is empty.
@@ -2125,6 +2157,17 @@ def _create_managed_job_v1(
     provision_script_path = _sbatch_provision_script_path(
         sky_base_dir, cluster_name_on_cloud)
     provision_scripts_dir = os.path.dirname(provision_script_path)
+
+    # Precondition cleanup: a previous attempt killed under SIGKILL
+    # would have skipped its EXIT trap and left
+    # ``.sky_clusters/<cluster_name_on_cloud>`` behind. The legacy path
+    # tolerated this because its sbatch preamble recreated everything
+    # before user code ran. V1's sbatch script writes nothing under
+    # ``.sky_clusters`` today, but we still purge the directory so any
+    # historical residue (logs, ready markers, partial container init
+    # state) doesn't poison a fresh attempt — PLAN.md gap #10.
+    _v1_precondition_cleanup(login_node_runner, sky_base_dir,
+                             cluster_name_on_cloud)
 
     # Read the persisted v1 execution payload from the provider config.
     setup = provider_config.get('setup')
