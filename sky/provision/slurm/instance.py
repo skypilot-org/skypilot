@@ -1389,33 +1389,47 @@ def _terminate_managed_job_v1(cluster_name_on_cloud: str,
 # state space documented at
 # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES — see
 # also ``managed_job_runtime._slurm_state_to_job_status``.
-_V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[
-    str, Optional[status_lib.ClusterStatus]] = {
-        'PENDING': status_lib.ClusterStatus.INIT,
-        'CONFIGURING': status_lib.ClusterStatus.INIT,
-        'RESV_DEL_HOLD': status_lib.ClusterStatus.INIT,
-        'REQUEUED': status_lib.ClusterStatus.INIT,
-        'REQUEUE_HOLD': status_lib.ClusterStatus.INIT,
-        'REQUEUE_FED': status_lib.ClusterStatus.INIT,
-        'RESIZING': status_lib.ClusterStatus.INIT,
-        'RUNNING': status_lib.ClusterStatus.UP,
-        'COMPLETING': status_lib.ClusterStatus.UP,
-        'SIGNALING': status_lib.ClusterStatus.UP,
-        'STAGE_OUT': status_lib.ClusterStatus.UP,
-        'SUSPENDED': status_lib.ClusterStatus.UP,
-        # Terminal — ``None`` means "no longer an instance".
-        'COMPLETED': None,
-        'CANCELLED': None,
-        'FAILED': None,
-        'TIMEOUT': None,
-        'NODE_FAIL': None,
-        'BOOT_FAIL': None,
-        'DEADLINE': None,
-        'OUT_OF_MEMORY': None,
-        'PREEMPTED': None,
-        'REVOKED': None,
-        'SPECIAL_EXIT': None,
-    }
+_V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[str, Optional[status_lib.ClusterStatus]] = {
+    'PENDING': status_lib.ClusterStatus.INIT,
+    'CONFIGURING': status_lib.ClusterStatus.INIT,
+    'RESV_DEL_HOLD': status_lib.ClusterStatus.INIT,
+    'REQUEUED': status_lib.ClusterStatus.INIT,
+    'REQUEUE_HOLD': status_lib.ClusterStatus.INIT,
+    'REQUEUE_FED': status_lib.ClusterStatus.INIT,
+    'RESIZING': status_lib.ClusterStatus.INIT,
+    'RUNNING': status_lib.ClusterStatus.UP,
+    'COMPLETING': status_lib.ClusterStatus.UP,
+    'SIGNALING': status_lib.ClusterStatus.UP,
+    'STAGE_OUT': status_lib.ClusterStatus.UP,
+    'SUSPENDED': status_lib.ClusterStatus.UP,
+    # --- Terminal due to user-code outcome: report cluster as UP. ---
+    # The Slurm allocation is gone, but from the managed-jobs
+    # controller's perspective the "cluster" ran fine and the
+    # user's code is what terminated. Without UP here the
+    # controller's user-code-failure branch at controller.py:874+
+    # never fires (it gates on ``cluster_status == UP``), so a
+    # FAILED job is misclassified as cluster-preempted and
+    # retried indefinitely. Compare K8s legacy at
+    # ``kubernetes/instance.py:2640`` which uses ``status_map_overrides``
+    # (line 2631) to swap ``Failed → UP`` for v1-style pods that are
+    # also single-use; we set this directly because Slurm v1 owns
+    # the whole status path.
+    'COMPLETED': status_lib.ClusterStatus.UP,
+    'FAILED': status_lib.ClusterStatus.UP,
+    'TIMEOUT': status_lib.ClusterStatus.UP,
+    'OUT_OF_MEMORY': status_lib.ClusterStatus.UP,
+    'DEADLINE': status_lib.ClusterStatus.UP,
+    'SPECIAL_EXIT': status_lib.ClusterStatus.UP,
+    # --- Terminal due to infrastructure or cancellation: ``None``. ---
+    # ``None`` tells the controller "no longer an instance" so it
+    # takes the recovery / cleanup path (per its ``cluster_status
+    # != UP`` branch).
+    'NODE_FAIL': None,
+    'BOOT_FAIL': None,
+    'PREEMPTED': None,
+    'REVOKED': None,
+    'CANCELLED': None,
+}
 
 
 def _v1_sacct_job_state(client: 'slurm.SlurmClient',
