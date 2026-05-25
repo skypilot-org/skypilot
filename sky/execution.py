@@ -173,6 +173,13 @@ def _compute_set_autostop_args_for_hooks_only_relaunch(
     persisted client-side; on this path it defaults back to
     ``jobs_and_ssh`` (the documented default), which is the same value a
     user would get on a fresh ``sky autostop``.
+
+    The helper is named ``set_autostop`` because the underlying RPC
+    that propagates hooks IS ``SetAutostop`` (hooks ride on it for
+    wire-compat reasons — see
+    ``sky/schemas/proto/autostopv1.proto``). If a future PR adds a
+    dedicated ``SetHooks`` RPC, this helper's name and call site can
+    track that rename.
     """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:

@@ -2,8 +2,24 @@ syntax = "proto3";
 
 package autostop.v1;
 
+// NOTE on naming. ``AutostopService`` predates the generalized
+// lifecycle-hooks framework. It is logically ``LifecycleService`` now
+// — ``SetAutostop`` carries both the autostop config AND the cluster's
+// hooks list. The naming is kept for wire-format back-compat: renaming
+// a gRPC service or RPC method is a wire-format break against every
+// pre-existing skylet running on disk. A future PR can:
+//   1. Introduce a parallel ``SetHooks`` RPC alongside ``SetAutostop``,
+//   2. Have new clients prefer ``SetHooks`` when ``SKYLET_LIB_VERSION``
+//      indicates support,
+//   3. Mark ``SetAutostopRequest.hooks`` / ``clear_hooks`` reserved
+//      once the minimum supported skylet version reaches that floor.
+// Until then, hooks ride on ``SetAutostop`` and the naming stays.
 service AutostopService {
   // Set autostop configuration for the cluster.
+  //
+  // NOTE: also carries the cluster's lifecycle-hooks list (the
+  // ``hooks`` / ``clear_hooks`` fields on the request). This is a
+  // wire-compat shim — see the comment on the service above.
   rpc SetAutostop(SetAutostopRequest) returns (SetAutostopResponse);
   // Check if the cluster is currently autostopping.
   rpc IsAutostopping(IsAutostoppingRequest) returns (IsAutostoppingResponse);
@@ -32,6 +48,12 @@ message Hook {
   int32 timeout = 3;
 }
 
+// SetAutostopRequest is a wire-compat misnomer: it now carries both
+// the autostop config (idle_minutes / wait_for / down) AND the
+// cluster's lifecycle-hooks list (hooks / clear_hooks). See the
+// ``service AutostopService`` comment above for the future-rename
+// plan; until that lands, the message name stays as-is to avoid
+// breaking pre-existing skylets.
 message SetAutostopRequest {
   int32 idle_minutes = 1;
   string backend = 2;

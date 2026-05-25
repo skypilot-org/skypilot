@@ -1,4 +1,19 @@
-"""Autostop utilities."""
+"""Autostop utilities — and lifecycle-hooks storage (see naming note).
+
+Naming note: this module holds both legitimately-autostop state
+(``AutostopConfig``, idle-timer indicator, ``set_autostop`` /
+``get_autostop_config``, ``set_autostopping_started`` /
+``get_is_autostopping``) AND the generalized lifecycle-hooks
+list (``set_hooks`` / ``get_hooks`` plus the proto serializers
+``hooks_to_protobuf`` / ``hooks_from_protobuf``). The hook helpers
+live here because the hooks payload piggybacks on the existing
+``SetAutostop`` gRPC (see ``sky/schemas/proto/autostopv1.proto``)
+rather than having its own ``SetHooks`` RPC. When a follow-up PR
+splits out a dedicated ``SetHooks`` RPC, the hook helpers should
+move to a new ``hooks_lib.py`` module alongside ``hook_executor.py``;
+the autostop-specific helpers stay here. No external behavior
+changes by then — pure refactor, deferred to keep PR1 minimal.
+"""
 import enum
 import json
 import os
@@ -269,7 +284,13 @@ def _ensure_event_maps() -> None:
 
 
 def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
-    """Convert a list of hook dicts into protobuf ``Hook`` messages."""
+    """Convert a list of hook dicts into protobuf ``Hook`` messages.
+
+    Lives in this module because the hooks payload currently rides on
+    the ``SetAutostop`` gRPC; see the module docstring for the
+    planned move to a dedicated ``hooks_lib.py`` after a future PR
+    introduces a parallel ``SetHooks`` RPC.
+    """
     _ensure_event_maps()
     out = []
     for h in hooks:
@@ -290,6 +311,10 @@ def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
     has no presence, so an empty ``events`` list is wire-equivalent to
     "field omitted". Without the default, an empty list would silently
     match no event and the hook would never fire.
+
+    Same "lives in autostop_lib for wire-compat reasons" caveat as
+    :func:`hooks_to_protobuf`; should move to ``hooks_lib.py`` when
+    the planned proto split lands.
     """
     _ensure_event_maps()
     out: List[Dict[str, Any]] = []
@@ -309,8 +334,11 @@ def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
 def set_hooks(hooks: Optional[List[Dict[str, Any]]]) -> None:
     """Store the cluster's lifecycle-hooks list.
 
-    Called during launch via the AutostopCodeGen RPC. The list is
-    read by hook_executor when any teardown event fires.
+    Called during launch via the ``SetAutostop`` gRPC (which carries
+    hooks for wire-compat reasons — see the proto + module docstring).
+    The list is read by ``hook_executor`` when any teardown event
+    fires. Belongs in ``hooks_lib.py`` once the planned split lands;
+    parked here for PR1 minimalism.
     """
     if hooks:
         configs.set_config(_HOOKS_CONFIG_KEY, json.dumps(hooks))
@@ -320,7 +348,12 @@ def set_hooks(hooks: Optional[List[Dict[str, Any]]]) -> None:
 
 
 def get_hooks() -> List[Dict[str, Any]]:
-    """Load the stored lifecycle-hooks list, or [] if never set."""
+    """Load the stored lifecycle-hooks list, or [] if never set.
+
+    Counterpart to :func:`set_hooks`; see the module docstring for the
+    "lives in autostop_lib for wire-compat reasons, move to hooks_lib
+    in a follow-up" note.
+    """
     raw = configs.get_config(_HOOKS_CONFIG_KEY)
     if not raw:
         return []
