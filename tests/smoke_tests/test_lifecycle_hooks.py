@@ -299,19 +299,39 @@ def test_hook_sky_stop_fires_stop_event_with_env_var(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
-# Re-launch dropping `hooks:` clears the skylet's stored list (proto3
-# `repeated` has no presence — implementation sends `clear_hooks=True`).
-# Kept separate from the combined test because the re-launch sequencing
-# (launch → inspect → relaunch → inspect) is long enough to deserve its
-# own pytest function.
+# Re-launch propagates hook changes through three transitions on a single
+# cluster:
+#   (A) launch with hook A         → stored hooks = [A]
+#   (B) re-launch with hook B      → stored hooks = [B], A gone (replaced)
+#   (C) re-launch dropping hooks   → stored hooks = empty
+#
+# Runs on every cloud INCLUDING Kubernetes (no @no_kubernetes mark) because
+# the propagation path is the same SetAutostop gRPC / SSH codegen surface on
+# every backend — the cluster stays UP throughout, so the K8s autodown
+# semantics don't interact with this test.
+#
+# Pinned regressions:
+#   - (B) ensures relaunch actually REPLACES the stored list, not just
+#     appends. Pre-fix, an old codegen path could leave hook A alive.
+#   - (C) ensures the "drop hooks" path emits `clear_hooks=True` on the
+#     wire, since proto3 `repeated` has no presence (an empty `hooks` list
+#     on the wire is otherwise indistinguishable from "field omitted").
+#     Without `clear_hooks=True`, A would persist forever.
 # ---------------------------------------------------------------------------
 @_no_autostop
 def test_hook_clear_via_relaunch(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    yaml_with_hook = _write_yaml({
+    yaml_with_hook_a = _write_yaml({
         'hooks': [{
             'run': 'echo first-hook',
             'events': ['down'],
+        }],
+    })
+    yaml_with_hook_b = _write_yaml({
+        'hooks': [{
+            'run': 'echo second-hook',
+            'events': ['down'],
+            'timeout': 45,
         }],
     })
     yaml_without_hook = _write_yaml({})  # empty resources, no hooks
@@ -320,21 +340,99 @@ def test_hook_clear_via_relaunch(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test_hook_clear_via_relaunch',
         [
+            # (A) Launch with hook A
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
             f'--infra {generic_cloud} --fast '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_with_hook}) && '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_with_hook_a}) && '
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            # First launch — verify hook is stored
             f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
-            f'echo "$out" | grep first-hook',
-            # Re-launch without hooks — sky launch picks up the new YAML
-            f'sky launch -y -c {name} --fast {yaml_without_hook}',
-            # Verify the stored hooks list is empty (NOT first-hook)
+            f'echo "$out" | grep first-hook && '
+            f'! echo "$out" | grep second-hook',
+            # (B) Re-launch with hook B — must REPLACE stored hooks
+            f'sky launch -y -c {name} --fast {yaml_with_hook_b}',
             f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep second-hook && '
             f'! echo "$out" | grep first-hook',
+            # (C) Re-launch without hooks — must clear stored list entirely
+            f'sky launch -y -c {name} --fast {yaml_without_hook}',
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'! echo "$out" | grep first-hook && '
+            f'! echo "$out" | grep second-hook',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# STOPPED → re-launch with new hook propagates correctly.
+#
+# Real user pattern: launch a cluster yesterday with hook A, `sky stop` it,
+# come back today and `sky launch -c <name>` with a new YAML containing
+# hook B. The cluster restarts and the skylet's stored hooks list should be
+# REPLACED with hook B (not still firing A on the next teardown).
+#
+# This is the STOPPED-in-between variant of test_hook_clear_via_relaunch's
+# (B) step above. The interesting bit is that the skylet's sqlite at
+# ~/.sky/skylet_config.db survives stop/start (on-disk persistence), so the
+# OLD hook entry is sitting in storage when the cluster restarts — the
+# re-launch must actively overwrite it via SetAutostop. Pinned here in case
+# the post-restart launch path ever short-circuits and skips the
+# SetAutostop call when the cluster comes back UP.
+#
+# VM-only because K8s has no STOPPED state — clusters are either UP or
+# torn down (autodown).
+# ---------------------------------------------------------------------------
+@_no_autostop
+@pytest.mark.no_kubernetes
+def test_hook_relaunch_propagates_after_stop(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_a = _write_yaml({
+        'hooks': [{
+            'run': 'echo before-stop-hook',
+            'events': ['down'],
+        }],
+    })
+    yaml_b = _write_yaml({
+        'hooks': [{
+            'run': 'echo after-stop-hook',
+            'events': ['down'],
+            'timeout': 50,
+        }],
+    })
+    inspect = ('sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    test = smoke_tests_utils.Test(
+        'test_hook_relaunch_propagates_after_stop',
+        [
+            # (1) Launch with hook A — stored = before-stop-hook.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_a}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep before-stop-hook',
+            # (2) Stop the cluster — sqlite persists on the host disk.
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # (3) Re-launch with hook B. SkyPilot restarts the stopped
+            # cluster (same disk, sqlite still has hook A) AND must run
+            # SetAutostop to propagate the new hook B.
+            f'sky launch -y -c {name} --fast {yaml_b}',
+            # (4) Stored hooks list must now be [after-stop-hook], NOT
+            # [before-stop-hook]. If the launch path short-circuited the
+            # SetAutostop call on a stopped→restart, the old hook would
+            # still be in sqlite — this assert catches that regression.
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep after-stop-hook && '
+            f'! echo "$out" | grep before-stop-hook',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + 300,
     )
     smoke_tests_utils.run_one_test(test)
 
