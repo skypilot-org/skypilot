@@ -4,21 +4,34 @@ Lives in OSS alongside the Slurm provisioner. Owns the runtime-side
 adapter for the Slurm-native managed-jobs path: status reads from
 ``sacct``/``squeue``, log tailing reads ``--output`` files, and so on.
 
-Phase 1 ships ``get_job_status`` only — every other Protocol method
-returns ``None`` to defer to the call site's legacy default. Follow-up
-phases will replace those stubs with Slurm-native implementations
-(timestamps via ``sacct``, exit codes via ``sacct ExitCode``, log
-download/tail via SSH to the login node).
+Phase 2 implements ``get_job_status``, ``get_job_submitted_at``,
+``get_job_ended_at``, ``get_exit_codes``, ``download_logs`` and
+``tail_logs``. Log streaming is kept inline here for now;
+``PLAN.md`` notes we'll factor it into ``log_streaming.py`` later.
 """
+import datetime
+import os
+import shlex
+import subprocess
+import sys
+import threading
 import typing
 from typing import Any, Dict, List, Optional, Tuple
+
+import colorama
 
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision.slurm import instance as slurm_instance
+from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
+from sky.skylet import log_lib
+from sky.utils import command_runner
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -58,6 +71,14 @@ _FAILED_STATES = frozenset({
 })
 _CANCELLED_STATES = frozenset({'CANCELLED', 'REVOKED'})
 
+_TERMINAL_STATES = (_SUCCEEDED_STATES | _FAILED_STATES | _CANCELLED_STATES)
+
+# Cadence for the side-thread polling sacct during follow-mode log tail.
+_TAIL_TERMINAL_POLL_SECONDS = 5
+# How long after sacct reports a terminal state we let the SSH tail
+# subprocess drain stdout before forcibly closing it.
+_TAIL_DRAIN_SECONDS = 5
+
 
 class _Target:
     """Resolved per-handle context for a Slurm v1 managed job."""
@@ -67,11 +88,13 @@ class _Target:
         job_id: str,
         ssh_config: Dict[str, Any],
         partition: str,
+        region: Optional[str],
         log_path: Optional[str],
     ) -> None:
         self.job_id = job_id
         self.ssh_config = ssh_config
         self.partition = partition
+        self.region = region
         self.log_path = log_path
 
 
@@ -121,9 +144,15 @@ def _resolve_slurm_target(handle) -> Optional[_Target]:
     partition = provider_config.get('partition') or ''
     log_path = provider_config.get('log_path')
 
+    region: Optional[str] = None
+    launched_resources = getattr(handle, 'launched_resources', None)
+    if launched_resources is not None:
+        region = getattr(launched_resources, 'region', None)
+
     return _Target(job_id=str(job_id),
                    ssh_config=ssh_config,
                    partition=partition,
+                   region=region,
                    log_path=log_path)
 
 
@@ -137,6 +166,27 @@ def _slurm_client_from_target(target: _Target) -> 'slurm.SlurmClient':
         ssh_proxy_command=ssh.get('proxycommand'),
         ssh_proxy_jump=ssh.get('proxyjump'),
         identities_only=ssh.get('identities_only', False),
+    )
+
+
+def _login_node_runner(
+        ssh_config: Dict[str, Any]) -> 'command_runner.SSHCommandRunner':
+    """Build an ``SSHCommandRunner`` for the Slurm login node.
+
+    Mirrors the constructor block in ``instance.py::_create_virtual_instance``
+    (around line 523) and ``_create_managed_job_v1`` (around line 1677).
+    Copied rather than imported to avoid an import cycle with the
+    provisioner module from runtime code paths.
+    """
+    identities_only = bool(ssh_config.get('identities_only', False))
+    return command_runner.SSHCommandRunner(
+        (ssh_config['hostname'], int(ssh_config.get('port', 22))),
+        ssh_config['user'],
+        ssh_config.get('private_key'),
+        ssh_proxy_command=ssh_config.get('proxycommand'),
+        ssh_proxy_jump=ssh_config.get('proxyjump'),
+        enable_interactive_auth=True,
+        disable_identities_only=not identities_only,
     )
 
 
@@ -162,6 +212,135 @@ def _sacct_get_state(client: 'slurm.SlurmClient', job_id: str) -> Optional[str]:
         if state:
             return state.upper()
     return None
+
+
+def _sacct_get_single_field(client: 'slurm.SlurmClient', job_id: str,
+                            field: str) -> Optional[str]:
+    """Fetch a single ``sacct`` field for the allocation (parent row).
+
+    Returns the trimmed field value, or ``None`` on query failure /
+    empty output. Empty string and Slurm's ``Unknown`` sentinel both
+    map to ``None`` so callers can treat "not available yet" uniformly.
+    """
+    cmd = (f'sacct -j {job_id} --format={field} --parsable2 --noheader '
+           '--allocations')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0:
+        return None
+    for line in stdout.splitlines():
+        value = line.strip()
+        if not value or value == 'Unknown':
+            return None
+        return value
+    return None
+
+
+def _parse_slurm_timestamp(value: Optional[str]) -> Optional[float]:
+    """Parse a Slurm sacct ISO timestamp (local time) to a Unix float.
+
+    Slurm emits times in the controller's local timezone formatted as
+    ``YYYY-MM-DDTHH:MM:SS`` (no timezone suffix). ``fromisoformat``
+    treats the result as a naive ``datetime``; calling ``.timestamp()``
+    then interprets it in the *local* timezone of the API server. For
+    Phase 2 that's the closest we can get without an explicit TZ flag
+    or sacct format override (TODO(slurm-v1): set ``SLURM_TIME_FORMAT``
+    or use ``--format=Start%Y-%m-%dT%H:%M:%S%z`` once we standardize
+    timezone handling).
+    """
+    if value is None:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        logger.debug(f'Failed to parse Slurm timestamp {value!r}.')
+        return None
+    return dt.timestamp()
+
+
+def _resolve_log_path(
+        target: _Target,
+        client: Optional['slurm.SlurmClient'] = None) -> Optional[str]:
+    """Compute the sbatch ``--output`` path for the v1 job.
+
+    ``_create_managed_job_v1`` writes it to
+    ``{workdir or $HOME}/.sky_provision/slurm-{job_id}.out`` — the
+    same shape as ``instance._sbatch_log_path``. We recompute it at
+    runtime because the path is not persisted into the cluster YAML
+    (template intentionally omits skypilot-level workdir; only the
+    task-level workdir payload is stored).
+    """
+    if target.log_path is not None:
+        return target.log_path
+    if client is None:
+        client = _slurm_client_from_target(target)
+
+    workdir_cfg: Optional[str] = None
+    if target.region is not None:
+        try:
+            workdir_cfg = skypilot_config.get_effective_region_config(
+                cloud='slurm',
+                region=target.region,
+                keys=('workdir',),
+                default_value=None)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read slurm.workdir from config: {e}')
+            workdir_cfg = None
+
+    if workdir_cfg is not None:
+        try:
+            remote_env = client.get_env()
+            workdir_cfg = slurm_utils.expand_path_vars(workdir_cfg, remote_env)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to expand workdir vars: {e}')
+
+    if workdir_cfg is not None:
+        sky_base_dir = workdir_cfg
+    else:
+        try:
+            sky_base_dir = client.get_remote_home_dir()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to resolve remote $HOME for v1 log '
+                           f'path: {e}')
+            return None
+
+    if not sky_base_dir or not os.path.isabs(sky_base_dir):
+        logger.warning(f'Refusing to use non-absolute v1 log base dir '
+                       f'{sky_base_dir!r}.')
+        return None
+
+    return (f'{sky_base_dir}/'
+            f'{slurm_instance.PROVISION_SCRIPTS_DIRECTORY_NAME}/'
+            f'slurm-{target.job_id}.out')
+
+
+def _build_managed_job_streaming_header(num_nodes: int,
+                                        min_nodes: Optional[int] = None) -> str:
+    """Slurm-local copy of the K8s v1 streaming header.
+
+    Kept byte-identical to the K8s plugin's
+    ``_build_managed_job_streaming_header`` so saved-log replay's
+    ``LOG_FILE_START_STREAMING_AT`` marker is the same across runtimes.
+    We copy rather than import to keep the OSS Slurm runtime free of
+    plugin imports.
+    """
+    dim = colorama.Style.DIM
+    reset = colorama.Style.RESET_ALL
+    plural = 's' if num_nodes > 1 else ''
+    lines = [
+        f'{dim}├── {log_lib.LOG_FILE_START_STREAMING_AT}{num_nodes} '
+        f'node{plural}.{reset}\n'
+    ]
+    if min_nodes is not None:
+        lines.append(f'{dim}├── Gang scheduling: waiting for '
+                     f'{min_nodes} nodes before starting setup/run.'
+                     f'{reset}\n')
+    lines.append(f'{dim}└── {reset}'
+                 f'Job started. Streaming logs... '
+                 f'{dim}'
+                 f'(Ctrl-C to exit log streaming; job will not be killed)'
+                 f'{reset}\n')
+    return ''.join(lines)
 
 
 def _slurm_state_to_job_status(
@@ -208,6 +387,17 @@ def _returncode_to_job_status(
     return (job_lib.JobStatus.FAILED, None)
 
 
+def _state_to_job_exit_code(state: Optional[str]) -> int:
+    """Map a Slurm state to a ``JobExitCode``."""
+    if state is None:
+        return exceptions.JobExitCode.FAILED.value
+    if state in _SUCCEEDED_STATES:
+        return exceptions.JobExitCode.SUCCEEDED.value
+    if state in _CANCELLED_STATES:
+        return exceptions.JobExitCode.CANCELLED.value
+    return exceptions.JobExitCode.FAILED.value
+
+
 class SlurmManagedJobRuntime:
     """ManagedJobRuntime for the Slurm-native v1 managed-job path."""
 
@@ -249,29 +439,76 @@ class SlurmManagedJobRuntime:
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         cluster_name: str,
     ) -> Optional[float]:
-        # TODO(slurm-v1 phase 2): query ``sacct -j <jobid> --format=Start``
-        # and parse the Unix timestamp. Mirrors skylet ``add_job``
-        # semantics ("registered to begin"), not "got queued".
-        del handle, cluster_name
-        return None
+        del cluster_name
+        target = _resolve_slurm_target(handle)
+        if target is None:
+            return None
+        try:
+            client = _slurm_client_from_target(target)
+            # ``Start`` (not ``Submit``): the legacy skylet ``add_job``
+            # timestamp tracks "registered to begin", not "got queued".
+            # On a busy partition ``Submit`` can be days off ``Start``.
+            value = _sacct_get_single_field(client, target.job_id, 'Start')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to query Slurm Start time for job '
+                           f'{target.job_id}: {e}')
+            return None
+        return _parse_slurm_timestamp(value)
 
     def get_job_ended_at(
         self,
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
         cluster_name: str,
     ) -> Optional[float]:
-        # TODO(slurm-v1 phase 2): query ``sacct -j <jobid> --format=End``.
-        del handle, cluster_name
-        return None
+        del cluster_name
+        target = _resolve_slurm_target(handle)
+        if target is None:
+            return None
+        try:
+            client = _slurm_client_from_target(target)
+            value = _sacct_get_single_field(client, target.job_id, 'End')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to query Slurm End time for job '
+                           f'{target.job_id}: {e}')
+            return None
+        return _parse_slurm_timestamp(value)
 
     def get_exit_codes(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     ) -> Optional[List[int]]:
-        # TODO(slurm-v1 phase 2): query ``sacct -j <jobid>
-        # --format=ExitCode --parsable2`` — one row per srun step.
-        del handle
-        return None
+        target = _resolve_slurm_target(handle)
+        if target is None:
+            return None
+        # TODO(slurm-v1): PLAN.md gap #16 calls out that ``sacct
+        # --format=ExitCode`` returns one row per srun step
+        # (``<jobid>``, ``<jobid>.batch``, ``<jobid>.0``, ...). For now
+        # we take the parent allocation row, parse the ``<exit>:<signal>``
+        # format, and surface a single exit code. A follow-up should
+        # split per-rank codes once we decide which step row maps to
+        # which user-visible rank.
+        try:
+            client = _slurm_client_from_target(target)
+            value = _sacct_get_single_field(client, target.job_id, 'ExitCode')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to query Slurm ExitCode for job '
+                         f'{target.job_id}: {e}')
+            return None
+        if value is None:
+            return None
+        # ``<exit>:<signal>``. If signal != 0 and exit == 0, the job
+        # was killed by signal — surface 128+signal so callers see a
+        # non-zero code.
+        try:
+            exit_str, _, signal_str = value.partition(':')
+            exit_code = int(exit_str) if exit_str else 0
+            signal_code = int(signal_str) if signal_str else 0
+        except ValueError:
+            logger.debug(f'Unparseable Slurm ExitCode {value!r}.')
+            return None
+        if exit_code == 0 and signal_code != 0:
+            exit_code = 128 + signal_code
+        return [exit_code]
 
     def download_logs(
         self,
@@ -279,10 +516,44 @@ class SlurmManagedJobRuntime:
         job_id: int,
         task_id: Optional[int],
     ) -> Optional[str]:
-        # TODO(slurm-v1 phase 2): SSH to the login node and scp the
-        # sbatch ``--output`` file into ``~/.sky/managed_jobs/...``.
-        del handle, job_id, task_id
-        return None
+        target = _resolve_slurm_target(handle)
+        if target is None:
+            return None
+        client = _slurm_client_from_target(target)
+        log_path = _resolve_log_path(target, client)
+        if log_path is None:
+            return None
+
+        runner = _login_node_runner(target.ssh_config)
+        # ``cat`` instead of ``rsync`` so a missing file produces a
+        # clean empty stdout + non-zero rc rather than an rsync error;
+        # job-not-yet-started maps to an empty saved log.
+        cmd = f'cat {shlex.quote(log_path)} 2>/dev/null'
+        rc, stdout, stderr = runner.run(cmd,
+                                        require_outputs=True,
+                                        separate_stderr=True,
+                                        stream_logs=False)
+        if rc != 0:
+            logger.warning(f'Failed to download Slurm v1 logs from '
+                           f'{log_path} (rc={rc}): {stderr}')
+            return None
+
+        local_dir = os.path.expanduser(
+            os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
+                         f'job-id-{job_id}'))
+        os.makedirs(local_dir, exist_ok=True)
+        log_file = os.path.join(
+            local_dir, f'task-{task_id if task_id is not None else 0}.log')
+
+        num_nodes = getattr(handle, 'launched_nodes', 1) or 1
+        header = _build_managed_job_streaming_header(num_nodes=num_nodes,
+                                                     min_nodes=None)
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write(header)
+            f.write(stdout)
+
+        logger.info(f'Downloaded Slurm managed job logs to {log_file}')
+        return log_file
 
     def tail_logs(
         self,
@@ -297,11 +568,201 @@ class SlurmManagedJobRuntime:
         tail: Optional[int],
         tail_offset: Optional[int] = None,
     ) -> Optional[int]:
-        # TODO(slurm-v1 phase 2): live-tail the sbatch ``--output`` file
-        # over SSH; see ``log_streaming.SlurmLogStreamer`` (planned).
-        del (handle, backend, job_id, task_id, job_id_on_cluster, worker,
-             follow, tail, tail_offset)
-        return None
+        del backend, job_id, task_id, job_id_on_cluster, worker
+        target = _resolve_slurm_target(handle)
+        if target is None:
+            return None
+        client = _slurm_client_from_target(target)
+        log_path = _resolve_log_path(target, client)
+        if log_path is None:
+            return None
+
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import context as context_lib
+
+        ctx = context_lib.get()
+        out = ctx.output_stream(sys.stdout) if ctx else sys.stdout
+
+        def _write(msg: str) -> None:
+            out.write(msg)
+            out.flush()
+
+        runner = _login_node_runner(target.ssh_config)
+        base_ssh = runner.ssh_base_command(
+            ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+            port_forward=None,
+            connect_timeout=None)
+
+        # Build the remote ``tail`` invocation.
+        quoted_path = shlex.quote(log_path)
+        if tail_offset is not None and tail_offset > 0:
+            # ``tail -c +<bytes>`` starts at byte offset (1-indexed),
+            # which is a strict improvement over K8s v1 (PLAN.md "Log
+            # tailing"). Saved-log replay uses line-based offsets; live
+            # tail with a byte offset only triggers from controller-side
+            # callers that compute the offset against the same file.
+            remote_cmd = (f'tail -c +{int(tail_offset) + 1} '
+                          f'{"-F" if follow else ""} {quoted_path} 2>/dev/null')
+        elif follow:
+            remote_cmd = f'tail -F {quoted_path} 2>/dev/null'
+        else:
+            n = tail if (tail is not None and tail > 0) else None
+            tail_flag = f'-n {n}' if n is not None else '-n +1'
+            remote_cmd = f'tail {tail_flag} {quoted_path} 2>/dev/null'
+
+        if not follow:
+            return self._tail_once(base_ssh, remote_cmd, _write, target, client)
+        return self._tail_follow(base_ssh, remote_cmd, _write, target, client)
+
+    def _tail_once(
+        self,
+        base_ssh: List[str],
+        remote_cmd: str,
+        write_fn,
+        target: _Target,
+        client: 'slurm.SlurmClient',
+    ) -> int:
+        # Pass ``remote_cmd`` as a single argv element. SSH joins any
+        # remaining args with spaces into one command string for the
+        # remote shell, so a single arg with shell metachars (``|``,
+        # ``2>/dev/null``) is preserved verbatim. Compare
+        # ``command_runner.run`` which sets ``shell=True`` locally and
+        # therefore needs ``shlex.quote``; here ``subprocess`` uses argv
+        # mode so no extra quoting is needed.
+        full_cmd = base_ssh + [remote_cmd]
+        try:
+            proc = subprocess.run(full_cmd,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,
+                                  check=False)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Slurm v1 tail (one-shot) failed: {e}')
+            return exceptions.JobExitCode.FAILED.value
+        if proc.stdout:
+            write_fn(proc.stdout.decode('utf-8', errors='replace'))
+        # Render the same footer as the follow path so the saved-log
+        # consumer sees a consistent shape.
+        state = self._read_terminal_state(client, target.job_id)
+        if state is not None:
+            write_fn(
+                ux_utils.finishing_message(f'Job finished (status: {state}).') +
+                '\n')
+            return _state_to_job_exit_code(state)
+        # Non-terminal one-shot read — return NOT_FINISHED so the caller
+        # falls through to the standard already-running path.
+        return exceptions.JobExitCode.NOT_FINISHED.value
+
+    def _tail_follow(
+        self,
+        base_ssh: List[str],
+        remote_cmd: str,
+        write_fn,
+        target: _Target,
+        client: 'slurm.SlurmClient',
+    ) -> int:
+        # See ``_tail_once`` for argv vs shell-quote reasoning.
+        full_cmd = base_ssh + [remote_cmd]
+        try:
+            proc = subprocess.Popen(
+                full_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                # Line-buffered text isn't reliable through SSH; read bytes.
+                bufsize=0,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to spawn Slurm v1 tail subprocess: {e}')
+            return exceptions.JobExitCode.FAILED.value
+
+        assert proc.stdout is not None
+        stdout_fd = proc.stdout.fileno()
+
+        terminal_state: Dict[str, Optional[str]] = {'value': None}
+        stop_event = threading.Event()
+
+        def _poll_state() -> None:
+            while not stop_event.is_set():
+                try:
+                    state = client.get_job_state(target.job_id)
+                    if state is None:
+                        state = _sacct_get_state(client, target.job_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'sacct poll failed: {e}')
+                    state = None
+                if state is not None and state in _TERMINAL_STATES:
+                    terminal_state['value'] = state
+                    # Give the SSH ``tail -F`` subprocess a short window
+                    # to flush anything still in flight, then send it a
+                    # SIGTERM so the blocking ``os.read`` in the main
+                    # thread returns 0 and we proceed to the footer.
+                    if stop_event.wait(_TAIL_DRAIN_SECONDS):
+                        return
+                    try:
+                        proc.terminate()
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+                    return
+                if stop_event.wait(_TAIL_TERMINAL_POLL_SECONDS):
+                    return
+
+        poll_thread = threading.Thread(target=_poll_state, daemon=True)
+        poll_thread.start()
+
+        try:
+            # Stream bytes as they arrive. The poll thread is
+            # responsible for ``proc.terminate()`` once it observes a
+            # terminal sacct state, which closes the SSH pipe and lets
+            # ``os.read`` return 0 here so we drop out cleanly. Reading
+            # the raw fd avoids relying on ``BufferedReader`` behavior
+            # across Python versions.
+            while True:
+                try:
+                    chunk = os.read(stdout_fd, 4096)
+                except OSError:
+                    chunk = b''
+                if not chunk:
+                    break
+                write_fn(chunk.decode('utf-8', errors='replace'))
+        finally:
+            stop_event.set()
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=_TAIL_DRAIN_SECONDS)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=_TAIL_DRAIN_SECONDS)
+            except Exception:  # pylint: disable=broad-except
+                pass
+            poll_thread.join(timeout=_TAIL_DRAIN_SECONDS)
+
+        state = terminal_state['value']
+        if state is None:
+            # Watchdog never observed terminal; do one last sacct query
+            # so the footer reflects whatever Slurm now reports.
+            state = self._read_terminal_state(client, target.job_id)
+
+        if state is not None:
+            write_fn(
+                ux_utils.finishing_message(f'Job finished (status: {state}).') +
+                '\n')
+            return _state_to_job_exit_code(state)
+        # No terminal observed and tail dropped — surface as failed so
+        # the controller's existing decision branches handle it.
+        return exceptions.JobExitCode.FAILED.value
+
+    def _read_terminal_state(self, client: 'slurm.SlurmClient',
+                             job_id: str) -> Optional[str]:
+        try:
+            state = client.get_job_state(job_id)
+            if state is None:
+                state = _sacct_get_state(client, job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Terminal state lookup failed: {e}')
+            return None
+        if state is None or state not in _TERMINAL_STATES:
+            return None
+        return state
 
     def job_group_envs(
         self,
