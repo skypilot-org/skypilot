@@ -201,7 +201,8 @@ def user_update(request: fastapi.Request,
                    role != rbac.RoleName.ADMIN.value)
     if is_demotion:
         try:
-            resource_checker.check_user_role_demotion(user_info.id)
+            resource_checker.check_user_role_demotion(
+                user_info.id, user_display=user_info.name or user_info.id)
         except ValueError as e:
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 

@@ -325,8 +325,6 @@ def check_user_role_demotion(
         user_id: str,
         remaining_admin_user_ids: Optional[Set[str]] = None,
         workspaces: Optional[Dict[str, Any]] = None,
-        active_resources: Optional[Tuple[List[Dict[str, Any]],
-                                         List[Dict[str, Any]]]] = None,
         active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str,
                                                                      Any]]],
                                                  Dict[str,
@@ -350,16 +348,13 @@ def check_user_role_demotion(
             ``load_fresh_workspaces()``). When called in a batch loop, the
             caller should fetch this once and pass it in to avoid the
             per-call ``safe_reload_config`` + YAML read overhead.
-        active_resources: Optional pre-fetched ``(clusters, managed_jobs)``
-            tuple. When called in a batch loop, the caller should fetch
-            this once via ``get_active_resources()`` and pass it in to
-            avoid the per-call cluster+jobs fetch.
         active_resources_by_user: Optional pre-built
             ``(clusters_by_user_hash, jobs_by_user_hash)`` index from
             ``index_active_resources_by_user_hash``. When provided, the
             per-user lookup is O(1) instead of an O(C+J) scan, giving
             O(N + C + J) total for a batch instead of O(N * (C+J)).
-            Takes precedence over ``active_resources`` if both are set.
+            When not provided (single-user path), the function fetches
+            and filters internally.
         user_display: Optional pre-resolved display string (username or
             user_id) used in the error message. Batch callers that already
             hold the user model should pass this to skip the per-call
@@ -422,16 +417,13 @@ def check_user_role_demotion(
 
     # Resolve the demoted user's clusters / jobs. Prefer the pre-built
     # index (O(1) lookup) when the batch caller supplied one; fall back
-    # to the linear filter over the raw (clusters, jobs) tuple.
+    # to a fresh fetch + linear filter for the single-user path.
     if active_resources_by_user is not None:
         clusters_by_user, jobs_by_user = active_resources_by_user
         user_clusters = clusters_by_user.get(user_id, [])
         user_jobs = jobs_by_user.get(user_id, [])
     else:
-        if active_resources is None:
-            all_clusters, all_managed_jobs = _get_active_resources()
-        else:
-            all_clusters, all_managed_jobs = active_resources
+        all_clusters, all_managed_jobs = _get_active_resources()
         user_clusters = [
             c for c in all_clusters if c.get('user_hash') == user_id
         ]
