@@ -2386,16 +2386,22 @@ def _create_managed_job_v1(
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
-    nodes, _ = client.get_job_nodes(job_id)
+    # Fast-failing v1 jobs (OOM-kill, exit non-zero, setup failure,
+    # ...) terminate before ``_wait_for_job_nodes`` sees nodes. In that
+    # case ``client.get_job_nodes`` RAISES ``RuntimeError`` ("No nodes
+    # found for job <id>") rather than returning an empty list. Fall
+    # back to sacct's NodeList — the ProvisionRecord we return is
+    # still valid; the managed-job controller's next
+    # ``get_job_status`` poll will surface the terminal state via the
+    # chain registry and the user-code-failure branch fires.
+    try:
+        nodes, _ = client.get_job_nodes(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.info(
+            f'V1 get_job_nodes({job_id}) raised {type(e).__name__}: {e}; '
+            'falling back to sacct NodeList for fast-terminal v1 job.')
+        nodes = []
     if not nodes:
-        # Fast-failing job: terminal before _wait_for_job_nodes saw a
-        # node allocation. ``get_job_nodes`` (scontrol show job) returns
-        # empty for terminal jobs; fall back to sacct's NodeList, which
-        # records the node the job actually ran on. The ProvisionRecord
-        # we return is still valid — the controller's next
-        # ``get_job_status`` poll will surface the terminal state via
-        # the chain registry and the user-code-failure /
-        # cluster-up-job-failed branch will fire.
         nodes = _v1_sacct_node_list(client, job_id) or []
         if not nodes:
             raise RuntimeError(
