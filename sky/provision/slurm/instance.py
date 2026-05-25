@@ -942,6 +942,20 @@ def get_cluster_info(
     del region
     assert provider_config is not None, cluster_name_on_cloud
 
+    if is_managed_job_v1_provider_config(provider_config):
+        info = _get_cluster_info_v1(cluster_name_on_cloud, provider_config)
+        if info is not None:
+            return info
+        # Safe default: an empty ClusterInfo. Mirrors the legacy
+        # "no running jobs" branch below — the controller treats this
+        # as "no instances yet" rather than crashing.
+        return common.ClusterInfo(
+            instances={},
+            head_instance_id=None,
+            provider_name='slurm',
+            provider_config=provider_config,
+        )
+
     # The SSH host is the remote machine running slurmctld daemon.
     # Cross-cluster operations are supported by interacting with
     # the current controller. For details, please refer to
@@ -1525,6 +1539,129 @@ def _query_instances_v1(
             statuses[cluster_name_on_cloud] = (sky_status, sacct_state)
 
     return statuses
+
+
+def _v1_sacct_node_list(client: 'slurm.SlurmClient',
+                        job_id: str) -> Optional[List[str]]:
+    """Recover the per-job node list from ``sacct`` when squeue is empty.
+
+    Used by ``_get_cluster_info_v1`` as a fallback for jobs that have
+    aged out of squeue. ``NodeList`` is on the parent allocation row;
+    ``scontrol show hostnames`` expands the compact Slurm hostlist
+    notation (e.g. ``node-[01-03]``) into individual node names.
+    """
+    cmd = (f'sacct -j {job_id} --format=NodeList --parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0:
+        return None
+    nodelist: Optional[str] = None
+    for line in stdout.splitlines():
+        value = line.strip()
+        if not value or value == 'None assigned':
+            continue
+        nodelist = value
+        break
+    if nodelist is None:
+        return None
+    expand_cmd = f'scontrol show hostnames {shlex.quote(nodelist)}'
+    rc, stdout, _ = client._run_slurm_cmd(expand_cmd)
+    if rc != 0:
+        return None
+    nodes = [line.strip() for line in stdout.splitlines() if line.strip()]
+    return nodes if nodes else None
+
+
+def _get_cluster_info_v1(
+        cluster_name_on_cloud: str,
+        provider_config: Dict[str, Any]) -> Optional[common.ClusterInfo]:
+    """v1 ``get_cluster_info``: minimal shape, no SSH-port shenanigans.
+
+    Unlike the legacy path's ``InstanceInfo(ssh_port=ssh_port,
+    external_ip=ssh_host, ...)`` (which is misleading on v1 — SkyPilot
+    never SSHes to the compute node), the v1 shape mirrors K8s v1:
+    no external_ip, empty ssh_user override, and the InstanceInfo's
+    ``ssh_port`` left at its default. Tags carry the structured
+    ``job_id`` / ``node`` / ``TAG_SKYPILOT_CLUSTER_NAME`` so
+    ``_resolve_slurm_target`` (managed_job_runtime) finds the right
+    job_id without parsing.
+
+    Returns ``None`` (not a ``ClusterInfo``) when listing nodes fails
+    even after the sacct fallback — callers should treat that as
+    "no instances yet" and fall through to a safe default.
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+
+    try:
+        running_jobs = client.query_jobs(cluster_name_on_cloud, ['running'])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'V1 get_cluster_info: squeue query failed: {e}')
+        return None
+
+    if not running_jobs:
+        # No running job — return empty so caller treats as "no instances
+        # yet" / cluster torn down.
+        return common.ClusterInfo(
+            instances={},
+            head_instance_id=None,
+            provider_name='slurm',
+            provider_config=provider_config,
+        )
+    assert len(running_jobs) == 1, (
+        f'Multiple running jobs found for v1 cluster '
+        f'{cluster_name_on_cloud}: {running_jobs}. Expected single-job-per'
+        '-name (enforced by _create_managed_job_v1).')
+
+    job_id = running_jobs[0]
+    nodes: List[str] = []
+    try:
+        nodes, _ = client.get_job_nodes(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        # Fall back to sacct — the job may have just exited and squeue
+        # is briefly out of sync, or get_job_nodes' scontrol-show-node
+        # invocation hit a transient.
+        logger.debug(f'V1 get_cluster_info: get_job_nodes({job_id}) failed: '
+                     f'{e}; trying sacct.')
+        recovered = _v1_sacct_node_list(client, job_id)
+        if recovered:
+            nodes = recovered
+
+    if not nodes:
+        # Give the caller a None so it can fall through to its safe
+        # default rather than emitting an empty-instances ClusterInfo
+        # that downstream code might interpret as "definitely no
+        # nodes".
+        logger.debug(f'V1 get_cluster_info: no nodes resolved for job '
+                     f'{job_id}; returning None.')
+        return None
+
+    instances: Dict[str, List[common.InstanceInfo]] = {}
+    for node in nodes:
+        instance_id = slurm_utils.instance_id(job_id, node)
+        instances[instance_id] = [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                # V1 never SSHes to the compute node; leave internal_ip
+                # empty (mirrors K8s v1's empty pod_ip handling).
+                internal_ip='',
+                external_ip=None,
+                tags={
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+                    'job_id': str(job_id),
+                    'node': node,
+                },
+                node_name=instance_id,
+            )
+        ]
+
+    return common.ClusterInfo(
+        instances=instances,
+        head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+        provider_name='slurm',
+        # V1 has no SSH user — runtime never executes against the node.
+        ssh_user='',
+        provider_config=provider_config,
+    )
 
 
 def _all_resource_alternatives_are_slurm(task: 'task_lib.Task') -> bool:
