@@ -366,6 +366,64 @@ def test_hook_clear_via_relaunch(generic_cloud: str):
 
 
 # ---------------------------------------------------------------------------
+# Regression pin: `sky exec` MUST NOT clear the stored hooks list.
+#
+# A reviewer flagged a hypothetical bug where the `PRE_EXEC` stage's
+# hooks-payload block in `sky/execution.py` (lines ~613-650) might fire
+# during `sky exec` with `task_hooks=None + cluster_exists=True`,
+# wiping the stored hooks by sending `clear_hooks=True` to the skylet.
+#
+# Local verification confirmed the bug doesn't fire today because
+# `sky exec` passes `stages=[Stage.SYNC_WORKDIR, Stage.EXEC]` —
+# `Stage.PRE_EXEC` is NOT in the list, so the entire hooks_payload
+# block is gated off. The flagged code path is correctly inaccessible
+# from `sky exec`.
+#
+# This smoke pins that contract end-to-end so a future change that
+# adds `Stage.PRE_EXEC` to `sky exec`'s stages list fires the test
+# immediately rather than producing a silent hooks-wipe regression
+# that users only discover when a hook stops firing on teardown.
+# ---------------------------------------------------------------------------
+@_no_autostop
+def test_hook_sky_exec_does_not_clear_stored_hooks(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_with_hook = _write_yaml({
+        'hooks': [{
+            'run': 'echo persistent-hook',
+            'events': ['down'],
+            'timeout': 30,
+        }],
+    })
+    inspect = ('sqlite3 ~/.sky/skylet_config.db '
+               '"SELECT value FROM config WHERE key=\\"lifecycle_hooks\\";"')
+    test = smoke_tests_utils.Test(
+        'test_hook_sky_exec_does_not_clear_stored_hooks',
+        [
+            # Launch the cluster with hook A.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_with_hook}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Verify hook is stored before exec.
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep persistent-hook',
+            # Run `sky exec` with a task that has no hooks. The
+            # hypothetical bug would set hooks_payload=[] →
+            # SetAutostop with clear_hooks=True → wipe.
+            f'sky exec {name} -- "echo hello-from-exec"',
+            # Pin: hook is STILL stored. If a future change adds
+            # PRE_EXEC to sky exec's stages and the hooks-payload
+            # block fires, this assertion fails.
+            f'out=$(sky exec {name} {chr(39)}{inspect}{chr(39)}) && '
+            f'echo "$out" | grep persistent-hook',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
 # STOPPED → re-launch with new hook propagates correctly.
 #
 # Real user pattern: launch a cluster yesterday with hook A, `sky stop` it,
