@@ -101,11 +101,10 @@ class SlurmLogStreamer:
 
         quoted_path = shlex.quote(self._log_path)
         if self._tail_offset is not None and self._tail_offset > 0:
-            # ``tail -c +<bytes>`` starts at byte offset (1-indexed),
-            # which is a strict improvement over K8s v1 (PLAN.md "Log
-            # tailing"). Saved-log replay uses line-based offsets; live
-            # tail with a byte offset only triggers from controller-side
-            # callers that compute the offset against the same file.
+            # ``tail -c +<bytes>`` starts at byte offset (1-indexed).
+            # Saved-log replay uses line-based offsets; live tail with
+            # a byte offset only triggers from controller-side callers
+            # that compute the offset against the same file.
             remote_cmd = (
                 f'tail -c +{int(self._tail_offset) + 1} '
                 f'{"-F" if self._follow else ""} {quoted_path} 2>/dev/null')
