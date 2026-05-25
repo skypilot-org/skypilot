@@ -80,11 +80,16 @@ The above is achieved by configuring the following section in the config file:
              allowed_contexts:
                - node-pool-1
                - node-pool-2
+             # Workspace-level default namespace (optional). Applies to every
+             # context in `allowed_contexts` that does not set its own
+             # `context_configs.<ctx>.namespace` below.
+             namespace: team-a-namespace
              # Per-workspace per-context overrides (optional). Lets a single
-             # shared context target a different namespace per workspace.
+             # shared context target a different namespace per workspace and
+             # takes precedence over the workspace-level `namespace` above.
              context_configs:
                node-pool-1:
-                 namespace: team-a-namespace
+                 namespace: team-a-node-pool-1-namespace
 
            gcp:
              disabled: false

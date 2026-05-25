@@ -1411,7 +1411,7 @@ def test_get_effective_queue_name_workspace_override(monkeypatch,
 
 
 def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
-    """Full precedence matrix: workspace per-context > global per-context > global cloud > None."""
+    """Full precedence matrix across all four resolver layers."""
     with open(tmp_path / 'namespace.yaml', 'w', encoding='utf-8') as f:
         f.write("""\
         kubernetes:
@@ -1435,12 +1435,16 @@ def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
                 kubernetes:
                     # Workspace declared but sets no namespace overrides.
                     allowed_contexts: ['contextA']
+            workspaceC:
+                kubernetes:
+                    # Workspace-level shorthand; no per-context override.
+                    namespace: workspaceC-shorthand-namespace
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'namespace.yaml')
     skypilot_config.reload_config()
 
-    # Layer 1: workspace per-context wins.
+    # Layer 1: workspace per-context wins over every lower layer.
     assert skypilot_config.get_effective_namespace(
         cloud='kubernetes', region='contextA',
         workspace='workspaceA') == 'workspaceA-contextA-namespace'
@@ -1448,7 +1452,17 @@ def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
         cloud='kubernetes', region='contextB',
         workspace='workspaceA') == 'workspaceA-contextB-namespace'
 
-    # Layer 2: global per-context wins when workspace has no override.
+    # Layer 2: workspace cloud-level shorthand wins over the global
+    # per-context (layer 3) and global cloud-level (layer 4) layers, and
+    # applies regardless of which context the launch targets.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+
+    # Layer 3: global per-context wins when no workspace layer matches.
     assert skypilot_config.get_effective_namespace(
         cloud='kubernetes', region='contextA',
         workspace='workspaceB') == 'contextA-global-namespace'
@@ -1456,14 +1470,14 @@ def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
         cloud='kubernetes', region='contextA',
         workspace='default') == 'contextA-global-namespace'
 
-    # Layer 3: global cloud-level when no per-context override exists.
+    # Layer 4: global cloud-level when no per-context override exists.
     assert skypilot_config.get_effective_namespace(
         cloud='kubernetes', region='contextB',
         workspace='workspaceB') == 'global-default-namespace'
     assert skypilot_config.get_effective_namespace(
         cloud='kubernetes', workspace='default') == 'global-default-namespace'
 
-    # Layer 4: None when no layer matches (aws has no config in this fixture).
+    # No layer matches: returns None (aws has no config in this fixture).
     assert skypilot_config.get_effective_namespace(
         cloud='aws', workspace='workspaceA') is None
 

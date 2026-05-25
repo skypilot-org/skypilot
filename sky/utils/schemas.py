@@ -2438,6 +2438,9 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        'namespace': {
+                            'type': 'string',
+                        },
                         'kueue': {
                             'type': 'object',
                             'required': [],

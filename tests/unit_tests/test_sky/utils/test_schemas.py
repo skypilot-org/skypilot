@@ -473,26 +473,74 @@ class TestWorkspaceSchema(unittest.TestCase):
         jsonschema.validate(instance=valid_config,
                             schema=self.workspaces_schema)
 
-    def test_workspace_kubernetes_namespace_shorthand_rejected(self):
-        """`workspaces.<ws>.kubernetes.namespace` (no context) is rejected.
+    def test_workspace_kubernetes_namespace_shorthand_accepted(self):
+        """`workspaces.<ws>.kubernetes.namespace` (no context) validates.
 
-        Design choice: only the per-context spelling is supported.
+        Mirrors the `kueue`/`quota` shorthand already accepted at the
+        workspace cloud level, and matches layer 2 of the resolver
+        precedence in `get_effective_namespace`.
         """
-        invalid_config = {
+        valid_config = {
             'my-workspace': {
                 'kubernetes': {
                     'namespace': 'team-a',
                 },
             },
         }
-        with self.assertRaises(jsonschema.exceptions.ValidationError):
-            jsonschema.validate(instance=invalid_config,
-                                schema=self.workspaces_schema)
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
 
-    def test_workspace_kubernetes_context_configs_namespace_must_be_string(
-            self):
-        """Non-string `namespace` is rejected at the workspace level too."""
+    def test_workspace_kubernetes_namespace_shorthand_coexists(self):
+        """Shorthand `namespace` validates alongside other workspace fields.
+
+        Pins that adding the shorthand does not regress the existing
+        per-context, `allowed_contexts`, `kueue`, or `quota` spellings
+        when they are set in the same workspace block.
+        """
+        valid_config = {
+            'my-workspace': {
+                'kubernetes': {
+                    'namespace': 'team-a',
+                    'allowed_contexts': ['shared-context'],
+                    'kueue': {
+                        'local_queue_name': 'team-a-queue',
+                    },
+                    'quota': {
+                        'queue': 'team-a-quota',
+                    },
+                    'context_configs': {
+                        'shared-context': {
+                            'namespace': 'team-a-shared',
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=valid_config,
+                            schema=self.workspaces_schema)
+
+    def test_workspace_kubernetes_namespace_must_be_string(self):
+        """Non-string `namespace` is rejected at every workspace spelling.
+
+        Covers both the shorthand (`workspaces.<ws>.kubernetes.namespace`)
+        and the per-context spelling
+        (`workspaces.<ws>.kubernetes.context_configs.<ctx>.namespace`).
+        """
         invalid_configs = [
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'namespace': 123,
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'kubernetes': {
+                        'namespace': ['team-a'],
+                    },
+                },
+            },
             {
                 'my-workspace': {
                     'kubernetes': {
