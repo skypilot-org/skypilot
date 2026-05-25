@@ -1544,8 +1544,21 @@ def _query_instances_v1(
                               Optional[str]]] = {}
     seen_job_ids: set = set()
 
-    # --- squeue: live jobs (pending/running/completing/...) and recent ---
-    # --- terminal jobs within the MinJobAge window. ---
+    # --- squeue: gather all job_ids across the live + recently-terminal
+    # filter set, then pick ONLY the most-recent attempt. ---
+    #
+    # On recovery, the controller resubmits under the same
+    # cluster_name_on_cloud. Within ``MinJobAge`` (default 300s) squeue
+    # surfaces every recent attempt of that name. If we report all of
+    # them, ``backend_utils._update_cluster_status`` sees
+    # ``len(node_statuses) > launched_nodes`` and raises
+    # ``ClusterStatusFetchingError`` ("Found N node(s) with the same
+    # cluster name tag"), spinning the launch retry loop.
+    #
+    # Slurm job IDs are monotonic per slurmctld lifetime — the highest
+    # ID wins. We collect (job_id, state) pairs across the full filter
+    # set and keep the row with the largest job_id only.
+    candidates: Dict[str, str] = {}  # job_id -> upper-case Slurm state
     for state_filter in [
             'pending', 'running', 'completing', 'completed', 'cancelled',
             'failed', 'node_fail'
@@ -1570,32 +1583,39 @@ def _query_instances_v1(
             continue
         for job_id in job_ids:
             seen_job_ids.add(job_id)
-            sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(state)
-            if sky_status is None:
-                if non_terminated_only:
-                    continue
-                try:
-                    reason = client.get_job_reason(job_id)
-                except Exception:  # pylint: disable=broad-except
-                    reason = None
-                statuses[job_id] = (None, reason)
-                continue
+            candidates[job_id] = state
+
+    if candidates:
+        try:
+            best_job_id = str(max(int(j) for j in candidates))
+        except ValueError:
+            # Non-numeric job id (e.g. federated cluster). Fall back to
+            # lexicographic max — rare on this path; the legacy slurm
+            # adaptor already enforces numeric job ids.
+            best_job_id = max(candidates)
+        best_state = candidates[best_job_id]
+        sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(best_state)
+        if sky_status is None and not non_terminated_only:
             try:
-                nodes, _ = client.get_job_nodes(job_id)
+                reason = client.get_job_reason(best_job_id)
+            except Exception:  # pylint: disable=broad-except
+                reason = None
+            statuses[best_job_id] = (None, reason)
+        elif sky_status is not None:
+            try:
+                nodes, _ = client.get_job_nodes(best_job_id)
             except Exception as e:  # pylint: disable=broad-except
-                # PENDING jobs may not yet have nodes; the empty result
-                # below is fine. Other failures we surface as no nodes.
-                logger.debug(f'V1 query_instances: get_job_nodes({job_id}) '
-                             f'failed: {e}')
+                logger.debug(f'V1 query_instances: get_job_nodes('
+                             f'{best_job_id}) failed: {e}')
                 nodes = []
             if not nodes:
-                # Surface the job-id keyed entry so the caller sees the
-                # cluster is in INIT.
-                statuses[job_id] = (sky_status, None)
-                continue
-            for node in nodes:
-                instance_id = slurm_utils.instance_id(job_id, node)
-                statuses[instance_id] = (sky_status, None)
+                # Surface the job-id keyed entry so the caller sees a
+                # single-entry cluster (matches launched_nodes=1).
+                statuses[best_job_id] = (sky_status, None)
+            else:
+                for node in nodes:
+                    instance_id = slurm_utils.instance_id(best_job_id, node)
+                    statuses[instance_id] = (sky_status, None)
 
     # --- sacct: terminal state for jobs aged past MinJobAge. ---
     # Only consult sacct if squeue didn't already produce a live entry,
