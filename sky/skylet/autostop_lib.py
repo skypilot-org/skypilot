@@ -479,7 +479,21 @@ class AutostopCodeGen:
                     flat_hook = entry['run']
                     flat_timeout = entry.get('timeout')
                     break
-        hooks_payload = hooks or []
+        # v7+ branch: forward ``hook`` / ``hook_timeout`` so the
+        # skylet's set_autostop routing bridges a pre-v7 client's
+        # legacy hook arg into the new hooks list (see
+        # autostop_lib.set_autostop ~line 200). Only emit
+        # ``set_hooks(...)`` when the caller explicitly passes a list:
+        # ``hooks=None`` means "leave stored alone" (no explicit
+        # opinion); an empty-list emit there would wipe the entry the
+        # bridge just stored — exactly the failure mode that surfaced
+        # as `TestBackwardCompatibility::
+        # test_client_server_compatibility_new_server` timing out
+        # waiting for AUTOSTOPPING.
+        if hooks is None:
+            set_hooks_line = ''
+        else:
+            set_hooks_line = f'\n autostop_lib.set_hooks({hooks!r})'
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -494,8 +508,9 @@ class AutostopCodeGen:
             f'hook_timeout={flat_timeout})'
             '\nelse: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
-            f'autostop_lib.{wait_for}, {down})'
-            f'\n autostop_lib.set_hooks({hooks_payload!r})',
+            f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
+            f'hook_timeout={hook_timeout})'
+            f'{set_hooks_line}',
         ]
         return cls._build(code)
 

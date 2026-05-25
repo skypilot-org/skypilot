@@ -1363,6 +1363,92 @@ def test_codegen_pre_v7_branch_no_flat_when_only_preemption_hook():
         f"matches; got:\n{payload}")
 
 
+def test_codegen_v7_branch_preserves_legacy_hook_when_hooks_none():
+    """Pre-v7 client passes ``hook=`` (no ``hooks=``) via SSH codegen.
+
+    Real-world trigger: SkyPilot's master client calls
+    ``sky.autostop(cluster, idle_minutes=1, hook='sleep 120')``. The
+    SDK lands on a v7+ server which dispatches over SSH codegen when
+    gRPC is disabled (``SKYPILOT_ENABLE_GRPC`` defaults False), and the
+    codegen v7+ ``else:`` branch must:
+
+      1. **Pass** the legacy ``hook=`` / ``hook_timeout=`` args to
+         ``autostop_lib.set_autostop`` so its internal routing (the
+         pre-v7 client → v7+ skylet bridge at autostop_lib.py:200-206)
+         stores the hook under the new ``lifecycle_hooks`` key.
+
+      2. **Not** call ``set_hooks([])`` when ``hooks is None`` —
+         ``None`` means "leave stored hooks alone", and the empty-list
+         call would wipe the entry the routing just persisted, leaving
+         the skylet with no hook to fire at idle-timer teardown.
+
+    Confirmed root cause of TestBackwardCompatibility::
+    test_client_server_compatibility_new_server on aws timing out
+    waiting for AUTOSTOPPING: the cluster transitioned UP → STOPPED
+    without ever running the ``sleep 120`` hook because the codegen
+    silently dropped it.
+    """
+    from sky.skylet import autostop_lib
+
+    rendered = autostop_lib.AutostopCodeGen.set_autostop(
+        idle_minutes=1,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=False,
+        hook='sleep 120',
+        hook_timeout=None,
+        hooks=None,
+    )
+    # _build wraps the python code in ``... -u -c <shlex.quote'd-py>``.
+    # Unwrap to inspect the literal Python source.
+    import shlex as _shlex
+    parts = _shlex.split(rendered)
+    payload = parts[-1]
+
+    # The v7+ (else:) branch is the last block; it must include the
+    # legacy hook in the set_autostop call so the skylet's routing
+    # bridge fires.
+    assert "'sleep 120'" in payload, (
+        f'Codegen v7+ branch must forward the legacy ``hook`` arg to '
+        f'set_autostop; otherwise the skylet has no way to route the '
+        f'master client\'s ``hook=`` into the new hooks list. Rendered '
+        f'payload:\n{payload}')
+
+    # When the caller passes ``hooks=None``, the v7+ branch must not
+    # emit ``set_hooks([])`` because that wipes the routed entry. The
+    # bug we are guarding against is exactly this empty-list call.
+    assert 'set_hooks([])' not in payload, (
+        f'Codegen v7+ branch emitted ``set_hooks([])`` for a None-hooks '
+        f'caller. None means "leave stored alone"; ``[]`` is reserved '
+        f'for explicit clear. Emitting ``set_hooks([])`` here wipes the '
+        f'entry that set_autostop\'s legacy-hook routing just stored. '
+        f'Rendered payload:\n{payload}')
+
+
+def test_codegen_v7_branch_explicit_clear_hooks_still_works():
+    """Re-launches that drop hooks pass ``hooks=[]`` to explicitly clear.
+
+    Guarding the corollary of the previous test: the codegen must still
+    emit ``set_hooks([])`` when ``hooks=[]`` is passed explicitly (vs.
+    ``hooks=None`` which leaves stored alone).
+    """
+    from sky.skylet import autostop_lib
+
+    rendered = autostop_lib.AutostopCodeGen.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=False,
+        hooks=[],
+    )
+    import shlex as _shlex
+    parts = _shlex.split(rendered)
+    payload = parts[-1]
+    assert 'set_hooks([])' in payload, (
+        f'Explicit hooks=[] must still emit set_hooks([]) so the skylet '
+        f'clears its stored hooks list. Rendered:\n{payload}')
+
+
 def test_codegen_v7_branch_dual_emits_set_autostop_and_set_hooks():
     """v7+ skylets get the full ``set_hooks(...)`` call alongside the
     legacy-shape ``set_autostop(...)``. Dual-emit lets a single rendered
