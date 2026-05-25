@@ -1615,7 +1615,7 @@ def _get_cluster_info_v1(
 
     Unlike the legacy path's ``InstanceInfo(ssh_port=ssh_port,
     external_ip=ssh_host, ...)`` (which is misleading on v1 — SkyPilot
-    never SSHes to the compute node), the v1 shape mirrors K8s v1:
+    never SSHes to the compute node), the v1 shape omits SSH leakage:
     no external_ip, empty ssh_user override, and the InstanceInfo's
     ``ssh_port`` left at its default. Tags carry the structured
     ``job_id`` / ``node`` / ``TAG_SKYPILOT_CLUSTER_NAME`` so
@@ -1678,7 +1678,7 @@ def _get_cluster_info_v1(
             common.InstanceInfo(
                 instance_id=instance_id,
                 # V1 never SSHes to the compute node; leave internal_ip
-                # empty (mirrors K8s v1's empty pod_ip handling).
+                # empty.
                 internal_ip='',
                 external_ip=None,
                 tags={

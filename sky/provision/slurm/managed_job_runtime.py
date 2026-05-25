@@ -91,9 +91,9 @@ def _resolve_slurm_target(handle) -> Optional[_Target]:
     """Extract the Slurm v1 context from a cluster handle.
 
     Returns ``None`` for handles that don't belong to the Slurm v1
-    runtime — never falls back to defaults. Cheap fast-path matches
-    the K8s v1 posture: ``getattr(..., 'has_ray', True)`` treats
-    missing metadata as legacy.
+    runtime — never falls back to defaults. Cheap fast-path:
+    ``getattr(..., 'has_ray', True)`` treats missing metadata as
+    legacy (default-to-legacy posture).
     """
     if handle is None:
         return None
@@ -305,13 +305,10 @@ def _resolve_log_path(
 
 def _build_managed_job_streaming_header(num_nodes: int,
                                         min_nodes: Optional[int] = None) -> str:
-    """Slurm-local copy of the K8s v1 streaming header.
+    """Build the multi-line streaming-start header for a v1 managed job.
 
-    Kept byte-identical to the K8s plugin's
-    ``_build_managed_job_streaming_header`` so saved-log replay's
-    ``LOG_FILE_START_STREAMING_AT`` marker is the same across runtimes.
-    We copy rather than import to keep the OSS Slurm runtime free of
-    plugin imports.
+    The first line embeds ``LOG_FILE_START_STREAMING_AT`` so saved-log
+    replay finds its expected marker.
     """
     dim = colorama.Style.DIM
     reset = colorama.Style.RESET_ALL
