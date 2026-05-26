@@ -16,6 +16,14 @@ import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
 import {
+  formatTimestamp,
+  formatTimeRange,
+  createBucketedTooltipLabel,
+  createBucketedTooltipCallbacks,
+  calculateTimeBucketSize,
+  aggregateIntoBuckets,
+} from '@/utils/chartUtils';
+import {
   trackEvent,
   trackPluginPageView,
   registerAnalyticsProvider,
@@ -704,6 +712,15 @@ function createPluginApi(dispatch) {
         gpuUtils: {
           canonicalizeGpuName,
           CANONICAL_GPU_NAMES,
+        },
+        // Chart utilities for time-series data with bucketing support
+        chartUtils: {
+          formatTimestamp,
+          formatTimeRange,
+          createBucketedTooltipLabel,
+          createBucketedTooltipCallbacks,
+          calculateTimeBucketSize,
+          aggregateIntoBuckets,
         },
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
