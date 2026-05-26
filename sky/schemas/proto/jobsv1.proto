@@ -50,6 +50,7 @@ message AddJobRequest {
   string run_timestamp = 3;
   string resources_str = 4;
   string metadata = 5;
+  optional string task_yaml = 6;
 }
 
 message AddJobResponse {
@@ -111,6 +112,7 @@ message JobInfo {
   optional int64 pid = 10;
   string log_path = 11;
   string metadata = 12;
+  optional string task_yaml = 13;
 }
 
 message GetJobQueueResponse {

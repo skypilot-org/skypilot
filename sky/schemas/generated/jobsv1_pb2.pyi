@@ -2,7 +2,8 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
+from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -30,18 +31,20 @@ JOB_STATUS_FAILED_SETUP: JobStatus
 JOB_STATUS_CANCELLED: JobStatus
 
 class AddJobRequest(_message.Message):
-    __slots__ = ("job_name", "username", "run_timestamp", "resources_str", "metadata")
+    __slots__ = ("job_name", "username", "run_timestamp", "resources_str", "metadata", "task_yaml")
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
     USERNAME_FIELD_NUMBER: _ClassVar[int]
     RUN_TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    TASK_YAML_FIELD_NUMBER: _ClassVar[int]
     job_name: str
     username: str
     run_timestamp: str
     resources_str: str
     metadata: str
-    def __init__(self, job_name: _Optional[str] = ..., username: _Optional[str] = ..., run_timestamp: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+    task_yaml: str
+    def __init__(self, job_name: _Optional[str] = ..., username: _Optional[str] = ..., run_timestamp: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata: _Optional[str] = ..., task_yaml: _Optional[str] = ...) -> None: ...
 
 class AddJobResponse(_message.Message):
     __slots__ = ("job_id", "log_dir")
@@ -118,7 +121,7 @@ class GetJobQueueRequest(_message.Message):
     def __init__(self, user_hash: _Optional[str] = ..., all_jobs: bool = ...) -> None: ...
 
 class JobInfo(_message.Message):
-    __slots__ = ("job_id", "job_name", "username", "submitted_at", "status", "run_timestamp", "start_at", "end_at", "resources", "pid", "log_path", "metadata")
+    __slots__ = ("job_id", "job_name", "username", "submitted_at", "status", "run_timestamp", "start_at", "end_at", "resources", "pid", "log_path", "metadata", "task_yaml")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
     USERNAME_FIELD_NUMBER: _ClassVar[int]
@@ -131,6 +134,7 @@ class JobInfo(_message.Message):
     PID_FIELD_NUMBER: _ClassVar[int]
     LOG_PATH_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    TASK_YAML_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     job_name: str
     username: str
@@ -143,7 +147,8 @@ class JobInfo(_message.Message):
     pid: int
     log_path: str
     metadata: str
-    def __init__(self, job_id: _Optional[int] = ..., job_name: _Optional[str] = ..., username: _Optional[str] = ..., submitted_at: _Optional[float] = ..., status: _Optional[_Union[JobStatus, str]] = ..., run_timestamp: _Optional[str] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., resources: _Optional[str] = ..., pid: _Optional[int] = ..., log_path: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+    task_yaml: str
+    def __init__(self, job_id: _Optional[int] = ..., job_name: _Optional[str] = ..., username: _Optional[str] = ..., submitted_at: _Optional[float] = ..., status: _Optional[_Union[JobStatus, str]] = ..., run_timestamp: _Optional[str] = ..., start_at: _Optional[float] = ..., end_at: _Optional[float] = ..., resources: _Optional[str] = ..., pid: _Optional[int] = ..., log_path: _Optional[str] = ..., metadata: _Optional[str] = ..., task_yaml: _Optional[str] = ...) -> None: ...
 
 class GetJobQueueResponse(_message.Message):
     __slots__ = ("jobs",)

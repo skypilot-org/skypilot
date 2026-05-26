@@ -160,6 +160,8 @@ class ClusterJobRecord(ResponseBaseModel):
     status: job_lib.JobStatus
     log_path: str
     metadata: Dict[str, Any] = {}
+    # Task YAML specification (may be None for older clusters)
+    task_yaml: Optional[str] = None
 
 
 class UploadStatus(enum.Enum):

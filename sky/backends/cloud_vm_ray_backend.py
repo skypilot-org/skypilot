@@ -4256,9 +4256,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-    def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str,
-                 metadata: str) -> Tuple[int, str]:
+    def _add_job(self,
+                 handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str],
+                 resources_str: str,
+                 metadata: str,
+                 task_yaml: Optional[str] = None) -> Tuple[int, str]:
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:
@@ -4268,7 +4271,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     username=common_utils.get_user_hash(),
                     run_timestamp=self.run_timestamp,
                     resources_str=resources_str,
-                    metadata=metadata)
+                    metadata=metadata,
+                    task_yaml=task_yaml)
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()).add_job(
                         request))
@@ -4285,7 +4289,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 username=common_utils.get_user_hash(),
                 run_timestamp=self.run_timestamp,
                 resources_str=resources_str,
-                metadata=metadata)
+                metadata=metadata,
+                task_yaml=task_yaml)
             returncode, result_str, stderr = self.run_on_head(
                 handle,
                 code,
@@ -4469,8 +4474,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
-                                        task.metadata_json)
+        task_yaml = yaml_utils.dump_yaml_str(
+            task.to_yaml_config(use_user_specified_yaml=True))
+        job_id, log_dir = self._add_job(handle,
+                                        task_copy.name,
+                                        resources_str,
+                                        task.metadata_json,
+                                        task_yaml=task_yaml)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods

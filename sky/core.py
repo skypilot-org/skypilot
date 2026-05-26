@@ -1180,6 +1180,8 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                     'resources': job_info.resources,
                     'log_path': job_info.log_path,
                     'user_hash': job_info.username,
+                    'task_yaml': job_info.task_yaml
+                                 if job_info.HasField('task_yaml') else None,
                 }
                 # Copied from job_lib.load_job_queue.
                 user = global_user_state.get_user(job_dict['user_hash'])

@@ -67,6 +67,7 @@ class JobInfoLoc(enum.IntEnum):
     LOG_PATH = 10
     METADATA = 11
     EXIT_CODES = 12
+    TASK_YAML = 13
 
 
 def create_table(cursor, conn):
@@ -126,6 +127,8 @@ def create_table(cursor, conn):
                                  'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'exit_codes',
+                                 'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'task_yaml',
                                  'TEXT DEFAULT NULL')
     conn.commit()
 
@@ -386,12 +389,18 @@ def add_job(job_name: str,
             username: str,
             run_timestamp: str,
             resources_str: str,
-            metadata: str = '{}') -> Tuple[int, str]:
+            metadata: str = '{}',
+            task_yaml: Optional[str] = None) -> Tuple[int, str]:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    if int(constants.SKYLET_VERSION) >= 28:
+    if int(constants.SKYLET_VERSION) >= 38:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null, ?)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata, task_yaml))
+    elif int(constants.SKYLET_VERSION) >= 28:
         _DB.cursor.execute(
             'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
@@ -621,7 +630,8 @@ def get_jobs_info(user_hash: Optional[str] = None,
                                log_path=os.path.join(
                                    constants.SKY_LOGS_DIRECTORY,
                                    job['run_timestamp']),
-                               metadata=json.dumps(job['metadata'])))
+                               metadata=json.dumps(job['metadata']),
+                               task_yaml=job.get('task_yaml')))
     return jobs_info
 
 
@@ -740,6 +750,8 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
                 records[-1]['exit_codes'] = ([
                     int(code) for code in exit_code_str.split(',')
                 ])
+        if int(constants.SKYLET_VERSION) >= 38:
+            records[-1]['task_yaml'] = row[JobInfoLoc.TASK_YAML.value]
     return records
 
 
@@ -1175,8 +1187,13 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str, metadata: str) -> str:
+    def add_job(cls,
+                job_name: Optional[str],
+                username: str,
+                run_timestamp: str,
+                resources_str: str,
+                metadata: str,
+                task_yaml: Optional[str] = None) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1194,13 +1211,21 @@ class JobLibCodeGen:
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            '\nelse: '
+            '\nelif int(constants.SKYLET_VERSION) < 38: '
             '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r})',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r},'
+            f'task_yaml={task_yaml!r})',
             ('\nif isinstance(result, tuple):'
              '\n  print("Job ID: " + str(result[0]), flush=True)'
              '\n  print("Log Dir: " + str(result[1]), flush=True)'
