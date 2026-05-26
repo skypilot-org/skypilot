@@ -683,3 +683,310 @@ def cleanup_metrics():
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# WorkspaceUsageCollector tests
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _make_cluster_row(*,
+                      workspace,
+                      user_hash,
+                      status_name,
+                      cloud_str,
+                      cpus='4',
+                      memory='16',
+                      disk_size=100,
+                      accelerators=None,
+                      launched_nodes=1,
+                      cost_per_hour=2.5):
+    """Build a fake cluster dict matching the shape returned by
+    global_user_state.get_clusters().
+
+    Status is a stub object exposing .name; cloud is a stub whose str()
+    returns ``cloud_str``; launched_resources is a MagicMock with the
+    fields the collector reads.
+    """
+
+    class _StatusStub:
+
+        def __init__(self, name):
+            self.name = name
+
+    class _CloudStub:
+
+        def __init__(self, name):
+            self._name = name
+
+        def __str__(self):
+            return self._name
+
+    status_obj = _StatusStub(status_name)
+    cloud_obj = _CloudStub(cloud_str)
+
+    launched_resources = MagicMock()
+    launched_resources.cloud = cloud_obj
+    launched_resources.cpus = cpus
+    launched_resources.memory = memory
+    launched_resources.disk_size = disk_size
+    launched_resources.accelerators = accelerators
+    launched_resources.get_cost.return_value = cost_per_hour
+
+    handle = MagicMock()
+    handle.launched_resources = launched_resources
+    handle.launched_nodes = launched_nodes
+
+    return {
+        'name': 'c',
+        'workspace': workspace,
+        'user_hash': user_hash,
+        'user_name': 'whoever',
+        'status': status_obj,
+        'handle': handle,
+        'is_managed': False,
+        'node_names': [],
+    }
+
+
+def _collect_to_dict(collector):
+    """Run collector.collect() and return {metric_name: {labels_tuple: value}}."""
+    out = {}
+    for mf in collector.collect():
+        for sample in mf.samples:
+            # sample is a NamedTuple (name, labels, value, timestamp, exemplar)
+            key = tuple(sorted(sample.labels.items()))
+            out.setdefault(sample.name, {})[key] = sample.value
+    return out
+
+
+def test_workspace_usage_collector_counts_by_workspace_user_status_cloud():
+    """Counts emit one row per (workspace, user, status, cloud) group."""
+    clusters = [
+        _make_cluster_row(workspace='ws-a',
+                          user_hash='u1',
+                          status_name='UP',
+                          cloud_str='AWS'),
+        _make_cluster_row(workspace='ws-a',
+                          user_hash='u1',
+                          status_name='UP',
+                          cloud_str='AWS'),
+        _make_cluster_row(workspace='ws-a',
+                          user_hash='u2',
+                          status_name='UP',
+                          cloud_str='GCP'),
+        _make_cluster_row(workspace='ws-b',
+                          user_hash='u1',
+                          status_name='STOPPED',
+                          cloud_str='AWS'),
+    ]
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    counts = samples['sky_clusters_count']
+    # 2 clusters in ws-a/u1/UP/AWS, 1 in ws-a/u2/UP/GCP, 1 in ws-b/u1/STOPPED/AWS
+    assert counts[(('cloud', 'AWS'), ('status', 'UP'), ('user', 'u1'),
+                   ('workspace', 'ws-a'))] == 2.0
+    assert counts[(('cloud', 'GCP'), ('status', 'UP'), ('user', 'u2'),
+                   ('workspace', 'ws-a'))] == 1.0
+    assert counts[(('cloud', 'AWS'), ('status', 'STOPPED'), ('user', 'u1'),
+                   ('workspace', 'ws-b'))] == 1.0
+
+
+def test_workspace_usage_collector_gpus_and_burn_rate_only_for_up_clusters():
+    """STOPPED clusters do not contribute to GPU or burn-rate gauges."""
+    clusters = [
+        # UP — counted
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8},
+                          launched_nodes=2,
+                          cost_per_hour=10.0),
+        # STOPPED — excluded from GPU/burn totals
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='STOPPED',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8},
+                          launched_nodes=2,
+                          cost_per_hour=10.0),
+    ]
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    gpu_key = (('cloud', 'AWS'), ('gpu_type', 'H100'), ('user', 'u'),
+               ('workspace', 'ws'))
+    # 8 H100 × 2 nodes from the UP cluster only.
+    assert samples['sky_clusters_gpus_in_flight'][gpu_key] == 16.0
+    # $10/hr × 2 nodes from the UP cluster only.
+    assert samples['sky_clusters_burn_rate_dollars'][gpu_key] == 20.0
+
+
+def test_workspace_usage_collector_gpus_and_burn_rate():
+    """GPUs/burn rate aggregate by gpu_type and multiply by launched_nodes."""
+    clusters = [
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8},
+                          launched_nodes=4,
+                          cost_per_hour=10.0),
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8},
+                          launched_nodes=2,
+                          cost_per_hour=10.0),
+    ]
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    gpu_key = (('cloud', 'AWS'), ('gpu_type', 'H100'), ('user', 'u'),
+               ('workspace', 'ws'))
+    # 8 H100 × (4 + 2) nodes = 48
+    assert samples['sky_clusters_gpus_in_flight'][gpu_key] == 48.0
+
+    burn_key = (('cloud', 'AWS'), ('gpu_type', 'H100'), ('user', 'u'),
+                ('workspace', 'ws'))
+    # $10/hr per node × (4 + 2) nodes = $60/hr
+    assert samples['sky_clusters_burn_rate_dollars'][burn_key] == 60.0
+
+
+def test_workspace_usage_collector_cpu_only_cluster_uses_cpu_burn_label():
+    """Clusters without accelerators are attributed to gpu_type='cpu'."""
+    clusters = [
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators=None,
+                          launched_nodes=1,
+                          cost_per_hour=0.5),
+    ]
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    burn_key = (('cloud', 'AWS'), ('gpu_type', 'cpu'), ('user', 'u'),
+                ('workspace', 'ws'))
+    assert samples['sky_clusters_burn_rate_dollars'][burn_key] == 0.5
+    # No GPU samples emitted for this cluster.
+    assert (('cloud', 'AWS'), ('gpu_type', 'cpu'), ('user', 'u'),
+            ('workspace',
+             'ws')) not in samples.get('sky_clusters_gpus_in_flight', {})
+
+
+def test_workspace_usage_collector_null_labels_default():
+    """Null workspace → 'default'; null user/cloud → empty string."""
+    clusters = [
+        _make_cluster_row(workspace=None,
+                          user_hash=None,
+                          status_name='UP',
+                          cloud_str=''),
+    ]
+    # Override cloud to be None (the helper always sets one).
+    clusters[0]['handle'].launched_resources.cloud = None
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    counts = samples['sky_clusters_count']
+    # workspace defaulted to 'default'; user and cloud are empty.
+    assert counts[(('cloud', ''), ('status', 'UP'), ('user', ''),
+                   ('workspace', 'default'))] == 1.0
+
+
+def test_workspace_usage_collector_cost_lookup_failure_does_not_break():
+    """A get_cost() exception zeroes burn rate but other metrics still emit."""
+    clusters = [
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8}),
+    ]
+    clusters[0]['handle'].launched_resources.get_cost.side_effect = (
+        RuntimeError('catalog missing'))
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    # gpus_in_flight still emitted
+    assert samples['sky_clusters_gpus_in_flight'][(('cloud', 'AWS'),
+                                                   ('gpu_type',
+                                                    'H100'), ('user', 'u'),
+                                                   ('workspace', 'ws'))] == 8.0
+    # burn rate is 0 (not absent) — the catch falls through to 0.0.
+    assert samples['sky_clusters_burn_rate_dollars'][(('cloud', 'AWS'),
+                                                      ('gpu_type',
+                                                       'H100'), ('user', 'u'),
+                                                      ('workspace',
+                                                       'ws'))] == 0.0
+
+
+def test_workspace_usage_collector_cache_ttl():
+    """Within the cache TTL, _compute() is not called a second time."""
+    with patch('sky.global_user_state.get_clusters',
+               return_value=[]) as mock_get:
+        collector = metrics.WorkspaceUsageCollector()
+        # First scrape triggers compute.
+        list(collector.collect())
+        assert mock_get.call_count == 1
+        # Immediate second scrape hits the cache.
+        list(collector.collect())
+        assert mock_get.call_count == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ManagedJobsCollector tests
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_managed_jobs_collector_emits_workspace_user_status_cloud():
+    """One series per (workspace, user, status, cloud) for non-terminal jobs.
+
+    The SQL layer filters out terminal statuses, so the test fixture
+    only contains non-terminal rows — terminal-filter behavior is
+    covered by the SQL helper's own tests if/when they exist.
+    """
+    rows = [
+        # (workspace, user_hash, cloud, status, count)
+        ('ws-a', 'u1', 'AWS', 'ManagedJobStatus.RUNNING', 3),
+        ('ws-a', 'u1', 'GCP', 'ManagedJobStatus.RUNNING', 2),
+        # Pre-cloud-assignment status — cloud is NULL in DB.
+        ('ws-a', 'u1', None, 'ManagedJobStatus.PENDING', 1),
+        ('ws-b', 'u2', 'AWS', 'ManagedJobStatus.LAUNCHING', 4),
+    ]
+    with patch('sky.jobs.state.get_status_counts_by_workspace_user_cloud',
+               return_value=rows):
+        collector = metrics.ManagedJobsCollector()
+        samples = _collect_to_dict(collector)
+
+    counts = samples['sky_managed_jobs_count']
+    # RUNNING for ws-a/u1 on AWS and GCP stay separate (cloud is a label).
+    assert counts[(('cloud', 'AWS'), ('status', 'ManagedJobStatus.RUNNING'),
+                   ('user', 'u1'), ('workspace', 'ws-a'))] == 3.0
+    assert counts[(('cloud', 'GCP'), ('status', 'ManagedJobStatus.RUNNING'),
+                   ('user', 'u1'), ('workspace', 'ws-a'))] == 2.0
+    # PENDING with NULL cloud — emitted with cloud="".
+    assert counts[(('cloud', ''), ('status', 'ManagedJobStatus.PENDING'),
+                   ('user', 'u1'), ('workspace', 'ws-a'))] == 1.0
+    # LAUNCHING on ws-b/u2/AWS.
+    assert counts[(('cloud', 'AWS'), ('status', 'ManagedJobStatus.LAUNCHING'),
+                   ('user', 'u2'), ('workspace', 'ws-b'))] == 4.0
+
+
+def test_managed_jobs_collector_handles_empty_db():
+    with patch('sky.jobs.state.get_status_counts_by_workspace_user_cloud',
+               return_value=[]):
+        collector = metrics.ManagedJobsCollector()
+        samples = _collect_to_dict(collector)
+    # Metric family exists, just with no rows.
+    assert samples.get('sky_managed_jobs_count', {}) == {}

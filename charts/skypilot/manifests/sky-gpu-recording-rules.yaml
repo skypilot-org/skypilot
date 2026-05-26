@@ -1,0 +1,51 @@
+# Prometheus recording rules that aggregate raw federated DCGM + KSM data
+# from the SkyPilot API server's /gpu-metrics endpoint into per-cluster /
+# per-GPU-model series.
+#
+# Two installation paths:
+#   * Prometheus Operator users: deploy via the Helm chart with
+#     `apiService.metrics.prometheusRule.enabled=true` — the chart wraps
+#     these rules in a PrometheusRule CRD.
+#   * Vanilla Prometheus users: add this file under your `rule_files:`
+#     directive and reload.
+#
+# Each rule evaluates every 30s. The `cluster` label is added at federation
+# time by the API server (see add_cluster_name_label in sky/metrics/utils.py),
+# so all series here are cluster-scoped.
+
+groups:
+  - name: sky_gpu_aggregation
+    interval: 30s
+    rules:
+      # ── Capacity: total GPUs per (cluster, GPU model) ─────────────────
+      # DCGM emits one series per physical GPU; count() on any per-GPU
+      # metric gives the GPU count. Avoids a kube_node_* join that would
+      # require GPU-type labels to be present on every node.
+      - record: sky:gpu_capacity_total
+        expr: count by (cluster, modelName) (DCGM_FI_DEV_GPU_UTIL)
+
+      # ── Allocated: GPUs currently requested by pods ───────────────────
+      # kube-state-metrics emits `nvidia_com_gpu` (dot→underscore) on the
+      # `resource` label. Join with DCGM on (cluster, node=Hostname) to
+      # attach a modelName label — each pod's GPU type is the node's.
+      - record: sky:gpu_allocated_total
+        expr: |
+          sum by (cluster, modelName) (
+            kube_pod_container_resource_requests{resource="nvidia_com_gpu"}
+            * on (cluster, node) group_left(modelName)
+              label_replace(
+                max by (cluster, Hostname, modelName) (DCGM_FI_DEV_GPU_UTIL),
+                "node", "$1", "Hostname", "(.+)"
+              )
+          )
+
+      # ── Free = Capacity − Allocated, per (cluster, GPU model) ─────────
+      - record: sky:gpu_free_total
+        expr: sky:gpu_capacity_total - sky:gpu_allocated_total
+
+      # ── Utilization: average + p90 per (cluster, GPU model) ───────────
+      - record: sky:gpu_utilization_avg
+        expr: avg by (cluster, modelName) (DCGM_FI_DEV_GPU_UTIL)
+
+      - record: sky:gpu_utilization_p90
+        expr: quantile by (cluster, modelName) (0.9, DCGM_FI_DEV_GPU_UTIL)

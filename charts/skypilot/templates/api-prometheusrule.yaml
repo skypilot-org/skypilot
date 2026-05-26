@@ -1,0 +1,25 @@
+{{- /*
+  Prometheus Operator PrometheusRule that ships the GPU-availability
+  recording rules defined in charts/skypilot/manifests/sky-gpu-recording-rules.yaml.
+
+  Prerequisite: prometheus-operator CRDs (`monitoring.coreos.com/v1`)
+  installed on the cluster. Opt-in: defaults to disabled.
+
+  Same content can be loaded into a vanilla Prometheus via `rule_files:`.
+*/ -}}
+{{- if and .Values.apiService.metrics.enabled .Values.apiService.metrics.prometheusRule.enabled }}
+{{- $fullName := include "skypilot.fullname" . -}}
+{{- $rules := .Files.Get "manifests/sky-gpu-recording-rules.yaml" | fromYaml -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fullName }}-gpu-aggregation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $fullName }}-api
+    {{- with .Values.apiService.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- toYaml $rules | nindent 2 }}
+{{- end }}
