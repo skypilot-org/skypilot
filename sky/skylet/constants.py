@@ -404,11 +404,17 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     # SkyPilot version is different from the running code", which on
     # SkyServe surfaces as replica FAILED_PROVISION after 3 retries. Kill
     # any local API server so the next sdk call re-spawns it with the new
-    # code. The pattern must stay in sync with
-    # sky.server.common.API_SERVER_CMD. pkill returns non-zero when no
-    # match is found, which is the common case for plain user clusters and
-    # replica VMs — swallow it.
-    'pkill -f "sky.server.server" 2>/dev/null || true; '
+    # code. The regex must stay in sync with
+    # sky.server.common.API_SERVER_CMD. The character class `[s]` matches a
+    # literal 's', so the regex still matches the API server's cmdline
+    # (`...-m sky.server.server`), but the literal string "[s]ky.server.server"
+    # does NOT contain "sky.server.server" as a substring — that prevents
+    # pkill from accidentally killing the parent shell when the whole setup
+    # script is run via `bash -c "..."`, which would otherwise have
+    # "sky.server.server" in its own cmdline and trip a self-kill. pkill
+    # returns non-zero when no match is found, which is the common case for
+    # plain user clusters and replica VMs — swallow it.
+    'pkill -f "[s]ky.server.server" 2>/dev/null || true; '
     '}; ')
 
 # Install ray and skypilot on the remote cluster if they are not already

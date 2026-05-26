@@ -39,7 +39,9 @@ def test_wheel_install_kills_stale_api_server():
     install_idx = rendered.rfind(install_marker)
     assert install_idx != -1, rendered
     tail = rendered[install_idx:]
-    assert re.search(r'pkill\s+-f\s+"[^"]*sky\.server\.server[^"]*"', tail), (
+    # The regex uses a [s] character class to avoid pkill matching the parent
+    # shell when the whole setup script is run via `bash -c "..."`.
+    assert re.search(r'pkill\s+-f\s+"\[s\]ky\.server\.server"', tail), (
         f'Expected pkill of the local API server after wheel reinstall, '
         f'got tail: {tail!r}')
     # The pkill must tolerate "no such process" (the common case on
@@ -63,3 +65,10 @@ def test_wheel_install_pkill_pattern_matches_api_server_cmd():
     assert re.search(pattern, server_common.API_SERVER_CMD), (
         f'pkill pattern {pattern!r} does not match '
         f'server_common.API_SERVER_CMD={server_common.API_SERVER_CMD!r}')
+    # Defensive: the `[s]ky...` bracket-class trick must keep the pattern
+    # itself out of the literal text. If someone simplified it back to
+    # "sky.server.server" the parent shell of a `bash -c "..."` setup run
+    # would self-kill.
+    assert not re.search(pattern, pattern), (
+        f'pkill pattern {pattern!r} matches its own literal text — it would '
+        f'kill the parent shell when the setup script is run via bash -c.')
