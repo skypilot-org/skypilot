@@ -18,21 +18,6 @@ logger = sky_logging.init_logger(__name__)
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
 
-_DEFAULT_STORAGE_CLASS_ANNOTATION = (
-    'storageclass.kubernetes.io/is-default-class')
-_DEFAULT_STORAGE_CLASS_ANNOTATION_LEGACY = (
-    'storageclass.beta.kubernetes.io/is-default-class')
-
-
-def _is_truthy(value: Any) -> bool:
-    """Matches `strconv.ParseBool` semantics used by K8s admission.
-
-    Accepts 'true'/'True'/'TRUE'/'1'/'t'/'T' as truthy.
-    """
-    if value is None:
-        return False
-    return str(value).lower() in ('true', '1', 't')
-
 
 def _is_rbac_permission_error(e: Exception) -> bool:
     """True if the K8s ApiException is a 401/403 RBAC denial.
@@ -125,18 +110,12 @@ def _check_cluster_has_default_storage_class(context: Optional[str]) -> None:
             f'Failed to list storage classes in context {context!r} '
             f'while checking for a default StorageClass: {e}')
     for sc in sc_list.items:
-        annotations = (sc.metadata.annotations or {}) if sc.metadata else {}
-        # K8s admission accepts strconv.ParseBool-style truthy values
-        # (`true`, `True`, `1`, `t`, `T`). Match that to avoid spurious
-        # rejection on clusters annotated with capitalized variants.
-        if (_is_truthy(annotations.get(_DEFAULT_STORAGE_CLASS_ANNOTATION)) or
-                _is_truthy(
-                    annotations.get(_DEFAULT_STORAGE_CLASS_ANNOTATION_LEGACY))):
+        if kubernetes_utils.is_default_storage_class(sc):
             return
     raise config_lib.KubernetesError(
         f'No storage class specified and cluster {context!r} has no default '
         f'StorageClass (no storage class annotated '
-        f'"{_DEFAULT_STORAGE_CLASS_ANNOTATION}: true"). '
+        f'"{kubernetes_utils.DEFAULT_STORAGE_CLASS_ANNOTATION}: true"). '
         f'Set config.storage_class_name in your volume YAML to an explicit '
         f'storage class, or mark one as default on the cluster.')
 
