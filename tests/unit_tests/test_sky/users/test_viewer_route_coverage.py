@@ -26,6 +26,7 @@ forces a deliberate review.
 from casbin import util as casbin_util
 from fastapi.routing import APIRoute
 
+from sky.server import plugins as server_plugins
 from sky.server import server as server_app
 from sky.users import rbac
 
@@ -166,19 +167,50 @@ def _matches_any(path_template: str, method: str, allowlist: list) -> bool:
     return False
 
 
+def _matches_deny(path_template: str, method: str, denied_pattern_list,
+                  denied_pair_set) -> bool:
+    """True if a route is on either deny source.
+
+    ``denied_pair_set`` holds OSS deny entries as exact
+    ``(path_template, method)`` tuples (the ``_KNOWN_VIEWER_DENIED``
+    set), since OSS paths are always exact templates.  Plugin deny
+    entries arrive as ``{'path': pattern, 'method': method}`` dicts
+    and may use Casbin ``keyMatch2`` wildcards, so they're matched
+    the same way the allowlist is.
+    """
+    if (path_template, method) in denied_pair_set:
+        return True
+    return _matches_any(path_template, method, denied_pattern_list)
+
+
 def test_every_route_has_a_viewer_decision():
     """Every API route must be either viewer-allowed or viewer-denied.
 
     No silent "neither" state — if you add or rename a route you
-    must update either `rbac._DEFAULT_VIEWER_ALLOWLIST` (it's a
-    read) or this file's `_KNOWN_VIEWER_DENIED` (it's a write or a
-    sensitive read).
+    must update either:
+
+      - ``rbac._DEFAULT_VIEWER_ALLOWLIST`` (OSS read), or
+      - this file's ``_KNOWN_VIEWER_DENIED`` (OSS write/sensitive), or
+      - the plugin's ``viewer_allowlist`` (plugin read), or
+      - the plugin's ``viewer_denied`` (plugin write/sensitive).
+
+    Plugin contributions are loaded via ``load_plugin_viewer_allowlist``
+    and ``load_plugin_viewer_denied`` so the coverage check holds the
+    same contract for plugin routes as for OSS routes.
     """
-    allowlist = rbac._DEFAULT_VIEWER_ALLOWLIST  # pylint: disable=protected-access
+    # Importing ``server`` above triggers plugin loading via the
+    # UVICORN extension context, so ``app.routes`` already includes
+    # any plugin-registered routes by the time we enumerate it.
+    plugin_allowlist = server_plugins.load_plugin_viewer_allowlist()
+    plugin_denied = server_plugins.load_plugin_viewer_denied()
+    allowlist = (
+        list(rbac._DEFAULT_VIEWER_ALLOWLIST) +  # pylint: disable=protected-access
+        plugin_allowlist)
     uncategorized = []
     for path_template, method in _route_pairs():
         on_allow = _matches_any(path_template, method, allowlist)
-        on_deny = (path_template, method) in _KNOWN_VIEWER_DENIED
+        on_deny = _matches_deny(path_template, method, plugin_denied,
+                                _KNOWN_VIEWER_DENIED)
         if on_allow and on_deny:
             uncategorized.append(
                 f'{method} {path_template} appears in BOTH lists; '
@@ -186,8 +218,11 @@ def test_every_route_has_a_viewer_decision():
         elif not on_allow and not on_deny:
             uncategorized.append(
                 f'{method} {path_template} has no viewer decision. '
-                'Add to rbac._DEFAULT_VIEWER_ALLOWLIST (read) or to '
-                'this file\'s _KNOWN_VIEWER_DENIED (write/sensitive).')
+                'OSS routes: add to rbac._DEFAULT_VIEWER_ALLOWLIST '
+                '(read) or to this file\'s _KNOWN_VIEWER_DENIED '
+                '(write/sensitive).  Plugin routes: add to the '
+                'plugin\'s viewer_allowlist (read) or viewer_denied '
+                '(write/sensitive).')
     assert not uncategorized, ('Routes with no viewer-role decision:\n  ' +
                                '\n  '.join(sorted(uncategorized)))
 
@@ -201,7 +236,12 @@ def test_allowlist_entries_match_real_routes():
     """
     pairs = list(_route_pairs())
     casbin_pairs = [(_fastapi_path_to_casbin(p), m) for p, m in pairs]
-    allowlist = rbac._DEFAULT_VIEWER_ALLOWLIST  # pylint: disable=protected-access
+    # Same composition as ``test_every_route_has_a_viewer_decision``
+    # so plugin-supplied entries are matched against the live route
+    # table rather than flagged as unknown.
+    allowlist = (
+        list(rbac._DEFAULT_VIEWER_ALLOWLIST) +  # pylint: disable=protected-access
+        server_plugins.load_plugin_viewer_allowlist())
 
     # Some allowlist patterns intentionally target endpoints not in
     # the OSS app's route table — these come from plugins or from

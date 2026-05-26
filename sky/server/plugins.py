@@ -329,6 +329,40 @@ class BasePlugin(abc.ABC):
         """
         return []
 
+    @property
+    def viewer_denied(self) -> List['RBACRule']:
+        """Endpoints this plugin exposes that are write/sensitive.
+
+        Mirrors ``viewer_allowlist`` but on the deny side.  Use this to
+        declare write or sensitive plugin endpoints that should be
+        explicitly denied for the ``viewer`` role.
+
+        The runtime middleware already denies anything not on the
+        merged viewer allowlist, so declaring an entry here does not
+        change the runtime decision — denial is implicit either way.
+        The list exists so the OSS route-coverage test
+        (``tests/unit_tests/test_sky/users/test_viewer_route_coverage.py``)
+        can verify that every plugin-registered route carries an
+        EXPLICIT decision (allow or deny), the same contract OSS
+        endpoints follow via ``_KNOWN_VIEWER_DENIED``.  Skipping a
+        write endpoint here will surface as a test failure on the
+        next CI run, forcing a deliberate classification.
+
+        Path patterns use the same Casbin ``keyMatch2`` syntax as
+        ``rbac_rules`` and ``viewer_allowlist``.
+
+        Example:
+            @property
+            def viewer_denied(self):
+                return [
+                    RBACRule(path='/plugins/api/foo/create',
+                             method='POST'),
+                    RBACRule(path='/plugins/api/foo/:id',
+                             method='DELETE'),
+                ]
+        """
+        return []
+
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):
         """Hook called by API server to let the plugin install itself."""
@@ -677,6 +711,68 @@ def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
 def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
     """Return the cached viewer-allowlist entries collected from plugins."""
     return _PLUGIN_VIEWER_ALLOWLIST
+
+
+_PLUGIN_VIEWER_DENIED: List[Dict[str, str]] = []
+
+
+def load_plugin_viewer_denied() -> List[Dict[str, str]]:
+    """Load viewer-denied entries from plugins without calling install().
+
+    Mirror of `load_plugin_viewer_allowlist` for the deny side.
+    Plugins that don't override `viewer_denied` inherit the BasePlugin
+    default (empty list).  The runtime decision is unaffected by this
+    list (anything not on the merged allowlist is already denied); it
+    exists so the route-coverage test can verify EVERY plugin-
+    registered route carries an explicit allow-or-deny classification.
+
+    Returns:
+        Flat list of `{path, method}` records collected from each
+        plugin's `viewer_denied` property.
+    """
+    global _PLUGIN_VIEWER_DENIED
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    denied: List[Dict[str, str]] = []
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # Mirror the load_plugin_viewer_allowlist filter: the deny
+            # list is also an API-server concern, so skip plugins that
+            # don't load in either API-server context.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            for rule in plugin.viewer_denied:
+                denied.append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected viewer denied entry from '
+                             f'{class_path}: {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load viewer denied from '
+                           f'{class_path}: {e}')
+
+    _PLUGIN_VIEWER_DENIED = denied
+    return denied
+
+
+def get_plugin_viewer_denied() -> List[Dict[str, str]]:
+    """Return the cached viewer-denied entries collected from plugins."""
+    return _PLUGIN_VIEWER_DENIED
 
 
 def get_extension_context() -> Optional[ExtensionContext]:
