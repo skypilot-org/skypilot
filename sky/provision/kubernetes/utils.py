@@ -266,6 +266,46 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
+# Annotations Kubernetes uses to mark the cluster's default StorageClass.
+DEFAULT_STORAGE_CLASS_ANNOTATION = (
+    'storageclass.kubernetes.io/is-default-class')
+DEFAULT_STORAGE_CLASS_ANNOTATION_LEGACY = (
+    'storageclass.beta.kubernetes.io/is-default-class')
+
+
+def is_truthy_annotation(value: Any) -> bool:
+    """Returns True for the values K8s admission treats as truthy.
+
+    Matches Go's `strconv.ParseBool` semantics, which K8s uses for
+    boolean-valued annotations: accepts 'true' / 'True' / 'TRUE' / '1' /
+    't' / 'T'. Strict equality on the string `'true'` misses capitalized
+    variants that some Helm charts emit in the wild.
+    """
+    if value is None:
+        return False
+    return str(value).lower() in ('true', '1', 't')
+
+
+def is_default_storage_class(sc: Any) -> bool:
+    """True if the StorageClass object is annotated as the cluster default.
+
+    Accepts both the current annotation
+    (`storageclass.kubernetes.io/is-default-class`) and the legacy beta
+    annotation. Robust to missing metadata/annotations.
+
+    Args:
+        sc: A Kubernetes V1StorageClass (or duck-typed equivalent).
+    """
+    metadata = getattr(sc, 'metadata', None)
+    sc_annotations = (getattr(metadata, 'annotations', None)
+                      if metadata else None)
+    if not sc_annotations:
+        return False
+    return (is_truthy_annotation(
+        sc_annotations.get(DEFAULT_STORAGE_CLASS_ANNOTATION)) or
+            is_truthy_annotation(
+                sc_annotations.get(DEFAULT_STORAGE_CLASS_ANNOTATION_LEGACY)))
+
 
 def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
     """Normalize TPU names to the k8s-compatible name and extract count."""
