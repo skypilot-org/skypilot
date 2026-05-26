@@ -46,7 +46,12 @@ def test_wheel_install_kills_stale_api_server():
         f'got tail: {tail!r}')
     # The pkill must tolerate "no such process" (the common case on
     # ordinary user clusters / replica VMs) so it does not break setup.
-    assert '|| true' in tail, (
+    # In the debug-instrumented variant, pkill's exit code is captured into
+    # $pkill_rc instead of swallowed with `|| true`; the surrounding shell
+    # must NOT have an `|| exit 1` after pkill, or no-match would abort the
+    # whole setup. Assert that by checking nothing aborts the script after
+    # pkill returns non-zero.
+    assert '|| true' in tail or 'pkill_rc=$?' in tail, (
         f'pkill must tolerate the no-match exit code, got tail: {tail!r}')
 
 
