@@ -395,7 +395,21 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
-    'exit 1; }; ')
+    'exit 1; '
+    # On VMs that run a long-lived local SkyPilot API server (e.g. jobs/serve
+    # controllers), the just-completed wheel reinstall leaves the on-disk
+    # sky package out of sync with whatever sky.__version__ that API server
+    # has cached in memory. Subsequent sdk.launch() calls into that API
+    # server then fail in wheel_utils._build_sky_wheel with "The installed
+    # SkyPilot version is different from the running code", which on
+    # SkyServe surfaces as replica FAILED_PROVISION after 3 retries. Kill
+    # any local API server so the next sdk call re-spawns it with the new
+    # code. The pattern must stay in sync with
+    # sky.server.common.API_SERVER_CMD. pkill returns non-zero when no
+    # match is found, which is the common case for plain user clusters and
+    # replica VMs — swallow it.
+    'pkill -f "sky.server.server" 2>/dev/null || true; '
+    '}; ')
 
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in
