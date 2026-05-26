@@ -8,8 +8,14 @@
 # We install the open-kernel-module flavor of the driver. NVIDIA Blackwell
 # data-center GPUs (B200, RTX PRO 6000 Blackwell Server) require the open
 # kernel module; the proprietary kernel module is unsupported on these cards.
-# The open module also works on every previously supported GPU (Turing and
-# later), so a single image continues to cover all GPU types.
+#
+# Architecture coverage: the open kernel modules depend on the GSP firmware
+# first introduced in Turing, so they support Turing and later only — T4,
+# A100, L4, H100, B200, RTX PRO 6000, etc. They do NOT support Maxwell,
+# Pascal (P100, P4), or Volta (V100), all of which previously worked with
+# the 535 proprietary driver. Image consumers needing those GPUs must use a
+# separate image built against the proprietary driver branch.
+# Ref: https://download.nvidia.com/XFree86/Linux-x86_64/580.105.08/README/kernel_open.html
 #
 # Driver / toolkit pinning: NVIDIA 580 branch (open) + CUDA 13.0.
 
