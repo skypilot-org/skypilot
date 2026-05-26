@@ -604,12 +604,14 @@ def _replace_yaml_dicts(
         for key in exclude_restore_key_name[:-1]:
             # _restore_block may have replaced an ancestor block wholesale
             # with the old config (e.g. 'provider'), which can lack an
-            # intermediate key that only exists in the new config. This
-            # happens when restarting a cluster created before a feature
-            # that added a nested provider field (e.g. Nebius
-            # `provider.security_group`). Recreate the path so we can still
-            # apply the new value instead of raising KeyError.
-            curr = curr.setdefault(key, {})
+            # intermediate key that only exists in the new config (or have
+            # it present but null). This happens when restarting a cluster
+            # created before a feature that added a nested provider field
+            # (e.g. Nebius `provider.security_group`). Recreate the path so
+            # we can still apply the new value instead of raising KeyError.
+            if not isinstance(curr.get(key), dict):
+                curr[key] = {}
+            curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
     return yaml_utils.dump_yaml_str(new_config)
 

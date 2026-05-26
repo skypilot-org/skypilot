@@ -457,3 +457,36 @@ def test_replace_yaml_dicts_preserves_old_subfield_on_restart():
     assert sg['GroupName'] == 'new-name'
     # ManagedBySkyPilot is not an exception -> restored from old yaml.
     assert sg['ManagedBySkyPilot'] is False
+
+
+def test_replace_yaml_dicts_restores_new_nested_field_when_old_is_null():
+    """Old yaml has the intermediate key present but null (e.g. `key:`).
+
+    `dict.setdefault(key, {})` would return the existing None here, so the
+    revert must explicitly treat a non-dict intermediate as absent and
+    rebuild the path rather than crashing.
+    """
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                '  security_group:\n'
+                '    GroupName: new-name\n'
+                '    ManagedBySkyPilot: true\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+    # `security_group:` with no value parses to None.
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                '  security_group:\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+    result = yaml_utils.read_yaml_str(out)
+    assert result['provider']['security_group']['GroupName'] == 'new-name'
