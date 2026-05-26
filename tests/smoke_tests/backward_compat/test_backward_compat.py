@@ -945,6 +945,7 @@ class TestBackwardCompatibility:
             self.run_compatibility_test(f'{volume_name}-compat', commands,
                                         teardown)
 
+    @pytest.mark.no_kubernetes
     def test_autostop_hook_compatibility(self, generic_cloud: str):
         """Master's `autostop.hook` YAML works end-to-end across versions.
 
@@ -1019,6 +1020,7 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
+    @pytest.mark.no_kubernetes
     def test_autostop_hook_sdk_legacy_param(self, generic_cloud: str):
         """Pin: SDK-side ``sky.autostop(cluster, idle_minutes=N, hook=...)``
         routes the legacy ``hook=`` arg into the new hooks-list framework
