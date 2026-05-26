@@ -86,6 +86,13 @@ def _write_yaml_raw(top_level: dict) -> str:
     return f.name
 
 
+# Shorthand for the shared helper — every kubectl invocation in this
+# module needs to resolve the workload cluster's kubeconfig context
+# at runtime (the API server's K8s cluster differs from the workload
+# cluster on shared-API-server pipelines).
+_kc = smoke_tests_utils.kubectl_for_cluster
+
+
 # ---------------------------------------------------------------------------
 # Combined stop + retrieval coverage. One launch + one autostop cycle
 # verifies the union of:
@@ -588,12 +595,12 @@ def test_hook_k8s_preemption_sigterm():
             'timeout': 60,
         }],
     })
-    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+    pod_query = (f'{_kc(name)} get pods -o name '
                  f'2>/dev/null | grep {name} | head -n1')
     k8s_delete = (f'pod=$({pod_query}) && '
-                  f'kubectl delete --context kind-skypilot --wait=false "$pod"')
+                  f'{_kc(name)} delete --wait=false "$pod"')
     read_log = (f'sleep 3 && pod=$({pod_query}) && '
-                f'kubectl exec --context kind-skypilot "$pod" -- '
+                f'{_kc(name)} exec "$pod" -- '
                 f'cat /home/sky/.sky/hooks/preemption.log')
     test = smoke_tests_utils.Test(
         'test_hook_k8s_preemption_sigterm',
@@ -643,9 +650,9 @@ def test_hook_grace_capped_at_autoscaler_limit():
             f'echo "$s" | grep -i "cluster-autoscaler" && '
             f'echo "$s" | grep -i "Capping"',
             # (2) pod's terminationGracePeriodSeconds is 600 (capped), not 800
-            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
-            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'val=$({_kc(name)} get "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
             f'[ "$val" = "600" ]',
         ],
@@ -693,9 +700,9 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT} && '
             f'! (echo "$s" | grep -i "preemption-hook grace requirement")',
             # (2) Confirm pod's grace is 60.
-            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
-            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'val=$({_kc(name)} get "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
             f'[ "$val" = "60" ]',
             # (3) Re-launch with larger timeout. Warning expected on
@@ -710,9 +717,9 @@ def test_hook_k8s_relaunch_warns_when_preemption_grace_increases():
             # (4) Confirm the existing pod's grace is STILL 60 — re-launch
             # cannot mutate the pod spec; warning is the only thing the
             # user can act on.
-            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
-            f'val=$(kubectl get --context kind-skypilot "$pod" '
+            f'val=$({_kc(name)} get "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.terminationGracePeriodSeconds}}{chr(39)}) && '
             f'[ "$val" = "60" ]',
         ],
@@ -759,7 +766,7 @@ def test_hook_k8s_sky_down_does_not_fire_preemption():
             },
         ],
     })
-    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+    pod_query = (f'{_kc(name)} get pods -o name '
                  f'2>/dev/null | grep {name} | head -n1')
     # Capture per-event log contents into a temp file BEFORE teardown
     # completes (pod will be gone after sky down). We use a job
@@ -831,9 +838,9 @@ def test_hook_k8s_prestop_pgrep_is_skylet_only():
             # (`\\.` for one regex `\.`), making a literal grep
             # fragile. The two checks above are sufficient to catch
             # the regression.
-            f'pod=$(kubectl get pods --context kind-skypilot -o name '
+            f'pod=$({_kc(name)} get pods -o name '
             f'2>/dev/null | grep {name} | head -n1) && '
-            f'cmd=$(kubectl get --context kind-skypilot "$pod" '
+            f'cmd=$({_kc(name)} get "$pod" '
             f'-o jsonpath={chr(39)}{{.spec.containers[0].lifecycle.preStop.exec.command}}{chr(39)}) && '
             f'echo "preStop: $cmd" && '
             f'echo "$cmd" | grep -q "pgrep -of" && '
@@ -883,10 +890,10 @@ def test_hook_k8s_autodown_fires_down_event():
             'timeout': 240,
         }],
     })
-    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+    pod_query = (f'{_kc(name)} get pods -o name '
                  f'2>/dev/null | grep {name} | head -n1')
     cat_log = (f'pod=$({pod_query}) && '
-               f'kubectl exec --context kind-skypilot "$pod" -- '
+               f'{_kc(name)} exec "$pod" -- '
                f'cat /home/sky/.sky/hooks/down.log')
     # Poll up to ~5 min for the hook log to appear, then assert the
     # marker is in it. The hook fires ~120s after the SetAutostop RPC
@@ -999,10 +1006,10 @@ def test_hook_k8s_autodown_lifecycle_combined():
             },
         ],
     })
-    pod_query = (f'kubectl get pods --context kind-skypilot -o name '
+    pod_query = (f'{_kc(name)} get pods -o name '
                  f'2>/dev/null | grep {name} | head -n1')
     cat_log = (f'pod=$({pod_query}) && '
-               f'kubectl exec --context kind-skypilot "$pod" -- '
+               f'{_kc(name)} exec "$pod" -- '
                f'cat /home/sky/.sky/hooks/down.log')
     # Poll until the legacy hook's marker appears (it writes first
     # because the legacy autostop.hook routes into the hooks list and
@@ -1049,7 +1056,7 @@ def test_hook_k8s_autodown_lifecycle_combined():
             # the `events:[down, preemption]` hook only fires on the
             # event that matched (down here), not on preemption.
             f'pod=$({pod_query}) && '
-            f'kubectl exec --context kind-skypilot "$pod" -- '
+            f'{_kc(name)} exec "$pod" -- '
             f'test ! -e /home/sky/.sky/hooks/preemption.log',
             # Wait for autodown to complete (sleep 180 in legacy hook +
             # teardown). Cluster row is gone after autodown finishes.
