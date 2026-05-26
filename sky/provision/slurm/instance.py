@@ -1434,6 +1434,19 @@ _STATE_FILTER_TO_SLURM_STATE: Dict[str, str] = {
     'cancelled': 'CANCELLED',
     'failed': 'FAILED',
     'node_fail': 'NODE_FAIL',
+    # Terminal states beyond plain FAILED. squeue keeps these visible
+    # within ``MinJobAge`` (default 300s) but each surfaces under its
+    # own filter — ``--states failed`` does NOT include TIMEOUT or
+    # OUT_OF_MEMORY rows. Without these entries, a walltime-killed
+    # or OOM-killed job goes invisible to ``_query_instances_v1``'s
+    # squeue path even though it's well within MinJobAge, and the
+    # controller misclassifies as preemption.
+    'timeout': 'TIMEOUT',
+    'out_of_memory': 'OUT_OF_MEMORY',
+    'deadline': 'DEADLINE',
+    'preempted': 'PREEMPTED',
+    'boot_fail': 'BOOT_FAIL',
+    'revoked': 'REVOKED',
 }
 
 _V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[str, Optional[status_lib.ClusterStatus]] = {
@@ -1561,7 +1574,8 @@ def _query_instances_v1(
     candidates: Dict[str, str] = {}  # job_id -> upper-case Slurm state
     for state_filter in [
             'pending', 'running', 'completing', 'completed', 'cancelled',
-            'failed', 'node_fail'
+            'failed', 'node_fail', 'timeout', 'out_of_memory', 'deadline',
+            'preempted', 'boot_fail', 'revoked'
     ]:
         try:
             job_ids = client.query_jobs(cluster_name_on_cloud, [state_filter])
@@ -1618,9 +1632,18 @@ def _query_instances_v1(
                     statuses[instance_id] = (sky_status, None)
 
     # --- sacct: terminal state for jobs aged past MinJobAge. ---
-    # Only consult sacct if squeue didn't already produce a live entry,
-    # and only when the caller actually wants terminal state.
-    if not non_terminated_only and not statuses:
+    # Consult sacct whenever the squeue path produced nothing, regardless
+    # of ``non_terminated_only``. The flag describes per-instance filtering
+    # semantics for multi-node clouds; v1 Slurm jobs are single-instance
+    # and the controller's ``_update_cluster_status`` (which calls us with
+    # the default ``non_terminated_only=True``) needs to distinguish
+    # ``cluster_status=UP`` (user-code terminal — fire user-code-failure
+    # branch) from ``cluster_status=None`` (infra terminal — fire recovery
+    # branch). Without surfacing sacct here, a job that aged past squeue's
+    # MinJobAge window appears as "no instance" and the controller
+    # misclassifies as preemption.
+    del non_terminated_only  # Intentionally ignored — see docstring above.
+    if not statuses:
         sacct_state = _v1_sacct_job_state(client, cluster_name_on_cloud)
         if sacct_state is not None:
             sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(sacct_state)
