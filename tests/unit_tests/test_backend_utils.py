@@ -11,6 +11,7 @@ from sky.resources import Resources
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.utils import yaml_utils
 
 
 # Set env var to test config file.
@@ -387,3 +388,72 @@ def test_is_controller_accessible_accepts_autostopping(mock_refresh):
         stopped_message='Test stopped',
         exit_if_not_accessible=False)
     assert result == mock_handle
+
+
+def test_replace_yaml_dicts_restores_new_nested_field_for_legacy_cluster():
+    """Restarting a cluster created before a nested provider field was added.
+
+    Regression test for the Nebius `KeyError: 'security_group'` seen when
+    restarting a STOPPED cluster after upgrading to a version that added
+    `provider.security_group`. The old (stored) yaml's `provider` block is
+    restored wholesale and lacks `security_group`, so reverting the
+    `('provider', 'security_group', 'GroupName')` exception must not assume
+    the intermediate key exists.
+    """
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                '  security_group:\n'
+                '    GroupName: new-name\n'
+                '    ManagedBySkyPilot: true\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+    # Old yaml predates the security_group feature: no such key under provider.
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+    result = yaml_utils.read_yaml_str(out)
+    # The new GroupName is applied even though the restored provider block
+    # had no security_group; no KeyError is raised.
+    assert result['provider']['security_group']['GroupName'] == 'new-name'
+
+
+def test_replace_yaml_dicts_preserves_old_subfield_on_restart():
+    """Existing cluster restart keeps old sibling subfields, takes new GroupName."""
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                '  security_group:\n'
+                '    GroupName: new-name\n'
+                '    ManagedBySkyPilot: true\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  region: r\n'
+                '  security_group:\n'
+                '    GroupName: old-name\n'
+                '    ManagedBySkyPilot: false\n'
+                'auth: {ssh_user: ubuntu}\n'
+                'node_config: {InstanceType: t}\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+    sg = yaml_utils.read_yaml_str(out)['provider']['security_group']
+    # GroupName is an exception -> taken from new yaml.
+    assert sg['GroupName'] == 'new-name'
+    # ManagedBySkyPilot is not an exception -> restored from old yaml.
+    assert sg['ManagedBySkyPilot'] is False
