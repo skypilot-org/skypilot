@@ -984,7 +984,24 @@ def fill_template(template_ref: str, variables: Dict[str, Any],
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Write out yaml config.
-    j2_template = jinja2.Template(template)
+    #
+    # Override ``tojson`` so non-ASCII content (emoji, CJK, RTL, etc.) is
+    # emitted as UTF-8 bytes rather than ASCII-escaped. Default Flask-style
+    # ``tojson`` calls ``json.dumps(ensure_ascii=True)``, which produces
+    # UTF-16 surrogate pairs for codepoints above U+FFFF (e.g.
+    # ``🚀`` for 🚀). YAML's ``\u`` escape only accepts the BMP
+    # — surrogate pairs in double-quoted scalars trip
+    # ``yaml.scanner.ScannerError: invalid Unicode character escape code``,
+    # so any cluster YAML whose payload (run / setup / env values) contains
+    # emoji or other non-BMP characters fails downstream parsing. Both
+    # YAML and JSON happily accept raw UTF-8 in quoted strings, so flipping
+    # ``ensure_ascii=False`` is the minimum-surprise fix.
+    env = jinja2.Environment()
+    env.policies['json.dumps_kwargs'] = {
+        'sort_keys': True,
+        'ensure_ascii': False,
+    }
+    j2_template = env.from_string(template)
     content = j2_template.render(**variables)
     with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)
