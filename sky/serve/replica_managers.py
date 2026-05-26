@@ -1226,6 +1226,34 @@ class SkyPilotReplicaManager(ReplicaManager):
                             f'Launch thread for replica {replica_id} '
                             f'exited abnormally with exception '
                             f'{t.format_exc}. Terminating...')
+                        # DEBUG (issue #N/A): also surface the per-replica
+                        # launch log into the controller serve.log so the
+                        # AWS-side provisioner error survives even after the
+                        # replica VM never existed / the service dir is wiped.
+                        # Remove after root cause for SkyServe FAILED_PROVISION
+                        # on AWS (smoke-tests 10892/10899/10917) is identified.
+                        try:
+                            launch_log_path = (
+                                serve_utils.
+                                generate_replica_launch_log_file_name(
+                                    self._service_name, replica_id))
+                            with open(launch_log_path,
+                                      'r',
+                                      encoding='utf-8',
+                                      errors='replace') as launch_log_f:
+                                launch_log_content = launch_log_f.read()
+                            launch_log_tail = '\n'.join(
+                                launch_log_content.splitlines()[-400:])
+                            logger.warning(
+                                f'[DEBUG] === Replica {replica_id} launch '
+                                f'log (last 400 lines of {launch_log_path}) '
+                                f'===\n{launch_log_tail}\n[DEBUG] === End '
+                                f'of replica {replica_id} launch log ===')
+                        except Exception as dbg_e:  # pylint: disable=broad-except
+                            logger.warning(
+                                f'[DEBUG] Could not read replica '
+                                f'{replica_id} launch log: '
+                                f'{common_utils.format_exception(dbg_e)}')
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.FAILED)
                         error_in_sky_launch = True
