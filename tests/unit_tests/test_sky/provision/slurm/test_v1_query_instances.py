@@ -293,3 +293,64 @@ def test_query_instances_v1_no_sacct_call_when_squeue_has_result():
         slurm_instance._query_instances_v1(
             'slurm-edge-32', {}, non_terminated_only=True)
     sacct_mock.assert_not_called()
+
+
+def test_query_instances_v1_terminal_multinode_fans_out_via_sacct():
+    """Multi-node terminal jobs must fan out across the full node list.
+
+    Regression for the partial-rank-failure bug: ``get_job_nodes`` uses
+    ``squeue --jobs <id>``, which excludes terminal jobs by default. For a
+    multi-node FAILED job within MinJobAge, the by-state filter sees the
+    job but the by-id lookup returns no nodes. Without the sacct NodeList
+    fallback, the result collapses to a single ``{job_id: (UP, None)}``
+    entry. ``backend_utils._update_cluster_status`` then sees
+    ``len(node_statuses)=1 < launched_nodes=2``, fires
+    ``some_nodes_terminated``, and the controller misclassifies as
+    infrastructure failure → spurious recovery loop.
+    """
+    client, _ = _make_mock_client(query_jobs_return={'failed': ['9001']})
+    # squeue --jobs <id> returns empty for terminal jobs.
+    client.get_job_nodes.return_value = ([], [])
+    with mock.patch.object(slurm_instance,
+                           '_slurm_client_from_provider_config',
+                           return_value=client), \
+         mock.patch.object(slurm_instance,
+                           '_v1_sacct_node_list',
+                           return_value=['node-a', 'node-b']), \
+         mock.patch.object(slurm_instance,
+                           '_v1_sacct_job_state',
+                           return_value=None):
+        result = slurm_instance._query_instances_v1(
+            'slurm-edge-32', {}, non_terminated_only=True)
+    assert len(result) == 2, (
+        f'Expected 2 fan-out entries for a 2-node terminal job, got {result}')
+    # Both entries must report the same (UP, None) and be keyed on a
+    # job_id+node composite (so the same status map is consumable by
+    # ``_update_cluster_status``).
+    expected = (status_lib.ClusterStatus.UP, None)
+    assert all(v == expected for v in result.values()), result
+    # Keys are ``slurm_utils.instance_id(job_id, node)`` == ``job<id>-<node>``.
+    assert set(result.keys()) == {'job9001-node-a', 'job9001-node-b'}
+
+
+def test_query_instances_v1_terminal_singlenode_keeps_single_entry():
+    """Single-node terminal jobs still collapse to a single job-id entry.
+
+    When ``_v1_sacct_node_list`` returns None (sacct unavailable or job
+    aged out completely), preserve the existing single-entry shape so the
+    1-node launched_nodes path keeps working.
+    """
+    client, _ = _make_mock_client(query_jobs_return={'failed': ['9002']})
+    client.get_job_nodes.return_value = ([], [])
+    with mock.patch.object(slurm_instance,
+                           '_slurm_client_from_provider_config',
+                           return_value=client), \
+         mock.patch.object(slurm_instance,
+                           '_v1_sacct_node_list',
+                           return_value=None), \
+         mock.patch.object(slurm_instance,
+                           '_v1_sacct_job_state',
+                           return_value=None):
+        result = slurm_instance._query_instances_v1(
+            'slurm-edge-32', {}, non_terminated_only=True)
+    assert result == {'9002': (status_lib.ClusterStatus.UP, None)}
