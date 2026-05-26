@@ -90,7 +90,7 @@ def _patch_apply_dependencies(mock_k8s):
 
 
 def test_apply_pvc_explicit_storage_class_uses_read_storage_class():
-    """O4: explicit storage_class_name → existing read_storage_class path."""
+    """Explicit storage_class_name → per-name validation runs, list does not."""
     config = _apply_config(storage_class_name='premium-rwx')
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
          mock.patch.object(volume_provision,
@@ -107,7 +107,7 @@ def test_apply_pvc_explicit_storage_class_uses_read_storage_class():
 
 
 def test_apply_pvc_omitted_storage_class_succeeds_with_default_present():
-    """O1: omitted storage_class_name + cluster has a default → proceeds."""
+    """Omitted storage_class_name + cluster has a default → proceeds."""
     config = _apply_config(storage_class_name=None)
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
          mock.patch.object(volume_provision,
@@ -132,7 +132,8 @@ def test_apply_pvc_omitted_storage_class_succeeds_with_default_present():
 
 
 def test_apply_pvc_omitted_storage_class_legacy_beta_annotation_recognized():
-    """O1 variant: legacy beta annotation also counts as default."""
+    """Legacy beta annotation `storageclass.beta.kubernetes.io/is-default-class`
+    is also accepted as marking the default StorageClass."""
     config = _apply_config(storage_class_name=None)
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
          mock.patch.object(volume_provision,
@@ -149,7 +150,7 @@ def test_apply_pvc_omitted_storage_class_legacy_beta_annotation_recognized():
 
 
 def test_apply_pvc_omitted_storage_class_capitalized_truthy_recognized():
-    """O1 variant: K8s admission accepts True/TRUE/1/t/T — we must too.
+    """K8s admission accepts True/TRUE/1/t/T as truthy — we must too.
 
     Strict equality on `'true'` would miss `'True'`-annotated defaults
     emitted by some Helm charts in the wild.
@@ -173,7 +174,7 @@ def test_apply_pvc_omitted_storage_class_capitalized_truthy_recognized():
 
 
 def test_apply_pvc_omitted_storage_class_no_default_raises():
-    """O2: omitted + no default-annotated SC → KubernetesError, no create."""
+    """Omitted + no default-annotated SC → KubernetesError; PVC not created."""
     config = _apply_config(storage_class_name=None)
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
          mock.patch.object(volume_provision,
@@ -199,11 +200,11 @@ def test_apply_pvc_omitted_storage_class_no_default_raises():
 
 
 def test_apply_pvc_omitted_multiple_defaults_proceeds():
-    """O3: multiple SCs annotated default → proceeds (K8s picks one).
+    """Multiple SCs annotated default → proceeds (K8s picks one).
 
-    We do not reject this server-side; the dashboard warns when the path
-    goes through the UI, but CLI/SDK callers behave consistently with K8s
-    itself (which picks one nondeterministically and binds the PVC).
+    We don't reject this server-side. CLI/SDK callers behave consistently
+    with K8s itself (which picks one nondeterministically and binds the
+    PVC); the dashboard separately warns on multi-default clusters.
     """
     config = _apply_config(storage_class_name=None)
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
@@ -228,7 +229,7 @@ def test_apply_pvc_omitted_multiple_defaults_proceeds():
 
 
 def test_apply_pvc_omitted_list_storage_class_api_error_propagates():
-    """O5: K8s API error during default-check → distinguishable error msg.
+    """Non-RBAC K8s API error during default-check → distinguishable error msg.
 
     Uses status=500 to exercise the non-RBAC path (RBAC 401/403 is
     handled separately by the permission-tolerance tests below).
@@ -252,11 +253,11 @@ def test_apply_pvc_omitted_list_storage_class_api_error_propagates():
         mock_create.assert_not_called()
 
 
-# ── O6: use_existing short-circuits all SC validation ─────────────────────
+# ── use_existing short-circuits all SC validation ────────────────────────
 
 
 def test_apply_pvc_use_existing_skips_sc_validation():
-    """O6: use_existing=True bypasses both SC checks.
+    """use_existing=True bypasses both SC checks.
 
     The existing PVC is looked up by name/label; no provisioning happens,
     so neither the explicit-name validation nor the empty-default safety
@@ -277,7 +278,7 @@ def test_apply_pvc_use_existing_skips_sc_validation():
 
 
 def test_apply_pvc_use_existing_with_explicit_sc_also_skips_validation():
-    """O6 variant: use_existing=True + explicit storage_class → no validation.
+    """use_existing=True + explicit storage_class → no validation either.
 
     The existing PVC already has its own SC binding; validating that the
     name still resolves on the cluster is pointless work.
@@ -294,11 +295,11 @@ def test_apply_pvc_use_existing_with_explicit_sc_also_skips_validation():
         mock_create.assert_called_once()
 
 
-# ── O7: 401/403 RBAC tolerance on both SC API calls ──────────────────────
+# ── 401/403 RBAC tolerance on both SC API calls ──────────────────────────
 
 
 def test_apply_pvc_explicit_sc_rbac_403_tolerated():
-    """O7a: 403 on read_storage_class → warning + proceed.
+    """403 on read_storage_class → warning + proceed.
 
     Namespace-constrained users on multi-tenant clusters often lack
     cluster-scoped `get storageclasses`. Block them and we regress
@@ -319,7 +320,7 @@ def test_apply_pvc_explicit_sc_rbac_403_tolerated():
 
 
 def test_apply_pvc_explicit_sc_rbac_401_tolerated():
-    """O7a variant: 401 (unauthorized) treated the same as 403."""
+    """401 (unauthorized) treated the same as 403 on read_storage_class."""
     config = _apply_config(storage_class_name='premium-rwx')
     fake_api_exc = type('FakeApiException', (Exception,), {'status': 401})
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
@@ -334,10 +335,10 @@ def test_apply_pvc_explicit_sc_rbac_401_tolerated():
 
 
 def test_apply_pvc_explicit_sc_404_still_raises():
-    """O7a counter-example: 404 (SC doesn't exist) still raises.
+    """404 (SC doesn't exist) still raises — RBAC tolerance doesn't apply.
 
-    The RBAC-tolerance fix must NOT swallow real validation errors —
-    a 404 from read_storage_class means the user specified a name that
+    The 401/403 tolerance must NOT swallow real validation errors. A
+    404 from read_storage_class means the user specified a name that
     doesn't exist on the cluster, which is the legitimate failure mode
     the pre-existing check was designed to catch.
     """
@@ -357,13 +358,12 @@ def test_apply_pvc_explicit_sc_404_still_raises():
 
 
 def test_apply_pvc_omitted_sc_list_rbac_403_tolerated():
-    """O7b: 403 on list_storage_class → warning + proceed.
+    """403 on list_storage_class → warning + proceed.
 
-    Same rationale as O7a: namespace-constrained users may not have
-    cluster-scoped `list storageclasses`. If a default actually exists,
-    K8s admission will bind the PVC; if not, the user sees the same
-    Pending behavior they'd have hit before this PR (which is no worse
-    than master).
+    Namespace-constrained users may not have cluster-scoped
+    `list storageclasses`. If a default actually exists, K8s admission
+    will bind the PVC; if not, the user sees the same Pending behavior
+    they'd have hit before this PR (no worse than master).
     """
     config = _apply_config(storage_class_name=None)
     fake_api_exc = type('FakeApiException', (Exception,), {'status': 403})
@@ -375,4 +375,27 @@ def test_apply_pvc_omitted_sc_list_rbac_403_tolerated():
         mock_k8s.storage_api.return_value.list_storage_class.side_effect = (
             fake_api_exc('forbidden'))
         volume_provision._apply_pvc_volume(config)
+        mock_create.assert_called_once()
+
+
+# ── storage_class_name == '': K8s "no class" / static-binding convention ─
+
+
+def test_apply_pvc_empty_string_storage_class_skips_both_checks():
+    """storage_class_name='' is the K8s opt-out-of-dynamic-provisioning value.
+
+    Used to bind a PVC to a manually-created PV (static provisioning).
+    We must skip both the per-name validation and the empty-default
+    safety net — the user explicitly chose "no class", so neither
+    check is meaningful. K8s handles the binding semantics.
+    """
+    config = _apply_config(storage_class_name='')
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        _patch_apply_dependencies(mock_k8s)
+        volume_provision._apply_pvc_volume(config)
+        # Neither SC API was called.
+        mock_k8s.storage_api.return_value.read_storage_class.assert_not_called()
+        mock_k8s.storage_api.return_value.list_storage_class.assert_not_called()
         mock_create.assert_called_once()

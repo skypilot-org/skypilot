@@ -174,10 +174,16 @@ def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     # already has its own SC binding.
     if not config.config.get('use_existing'):
         storage_class_name = pvc_spec['spec'].get('storageClassName')
-        if storage_class_name is not None:
+        if storage_class_name:
+            # Non-empty name: validate that the class exists.
             _validate_explicit_storage_class(context, storage_class_name)
-        else:
+        elif storage_class_name is None:
+            # Omitted: K8s will use the cluster default. Verify one exists.
             _check_cluster_has_default_storage_class(context)
+        # else: storage_class_name == '' — the K8s convention for "no
+        # storage class" (opt out of dynamic provisioning, e.g. for
+        # static binding to a pre-created PV). Skip both checks; K8s
+        # handles the binding semantics.
     create_persistent_volume_claim(namespace, context, pvc_spec, config)
     return config
 
