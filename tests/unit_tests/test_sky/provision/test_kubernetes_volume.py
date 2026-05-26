@@ -228,21 +228,151 @@ def test_apply_pvc_omitted_multiple_defaults_proceeds():
 
 
 def test_apply_pvc_omitted_list_storage_class_api_error_propagates():
-    """O5: K8s API error during default-check → distinguishable error msg."""
+    """O5: K8s API error during default-check → distinguishable error msg.
+
+    Uses status=500 to exercise the non-RBAC path (RBAC 401/403 is
+    handled separately by the permission-tolerance tests below).
+    """
     config = _apply_config(storage_class_name=None)
-    fake_api_exc = type('FakeApiException', (Exception,), {})
+    fake_api_exc = type('FakeApiException', (Exception,), {'status': 500})
     with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
          mock.patch.object(volume_provision,
                            'create_persistent_volume_claim') as mock_create:
         mock_k8s.api_exception.return_value = fake_api_exc
         mock_k8s.API_TIMEOUT = 5
         mock_k8s.storage_api.return_value.list_storage_class.side_effect = (
-            fake_api_exc('rbac forbidden'))
+            fake_api_exc('internal server error'))
         with pytest.raises(k8s_config.KubernetesError) as exc:
             volume_provision._apply_pvc_volume(config)
         msg = str(exc.value)
         # Must not be confused for the empty-default error.
         assert 'No storage class specified' not in msg
         assert 'Failed to list storage classes' in msg
-        assert 'rbac forbidden' in msg
+        assert 'internal server error' in msg
         mock_create.assert_not_called()
+
+
+# ── O6: use_existing short-circuits all SC validation ─────────────────────
+
+
+def test_apply_pvc_use_existing_skips_sc_validation():
+    """O6: use_existing=True bypasses both SC checks.
+
+    The existing PVC is looked up by name/label; no provisioning happens,
+    so neither the explicit-name validation nor the empty-default safety
+    net is relevant. Previously this branched into the empty-default
+    check and spuriously failed on clusters with no default-annotated SC.
+    """
+    config = _apply_config(storage_class_name=None)
+    config.config['use_existing'] = True
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        _patch_apply_dependencies(mock_k8s)
+        volume_provision._apply_pvc_volume(config)
+        # Neither SC API was called.
+        mock_k8s.storage_api.return_value.list_storage_class.assert_not_called()
+        mock_k8s.storage_api.return_value.read_storage_class.assert_not_called()
+        mock_create.assert_called_once()
+
+
+def test_apply_pvc_use_existing_with_explicit_sc_also_skips_validation():
+    """O6 variant: use_existing=True + explicit storage_class → no validation.
+
+    The existing PVC already has its own SC binding; validating that the
+    name still resolves on the cluster is pointless work.
+    """
+    config = _apply_config(storage_class_name='some-sc')
+    config.config['use_existing'] = True
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        _patch_apply_dependencies(mock_k8s)
+        volume_provision._apply_pvc_volume(config)
+        mock_k8s.storage_api.return_value.read_storage_class.assert_not_called()
+        mock_k8s.storage_api.return_value.list_storage_class.assert_not_called()
+        mock_create.assert_called_once()
+
+
+# ── O7: 401/403 RBAC tolerance on both SC API calls ──────────────────────
+
+
+def test_apply_pvc_explicit_sc_rbac_403_tolerated():
+    """O7a: 403 on read_storage_class → warning + proceed.
+
+    Namespace-constrained users on multi-tenant clusters often lack
+    cluster-scoped `get storageclasses`. Block them and we regress
+    flows that previously worked (K8s admission still binds the PVC).
+    """
+    config = _apply_config(storage_class_name='premium-rwx')
+    fake_api_exc = type('FakeApiException', (Exception,), {'status': 403})
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        mock_k8s.api_exception.return_value = fake_api_exc
+        mock_k8s.API_TIMEOUT = 5
+        mock_k8s.storage_api.return_value.read_storage_class.side_effect = (
+            fake_api_exc('forbidden'))
+        # Must not raise.
+        volume_provision._apply_pvc_volume(config)
+        mock_create.assert_called_once()
+
+
+def test_apply_pvc_explicit_sc_rbac_401_tolerated():
+    """O7a variant: 401 (unauthorized) treated the same as 403."""
+    config = _apply_config(storage_class_name='premium-rwx')
+    fake_api_exc = type('FakeApiException', (Exception,), {'status': 401})
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        mock_k8s.api_exception.return_value = fake_api_exc
+        mock_k8s.API_TIMEOUT = 5
+        mock_k8s.storage_api.return_value.read_storage_class.side_effect = (
+            fake_api_exc('unauthorized'))
+        volume_provision._apply_pvc_volume(config)
+        mock_create.assert_called_once()
+
+
+def test_apply_pvc_explicit_sc_404_still_raises():
+    """O7a counter-example: 404 (SC doesn't exist) still raises.
+
+    The RBAC-tolerance fix must NOT swallow real validation errors —
+    a 404 from read_storage_class means the user specified a name that
+    doesn't exist on the cluster, which is the legitimate failure mode
+    the pre-existing check was designed to catch.
+    """
+    config = _apply_config(storage_class_name='typo-sc')
+    fake_api_exc = type('FakeApiException', (Exception,), {'status': 404})
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        mock_k8s.api_exception.return_value = fake_api_exc
+        mock_k8s.API_TIMEOUT = 5
+        mock_k8s.storage_api.return_value.read_storage_class.side_effect = (
+            fake_api_exc('not found'))
+        with pytest.raises(k8s_config.KubernetesError) as exc:
+            volume_provision._apply_pvc_volume(config)
+        assert 'Check storage class typo-sc' in str(exc.value)
+        mock_create.assert_not_called()
+
+
+def test_apply_pvc_omitted_sc_list_rbac_403_tolerated():
+    """O7b: 403 on list_storage_class → warning + proceed.
+
+    Same rationale as O7a: namespace-constrained users may not have
+    cluster-scoped `list storageclasses`. If a default actually exists,
+    K8s admission will bind the PVC; if not, the user sees the same
+    Pending behavior they'd have hit before this PR (which is no worse
+    than master).
+    """
+    config = _apply_config(storage_class_name=None)
+    fake_api_exc = type('FakeApiException', (Exception,), {'status': 403})
+    with mock.patch.object(volume_provision, 'kubernetes') as mock_k8s, \
+         mock.patch.object(volume_provision,
+                           'create_persistent_volume_claim') as mock_create:
+        mock_k8s.api_exception.return_value = fake_api_exc
+        mock_k8s.API_TIMEOUT = 5
+        mock_k8s.storage_api.return_value.list_storage_class.side_effect = (
+            fake_api_exc('forbidden'))
+        volume_provision._apply_pvc_volume(config)
+        mock_create.assert_called_once()
