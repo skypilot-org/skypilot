@@ -395,34 +395,7 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
-    'exit 1; '
-    # On VMs that run a long-lived local SkyPilot API server (e.g. jobs/serve
-    # controllers), the just-completed wheel reinstall leaves the on-disk
-    # sky package out of sync with whatever sky.__version__ that API server
-    # has cached in memory. Subsequent sdk.launch() calls into that API
-    # server then fail in wheel_utils._build_sky_wheel with "The installed
-    # SkyPilot version is different from the running code", which on
-    # SkyServe surfaces as replica FAILED_PROVISION after 3 retries. Kill
-    # any local API server so the next sdk call re-spawns it with the new
-    # code. The regex must stay in sync with
-    # sky.server.common.API_SERVER_CMD. The character class `[s]` matches a
-    # literal 's', so the regex still matches the API server's cmdline
-    # (`...-m sky.server.server`), but the literal string "[s]ky.server.server"
-    # does NOT contain "sky.server.server" as a substring — that prevents
-    # pkill from accidentally killing the parent shell when the whole setup
-    # script is run via `bash -c "..."`, which would otherwise have
-    # "sky.server.server" in its own cmdline and trip a self-kill. pkill
-    # returns non-zero when no match is found, which is the common case for
-    # plain user clusters and replica VMs — swallow it.
-    # DEBUG (PR #9719): log whether we actually entered the reinstall path
-    # and whether pkill matched anything, so a controller-side smoke-test
-    # failure can be traced back to this hook. Remove once root-caused.
-    'echo "[DEBUG-WHEEL-HOOK] reinstall path executed at $(date -u +%FT%TZ);'
-    ' running pkill of stale local API server"; '
-    'pkill -f "[s]ky.server.server" 2>/dev/null; '
-    'pkill_rc=$?; '
-    'echo "[DEBUG-WHEEL-HOOK] pkill exit=$pkill_rc (0=killed,1=no-match)"; '
-    '}; ')
+    'exit 1; }; ')
 
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in

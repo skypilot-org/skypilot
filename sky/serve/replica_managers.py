@@ -1226,58 +1226,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                             f'Launch thread for replica {replica_id} '
                             f'exited abnormally with exception '
                             f'{t.format_exc}. Terminating...')
-                        # DEBUG (PR #9719): surface the per-replica launch log
-                        # into the controller serve.log so the underlying
-                        # provisioner error survives even after the replica
-                        # VM never existed / the service dir is wiped by test
-                        # cleanup. Remove once SkyServe AWS FAILED_PROVISION
-                        # nightly failure is root-caused.
-                        try:
-                            launch_log_path = (
-                                serve_utils.
-                                generate_replica_launch_log_file_name(
-                                    self._service_name, replica_id))
-                            with open(launch_log_path,
-                                      'r',
-                                      encoding='utf-8',
-                                      errors='replace') as launch_log_f:
-                                launch_log_content = launch_log_f.read()
-                            launch_log_tail = '\n'.join(
-                                launch_log_content.splitlines()[-400:])
-                            logger.warning(
-                                f'[DEBUG] === Replica {replica_id} launch '
-                                f'log (last 400 lines of {launch_log_path}) '
-                                f'===\n{launch_log_tail}\n[DEBUG] === End '
-                                f'of replica {replica_id} launch log ===')
-                        except Exception as dbg_e:  # pylint: disable=broad-except
-                            logger.warning(
-                                f'[DEBUG] Could not read replica '
-                                f'{replica_id} launch log: '
-                                f'{common_utils.format_exception(dbg_e)}')
-                        # Also dump the local API server log: build 10931
-                        # showed the failure surfaces as "SkyPilot API
-                        # server process exited unexpectedly" — the actual
-                        # reason the server died is only in this file.
-                        try:
-                            api_log_path = os.path.expanduser(
-                                '~/.sky/api_server/server.log')
-                            with open(api_log_path,
-                                      'r',
-                                      encoding='utf-8',
-                                      errors='replace') as api_log_f:
-                                api_log_content = api_log_f.read()
-                            api_log_tail = '\n'.join(
-                                api_log_content.splitlines()[-200:])
-                            logger.warning(
-                                f'[DEBUG] === Local API server log '
-                                f'(last 200 lines of {api_log_path}) ===\n'
-                                f'{api_log_tail}\n[DEBUG] === End of '
-                                f'local API server log ===')
-                        except Exception as dbg_e:  # pylint: disable=broad-except
-                            logger.warning(
-                                f'[DEBUG] Could not read local API '
-                                f'server log: '
-                                f'{common_utils.format_exception(dbg_e)}')
                         info.status_property.sky_launch_status = (
                             common_utils.ProcessStatus.FAILED)
                         error_in_sky_launch = True

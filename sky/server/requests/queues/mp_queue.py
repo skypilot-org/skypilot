@@ -1,7 +1,10 @@
 """Shared queues for multiprocessing."""
+import ctypes
 import multiprocessing
 from multiprocessing import managers
 import queue
+import signal
+import sys
 import time
 from typing import List
 
@@ -13,6 +16,44 @@ logger = sky_logging.init_logger(__name__)
 # We avoid 50010, as it might be taken by HDFS.
 DEFAULT_QUEUE_MANAGER_PORT = 50011
 
+# Linux prctl(2) option: send a signal to this process when its parent dies
+# (PR_SET_PDEATHSIG = 1). Without this, when the API server is killed
+# abruptly (OOM, SIGKILL, controller VM crash) the queue manager subprocess
+# is reparented to PID 1 and keeps running indefinitely, holding the queue
+# manager port. The next API server start then hits "port already in use"
+# and exits, which on long-lived SkyServe controller VMs surfaces as
+# RuntimeError: SkyPilot API server process exited unexpectedly -> replica
+# FAILED_PROVISION. Setting PDEATHSIG ensures the kernel kills the orphan
+# automatically. No equivalent on macOS, so this is a Linux-only safeguard
+# (macOS API servers are interactive / short-lived and the failure mode
+# does not occur in practice).
+_PR_SET_PDEATHSIG = 1
+
+
+def _install_parent_death_signal() -> None:
+    """Install a kernel-level death pact with the parent process.
+
+    Called from the queue manager subprocess after fork. If the parent
+    process (the SkyPilot API server) dies for any reason, the kernel will
+    deliver SIGTERM to us so we exit too instead of leaking the port.
+    """
+    if not sys.platform.startswith('linux'):
+        return
+    try:
+        libc = ctypes.CDLL('libc.so.6', use_errno=True)
+        # prctl(PR_SET_PDEATHSIG, SIGTERM)
+        rc = libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+        if rc != 0:
+            logger.warning(
+                f'prctl(PR_SET_PDEATHSIG) failed with errno '
+                f'{ctypes.get_errno()}; queue manager will not auto-exit '
+                f'if its parent dies.')
+    except OSError as e:
+        logger.warning(f'Could not arm parent-death signal for queue '
+                       f'manager: {e}. Orphaned queue manager processes '
+                       f'may accumulate if the API server is killed '
+                       f'abruptly.')
+
 
 # Have to create custom manager to handle different processes connecting to the
 # same manager and getting the same queues.
@@ -22,6 +63,10 @@ class QueueManager(managers.BaseManager):
 
 def start_queue_manager(queue_names: List[str],
                         port: int = DEFAULT_QUEUE_MANAGER_PORT) -> None:
+    # Arm a parent-death signal so we don't outlive our parent and leak the
+    # port. Safe to call multiple times.
+    _install_parent_death_signal()
+
     # Defining a local function instead of a lambda function
     # (e.g. lambda: q) because the lambda function captures q by
     # reference, so by the time lambda is called, the loop has already
