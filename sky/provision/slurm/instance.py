@@ -11,6 +11,7 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
+import hostlist
 
 from sky import exceptions
 from sky import sky_logging
@@ -1691,9 +1692,10 @@ def _v1_sacct_node_list(client: 'slurm.SlurmClient',
     """Recover the per-job node list from ``sacct`` when squeue is empty.
 
     Used by ``_get_cluster_info_v1`` as a fallback for jobs that have
-    aged out of squeue. ``NodeList`` is on the parent allocation row;
-    ``scontrol show hostnames`` expands the compact Slurm hostlist
-    notation (e.g. ``node-[01-03]``) into individual node names.
+    aged out of squeue. ``NodeList`` is on the parent allocation row in
+    Slurm's compact hostlist notation (e.g. ``node-[01-03]``); expanded
+    locally via the ``hostlist`` library (same dependency the in-cluster
+    executor uses) to avoid a second SSH round-trip.
     """
     cmd = (f'sacct -j {job_id} --format=NodeList --parsable2 --noheader -X')
     # pylint: disable=protected-access
@@ -1709,12 +1711,26 @@ def _v1_sacct_node_list(client: 'slurm.SlurmClient',
         break
     if nodelist is None:
         return None
-    expand_cmd = f'scontrol show hostnames {shlex.quote(nodelist)}'
-    rc, stdout, _ = client._run_slurm_cmd(expand_cmd)
-    if rc != 0:
-        return None
-    nodes = [line.strip() for line in stdout.splitlines() if line.strip()]
+    nodes = _expand_slurm_hostlist(nodelist)
     return nodes if nodes else None
+
+
+def _expand_slurm_hostlist(nodelist: str) -> List[str]:
+    """Expand Slurm's compact hostlist syntax into individual node names.
+
+    Slurm emits NodeList as ``ip-10-3-93-178`` for single nodes and
+    ``node-[01-03,05]`` for ranges; the same shape is accepted by
+    ``hostlist.expand_hostlist``. Plain hostnames pass through.
+    """
+    if not nodelist:
+        return []
+    try:
+        return list(hostlist.expand_hostlist(nodelist))
+    except Exception as e:  # pylint: disable=broad-except
+        # Library raises ``hostlist.BadHostlist`` on malformed input;
+        # surface as debug rather than failing the whole status query.
+        logger.debug(f'Failed to expand Slurm hostlist {nodelist!r}: {e}')
+        return [nodelist]
 
 
 def _v1_sacct_latest_attempt(
@@ -1747,19 +1763,9 @@ def _v1_sacct_latest_attempt(
         last_nodelist_raw = parts[1].strip()
     if not last_job_id or not last_nodelist_raw or last_nodelist_raw == 'None':
         return None
-    # NodeList from sacct: for single-node, plain hostname. For multi-
-    # node, Slurm's hostlist syntax (e.g. ``node[1-3]``). For now we
-    # only fully support single-node. Multi-node v1 jobs would need
-    # ``scontrol show hostnames <list>`` to expand — log a debug and
-    # take the raw string so single-node and simple comma-separated
-    # cases work without an extra round-trip.
-    if '[' in last_nodelist_raw:
-        logger.debug(f'V1 sacct returned hostlist {last_nodelist_raw!r}; '
-                     'multi-node expansion is not yet implemented in the '
-                     'fast-terminal fallback path.')
-        nodes = [last_nodelist_raw]
-    else:
-        nodes = [n for n in last_nodelist_raw.split(',') if n]
+    nodes = _expand_slurm_hostlist(last_nodelist_raw)
+    if not nodes:
+        return None
     return last_job_id, nodes
 
 
