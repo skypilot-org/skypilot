@@ -1623,6 +1623,24 @@ def _query_instances_v1(
                 logger.debug(f'V1 query_instances: get_job_nodes('
                              f'{best_job_id}) failed: {e}')
                 nodes = []
+            # ``get_job_nodes`` uses ``squeue --jobs <id>``, which excludes
+            # terminal jobs by default. For a terminal multi-node job within
+            # MinJobAge, the squeue filter loop above tells us the *state*
+            # but the by-id lookup returns no nodes. Fall back to sacct's
+            # NodeList so we fan out across the full allocation. Without
+            # this, multi-node terminal jobs collapse to a single entry
+            # under ``best_job_id`` and ``backend_utils._update_cluster_status``
+            # fires ``some_nodes_terminated`` → "one or more nodes
+            # terminated" → spurious recovery loop.
+            if not nodes:
+                try:
+                    sacct_nodes = _v1_sacct_node_list(client, best_job_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'V1 query_instances: _v1_sacct_node_list('
+                                 f'{best_job_id}) failed: {e}')
+                    sacct_nodes = None
+                if sacct_nodes:
+                    nodes = sacct_nodes
             if not nodes:
                 # Surface the job-id keyed entry so the caller sees a
                 # single-entry cluster (matches launched_nodes=1).
