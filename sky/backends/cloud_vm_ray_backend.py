@@ -1130,6 +1130,7 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud.canonical_name())
             template_spec = (plugin.template_override(
                 task,
+                to_provision,
                 _extra_launch_context=self._extra_launch_context,
                 _is_launched_by_jobs_controller=self.
                 _is_launched_by_jobs_controller,
