@@ -3371,6 +3371,14 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
             return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
+    # Build assets under _next/ are content-hashed static files; a missing
+    # one must 404 instead of falling through to the index.html SPA shell
+    # below. Returning HTML (200) for a missing .js/.css lets a CDN cache the
+    # shell under the asset URL, which then fails the browser's strict MIME
+    # check and blanks the dashboard until the cache entry expires.
+    if safe_full_path.startswith('_next/'):
+        raise fastapi.HTTPException(status_code=404, detail='Not found')
+
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
