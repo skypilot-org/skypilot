@@ -124,8 +124,7 @@ def bootstrap_instances(
                                           [], enable_efa)
                 logger.debug('Default security group created.')
             except exceptions.NoClusterLaunchedError as e:
-                if 'not authorized to perform: ec2:CreateSecurityGroup' in str(
-                        e):
+                if 'UnauthorizedOperation' in str(e):
                     # User does not have permission to create the default
                     # security group.
                     logger.debug('User does not have permission to create '
