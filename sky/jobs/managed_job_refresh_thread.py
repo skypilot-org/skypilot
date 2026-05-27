@@ -8,6 +8,7 @@ import typing
 from typing import Optional
 
 from sky import sky_logging
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import events
@@ -35,16 +36,12 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         self._lock: Optional[locks.DistributedLock] = None
 
     def run(self) -> None:
-        from sky.jobs import constants as managed_job_constants
-
         self._lock = locks.get_lock(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
 
         while True:
             try:
                 self._become_leader_and_run()
-            except (SystemExit, KeyboardInterrupt):
-                raise
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
                     f'managed-job refresh error: {e}, '
