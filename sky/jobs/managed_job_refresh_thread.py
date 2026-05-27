@@ -8,10 +8,10 @@ import typing
 from typing import Optional
 
 from sky import sky_logging
-from sky.skylet import constants
-from sky.utils import locks
 from sky.jobs import utils as managed_job_utils
+from sky.skylet import constants
 from sky.skylet import events
+from sky.utils import locks
 
 if typing.TYPE_CHECKING:
     pass
@@ -49,29 +49,31 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 logger.exception(
                     f'managed-job refresh error: {e}, '
                     f'retrying in {_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
+                # If we previously held the lock and lost the session
+                # mid-recovery, retrying would run as a stale leader
+                # (local `_acquired` flag still True, server-side lock
+                # released, another replica can grab it).  Hand off via
+                # SIGTERM, same as the steady-state probe path.
+                if self._lock.is_locked() and not self._lock_still_held():
+                    self._suicide_on_lock_loss()
+                    return
                 time.sleep(_ACQUIRE_RETRY_INTERVAL_SECONDS)
 
-
     def _become_leader_and_run(self) -> None:
-        # pylint: disable=import-outside-toplevel
-
         assert self._lock is not None
 
-        # Touch the rolling-restart signal file before acquiring the
-        # lock.  Same semantics as the historical event_fn: any peer
-        # checking this file sees "leader handover in progress" until
-        # we've finished recovery.
+        if not self._lock.is_locked():
+            logger.info(f'Acquiring the consolidation mode lock: {self._lock}')
+            self._lock.acquire()
+            logger.info('Consolidation mode lock acquired')
+
+        # Touch signal file only after we hold the lock: standby
+        # replicas blocked on acquire() must not leave it lying around
+        # — update_managed_jobs_statuses early-returns when it exists.
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
         try:
-            if not self._lock.is_locked():
-                logger.info(
-                    f'Acquiring the consolidation mode lock: {self._lock}')
-                self._lock.acquire()
-                logger.info('Consolidation mode lock acquired')
-            # Recovery before any event-loop work: same ordering as the
-            # original ``managed_job_status_refresh_event``.
             managed_job_utils.ha_recovery_for_consolidation_mode()
         finally:
             try:
@@ -79,9 +81,12 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             except FileNotFoundError:
                 pass
 
-        # Steady-state event loop with periodic lock-liveness probe.
+        # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
+        # lock probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
         refresh_event = events.ManagedJobEvent()
-        last_probe = time.monotonic()
+        now = time.monotonic()
+        last_probe = now
+        last_event = now - events.EVENT_CHECKING_INTERVAL_SECONDS
         while True:
             now = time.monotonic()
             if now - last_probe >= _LOCK_PROBE_INTERVAL_SECONDS:
@@ -89,15 +94,13 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                     self._suicide_on_lock_loss()
                     return
                 last_probe = now
-            try:
-                logger.debug('=== Running managed job event ===')
-                refresh_event.run()
-            except Exception:  # pylint: disable=broad-except
-                # Tick failures are non-fatal — mirror the old
-                # InternalRequestDaemon.run_event catch-all.  Lock loss
-                # is the only thing that should take the pod down.
-                logger.exception('ManagedJobEvent tick failed; will retry')
-            time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+            if now - last_event >= events.EVENT_CHECKING_INTERVAL_SECONDS:
+                try:
+                    refresh_event.run()
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('ManagedJobEvent tick failed; will retry')
+                last_event = now
+            time.sleep(1)
 
     def _lock_still_held(self) -> bool:
         """True iff we are confident this replica still owns the lock."""
