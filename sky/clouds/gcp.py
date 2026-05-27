@@ -1398,6 +1398,9 @@ class GCP(clouds.Cloud):
             # standard quota instead. Avoid incorrectly failing early on the
             # on-demand quota check and let the DWS resize request handle
             # quota/capacity.
+            logger.warning(
+                'Skipping GCP quota precheck for DWS/Flex-start. The DWS '
+                'resize request will validate quota and capacity.')
             return True
 
         # pylint: disable=import-outside-toplevel
