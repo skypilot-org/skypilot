@@ -52,6 +52,7 @@ from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
 from sky.jobs import state as managed_job_state
+from sky.jobs import managed_job_refresh_thread
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
@@ -3495,13 +3496,7 @@ if __name__ == '__main__':
 
         # managed-job-status-refresh runs as a thread inside this
         # supervisor process so the leader role and the controller
-        # subprocesses it spawns share a single OS lifecycle.  Routing
-        # this daemon through the executor task queue (as other daemons
-        # do) lets it drift between replicas while the controllers stay
-        # behind, which causes cross-replica controller orphans.  See
-        # sky/jobs/managed_job_refresh_thread.py for details.
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs import managed_job_refresh_thread
+        # subprocesses it spawns share a single OS lifecycle.
         managed_job_refresh_thread.start_managed_job_refresh_daemon()
 
         queue_server, workers = executor.start(config)
