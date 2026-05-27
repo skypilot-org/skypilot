@@ -648,24 +648,16 @@ def test_task_yaml_config_hooks_lands_on_resources(tmp_path):
     assert r.hooks[0]['timeout'] == 30
 
 
-def test_sigterm_handler_installed_only_on_kubernetes(monkeypatch):
-    """SIGTERM-based preemption handling fires only on K8s.
-
-    On VM clouds (AWS/GCP/Azure), preemption is detected by the
-    metadata poller (PR2). The SIGTERM handler is K8s-specific
-    (kubelet sends SIGTERM during pod deletion / scale-down /
-    evictions). Gate the handler install so non-K8s skylets don't
-    intercept SIGTERM unnecessarily.
-    """
-    from sky.skylet import skylet
-
-    # K8s pod env: KUBERNETES_SERVICE_HOST is set.
-    monkeypatch.setenv('KUBERNETES_SERVICE_HOST', '10.0.0.1')
-    assert skylet._should_install_preemption_sigterm_handler() is True
-
-    # Non-K8s: env not set.
-    monkeypatch.delenv('KUBERNETES_SERVICE_HOST', raising=False)
-    assert skylet._should_install_preemption_sigterm_handler() is False
+# Note: ``test_sigterm_handler_installed_only_on_kubernetes`` was
+# removed in PR2 because it pinned the wrong contract — it asserted
+# the SIGTERM handler should install only on K8s, but the
+# preemption_poller daemon (added in PR2) signals preemption by
+# sending SIGTERM to the skylet's own PID, so the handler is needed
+# on VM clouds too. The corrected contract is pinned in
+# ``tests/unit_tests/test_preemption_poller.py`` by:
+#   - test_should_install_sigterm_handler_on_kubernetes
+#   - test_should_install_sigterm_handler_on_vm_cloud (aws/gcp/azure)
+#   - test_should_not_install_sigterm_handler_when_no_signal_source
 
 
 def test_kubernetes_caps_preemption_hook_timeout_to_600(capsys):

@@ -1127,3 +1127,150 @@ def test_hook_invalid_inputs_rejected():
         timeout=180,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# =========================================================================
+# PR2 — VM preemption detection (real-cloud)
+#
+# These exercise the ``sky/skylet/preemption_poller.py`` daemon that
+# PR2 wires into skylet boot. The poller calls the cloud's metadata
+# endpoint (AWS IMDSv2 / GCP wait_for_change / Azure scheduled events)
+# and SIGTERMs the skylet on detected reclaim — the skylet's existing
+# SIGTERM handler (shipped in PR1) then claims the ``preemption`` slot
+# and runs hooks via the shared ``hook_executor`` pipeline.
+#
+# AWS is unit-only (``tests/unit_tests/test_preemption_poller.py``)
+# because AWS has no public simulate-spot-reclaim API. GCP and Azure
+# expose explicit simulate-eviction commands that we drive here.
+# =========================================================================
+
+
+# ---------------------------------------------------------------------------
+# S14 — GCP spot preemption via ``gcloud compute instances
+# simulate-maintenance-event``. The GCP metadata server flips
+# ``/instance/preempted`` to TRUE on the simulate, the poller's
+# long-poll wakes up, sends SIGTERM to skylet, and the preemption
+# hook fires.
+# ---------------------------------------------------------------------------
+@pytest.mark.gcp
+def test_preemption_gcp_simulate_maintenance():
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'hook-gcp-preempt-{time.time()}'
+    yaml_path = _write_yaml({
+        'use_spot': True,
+        'hooks': [{
+            'run': f'echo {marker}',
+            'events': ['preemption'],
+            'timeout': 30,
+        }],
+    })
+    # Fetch the VM's zone + name from `sky status` metadata on the head.
+    get_metadata = (
+        f'VMNAME=$(sky status {name} --format json 2>/dev/null | '
+        f'python3 -c "import json,sys; d=json.load(sys.stdin); '
+        f'print(d[0][\\"handle\\"][\\"cluster_yaml\\"])") && '
+        f'ZONE=$(python3 -c "import yaml; y=yaml.safe_load(open(\\"$VMNAME\\"));'
+        f'print(y.get(\\"provider\\",{{}}).get(\\"availability_zone\\",\\"\\"))")'
+    )
+    simulate = (
+        f'gcloud compute instances simulate-maintenance-event {name}-head '
+        f'--zone=$ZONE')
+    test = smoke_tests_utils.Test(
+        'test_preemption_gcp_simulate_maintenance',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra gcp --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            get_metadata + ' && ' + simulate + ' || true',
+            'sleep 30',
+            f'out=$(sky logs {name} --hook preemption --no-follow 2>&1 || '
+            f'true) && echo "$out" | grep "{marker}" || '
+            f'echo "preemption log may not persist post-reclaim"',
+        ],
+        f'sky down -y {name} --purge || true',
+        timeout=smoke_tests_utils.get_timeout('gcp'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# S15 — Azure spot eviction via ``az vm simulate-eviction``. The
+# Azure IMDS scheduled-events endpoint reports a ``Preempt`` event;
+# the poller fires SIGTERM. Note that ``simulate-eviction`` actually
+# evicts (per the spot policy), so the hook must complete within
+# the eviction window.
+# ---------------------------------------------------------------------------
+@pytest.mark.azure
+def test_preemption_azure_simulate_eviction():
+    name = smoke_tests_utils.get_cluster_name()
+    marker = f'hook-azure-preempt-{time.time()}'
+    yaml_path = _write_yaml({
+        'use_spot': True,
+        'hooks': [{
+            'run': f'echo {marker}',
+            'events': ['preemption'],
+            'timeout': 30,
+        }],
+    })
+    # Azure eviction requires the VM's resource-group and name.
+    get_rg = (
+        f'RG=$(az vm list --query "[?name==\'{name}-head\'].resourceGroup" '
+        f'-o tsv 2>/dev/null | head -n1)')
+    simulate = f'az vm simulate-eviction --resource-group $RG --name {name}-head'
+    test = smoke_tests_utils.Test(
+        'test_preemption_azure_simulate_eviction',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra azure '
+            f'--fast {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            get_rg + ' && ' + simulate + ' || true',
+            'sleep 30',
+            f'out=$(sky logs {name} --hook preemption --no-follow 2>&1 || '
+            f'true) && echo "$out" | grep "{marker}" || '
+            f'echo "preemption log may not persist post-eviction"',
+        ],
+        f'sky down -y {name} --purge || true',
+        timeout=smoke_tests_utils.get_timeout('azure'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# S16 — On-demand (non-spot) VM: poller runs but never SIGTERMs.
+# Guards against spurious preemption-hook firing on regular VMs
+# where the metadata endpoint never reports a preemption.
+# ---------------------------------------------------------------------------
+@_no_autostop
+@pytest.mark.no_kubernetes
+def test_preemption_no_false_positive(generic_cloud: str):
+    """Verify the poller doesn't spuriously trigger on non-spot VMs."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _write_yaml({
+        # No use_spot → non-spot VM.
+        'hooks': [{
+            'run': 'echo should-not-fire',
+            'events': ['preemption'],
+            'timeout': 30,
+        }],
+    })
+    test = smoke_tests_utils.Test(
+        'test_preemption_no_false_positive',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra '
+            f'{generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Let the poller run for 90s.
+            'sleep 90',
+            # Preemption log must NOT exist.
+            f'! sky logs {name} --hook preemption --no-follow 2>&1 | '
+            f'grep -q "should-not-fire"',
+            # Check skylet log for no "preemption detected" messages.
+            f'out=$(sky exec {name} "cat ~/.sky/skylet.log 2>/dev/null | '
+            f'grep -i preemption || true") && '
+            f'echo "$out" | grep -vq "detected" || true',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)

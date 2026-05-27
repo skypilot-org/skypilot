@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from typing import Optional
 
 import grpc
 
@@ -19,6 +20,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import hook_executor
+from sky.skylet import preemption_poller
 from sky.skylet import services
 
 # Use the explicit logger name so that the logger is under the
@@ -89,6 +91,60 @@ def run_event_loop():
             event.run()
 
 
+def _detect_cloud_for_preemption_poller():
+    """Best-effort probe of the cluster's cloud identity.
+
+    Returns one of ``'aws'``, ``'gcp'``, ``'azure'``, or ``None`` when
+    the node isn't on a cloud VM (e.g., Kubernetes, Slurm, bare-metal).
+    Probes are cheap reads of the local metadata endpoints with tight
+    timeouts — a K8s pod with no metadata service gets ``None`` in ~1s.
+
+    K8s short-circuit: every K8s pod has ``KUBERNETES_SERVICE_HOST``
+    set automatically by kubelet. We return ``None`` immediately on
+    that signal so EKS pods (where the EC2 IMDS may be reachable from
+    the underlying node) don't misdetect as AWS and start a poller
+    that races the K8s preStop bridge.
+    """
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return None
+
+    import urllib.error  # pylint: disable=import-outside-toplevel
+    import urllib.request  # pylint: disable=import-outside-toplevel
+
+    # AWS IMDSv2: PUT /latest/api/token returns a token when on EC2.
+    try:
+        req = urllib.request.Request(
+            'http://169.254.169.254/latest/api/token',
+            method='PUT',
+            headers={'X-aws-ec2-metadata-token-ttl-seconds': '60'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200 and resp.read():
+                return 'aws'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    # GCP metadata server returns 200 with Metadata-Flavor: Google.
+    try:
+        req = urllib.request.Request(
+            'http://metadata.google.internal/computeMetadata/v1/instance/id',
+            headers={'Metadata-Flavor': 'Google'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200:
+                return 'gcp'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    # Azure IMDS: GET /metadata/instance with Metadata: true header.
+    try:
+        req = urllib.request.Request(
+            'http://169.254.169.254/metadata/instance?api-version=2021-02-01',
+            headers={'Metadata': 'true'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200:
+                return 'azure'
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return None
+
+
 def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
     """Run preemption hooks on SIGTERM before the pod is SIGKILLed.
 
@@ -108,19 +164,28 @@ def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
     sys.exit(0)
 
 
-def _should_install_preemption_sigterm_handler() -> bool:
-    """True iff the skylet is running inside a Kubernetes pod.
+def _should_install_preemption_sigterm_handler(
+        detected_cloud: Optional[str]) -> bool:
+    """True iff any preemption signal source can reach this skylet.
 
-    SIGTERM-driven preemption handling is K8s-specific: kubelet sends
-    SIGTERM to pod containers on delete / scale-down / eviction. On VM
-    clouds (AWS/GCP/Azure), preemption is detected via the metadata
-    poller (introduced in PR2), so installing a SIGTERM handler here
-    would be dead code and could mask normal-shutdown signal handling.
+    Two routes feed the same SIGTERM-driven preemption hook path:
 
-    Detection uses the standard ``KUBERNETES_SERVICE_HOST`` env var
-    that the kubelet injects into every pod.
+      - **K8s**: kubelet's preStop pgrep's the skylet PID and sends
+        SIGTERM directly. Detection via the standard
+        ``KUBERNETES_SERVICE_HOST`` env var that kubelet injects.
+      - **VM clouds (AWS/GCP/Azure)**: the in-process
+        ``preemption_poller`` daemon polls the cloud's metadata
+        endpoint and sends SIGTERM to skylet's own PID on detected
+        reclaim. If the handler isn't installed here, that SIGTERM
+        kills skylet without firing the preemption hook — defeating
+        the entire PR2 detection path.
+
+    Bare-metal / Slurm / local-dev: no K8s env var, no cloud metadata
+    endpoint reachable. Returning False keeps SIGTERM's default
+    process-exit behavior intact so no signal handling is masked.
     """
-    return 'KUBERNETES_SERVICE_HOST' in os.environ
+    is_k8s = 'KUBERNETES_SERVICE_HOST' in os.environ
+    return is_k8s or detected_cloud is not None
 
 
 def main():
@@ -135,8 +200,25 @@ def main():
     # Clear any stale teardown-claim marker from a prior crashed skylet so
     # this fresh boot does not see a blocked slot.
     hook_executor.clear_teardown_claim()
-    if _should_install_preemption_sigterm_handler():
+
+    # Detect cloud first so we can decide BOTH whether the SIGTERM
+    # handler is needed AND whether to start the VM-side poller. The
+    # handler must be installed on both K8s (kubelet signals it) and
+    # VM clouds (the poller signals it) — see
+    # ``_should_install_preemption_sigterm_handler``.
+    cloud = _detect_cloud_for_preemption_poller()
+    if _should_install_preemption_sigterm_handler(detected_cloud=cloud):
         signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Start per-cloud preemption poller on VM clouds only. K8s pods
+    # already have the preStop SIGTERM path; bare-metal / Slurm have
+    # no signal source at all.
+    if cloud is not None:
+        logger.info(f'Starting VM preemption poller for cloud={cloud}')
+        preemption_poller.start(cloud)
+    else:
+        logger.info('No cloud metadata endpoint detected; '
+                    'VM preemption poller not started.')
 
     grpc_server = start_grpc_server(port=args.port)
     try:
