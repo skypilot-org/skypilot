@@ -594,3 +594,68 @@ def test_delete_sg_drains_rules_first():
         nebius_utils.delete_security_group('sg-with-rules')
 
     mock_del_rule.assert_called_once_with('vpcsecurityrule-abc')
+
+
+# --- get_or_create_security_group error handling ---------------------------
+
+
+def _sg_create_error(code, message):
+    """A nebius RequestError whose create() would raise it."""
+    err_cls = nebius_adaptor.request_error()
+    status = mock.MagicMock()
+    status.code = code
+    status.__str__ = lambda self, _m=message: _m
+    return err_cls(status)
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_propagates_non_conflict_create_error():
+    """A non-ALREADY_EXISTS create failure must surface the real error
+    instead of being masked by a misleading NOT_FOUND from the re-fetch."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.NOT_FOUND,
+                                  'NOT_FOUND: SecurityGroup ... not found')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           return_value=None) as mock_lookup:
+        with pytest.raises(nebius_adaptor.request_error()) as exc_info:
+            nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')
+    assert 'NOT_FOUND' in str(exc_info.value)
+    # Only the initial existence check ran; no race re-fetch on a real error.
+    mock_lookup.assert_called_once_with('proj', 'sg-x')
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_recovers_from_already_exists_race():
+    """ALREADY_EXISTS means a concurrent bootstrap created it: re-fetch."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.ALREADY_EXISTS,
+                                  'ALREADY_EXISTS: security group exists')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           side_effect=[None, 'sg-raced']) as mock_lookup:
+        out = nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')
+    assert out == 'sg-raced'
+    assert mock_lookup.call_count == 2  # initial check + race re-fetch
+
+
+@nebius_sdk_required
+def test_get_or_create_sg_reraises_if_race_refetch_missing():
+    """ALREADY_EXISTS but the SG is gone on re-fetch → surface original."""
+    status_code = nebius_adaptor.status_code()
+    create_err = _sg_create_error(status_code.ALREADY_EXISTS,
+                                  'ALREADY_EXISTS: security group exists')
+    with mock.patch('sky.adaptors.nebius.sync_call', side_effect=create_err), \
+         mock.patch('sky.adaptors.nebius.sdk'), \
+         mock.patch('sky.adaptors.nebius.vpc'), \
+         mock.patch('sky.adaptors.nebius.nebius_common'), \
+         mock.patch.object(nebius_utils, 'get_security_group_by_name',
+                           side_effect=[None, None]):
+        with pytest.raises(nebius_adaptor.request_error()):
+            nebius_utils.get_or_create_security_group('proj', 'sg-x', 'net-1')
