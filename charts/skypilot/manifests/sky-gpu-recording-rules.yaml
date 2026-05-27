@@ -40,8 +40,15 @@ groups:
           )
 
       # ── Free = Capacity − Allocated, per (cluster, GPU model) ─────────
+      # `or 0 * sky:gpu_capacity_total` fills a zero-valued allocated
+      # series for every (cluster, modelName) that has capacity but no
+      # pod requesting GPUs. Without it, PromQL's 1:1 vector match would
+      # drop the series entirely when nothing is allocated — i.e. exactly
+      # the "all GPUs free" case this metric exists to report.
       - record: sky:gpu_free_total
-        expr: sky:gpu_capacity_total - sky:gpu_allocated_total
+        expr: |
+          sky:gpu_capacity_total
+          - (sky:gpu_allocated_total or 0 * sky:gpu_capacity_total)
 
       # ── Utilization: average + p90 per (cluster, GPU model) ───────────
       - record: sky:gpu_utilization_avg

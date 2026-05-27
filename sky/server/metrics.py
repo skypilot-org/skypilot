@@ -314,9 +314,6 @@ class ManagedJobsCollector:
                     self._refresh()
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('Failed to collect managed jobs metrics')
-                # Always advance the timestamp — even on failure — so a
-                # broken DB query backs off for the cache TTL instead of
-                # being retried on every scrape (retry storm).
                 self._last_scrape_time = now
             rows = self._cached_rows
 
@@ -431,9 +428,6 @@ class WorkspaceUsageCollector:
 
             # ── burn rate, USD/hr, multiplied by node count ──
             try:
-                # float() is inside the try: get_cost() can return None
-                # (no catalog entry) which would raise TypeError here, not
-                # just inside get_cost itself.
                 per_node_hourly = float(
                     launched_resources.get_cost(self._SECONDS_PER_HOUR) or 0.0)
             except Exception:  # pylint: disable=broad-except

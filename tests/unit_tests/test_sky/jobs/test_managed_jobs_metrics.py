@@ -9,14 +9,23 @@ class TestManagedJobsCollector:
     """Tests for ManagedJobsCollector."""
 
     def test_collect_returns_all_metric_families(self):
-        """Verify collect() yields the expected metric families."""
-        mock_status_counts = {'RUNNING': 3, 'PENDING': 2, 'SUCCEEDED': 10}
+        """Verify collect() yields the expected metric families.
+
+        The collector consumes (workspace, user_hash, cloud, status, count)
+        tuples from get_status_counts_by_workspace_user_cloud(); terminal
+        statuses are filtered there, so the fixture feeds non-terminal rows.
+        """
+        mock_rows = [
+            ('ws', 'u', 'AWS', 'RUNNING', 3),
+            # Pre-cloud-assignment status: cloud is NULL → empty label.
+            ('ws', 'u', None, 'PENDING', 2),
+        ]
 
         collector = metrics.ManagedJobsCollector()
         with patch.object(collector, '_refresh') as mock_refresh:
 
             def side_effect():
-                collector._cached_status_counts = mock_status_counts
+                collector._cached_rows = mock_rows
 
             mock_refresh.side_effect = side_effect
 
@@ -26,10 +35,12 @@ class TestManagedJobsCollector:
 
         status_family = families[0]
         assert status_family.name == 'sky_managed_jobs_count'
-        status_samples = {
-            s.labels['status']: s.value for s in status_family.samples
+        samples = {(s.labels['workspace'], s.labels['user'], s.labels['status'],
+                    s.labels['cloud']): s.value for s in status_family.samples}
+        assert samples == {
+            ('ws', 'u', 'RUNNING', 'AWS'): 3,
+            ('ws', 'u', 'PENDING', ''): 2,
         }
-        assert status_samples == {'RUNNING': 3, 'PENDING': 2, 'SUCCEEDED': 10}
 
     def test_collect_uses_cache(self):
         """Verify collect() caches results and doesn't re-query within TTL."""
@@ -39,7 +50,7 @@ class TestManagedJobsCollector:
         with patch.object(collector, '_refresh') as mock_refresh:
 
             def side_effect():
-                collector._cached_status_counts = {'RUNNING': 1}
+                collector._cached_rows = [('ws', 'u', 'AWS', 'RUNNING', 1)]
 
             mock_refresh.side_effect = side_effect
 
@@ -52,7 +63,13 @@ class TestManagedJobsCollector:
             assert mock_refresh.call_count == 1
 
     def test_collect_retries_on_error(self):
-        """Verify collect() retries refresh on next scrape after failure."""
+        """Verify collect() re-queries on the next scrape after a failure.
+
+        With _cache_ttl=0 the backoff window is zero, so a transient error
+        does not permanently wedge the collector. (Backoff for a non-zero
+        TTL is covered by
+        test_metrics.py::test_managed_jobs_collector_advances_timestamp_on_failure.)
+        """
         collector = metrics.ManagedJobsCollector()
         collector._cache_ttl = 0  # Always stale
 
@@ -63,7 +80,7 @@ class TestManagedJobsCollector:
             call_count += 1
             if call_count == 1:
                 raise RuntimeError('DB error')
-            collector._cached_status_counts = {'RUNNING': 1}
+            collector._cached_rows = [('ws', 'u', 'AWS', 'RUNNING', 1)]
 
         with patch.object(collector, '_refresh', side_effect=failing_refresh):
             # First collect fails, should yield empty metrics
@@ -71,7 +88,7 @@ class TestManagedJobsCollector:
             assert len(families) == 1
             assert list(families[0].samples) == []
 
-            # Second collect retries (not skipped by TTL)
+            # Second collect retries (not skipped by zero TTL)
             families = list(collector.collect())
             assert len(families) == 1
             samples = {s.labels['status']: s.value for s in families[0].samples}
