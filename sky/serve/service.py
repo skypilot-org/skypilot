@@ -8,6 +8,7 @@ import os
 import pathlib
 import shutil
 import socket
+import sys
 import time
 import traceback
 from typing import Any, Dict, Optional
@@ -139,6 +140,26 @@ def cleanup_storage(yaml_content: str) -> bool:
 # calling this function.
 def _cleanup(service_name: str, pool: bool) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
+    # Log who we are and what DB state we're cleaning up, so post-mortems
+    # can correlate this with concurrent ha_recovery activity. _cleanup is
+    # destructive (it deletes the HA recovery script on the very next line
+    # and may delete the entire service row at the end), so an audit trail
+    # is worth a few WARN lines.
+    own_pid = os.getpid()
+    try:
+        svc_dbg = serve_state.get_service_from_name(service_name)
+    except Exception:  # pylint: disable=broad-except
+        svc_dbg = None
+    if svc_dbg is not None:
+        logger.warning(
+            f'_cleanup entered for service {service_name} '
+            f'(own_pid={own_pid}, db_controller_pid='
+            f'{svc_dbg.get("controller_pid")}, db_controller_ip='
+            f'{svc_dbg.get("controller_ip")}, status={svc_dbg.get("status")})')
+    else:
+        logger.warning(
+            f'_cleanup entered for service {service_name} '
+            f'(own_pid={own_pid}, db row not found — already removed?)')
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
     # sky.exceptions.ResourcesUnavailableError).
@@ -312,6 +333,53 @@ def _orphan_exit(
     os._exit(0)  # pylint: disable=protected-access
 
 
+def _bail_on_boot_failure(service_name: str,
+                          controller_process: Optional[multiprocessing.Process],
+                          timeout_seconds: int,
+                          boot_err: BaseException) -> None:
+    """Exit path when the freshly-spawned controller subprocess failed
+    to bind within SERVICE_REGISTER_TIMEOUT_SECONDS.
+
+    Critical contract: must NOT fall through to `_start`'s outer
+    `try/finally`. That finally calls `_cleanup`, which on its very
+    first line removes the HA recovery script and on a pool with no
+    replicas proceeds to `remove_service_completely` — turning a
+    transient boot failure into permanent data loss for the service.
+
+    Kill the controller subprocess we spawned, then os._exit(1) to
+    bypass everything. The daemon's next ha_recovery iteration sees
+    the (preserved) recovery script and retries with a fresh _start.
+    """
+    logger.error(f'Controller subprocess failed to bind within '
+                 f'{timeout_seconds}s for {service_name}: {boot_err}. '
+                 f'Killing controller subprocess and exiting WITHOUT '
+                 f'cleanup so the daemon can retry. DB state and HA '
+                 f'recovery script preserved.')
+    # Defensive: skip kill if pid is None. `Process.start()` populates
+    # pid on success, but if start() raised before setting it the
+    # current code path would never reach here anyway (the outer try
+    # in `_start` would handle that). Still, guard explicitly because
+    # `psutil.Process(None)` returns the *calling* process — so
+    # passing `[None]` to `kill_children_processes` would target
+    # ourselves (and our own children) instead of bailing out cleanly.
+    if controller_process is not None and controller_process.pid is not None:
+        try:
+            # kill_children_processes with parent_pids != None SIGKILLs
+            # the parent itself AND its recursive children (see
+            # subprocess_utils.py).
+            subprocess_utils.kill_children_processes(
+                parent_pids=[controller_process.pid], force=True)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to kill controller subprocess during boot-failure '
+                'bailout; proceeding with os._exit anyway.')
+    # os._exit() bypasses the outer try/finally; the
+    # PORT_SELECTION_FILE_LOCK_PATH filelock held by the surrounding
+    # `with` block is released by the kernel when our FDs close on
+    # process exit (fcntl advisory lock).
+    os._exit(1)  # pylint: disable=protected-access
+
+
 def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     """Starts the service.
     This including the controller and load balancer.
@@ -391,15 +459,30 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         if latest_version is None:
             raise ValueError(f'No version found for service {service_name}')
         version = latest_version
-        # NOTE: do NOT update controller_pid/controller_ip yet. We must wait
-        # until our subprocess is actually listening on the port (see the
-        # update_service_controller_pid_ip_and_port call after
-        # _wait_for_controller_ready below). Otherwise clients in other pods
-        # would route to our pod IP before uvicorn binds and get
-        # ECONNREFUSED for the duration of the boot.
+        # Pre-claim controller_pid immediately so the next
+        # ha_recovery_for_consolidation_mode iteration sees our _start
+        # process as the live controller and does NOT fire a duplicate
+        # recovery script while we are still booting (the controller boot
+        # window is up to SERVICE_REGISTER_TIMEOUT_SECONDS = 60s, but the
+        # daemon retries every ~20s). _controller_process_alive matches by
+        # `--service-name <name>` in cmdline, which our _start process has.
+        #
+        # We deliberately do NOT update controller_ip / controller_port
+        # here — those still flip atomically after _wait_for_controller_ready
+        # succeeds, so clients routing by (ip, port) keep using the prior
+        # endpoint (or hit ECONNREFUSED, handled by
+        # _request_to_controller_with_retry) until the new subprocess is
+        # actually listening.
+        serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
     load_balancer_process = None
+    # Tracks whether we exited the main loop via the user-initiated
+    # SHUTTING_DOWN signal. We can't recover this from sys.exc_info() in
+    # the finally block — Python clears the active exception when the
+    # corresponding `except` clause catches it, so sys.exc_info() in
+    # the finally returns (None, None, None) for the caught path.
+    shutdown_via_user_signal = False
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
@@ -457,14 +540,14 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                     controller_host,
                     controller_port,
                     timeout=constants.SERVICE_REGISTER_TIMEOUT_SECONDS)
-            except RuntimeError:
-                # Controller subprocess failed to start. Bail; the daemon's
-                # next ha_recovery iteration will retry.
-                logger.error('Controller subprocess failed to start within '
-                             f'{constants.SERVICE_REGISTER_TIMEOUT_SECONDS}s; '
-                             'aborting _start. DB state untouched so the '
-                             'previous controller (if any) keeps serving.')
-                raise
+            except RuntimeError as boot_err:
+                # Bail without falling through to the outer try/finally,
+                # which would call _cleanup → remove_ha_recovery_script
+                # and possibly remove_service_completely. See helper for
+                # details.
+                _bail_on_boot_failure(
+                    service_name, controller_process,
+                    constants.SERVICE_REGISTER_TIMEOUT_SECONDS, boot_err)
 
             # Now we know the subprocess is bound on `controller_port`. Write
             # DB.
@@ -557,9 +640,37 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     except exceptions.ServeUserTerminatedError:
         logger.debug(f'Caught ServeUserTerminatedError for '
                      f'{service_name}; setting status=SHUTTING_DOWN')
+        shutdown_via_user_signal = True
         serve_state.set_service_status_and_active_versions(
             service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
+        # Log why we're entering the destructive cleanup path. _cleanup
+        # deletes the HA recovery script and may remove the entire
+        # service row, so an audit line (especially with the active
+        # exception type if any) is worth it for future post-mortems.
+        # The path (`_wait_for_controller_ready` timeout) and
+        # `_orphan_exit` both bypass this finally entirely via
+        # os._exit; anything else reaching here is either the user
+        # signal (flag above) or an unexpected propagating exception.
+        exc_type, exc_value, _ = sys.exc_info()
+        if shutdown_via_user_signal:
+            logger.info(f'_start for {service_name} entering cleanup path '
+                        '(user-initiated SHUTTING_DOWN).')
+        elif exc_type is None:
+            # _start's `while True` only exits via exception or
+            # os._exit, so a None exc_type here is unexpected. Log it
+            # at WARN so a future code path that adds a `return`
+            # doesn't silently slip into destructive cleanup unnoticed.
+            logger.warning(
+                f'_start for {service_name} entering cleanup path with '
+                'no exception and no user signal — this is unexpected; '
+                '_cleanup is destructive.')
+        else:
+            logger.warning(
+                f'_start for {service_name} entering cleanup path due to '
+                f'unexpected exception {exc_type.__name__}: {exc_value}. '
+                f'_cleanup will delete HA recovery script and may remove '
+                f'the service row.')
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
         process_to_kill = [

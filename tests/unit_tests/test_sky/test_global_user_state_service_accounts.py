@@ -129,6 +129,50 @@ class TestServiceAccountDatabaseOperations:
 
         assert result is None
 
+    def test_get_service_account_token_by_hash_found(self, mock_engine,
+                                                     mock_session):
+        """Hash lookup returns the row dict when a matching row exists."""
+        mock_row = mock.Mock()
+        mock_row.token_id = 'token123'
+        mock_row.token_name = 'test-token'
+        mock_row.token_hash = 'hash123'
+        mock_row.created_at = 1234567890
+        mock_row.last_used_at = 1234567900
+        mock_row.expires_at = 1234567890 + 2592000
+        mock_row.creator_user_hash = 'user456'
+        mock_row.service_account_user_id = 'sa789'
+
+        mock_filter = mock_session.query.return_value.filter_by
+        mock_filter.return_value.first.return_value = mock_row
+
+        result = global_user_state.get_service_account_token_by_hash('hash123')
+
+        assert result == {
+            'token_id': 'token123',
+            'token_name': 'test-token',
+            'token_hash': 'hash123',
+            'created_at': 1234567890,
+            'last_used_at': 1234567900,
+            'expires_at': 1234567890 + 2592000,
+            'creator_user_hash': 'user456',
+            'service_account_user_id': 'sa789'
+        }
+        # The query must filter by token_hash, not token_id. This is what
+        # makes rotation work: after rotation the DB row keeps the original
+        # token_id but its hash is replaced, so looking up by token_id would
+        # incorrectly accept the old JWT.
+        mock_filter.assert_called_once_with(token_hash='hash123')
+
+    def test_get_service_account_token_by_hash_not_found(
+            self, mock_engine, mock_session):
+        """Hash lookup returns None when no matching row exists."""
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+
+        result = global_user_state.get_service_account_token_by_hash(
+            'unknown_hash')
+
+        assert result is None
+
     def test_get_all_service_account_tokens(self, mock_engine, mock_session):
         """Test getting all service account tokens."""
         mock_row1 = mock.Mock()

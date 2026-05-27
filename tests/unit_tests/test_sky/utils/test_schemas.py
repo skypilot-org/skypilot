@@ -1039,5 +1039,140 @@ class TestRegisterKubernetesProperty(unittest.TestCase):
         jsonschema.validate(instance=config, schema=ws_ctx_schema)
 
 
+class TestDashboardSchema(unittest.TestCase):
+    """Tests for the top-level dashboard config schema."""
+
+    def _get_schema(self):
+        return schemas.get_config_schema()
+
+    def test_accepts_valid_external_links(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                    },
+                    {
+                        'label': 'Internal tools',
+                        'regex': r'https://tools\.internal\.example\.com/.*',
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_empty_external_links(self):
+        config = {'dashboard': {'external_links': []}}
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_empty_dashboard_block(self):
+        config = {'dashboard': {}}
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_missing_label(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'regex': r'https://example\.com/.*'
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_missing_regex(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Grafana'
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_label(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': '',
+                    'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_regex(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Grafana',
+                    'regex': '',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_unknown_property_on_entry(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Grafana',
+                    'regex': r'https://example\.com/.*',
+                    'url_template': 'https://example.com/{cluster_name}',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_unknown_property_on_dashboard_block(self):
+        config = {
+            'dashboard': {
+                'theme': 'dark',
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+
+class TestDashboardConfigRegexValidation(unittest.TestCase):
+    """Tests for the runtime regex-compile validation in skypilot_config."""
+
+    def test_invalid_regex_raises_value_error(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Bad',
+                    'regex': '[unclosed',
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+                config, 'test_config')
+        self.assertIn('dashboard.external_links[0].regex', str(ctx.exception))
+
+    def test_valid_regex_passes(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Good',
+                    'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+
 if __name__ == "__main__":
     unittest.main()

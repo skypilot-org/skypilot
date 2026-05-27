@@ -333,7 +333,9 @@ def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -393,7 +395,9 @@ def test_api_login_user_hash_needs_auth_both(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -888,10 +892,12 @@ def test_stream_response_resumable_retry_skips_replayed_lines():
     assert decode_call_count == 2
     # Final result is forwarded from get(request_id).
     assert result == 'final_result'
-    # Both progress fields advanced exactly to the number of distinct lines.
+    # line_processed tracks distinct lines (high-water mark for resumable
+    # skip-ahead). progress_count tracks total wire-level messages received
+    # across all attempts: 2 from the first attempt + 5 from the retry = 7.
     ctx = captured_context['ctx']
     assert ctx.line_processed == 5
-    assert ctx.progress_count == 5
+    assert ctx.progress_count == 7
 
 
 def test_stream_response_no_request_id():

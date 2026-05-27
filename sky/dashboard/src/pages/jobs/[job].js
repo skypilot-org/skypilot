@@ -62,6 +62,11 @@ import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
+import {
+  extractLinksFromLogs,
+  normalizeUrl,
+  useCustomUrlPatterns,
+} from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
@@ -921,15 +926,6 @@ function ControllerLogsSection({
     </div>
   );
 }
-// URL patterns for extracting links from logs
-// Each pattern has a name (used as link label) and a regex to match entire tokens
-// Patterns use ^ and $ anchors for exact token matching
-const URL_PATTERNS = {
-  // Matches W&B SaaS (wandb.ai) and Dedicated Cloud tenants (<tenant>.wandb.io).
-  'W&B Run':
-    /^https:\/\/(?:wandb\.ai|[^/]+\.wandb\.io)\/[^/]+\/[^/]+\/runs\/[^/]+$/,
-};
-
 function JobDetailsContent({
   jobData,
   allTasks = [],
@@ -1154,47 +1150,21 @@ function JobDetailsContent({
   // Persist extracted links across tab changes using a ref
   const extractedLinksRef = useRef({});
 
-  // Extract URLs from logs using whitelisted patterns
-  // Processes line-by-line with tokenization for exact word-level matching
-  // Updates are accumulated in a ref so they persist when switching tabs
+  // Merge built-in (W&B) and admin-configured patterns. The hook fetches the
+  // admin list on mount; until it returns, only built-ins are active.
+  const urlPatterns = useCustomUrlPatterns();
+
+  // Extract URLs from logs using the merged pattern map. Matches accumulate
+  // in a ref so they survive tab switches and re-renders.
   const logExtractedLinks = useMemo(() => {
-    // Start with previously found links
-    const extractedLinks = { ...extractedLinksRef.current };
-    const foundPatterns = new Set(Object.keys(extractedLinks));
-
-    // Process line by line to avoid creating one large string
-    for (const line of logs) {
-      // Skip if we've found all patterns
-      if (foundPatterns.size === Object.keys(URL_PATTERNS).length) {
-        break;
-      }
-
-      // Split line into tokens by whitespace and common delimiters
-      // This handles cases like: "URL: https://..." or "(https://...)"
-      const tokens = line.split(/[\s"'<>()[\]{},;]+/);
-
-      for (const token of tokens) {
-        // Clean up trailing punctuation that might be attached
-        const cleanToken = token.replace(/[.,:;!?]+$/, '');
-        if (!cleanToken) continue;
-
-        // Check each pattern against the clean token
-        for (const [linkName, pattern] of Object.entries(URL_PATTERNS)) {
-          if (foundPatterns.has(linkName)) continue;
-
-          if (pattern.test(cleanToken)) {
-            extractedLinks[linkName] = cleanToken;
-            foundPatterns.add(linkName);
-            break;
-          }
-        }
-      }
-    }
-
-    // Persist to ref so links survive tab switches
+    const extractedLinks = extractLinksFromLogs(
+      logs,
+      urlPatterns,
+      extractedLinksRef.current
+    );
     extractedLinksRef.current = extractedLinks;
     return extractedLinks;
-  }, [logs]);
+  }, [logs, urlPatterns]);
 
   // Notify parent when links are extracted (for cross-component sharing)
   useEffect(() => {
@@ -1561,12 +1531,7 @@ function JobDetailsContent({
           {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
             <div className="flex flex-wrap gap-4">
               {Object.entries(combinedLinks).map(([label, url]) => {
-                // Normalize URL - add https:// if no protocol specified
-                const normalizedUrl =
-                  url.startsWith('http://') || url.startsWith('https://')
-                    ? url
-                    : `https://${url}`;
-
+                const normalizedUrl = normalizeUrl(url);
                 return (
                   <a
                     key={label}

@@ -19,6 +19,18 @@ PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
 
 
+def _is_rbac_permission_error(e: Exception) -> bool:
+    """True if the K8s ApiException is a 401/403 RBAC denial.
+
+    Namespace-constrained users on multi-tenant clusters often lack the
+    cluster-scoped `list`/`get` perms on `storageclasses` that the
+    pre-flight checks require, but they can still create PVCs in their
+    namespace and rely on K8s admission to bind. Don't block them just
+    because we can't validate up front.
+    """
+    return getattr(e, 'status', None) in (401, 403)
+
+
 def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
     """Gets the context and namespace of a volume."""
     if config.region is None:
@@ -69,20 +81,88 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return _apply_pvc_volume(config)
 
 
+def _check_cluster_has_default_storage_class(context: Optional[str]) -> None:
+    """Verifies the cluster has a default StorageClass annotated.
+
+    Called when the user did not specify `storage_class_name` in the volume
+    config: Kubernetes will fall back to the cluster default at PVC-bind
+    time, and if no default is annotated the PVC sits in Pending forever
+    with no clear signal to the user. Fail fast with an actionable error
+    instead.
+
+    Skips the check (logs a warning) on 401/403 — see
+    `_is_rbac_permission_error`. The PVC create may still succeed if a
+    default actually exists.
+    """
+    try:
+        sc_list = kubernetes.storage_api(context).list_storage_class(
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if _is_rbac_permission_error(e):
+            logger.warning(
+                f'Cannot list storage classes in context {context!r} '
+                f'({e}). Proceeding with PVC creation; if no default '
+                f'StorageClass exists, the PVC will hang in Pending. '
+                f'Set config.storage_class_name in your volume YAML to '
+                f'avoid this ambiguity.')
+            return
+        raise config_lib.KubernetesError(
+            f'Failed to list storage classes in context {context!r} '
+            f'while checking for a default StorageClass: {e}')
+    for sc in sc_list.items:
+        if kubernetes_utils.is_default_storage_class(sc):
+            return
+    raise config_lib.KubernetesError(
+        f'No storage class specified and cluster {context!r} has no default '
+        f'StorageClass (no storage class annotated '
+        f'"{kubernetes_utils.DEFAULT_STORAGE_CLASS_ANNOTATION}: true"). '
+        f'Set config.storage_class_name in your volume YAML to an explicit '
+        f'storage class, or mark one as default on the cluster.')
+
+
+def _validate_explicit_storage_class(context: Optional[str],
+                                     storage_class_name: str) -> None:
+    """Verifies the named StorageClass exists on the cluster.
+
+    Skips validation (logs a warning) on 401/403 — see
+    `_is_rbac_permission_error`. K8s admission will surface a binding
+    error at PVC-create time if the name is actually wrong.
+    """
+    try:
+        kubernetes.storage_api(context).read_storage_class(
+            name=storage_class_name, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if _is_rbac_permission_error(e):
+            logger.warning(
+                f'Cannot validate storage class {storage_class_name!r} '
+                f'in context {context!r} ({e}). Proceeding with PVC '
+                f'creation; if the storage class is invalid, K8s will '
+                f'surface a binding error.')
+            return
+        raise config_lib.KubernetesError(
+            f'Check storage class {storage_class_name} error: {e}')
+
+
 def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a PVC volume."""
     context, namespace = _get_context_namespace(config)
     pvc_spec = _get_pvc_spec(namespace, config)
-    # Check if the storage class exists
-    storage_class_name = pvc_spec['spec'].get('storageClassName')
-    if storage_class_name is not None:
-        try:
-            kubernetes.storage_api(context).read_storage_class(
-                name=storage_class_name,
-                _request_timeout=kubernetes.API_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            raise config_lib.KubernetesError(
-                f'Check storage class {storage_class_name} error: {e}')
+    # use_existing volumes look up an existing PVC; no new provisioning
+    # happens. Storage-class validation (either the explicit-name check
+    # or the empty-default safety net) is irrelevant — the existing PVC
+    # already has its own SC binding.
+    if not config.config.get('use_existing'):
+        storage_class_name = pvc_spec['spec'].get('storageClassName')
+        if storage_class_name:
+            # Non-empty name: validate that the class exists.
+            _validate_explicit_storage_class(context, storage_class_name)
+        elif storage_class_name is None:
+            # Omitted: K8s will use the cluster default. Verify one exists.
+            _check_cluster_has_default_storage_class(context)
+        # else: storage_class_name == '' — the K8s convention for "no
+        # storage class" (opt out of dynamic provisioning, e.g. for
+        # static binding to a pre-created PV). Skip both checks; K8s
+        # handles the binding semantics.
     create_persistent_volume_claim(namespace, context, pvc_spec, config)
     return config
 

@@ -50,12 +50,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
   any_of:
     - infra: aws/us-west-2
@@ -272,12 +266,10 @@ Format:
     - `jobs_and_ssh` (default): Wait for in‑progress jobs and SSH connections to finish
     - `jobs`: Only wait for in‑progress jobs
     - `none`: Wait for nothing; autostop right after `idle_minutes`
-  - `hook`: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See Autostop hooks for detailed explanation and examples.
-
-  - `hook_timeout`: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see Lifecycle hooks
+(under `config.hooks` with `events: [stop]` for autostop, or
+`events: [down]` for autodown — `autostop: {down: true}`).
 
 `<unit>` can be one of:
 - `m`: minutes (default if not specified)
@@ -323,20 +315,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-```
-
-OR
-
-```yaml
-resources:
-  autostop:
-    idle_minutes: 10
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
 ```
 
@@ -637,6 +615,7 @@ If `'best'` is specified, use the best network tier available on the specified i
 - `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 - `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- `infra: k8s/my-oke-cluster`: Enable RoCEv2 for high-performance GPU communication across pods on Oracle OKE clusters with bare-metal GPU shapes (BM.GPU.*.8) provisioned via dedicated RDMA capacity pools.
 
 **Slurm-based:**
 
@@ -1263,7 +1242,17 @@ config:
     managed_instance_group: ...
   nvidia_gpus:
     disable_ecc: ...
+  hooks:
+    - run: |
+        cd my-code-base
+        git add . && git commit -m "Auto-commit" && git push
+      events: [stop, preemption, down]  # optional; defaults to all three
+      timeout: 300                      # optional; default 3600s
 ```
+
+The `hooks` field lists scripts to run on the cluster on lifecycle events
+(`stop`, `preemption`, `down`). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 
 # SkyServe Service

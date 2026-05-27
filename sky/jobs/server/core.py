@@ -2,6 +2,8 @@
 import ipaddress
 import os
 import pathlib
+import shlex
+import sys
 import tempfile
 import time
 import typing
@@ -966,6 +968,9 @@ def launch(
             'priority': priority,
             'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
+            'jobs_scheduler_python_cmd':
+                (shlex.quote(sys.executable)
+                 if is_consolidation_mode else skylet_constants.SKY_PYTHON_CMD),
             'pool': pool,
             'job_controller_indicator_file':
                 managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,

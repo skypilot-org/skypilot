@@ -35,13 +35,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
         { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
-        { selector: '.toctree-l1 > a', text: 'SkyPilot Recipes' },
-        { selector: '.toctree-l1 > a', text: 'Agent Skills' },
+        { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
+        { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

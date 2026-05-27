@@ -1,6 +1,8 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import concurrent.futures
+import contextvars
 import dataclasses
 import datetime
 import enum
@@ -14,7 +16,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, TextIO, Type, Union)
+                    Optional, Set, TextIO, Type, Union)
 import uuid
 
 import colorama
@@ -61,12 +63,14 @@ logger = sky_logging.init_logger(__name__)
 # `controller_ip` is atomic w.r.t. controller readiness (sky.serve.service
 # only flips DB after _wait_for_controller_ready), so the only failure modes
 # left are: (1) DB read replica lag right after a recovery; (2) brief network
-# blips between pods. Both resolve in <1s — a small bounded retry covers them.
+# blips between pods.
 # Intermediate retries log at DEBUG to avoid spamming WARN every refresh tick
 # while the controller is intentionally absent (CONTROLLER_INIT /
 # SHUTTING_DOWN / FAILED_CLEANUP); the final-attempt failure logs once at
 # WARN.
-_CONTROLLER_HTTP_RETRY_ATTEMPTS = 3
+# A single attempt with a tight connect timeout keeps `sky jobs pool status`
+# responsive even when one of N pools' controllers is unreachable.
+_CONTROLLER_HTTP_RETRY_ATTEMPTS = 1
 _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # (connect_timeout, read_timeout). Connect timeout matters most: when the
 # controller pod is dead/unreachable, kernel ECONNREFUSED is instant on
@@ -75,7 +79,14 @@ _CONTROLLER_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 # explicit timeout, `requests` waits forever and `sky jobs pool status`
 # appears to hang. Read timeout is generous because /autoscaler/info on a
 # busy controller can take a moment.
-_CONTROLLER_HTTP_TIMEOUT_SECONDS = (2.0, 10.0)
+_CONTROLLER_HTTP_TIMEOUT_SECONDS = (1.0, 10.0)
+
+# Bound on the per-call thread pool used by `get_service_status_pickled` to
+# fan out across services/pools. The per-service work is dominated by I/O
+# (controller HTTP + DB reads), so threads parallelize well. Capped low so a
+# 100-pool deployment doesn't open 100 simultaneous DB connections or
+# trigger memory pressure on big pools.
+_STATUS_FANOUT_MAX_WORKERS = 8
 
 
 def _get_controller_url(service_name: str, controller_port: int) -> str:
@@ -366,6 +377,11 @@ def ha_recovery_for_consolidation_mode(pool: bool):
     noun = 'pool' if pool else 'serve'
     capnoun = noun.capitalize()
     prefix = f'{noun}_'
+    # Snapshot the set of in-flight _start service names once per iteration
+    # so we don't walk /proc N times for N services. This also gives all
+    # services a consistent view (no torn read where service A is checked
+    # before service B's _start spawns, and B is checked after).
+    in_flight_service_names = _snapshot_in_flight_start_service_names()
     with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(prefix),
               'w',
               encoding='utf-8') as f:
@@ -382,7 +398,7 @@ def ha_recovery_for_consolidation_mode(pool: bool):
             status_dbg = svc.get('status')
             f.write(f'ha_recovery candidate {service_name}: '
                     f'pid={controller_pid} ip={controller_ip} '
-                    f'status={status_dbg}')
+                    f'status={status_dbg}\n')
             if controller_pid is not None:
                 try:
                     alive = _controller_process_alive(controller_pid,
@@ -402,6 +418,20 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                             f'{noun} {service_name} is still running. '
                             'Skipping recovery.\n')
                     continue
+
+            # Defense in depth: even if DB controller_pid is stale (e.g. an
+            # older _start hadn't yet pre-claimed it, or pre-claim is
+            # disabled / lost), still skip the recovery launch if any
+            # `python -m sky.serve.service --service-name <name>` is
+            # already running on this pod (snapshot taken once at the
+            # top of the iteration). Otherwise the daemon's ~20s
+            # iteration repeatedly fires recovery during the 0-60s
+            # controller boot window, piling up multiple _start instances.
+            if service_name in in_flight_service_names:
+                f.write(f'{capnoun} {service_name}: _start process already '
+                        f'running on this pod; skipping recovery this '
+                        f'round.\n')
+                continue
 
             script = serve_state.get_ha_recovery_script(service_name)
             if script is None:
@@ -427,6 +457,58 @@ def _controller_process_alive(pid: int, service_name: str) -> bool:
         ) and f'--service-name {service_name}' in cmd_str
     except psutil.NoSuchProcess:
         return False
+
+
+def _snapshot_in_flight_start_service_names() -> Set[str]:
+    """Walk `/proc` once and return the set of service names that have an
+    active (non-zombie) `python -m sky.serve.service --service-name <name>`
+    process on this pod.
+
+    Used by ha_recovery_for_consolidation_mode to deduplicate recovery
+    launches: while a previously-spawned _start is still in its 0-60s
+    boot window waiting for the controller subprocess to bind, DB
+    controller_pid may still point at the dead previous instance.
+    Re-firing the recovery script in that window causes pile-up
+    (multiple _start instances racing on the same service).
+
+    Snapshotting once per daemon iteration (rather than per-service)
+    gives O(processes + N services) instead of O(processes * N), and
+    also a consistent view (all services see the same set).
+
+    Zombies are excluded — a `_start` process that died but hasn't been
+    reaped (pods without a proper init process) would otherwise
+    permanently block recovery for that service.
+
+    Matching is on the argv LIST (not a joined string), so
+    `--service-name pool-a` does not falsely match `--service-name pool-abc`.
+    """
+    in_flight: Set[str] = set()
+    for proc in psutil.process_iter(['cmdline', 'status']):
+        try:
+            if proc.info.get('status') == psutil.STATUS_ZOMBIE:
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            if 'sky.serve.service' not in ' '.join(cmdline):
+                continue
+            try:
+                idx = cmdline.index('--service-name')
+            except ValueError:
+                continue
+            if idx + 1 < len(cmdline):
+                in_flight.add(cmdline[idx + 1])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return in_flight
+
+
+def _start_in_flight(service_name: str) -> bool:
+    """Thin wrapper around `_snapshot_in_flight_start_service_names` for
+    one-off checks (e.g. tests, ad-hoc callers).
+
+    The hot path in `ha_recovery_for_consolidation_mode` calls the
+    snapshot helper directly and reuses the set across services.
+    """
+    return service_name in _snapshot_in_flight_start_service_names()
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
@@ -831,19 +913,40 @@ def _get_service_status(
                      f'Traceback: {traceback.format_exc()}')
 
     if with_replica_info:
+        replica_infos = serve_state.get_replica_infos(service_name)
+        # Pre-fetch cluster records in one batched DB query instead of
+        # letting each to_info_dict() do its own. With a long failure
+        # history this was an N+1.
+        cluster_names = [info.cluster_name for info in replica_infos]
+        cluster_records = global_user_state.get_clusters_from_names(
+            cluster_names)
         record['replica_info'] = [
-            info.to_info_dict(with_handle=True, with_url=not pool)
-            for info in serve_state.get_replica_infos(service_name)
+            info.to_info_dict(
+                with_handle=True,
+                with_url=not pool,
+                cluster_record=cluster_records[info.cluster_name],
+            ) for info in replica_infos
         ]
         if pool:
-            # Get pool-level jobs (e.g. batch coordinators) that use
-            # all workers — they have pool set but no cluster_name.
-            pool_level_job_ids = (
-                managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, cluster_name=None))
+            # Fetch all nonterminal job ids in the pool in a single query,
+            # grouped by current_cluster_name. Avoids the N+1 pattern of
+            # (1 + len(replicas)) per-pool queries against a job_info table
+            # that may contain tens of thousands of finished rows.
+            jobs_by_cluster = (
+                managed_job_state.get_nonterminal_job_ids_by_pool_grouped(
+                    service_name))
+            # Pool-level jobs (e.g. batch coordinators) span every worker.
+            # They have pool set but no cluster_name, so they live under the
+            # None bucket of the grouped result. Note: the prior per-call
+            # implementation passed cluster_name=None to a function that
+            # treated None as "no filter" rather than "IS NULL", so it
+            # accidentally returned every nonterminal job in the pool and
+            # surfaced unrelated replicas' jobs as `used_by` on each READY
+            # worker. The grouped query lets us implement the intended
+            # semantic exactly.
+            pool_level_job_ids = list(jobs_by_cluster.get(None, []))
             for replica_info in record['replica_info']:
-                job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
-                    service_name, replica_info['name'])
+                job_ids = list(jobs_by_cluster.get(replica_info['name'], []))
                 # Show pool-level jobs on READY workers only.
                 if (replica_info.get('status') ==
                         serve_state.ReplicaStatus.READY):
@@ -854,18 +957,34 @@ def _get_service_status(
 
 def get_service_status_pickled(service_names: Optional[List[str]],
                                pool: bool) -> List[Dict[str, str]]:
-    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
-    for service_name in service_names:
-        service_status = _get_service_status(service_name, pool=pool)
-        if service_status is None:
-            continue
-        service_statuses.append({
-            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in service_status.items()
-        })
+    if not service_names:
+        return []
+    # Fan out across services. Each `_get_service_status` is dominated by
+    # I/O (controller HTTP + DB reads) so threads parallelize well; the
+    # cap on max_workers keeps memory and DB-connection pressure bounded.
+    # Each task gets a fresh `Context.copy()` because the same Context
+    # can't be entered from multiple threads (Context.run raises
+    # RuntimeError otherwise) — but the values (request_id / user_id)
+    # are inherited so log redirection still works inside workers.
+    # `ex.map` preserves the existing failure contract (first failure
+    # aborts the whole call).
+    parent_ctx = contextvars.copy_context()
+
+    def _run_in_context(name: str) -> Optional[Dict[str, Any]]:
+        return parent_ctx.copy().run(_get_service_status, name, pool=pool)
+
+    max_workers = min(len(service_names), _STATUS_FANOUT_MAX_WORKERS)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        statuses = list(ex.map(_run_in_context, service_names))
+    service_statuses: List[Dict[str, str]] = [{
+        k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+        for k, v in s.items()
+    }
+                                              for s in statuses
+                                              if s is not None]
     return sorted(service_statuses, key=lambda x: x['name'])
 
 
@@ -1907,19 +2026,39 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
             else:
                 used_by_str = '-'
 
-        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
-            'handle']
-        if replica_handle is not None:
-            infra = replica_handle.launched_resources.infra.formatted_str()
-            simplified = not show_all
-            resources_str_simple, resources_str_full = (
-                resources_utils.get_readable_resources_repr(
-                    replica_handle, simplified_only=simplified))
-            if simplified:
-                resources_str = resources_str_simple
-            else:
-                assert resources_str_full is not None
-                resources_str = resources_str_full
+        # Prefer pre-computed string fields from the server (new servers
+        # ship these alongside or instead of a pickled handle to keep wire
+        # payload small). Fall back to computing them locally from
+        # ``record['handle']`` for back-compat with old servers.
+        infra_pre = record.get('infra')
+        if infra_pre is not None:
+            infra = infra_pre
+        if show_all:
+            resources_pre = (record.get('resources_str_full') or
+                             record.get('resources_str'))
+        else:
+            resources_pre = record.get('resources_str')
+        if resources_pre is not None:
+            resources_str = resources_pre
+
+        if infra_pre is None or resources_pre is None:
+            replica_handle: Optional[
+                'backends.CloudVmRayResourceHandle'] = record.get('handle')
+            if (replica_handle is not None and
+                    replica_handle.launched_resources is not None):
+                if infra_pre is None:
+                    infra = (
+                        replica_handle.launched_resources.infra.formatted_str())
+                if resources_pre is None:
+                    simplified = not show_all
+                    resources_str_simple, resources_str_full = (
+                        resources_utils.get_readable_resources_repr(
+                            replica_handle, simplified_only=simplified))
+                    if simplified:
+                        resources_str = resources_str_simple
+                    else:
+                        assert resources_str_full is not None
+                        resources_str = resources_str_full
 
         replica_values = [
             service_name,

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -11,6 +17,7 @@ import {
   useClusterDetails,
   getClusterHistory,
   streamClusterProvisionLogs,
+  streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import {
@@ -29,6 +36,11 @@ import {
   LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
+import {
+  extractLinksFromLogs,
+  normalizeUrl,
+  useCustomUrlPatterns,
+} from '@/utils/externalLinks';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -290,6 +302,38 @@ function ActiveTab({
   const [isCopied, setIsCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
 
+  // Links extracted from provision logs and the latest job's tail logs,
+  // matched against built-in plus admin-configured `dashboard.external_links`.
+  const [clusterExtractedLinks, setClusterExtractedLinks] = useState({});
+  const handleClusterLinksExtracted = useCallback((links) => {
+    if (!links || Object.keys(links).length === 0) return;
+    setClusterExtractedLinks((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [label, url] of Object.entries(links)) {
+        if (next[label] !== url) {
+          next[label] = url;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // Persisted DB-backed links take priority over the live-scanned ones, same
+  // merge semantics the managed-job page uses (sky/dashboard/src/pages/jobs/
+  // [job].js: combinedLinks). DB links currently come from
+  // instance_links.generate_instance_links() at launch time.
+  const combinedClusterLinks = useMemo(() => {
+    const combined = { ...(clusterData?.links || {}) };
+    for (const [label, url] of Object.entries(clusterExtractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
+    }
+    return combined;
+  }, [clusterData?.links, clusterExtractedLinks]);
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
@@ -532,6 +576,40 @@ function ActiveTab({
                 </div>
               )}
 
+              {/* External Links section: persisted DB links (e.g., cloud
+                  instance console URLs from
+                  instance_links.generate_instance_links() at launch time)
+                  plus live regex matches against the admin-configured
+                  `dashboard.external_links` allowlist and built-in patterns
+                  (e.g., W&B). Only renders once at least one link is known. */}
+              {Object.keys(combinedClusterLinks).length > 0 && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    External Links
+                  </div>
+                  <div className="text-base mt-1">
+                    <div className="flex flex-wrap gap-4">
+                      {Object.entries(combinedClusterLinks).map(
+                        ([label, url]) => {
+                          const normalizedUrl = normalizeUrl(url);
+                          return (
+                            <a
+                              key={label}
+                              href={normalizedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {label}
+                            </a>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Queue Details section - right column */}
               {clusterData.details && (
                 <PluginSlot
@@ -713,14 +791,31 @@ function ActiveTab({
           <ProvisionLogs
             clusterName={clusterData.cluster}
             numNodes={clusterData.num_nodes}
+            onLinksExtracted={handleClusterLinksExtracted}
           />
         </div>
       )}
+
+      {/* Background scan of the most-recent cluster job's tail logs for
+          external-link matches. User observability URLs typically appear in
+          job run output, not provision logs, so this is the primary source
+          of links on the cluster page. Renders nothing visible. */}
+      {!isHistoricalCluster &&
+        clusterData.cluster &&
+        Array.isArray(clusterJobData) &&
+        clusterJobData.length > 0 && (
+          <LatestJobLogLinkScanner
+            clusterName={clusterData.cluster}
+            jobs={clusterJobData}
+            workspace={clusterData.workspace}
+            onLinksExtracted={handleClusterLinksExtracted}
+          />
+        )}
     </div>
   );
 }
 
-function ProvisionLogs({ clusterName, numNodes }) {
+function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
@@ -744,6 +839,24 @@ function ProvisionLogs({ clusterName, numNodes }) {
     refreshTrigger: logsRefreshToken,
     onError: handleStreamError,
   });
+
+  // Scan provision logs against the merged built-in plus admin-configured
+  // URL patterns. Matches are reported up to the parent so the Details Card
+  // can render a "Links" row.
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+  useEffect(() => {
+    if (!displayLines || displayLines.length === 0) return;
+    const extracted = extractLinksFromLogs(
+      displayLines,
+      urlPatterns,
+      extractedLinksRef.current
+    );
+    extractedLinksRef.current = extracted;
+    if (onLinksExtracted && Object.keys(extracted).length > 0) {
+      onLinksExtracted(extracted);
+    }
+  }, [displayLines, urlPatterns, onLinksExtracted]);
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((t) => t + 1);
@@ -848,6 +961,99 @@ function ProvisionLogs({ clusterName, numNodes }) {
       )}
     </Card>
   );
+}
+
+/**
+ * Invisible component that streams the tail of the most-recent cluster
+ * job's logs once and reports any matching external-link URLs to the
+ * parent via onLinksExtracted. Re-runs when the latest job id changes
+ * (e.g., a new job is submitted to the cluster).
+ */
+function LatestJobLogLinkScanner({
+  clusterName,
+  jobs,
+  workspace,
+  onLinksExtracted,
+}) {
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+
+  // Pick the latest job by max numeric id. Job ids are monotonically
+  // increasing per cluster, so this is the most recently submitted job.
+  const latestJobId = useMemo(() => {
+    if (!Array.isArray(jobs) || jobs.length === 0) return null;
+    let maxId = null;
+    for (const j of jobs) {
+      const n = Number(j?.id);
+      if (Number.isFinite(n) && (maxId === null || n > maxId)) {
+        maxId = n;
+      }
+    }
+    return maxId;
+  }, [jobs]);
+
+  useEffect(() => {
+    if (!clusterName || latestJobId === null) return;
+
+    const controller = new AbortController();
+    let pendingLines = [];
+    let buffered = '';
+
+    const flush = () => {
+      if (pendingLines.length === 0) return;
+      const extracted = extractLinksFromLogs(
+        pendingLines,
+        urlPatterns,
+        extractedLinksRef.current
+      );
+      extractedLinksRef.current = extracted;
+      pendingLines = [];
+      if (onLinksExtracted && Object.keys(extracted).length > 0) {
+        onLinksExtracted(extracted);
+      }
+    };
+
+    const onNewLog = (chunk) => {
+      buffered += chunk;
+      const parts = buffered.split('\n');
+      buffered = parts.pop() || '';
+      if (parts.length > 0) {
+        pendingLines.push(...parts);
+      }
+    };
+
+    (async () => {
+      try {
+        // Match the bound that streamManagedJobLogs uses for its log viewer
+        // (sky/dashboard/src/data/connectors/jobs.jsx) so the cluster page's
+        // proactive scan sees the same window the managed-job page sees.
+        await streamClusterJobLogs({
+          clusterName,
+          jobId: latestJobId,
+          workspace,
+          onNewLog,
+          signal: controller.signal,
+          tail: 5000,
+        });
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          console.debug('LatestJobLogLinkScanner stream failed:', error);
+        }
+      } finally {
+        if (buffered) {
+          pendingLines.push(buffered);
+          buffered = '';
+        }
+        flush();
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [clusterName, latestJobId, workspace, urlPatterns, onLinksExtracted]);
+
+  return null;
 }
 
 export default ClusterDetails;

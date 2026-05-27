@@ -1265,6 +1265,21 @@ class JobController:
             await job_group_networking.setup_job_group_networking(
                 job_group_name, updated_handles)
 
+        # Mirror the dispatch in `_run_one_task`: give the recovery
+        # strategy first refusal at owning the per-task monitor loop so
+        # both code paths behave consistently. Strategies that return
+        # None fall through to `_monitor_one_task` below unchanged.
+        result = await executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=None,
+            cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
+            force_transit_to_recovering=force_transit_to_recovering,
+            on_recovery=on_recovery,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,

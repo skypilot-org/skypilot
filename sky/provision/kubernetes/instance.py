@@ -18,6 +18,7 @@ from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
@@ -62,8 +63,13 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
-COMMON_NON_PENDING_EVENT_REASONS = {
-    'Scheduled', 'Created', 'Started', 'Failed', 'Pulled'
+# Normal-type pod events that represent slow, legitimately-in-flight steps
+# whose state.waiting.reason is the uninformative 'ContainerCreating'.
+# Consulted only as a fallback when no Warning-type event is present.
+_PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
+    'Pulling',  # kubelet pulling image (can be minutes for large images)
+    'Provisioning',  # external CSI provisioner creating a PV
+    'WaitForFirstConsumer',  # late-binding storage class
 }
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
@@ -694,11 +700,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
 
-    def _check_init_containers(pod):
-        # Check if any of the init containers failed
-        # to start. Could be because the init container
-        # command failed or failed to pull image etc.
-        for init_status in pod.status.init_container_statuses:
+    def _check_init_containers(pod) -> Optional[Tuple[str, int, int]]:
+        """Check init containers for errors and return running container info.
+
+        Returns (name, 1-based index, total) of the currently running init
+        container, or None if none is running.
+        Raises KubernetesError if any init container failed.
+        """
+        init_statuses = pod.status.init_container_statuses
+        total = len(init_statuses)
+        running_info: Optional[Tuple[str, int, int]] = None
+        for idx, init_status in enumerate(init_statuses):
             init_terminated = init_status.state.terminated
             if init_terminated:
                 if init_terminated.exit_code != 0:
@@ -708,6 +720,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         'Failed to run init container for pod '
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
+            if (init_status.state.running is not None and running_info is None):
+                running_info = (init_status.name, idx + 1, total)
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
                     not in ['ContainerCreating', 'PodInitializing']):
@@ -715,12 +729,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 #  them as needed.
                 msg = init_waiting.message if (
                     init_waiting.message) else str(init_waiting)
+                unmasked = _unmask_crashloopbackoff_reason(init_status)
+                reason_text = (unmasked if unmasked is not None else
+                               (init_waiting.reason or 'Unknown'))
                 raise config_lib.KubernetesError(
-                    'Failed to create init container for pod '
-                    f'{pod.metadata.name}. Error details: {msg}.')
+                    f'Failed to create init container for pod '
+                    f'{pod.metadata.name}. Error details: '
+                    f'{reason_text}: {msg}.')
+        return running_info
 
     def _inspect_pod_status(pod):
-        # Check if pod is terminated/preempted/failed.
+        # Check if pod is terminated/preempted/failed (unchanged).
         if (pod.metadata.deletion_timestamp is not None or
                 pod.status.phase == 'Failed'):
             # Get the reason and write to cluster events before
@@ -733,40 +752,67 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 f'Pod {pod.metadata.name} failed: {condensed}')
 
         container_statuses = pod.status.container_statuses
-        # Continue if pod and all the containers within the
-        # pod are successfully created and running.
+        # Happy path: pod Running and every container Running (unchanged).
         if (pod.status.phase == 'Running' and container_statuses is not None and
                 all(container.state.running
                     for container in container_statuses)):
             return True, None
 
-        reason: Optional[str] = None
-        if pod.status.phase == 'Pending':
-            pending_reason = _get_pod_pending_reason(context, namespace,
-                                                     pod.metadata.name)
-            if pending_reason is not None:
-                reason, message = pending_reason
-                logger.debug(f'Pod {pod.metadata.name} is pending: '
-                             f'{reason}: {message}')
+        # Tier 1: container-status sweep. Computed once, consumed in both
+        # branches below.
+        container_reason = _get_pod_pending_reason_from_container_status(pod)
 
-            # Iterate over each container in pod to check their status
+        if pod.status.phase == 'Pending':
+            # Today's raise block -- control flow preserved, message enriched
+            # via _unmask_crashloopbackoff_reason when the waiting state is
+            # CrashLoopBackOff. msg body (waiting.message) is always preserved.
+            init_reason: Optional[str] = None
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    # If the container wasn't in 'ContainerCreating'
-                    # state, then we know pod wasn't scheduled or
-                    # had some other error, such as image pull error.
-                    # See list of possible reasons for waiting here:
-                    # https://stackoverflow.com/a/57886025
-                    waiting = container_status.state.waiting
-                    if waiting is not None:
-                        if waiting.reason == 'PodInitializing':
-                            _check_init_containers(pod)
-                        elif waiting.reason != 'ContainerCreating':
-                            msg = waiting.message if (
-                                waiting.message) else str(waiting)
-                            raise config_lib.KubernetesError(
-                                f'{waiting.reason}: {msg}')
-        return False, reason
+                    waiting = (container_status.state.waiting
+                               if container_status.state else None)
+                    if waiting is None:
+                        continue
+                    if waiting.reason == 'PodInitializing':
+                        running_init = _check_init_containers(pod)
+                        if running_init is not None:
+                            name, idx, total = running_init
+                            init_reason = (f'init container {name!r} '
+                                           f'running ({idx}/{total})')
+                        else:
+                            init_reason = 'init container running'
+                    elif waiting.reason != 'ContainerCreating':
+                        msg = waiting.message if (
+                            waiting.message) else str(waiting)
+                        unmasked = _unmask_crashloopbackoff_reason(
+                            container_status)
+                        reason_text = (unmasked if unmasked is not None else
+                                       (waiting.reason or 'Unknown'))
+                        raise config_lib.KubernetesError(
+                            f'{reason_text}: {msg}')
+
+            # Init container reason wins over all event-based reasons,
+            # since events can retain stale "Pulling image" entries long
+            # after the pull completed.  Otherwise, Tier 1 (container
+            # status) wins; fall back to Tier 2/3 events.
+            reason: Optional[str] = init_reason or container_reason
+            event_message: Optional[str] = None
+            if reason is None:
+                pending_reason = _get_pod_pending_reason(
+                    context, namespace, pod.metadata.name)
+                if pending_reason is not None:
+                    reason, event_message = pending_reason
+            if reason is not None:
+                log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
+                if event_message:
+                    log_msg += f': {event_message}'
+                logger.debug(log_msg)
+            return False, reason
+
+        # phase == 'Running' but not all containers running (e.g. one is in
+        # CrashLoopBackOff). Surface tier-1's pending reason -- previously this
+        # returned (False, None) silently, masking OOMKilled etc.
+        return False, container_reason
 
     missing_pods_retry = 0
     last_status_msg: Optional[str] = None
@@ -1774,6 +1820,64 @@ def cleanup_cluster_resources(
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
+# The probe runs as soon as ray-installation finishes in step 2 of the
+# pod bootstrap, typically within tens of seconds of the pod going
+# Running. 60s gives the common case plenty of slack without pinning
+# every status refresh during a pod restart to a multi-minute hang.
+_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S = 60
+_HOST_NETWORK_SSHD_WAIT_INTERVAL_S = 2
+
+
+def _read_host_network_sshd_ports(cluster_name_on_cloud: str, namespace: str,
+                                  context: Optional[str],
+                                  expected_pods: List[str]) -> Dict[str, int]:
+    """Read each pod's probed sshd port from the hostNetwork ConfigMap.
+
+    Polls until every entry in ``expected_pods`` is present (or the
+    timeout elapses); returning partial state would freeze every
+    subsequent SSH at port 22 until the next refresh.
+    """
+    if not expected_pods:
+        return {}
+    name = host_network_probe.ray_ports_configmap_name(cluster_name_on_cloud)
+    expected = set(expected_pods)
+    deadline = time.monotonic() + _HOST_NETWORK_SSHD_WAIT_TIMEOUT_S
+    while True:
+        out: Dict[str, int] = {}
+        try:
+            cm = kubernetes.core_api(context).read_namespaced_config_map(
+                name=name, namespace=namespace)
+        except kubernetes.api_exception() as e:
+            if e.status != 404:
+                raise
+            cm = None
+        data = (cm.data or {}) if cm is not None else {}
+        for key, value in data.items():
+            if not key.startswith(host_network_probe.SSHD_KEY_PREFIX):
+                continue
+            podname = common_utils.removeprefix(
+                key, host_network_probe.SSHD_KEY_PREFIX)
+            try:
+                out[podname] = int(value)
+            except ValueError:
+                logger.warning(
+                    f'ConfigMap {namespace}/{name} has non-integer value '
+                    f'for {key!r}: {value!r}. SSH to {podname!r} will '
+                    f'fall back to port 22 and hit the K8s node\'s sshd.')
+        if expected.issubset(out.keys()):
+            return out
+        if time.monotonic() >= deadline:
+            missing = sorted(expected - out.keys())
+            logger.warning(
+                f'hostNetwork sshd ports for {missing} did not appear '
+                f'in ConfigMap {namespace}/{name} within '
+                f'{_HOST_NETWORK_SSHD_WAIT_TIMEOUT_S}s — `ssh <cluster>` '
+                f'to those pods will fail until the next '
+                f'`sky status -r`.')
+            return out
+        time.sleep(_HOST_NETWORK_SSHD_WAIT_INTERVAL_S)
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -1795,9 +1899,25 @@ def get_cluster_info(
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace, context)
 
+    # Each hostNetwork pod's sshd binds a probed port (host:22 is the
+    # K8s node's own sshd). The SSH config writer needs that port per
+    # pod, so wait for every hostNetwork pod's entry to land in the
+    # ConfigMap before caching the result.
+    host_network_pods = [
+        name for name, pod in running_pods.items() if pod.spec.host_network
+    ]
+    pod_sshd_ports = _read_host_network_sshd_ports(cluster_name_on_cloud,
+                                                   namespace, context,
+                                                   host_network_pods)
+
     head_pod_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
+        # Under hostNetwork the pod's network namespace is the host's, so
+        # pod_ip is the K8s node's host IP. SkyPilot injects a required
+        # per-cluster podAntiAffinity for hostNetwork clusters, so every
+        # pod of a cluster is on its own node and thus has a distinct,
+        # routable host IP — no per-pod loopback disambiguation needed.
         internal_ip = pod.status.pod_ip
         # Get the k8s node name the pod is running on (for dashboard display)
         k8s_node_name = getattr(pod.spec, 'node_name', None)
@@ -1806,7 +1926,7 @@ def get_cluster_info(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
                 external_ip=None,
-                ssh_port=port,
+                ssh_port=pod_sshd_ports.get(pod_name, port),
                 tags=pod.metadata.labels,
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
@@ -2198,12 +2318,83 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reverse=True)
 
 
+def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
+    """Return `last_state.terminated.reason` iff cs is in CrashLoopBackOff
+    and a previous terminated reason is available; else None.
+
+    Used to surface OOMKilled / Error / etc. instead of bare CrashLoopBackOff.
+    """
+    waiting = cs.state.waiting if cs.state else None
+    if waiting is None or waiting.reason != 'CrashLoopBackOff':
+        return None
+    last_term = cs.last_state.terminated if cs.last_state else None
+    if last_term is None or not last_term.reason:
+        return None
+    return last_term.reason
+
+
+def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
+    """Tier-1 sweep: derive a pending reason from pod.status.container_statuses.
+
+    For each container in turn:
+      1. state.waiting: on ContainerCreating/PodInitializing, fall through to
+         checks 2 and 3 on the *same* container (a transient-waiting current
+         state can coexist with a prior bad termination — surface the prior
+         fault); on CrashLoopBackOff, unmask via last_state.terminated; else
+         return the waiting reason.
+      2. state.terminated: if exit_code != 0, return terminated.reason.
+      3. last_state.terminated: if exit_code != 0 and reason present, return
+         it (race-window: container restarted between iterations).
+    If a container matches none of (1)-(3), advance to the next container.
+    Returns None only after exhausting all containers.
+
+    Returns a bare reason string (e.g. "OOMKilled", not
+    "OOMKilled (exit 137)") -- the exit-code suffix is intentionally omitted
+    because it adds cardinality that defeats nop_if_duplicate dedup on the
+    LAUNCH_PROGRESS event.
+    """
+    container_statuses = getattr(getattr(pod, 'status', None),
+                                 'container_statuses', None) or []
+    for cs in container_statuses:
+        # 1. state.waiting
+        waiting = cs.state.waiting if cs.state else None
+        if waiting is not None:
+            if waiting.reason in ('ContainerCreating', 'PodInitializing'):
+                # Transient; fall through to checks 2/3 on this container.
+                pass
+            elif waiting.reason == 'CrashLoopBackOff':
+                unmasked = _unmask_crashloopbackoff_reason(cs)
+                return unmasked or 'CrashLoopBackOff'
+            else:
+                return waiting.reason
+
+        # 2. state.terminated (currently terminated, between restarts)
+        terminated = cs.state.terminated if cs.state else None
+        if terminated is not None and terminated.exit_code != 0:
+            return terminated.reason or 'Terminated'
+
+        # 3. last_state.terminated (previous run terminated badly)
+        last_term = cs.last_state.terminated if cs.last_state else None
+        if (last_term is not None and last_term.exit_code is not None and
+                last_term.exit_code != 0 and last_term.reason):
+            return last_term.reason
+
+    return None
+
+
 def _get_pod_pending_reason(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
 
-    Returns a (reason, message) tuple about why the pod is pending (e.g.,
-    ("FailedMount", "hostPath type check failed")) or None if no reason found.
+    Two-pass scan over the event list (sorted newest-first by _get_pod_events):
+      1. Tier 2 -- return the newest event with event.type == 'Warning'.
+      2. Tier 3 -- return the newest event whose reason is in
+         _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
+    Warnings always beat allow-listed Normals, regardless of timestamp ordering
+    in the event window -- a FailedScheduling Warning is a more truthful pending
+    reason than a Pulling Normal from a doomed retry.
+
+    Returns a (reason, message) tuple, or None if neither pass matches.
     """
     try:
         pod_events = _get_pod_events(context, namespace, pod_name)
@@ -2214,15 +2405,15 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
+    # Tier 2: Warning events.
     for event in pod_events:
-        # Omit common events that does not indicate a pending reason.
-        # We could also filter by event type 'Warning' or 'Error',
-        # but there might be useful 'Normal' events such as pulling
-        # image that we want to surface to the user.
-        if event.reason not in COMMON_NON_PENDING_EVENT_REASONS:
-            reason = event.reason or 'Unknown'
-            message = event.message or ''
-            return reason, message
+        if event.type == 'Warning':
+            return event.reason or 'Unknown', event.message or ''
+
+    # Tier 3: allow-listed Normal events.
+    for event in pod_events:
+        if event.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST:
+            return event.reason, event.message or ''
 
     return None
 

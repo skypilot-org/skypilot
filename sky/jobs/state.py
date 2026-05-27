@@ -77,7 +77,11 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('job_name', sqlalchemy.Text),
     sqlalchemy.Column('resources', sqlalchemy.Text),
     sqlalchemy.Column('submitted_at', sqlalchemy.Float),
-    sqlalchemy.Column('status', sqlalchemy.Text),
+    # Indexed because non-terminal-status filtering on this column is on the
+    # hot path for the pool dashboard (per-pool job listing) and skip_finished
+    # queries; without it the filter is a full table scan over all (including
+    # finished) tasks.
+    sqlalchemy.Column('status', sqlalchemy.Text, index=True),
     sqlalchemy.Column('run_timestamp', sqlalchemy.Text),
     sqlalchemy.Column('start_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('end_at', sqlalchemy.Float, server_default=None),
@@ -138,10 +142,17 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('original_user_yaml_content',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None),
+    # Indexed: every per-pool dashboard query and pool_status request filters
+    # by this column. Without an index a job_info table with tens of thousands
+    # of (mostly finished) rows turns each pool lookup into a full scan.
+    sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None, index=True),
+    # Indexed: pool_status fetches per-replica used_by lists by filtering on
+    # current_cluster_name; the index keeps that fast when many jobs share
+    # the same pool.
     sqlalchemy.Column('current_cluster_name',
                       sqlalchemy.Text,
-                      server_default=None),
+                      server_default=None,
+                      index=True),
     sqlalchemy.Column('job_id_on_pool_cluster',
                       sqlalchemy.Integer,
                       server_default=None),
@@ -2249,6 +2260,46 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
+
+
+def get_nonterminal_job_ids_by_pool_grouped(
+        pool: str) -> Dict[Optional[str], List[int]]:
+    """Get nonterminal job ids in a pool, grouped by current_cluster_name.
+
+    Equivalent to calling get_nonterminal_job_ids_by_pool once per replica
+    (plus once for the pool as a whole), but executed in a single query so
+    callers like pool_status avoid the N+1 round-trips that dominate
+    dashboard latency when there are many finished jobs.
+
+    Returns:
+        A dict mapping current_cluster_name to the list of nonterminal
+        spot_job_ids assigned to that cluster. Jobs not yet bound to a
+        specific cluster (current_cluster_name IS NULL) are grouped under
+        the ``None`` key. Each list is sorted by spot_job_id ascending.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = sqlalchemy.select(
+            job_info_table.c.current_cluster_name,
+            spot_table.c.spot_job_id,
+        ).distinct().select_from(
+            spot_table.outerjoin(
+                job_info_table, spot_table.c.spot_job_id ==
+                job_info_table.c.spot_job_id)).where(
+                    sqlalchemy.and_(
+                        ~spot_table.c.status.in_([
+                            status.value
+                            for status in ManagedJobStatus.terminal_statuses()
+                        ]),
+                        job_info_table.c.pool == pool,
+                    )).order_by(spot_table.c.spot_job_id.asc())
+        rows = session.execute(query).fetchall()
+        result: Dict[Optional[str], List[int]] = {}
+        for cluster_name, job_id in rows:
+            if job_id is None:
+                continue
+            result.setdefault(cluster_name, []).append(job_id)
+        return result
 
 
 def _is_any_of_or_ordered(resource_config: Dict[str, Any]) -> bool:

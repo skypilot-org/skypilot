@@ -591,15 +591,40 @@ def _start(
         controller_resources = controller_utils.get_controller_resources(
             controller, [])
         # All resources should have the same autostop config.
-        controller_autostop_config = list(
-            controller_resources)[0].autostop_config
+        controller_resource = list(controller_resources)[0]
+        controller_autostop_config = controller_resource.autostop_config
         if (controller_autostop_config is not None and
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
-            hook = controller_autostop_config.hook
-            hook_timeout = controller_autostop_config.hook_timeout
+            # `controller_resource.hooks` is populated only when the user
+            # wrote the legacy `autostop.hook` field under
+            # `*.controller.resources` in ~/.sky/config.yaml (master-compat
+            # surface — the new `hooks:` form is rejected at schema time
+            # by _get_controller_schema). Resources.from_yaml_config
+            # routes the legacy field into _hooks with events=[stop] or
+            # events=[down] depending on autostop.down.
+            #
+            # Pull it back out into the pre-v7 wire fields
+            # (`hook` / `hook_timeout`) so non-consolidated controllers
+            # running an older skylet (< SKYLET_LIB_VERSION 7) — i.e.
+            # controllers that haven't been re-launched since the client
+            # upgrade — still receive the hook via the legacy
+            # SetAutostop fields. AutostopCodeGen.set_autostop dual-emits
+            # both `hook` and `hooks`, so v7+ skylets get it via either
+            # path; this loop only matters for the v<7 case.
+            #
+            # TODO(zpoint): remove after v0.15.0 — aligned with the
+            # autostop.hook removal already pinned at v0.15.0 in
+            # sky/utils/schemas.py:_AUTOSTOP_SCHEMA.
+            legacy_event = ('down'
+                            if controller_autostop_config.down else 'stop')
+            for entry in (controller_resource.hooks or []):
+                if legacy_event in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
@@ -648,12 +673,19 @@ def _start(
         # For controller clusters, hook comes from controller_autostop_config.
         # For regular clusters, hook is None so it will be inherited from the
         # existing config on the remote cluster.
+        hooks_list: Optional[List[Dict[str, Any]]] = None
+        if controller is not None and controller_resources:
+            # pylint: disable=unsubscriptable-object
+            hooks_list = list(controller_resources)[0].hooks
+        elif handle.launched_resources is not None:
+            hooks_list = handle.launched_resources.hooks
         backend.set_autostop(handle,
                              idle_minutes_to_autostop,
                              wait_for,
                              down,
                              hook=hook,
-                             hook_timeout=hook_timeout)
+                             hook_timeout=hook_timeout,
+                             hooks=hooks_list)
     return handle
 
 
@@ -854,7 +886,72 @@ def down(cluster_name: str,
                              terminate=True)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    _maybe_run_down_hooks(handle, backend, cluster_name)
     backend.teardown(handle, terminate=True, purge=purge)
+
+
+def _maybe_run_teardown_hooks(handle: 'backends.ResourceHandle',
+                              backend: 'backends.Backend', cluster_name: str,
+                              event: str) -> None:
+    """Runs ``event`` lifecycle hooks on the head before teardown.
+
+    Handles both ``down`` (``sky down``) and ``stop`` (``sky stop``)
+    user-initiated teardowns. Best-effort: if the head is unreachable
+    or running the hooks fails, we log a warning and proceed with
+    teardown so users can never be stuck. Per-node exactly-once
+    semantics are enforced on the head via the CAS in
+    ``hook_executor.try_claim_teardown``.
+    """
+    # Only the VM/Ray backend is supported; other backends simply skip.
+    if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
+        return
+    # Claim the event slot unconditionally — even if no hook declares
+    # this event. For 'down', the claim blocks the SIGTERM handler
+    # (kubelet's SIGTERM at K8s pod delete) from later claiming
+    # 'preemption' and firing the preemption hook on what was
+    # intentionally `sky down`. For 'stop', it blocks a racing
+    # idle-timer fire on the head. `hook_executor.run(event, hooks)`
+    # is a no-op when no matching hooks exist.
+    codegen = ('from sky.skylet import autostop_lib, hook_executor\n'
+               'hooks = autostop_lib.get_hooks() or []\n'
+               f'if hook_executor.try_claim_teardown({event!r}):\n'
+               f'    hook_executor.run({event!r}, hooks)\n')
+    # Use SKY_PYTHON_CMD so the codegen sees the sky/ installation on the
+    # remote — plain `python3` may point at a minimal system interpreter.
+    cmd = f'{constants.SKY_PYTHON_CMD} -c {shlex.quote(codegen)}'
+    try:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Running {event} hook on {cluster_name!r}')):
+            backend.run_on_head(
+                handle,
+                cmd,
+                stream_logs=False,
+                require_outputs=False,
+            )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to run {event} hook on {cluster_name!r}: {e}. '
+                       'Proceeding with teardown.')
+
+
+def _maybe_run_down_hooks(handle: 'backends.ResourceHandle',
+                          backend: 'backends.Backend',
+                          cluster_name: str) -> None:
+    """Runs ``down`` lifecycle hooks on the head before teardown."""
+    _maybe_run_teardown_hooks(handle, backend, cluster_name, event='down')
+
+
+def _maybe_run_stop_hooks(handle: 'backends.ResourceHandle',
+                          backend: 'backends.Backend',
+                          cluster_name: str) -> None:
+    """Runs ``stop`` lifecycle hooks on the head before stop.
+
+    Fires on user-initiated ``sky stop``. The idle-timer-driven stop
+    path (``events.StopEvent``) fires the ``stop`` event independently
+    on the head with no client involvement, so this codegen only runs
+    for the user-command path.
+    """
+    _maybe_run_teardown_hooks(handle, backend, cluster_name, event='stop')
 
 
 @usage_lib.entrypoint
@@ -933,6 +1030,7 @@ def stop(cluster_name: str,
                              terminate=False)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    _maybe_run_stop_hooks(handle, backend, cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
 
 
@@ -982,7 +1080,7 @@ def autostop(
           The script runs before the cluster is stopped or torn down. If the
           hook fails, autostop will still proceed but a warning will be logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
-          DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+          DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
           be terminated if it exceeds this timeout.
 
     Raises:
@@ -1039,12 +1137,15 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    hooks_list = (handle.launched_resources.hooks
+                  if handle.launched_resources is not None else None)
     backend.set_autostop(handle,
                          idle_minutes,
                          wait_for,
                          down,
                          hook=hook,
-                         hook_timeout=hook_timeout)
+                         hook_timeout=hook_timeout,
+                         hooks=hooks_list)
 
 
 # ==================
@@ -1297,13 +1398,16 @@ def tail_logs(cluster_name: str,
 
 
 @usage_lib.entrypoint
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs of a cluster.
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails per-event lifecycle-hook logs of a cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of 'stop', 'preemption', 'down'. When ``None``,
+            auto-selects whichever hook log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
@@ -1321,15 +1425,20 @@ def tail_autostop_logs(cluster_name: str,
     Returns:
         Return code 0 on success, non-zero on failure.
     """
-    # Check the status of the cluster.
+    if event is not None and event not in constants.HOOK_EVENTS:
+        raise ValueError(f'Invalid hook event {event!r}. Must be one of '
+                         f'{list(constants.HOOK_EVENTS)}.')
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        operation='tailing autostop logs',
+        operation='tailing hook logs',
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    returnval = backend.tail_hook_logs(handle,
+                                       event=event,
+                                       follow=follow,
+                                       tail=tail)
     return returnval
 
 
