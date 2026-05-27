@@ -168,7 +168,10 @@
                                     "type": "boolean"
                                 },
                                 "gpuMetricsPath": {
-                                    "type": "string"
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ]
                                 },
                                 "interval": {
                                     "type": "string"

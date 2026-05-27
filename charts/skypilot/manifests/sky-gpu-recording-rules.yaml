@@ -28,13 +28,18 @@ groups:
       # kube-state-metrics emits `nvidia_com_gpu` (dot→underscore) on the
       # `resource` label. Join with DCGM on (cluster, node=Hostname) to
       # attach a modelName label — each pod's GPU type is the node's.
+      # The DCGM side is normalized to a value of 1 (`0 * … + 1`) so the
+      # `*` acts as a pure label-join: without it we'd multiply the GPU
+      # request count by DCGM_FI_DEV_GPU_UTIL (0-100), reporting e.g.
+      # 8 requested × 85% util = 680 "allocated GPUs".
       - record: sky:gpu_allocated_total
         expr: |
           sum by (cluster, modelName) (
             kube_pod_container_resource_requests{resource="nvidia_com_gpu"}
             * on (cluster, node) group_left(modelName)
               label_replace(
-                max by (cluster, Hostname, modelName) (DCGM_FI_DEV_GPU_UTIL),
+                0 * max by (cluster, Hostname, modelName) (DCGM_FI_DEV_GPU_UTIL)
+                + 1,
                 "node", "$1", "Hostname", "(.+)"
               )
           )

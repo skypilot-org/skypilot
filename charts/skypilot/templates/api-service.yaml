@@ -4,6 +4,11 @@ kind: Service
 metadata:
   name: {{ $fullName }}-api-service
   namespace: {{ .Release.Namespace }}
+  # Service-level label so the optional ServiceMonitor (api-servicemonitor.yaml)
+  # can select this Service by metadata. The `app:` under spec.selector below
+  # is the pod selector and is NOT visible to ServiceMonitor matching.
+  labels:
+    app: {{ $fullName }}-api
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
   ports:

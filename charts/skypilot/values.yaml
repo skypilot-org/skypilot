@@ -175,6 +175,7 @@ apiService:
       additionalLabels: {}
       # Set to null to skip the /gpu-metrics endpoint when the API
       # server is deployed without GPU contexts.
+      # @schema type: [string, null]
       gpuMetricsPath: /gpu-metrics
     # Optional: render a Prometheus Operator PrometheusRule CRD that
     # carries the GPU-availability recording rules shipped at
