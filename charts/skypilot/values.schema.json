@@ -146,40 +146,6 @@
                         },
                         "port": {
                             "type": "integer"
-                        },
-                        "prometheusRule": {
-                            "type": "object",
-                            "properties": {
-                                "additionalLabels": {
-                                    "type": "object"
-                                },
-                                "enabled": {
-                                    "type": "boolean"
-                                }
-                            }
-                        },
-                        "serviceMonitor": {
-                            "type": "object",
-                            "properties": {
-                                "additionalLabels": {
-                                    "type": "object"
-                                },
-                                "enabled": {
-                                    "type": "boolean"
-                                },
-                                "gpuMetricsPath": {
-                                    "type": [
-                                        "string",
-                                        "null"
-                                    ]
-                                },
-                                "interval": {
-                                    "type": "string"
-                                },
-                                "scrapeTimeout": {
-                                    "type": "string"
-                                }
-                            }
                         }
                     }
                 },

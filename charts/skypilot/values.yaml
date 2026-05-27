@@ -151,40 +151,6 @@ apiService:
     enabled: false
     # The port to expose the metrics on, default to 9090.
     port: 9090
-    # Optional: render a Prometheus Operator ServiceMonitor CRD targeting
-    # the api-server's /metrics (and /gpu-metrics) endpoint. Off by
-    # default — only relevant for clusters running prometheus-operator
-    # (kube-prometheus-stack etc.). For vanilla Prometheus the existing
-    # pod scrape annotation path keeps working without this.
-    serviceMonitor:
-      enabled: false
-      # How often Prometheus should scrape. 30s matches the collector
-      # cache TTL inside the API server — finer scrapes return the same
-      # cached snapshot.
-      interval: 30s
-      # Per-scrape timeout. Must be GREATER than the API server's
-      # per-context federation timeout (20s for /gpu-metrics, see
-      # sky/server/metrics.py:_PER_CONTEXT_TIMEOUT_SECONDS) so a slow
-      # context doesn't cause Prometheus to abort mid-response, and
-      # LESS-OR-EQUAL to `interval` (30s). 25s sits comfortably in the
-      # middle.
-      scrapeTimeout: 25s
-      # Extra labels added to the ServiceMonitor object — typically the
-      # `release:` label that the Operator's serviceMonitorSelector
-      # expects (commonly `release: kube-prometheus-stack`).
-      additionalLabels: {}
-      # Set to null to skip the /gpu-metrics endpoint when the API
-      # server is deployed without GPU contexts.
-      # @schema type: [string, null]
-      gpuMetricsPath: /gpu-metrics
-    # Optional: render a Prometheus Operator PrometheusRule CRD that
-    # carries the GPU-availability recording rules shipped at
-    # charts/skypilot/manifests/sky-gpu-recording-rules.yaml. Same
-    # prerequisite as serviceMonitor — only useful when prometheus-operator
-    # is installed.
-    prometheusRule:
-      enabled: false
-      additionalLabels: {}
   # Custom annotations for the API server deployment
   # @schema type: [object, null]
   annotations: null
