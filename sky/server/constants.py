@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 51  # lazy-load replica handle in serve/pool status
+API_VERSION = 52  # lifecycle hooks: /hook_logs route + tail_hook_logs SDK
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

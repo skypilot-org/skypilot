@@ -19,6 +19,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import hook_executor
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -189,8 +190,12 @@ class UsageHeartbeatReportEvent(SkyletEvent):
         )
 
 
-class AutostopEvent(SkyletEvent):
-    """Skylet event for autostop.
+class StopEvent(SkyletEvent):
+    """Skylet event for the idle-timer-driven teardown path.
+
+    Fires either the ``stop`` hook (when ``autostop.down`` is false)
+    or the ``down`` hook (autodown, when ``autostop.down`` is true)
+    before issuing the actual cluster teardown.
 
     Idleness timer gets set to 0 whenever:
       - A first autostop setting is set. By "first", either there's never any
@@ -252,20 +257,29 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _execute_hook_if_present(self, autostop_config) -> None:
-        """Execute autostop hook if present in the config."""
-        hook = autostop_config.hook
-        hook_timeout = autostop_config.hook_timeout
-        if hook:
-            logger.info(f'Executing autostop hook before stopping cluster '
-                        f'(timeout: {hook_timeout}s)...')
-            hook_success = autostop_lib.execute_autostop_hook(
-                hook, hook_timeout)
-            if not hook_success:
-                logger.warning(
-                    'Autostop hook failed, but continuing with cluster stop. '
-                    'Check logs for details.')
-            else:
-                logger.info('Autostop hook completed successfully.')
+        """Run stored hooks via hook_executor under CAS.
+
+        Routes idle-timer-driven teardown to the right event:
+          - ``autostop.down=False`` (pause): fires ``stop`` hooks.
+          - ``autostop.down=True`` (autodown): fires ``down`` hooks
+            (same event as ``sky down`` — both are teardowns).
+
+        The CAS first-in-wins flag ensures we don't double-fire if
+        another teardown trigger (SIGTERM from preemption, etc.) has
+        already claimed this teardown.
+        """
+        event = (hook_executor.DOWN
+                 if autostop_config.down else hook_executor.STOP)
+        if not hook_executor.try_claim_teardown(event):
+            logger.info('Teardown already claimed by '
+                        f'{hook_executor.current_teardown_event()!r}; skipping '
+                        f'{event!r} hooks.')
+            return
+        hooks = autostop_lib.get_hooks()
+        if hooks:
+            logger.info(f'Executing {len(hooks)} stored lifecycle hook(s) for '
+                        f'{event!r}.')
+            hook_executor.run(event, hooks)
 
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
@@ -288,7 +302,9 @@ class AutostopEvent(SkyletEvent):
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
 
-            # Execute autostop hook if provided (for old provisioner path)
+            # Execute stop/down event hook if provided (for old provisioner
+            # path). The method claims the `stop` slot when autostop.down is
+            # false and the `down` slot for autodown.
             self._execute_hook_if_present(autostop_config)
 
             is_cluster_multinode = config['max_workers'] > 0
@@ -370,7 +386,9 @@ class AutostopEvent(SkyletEvent):
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
 
-        # Execute autostop hook if provided
+        # Execute stop/down event hook if provided. The method claims the
+        # `stop` slot when autostop.down is false and the `down` slot for
+        # autodown.
         self._execute_hook_if_present(autostop_config)
 
         cluster_name_on_cloud = cluster_config['cluster_name']

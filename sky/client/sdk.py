@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -56,6 +57,7 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1157,40 +1159,52 @@ def tail_provision_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(52)
 @annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails a per-event lifecycle-hook log on the cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of ``stop``, ``preemption``, ``down``. When None,
+            auto-selects whichever log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
     Returns:
         Exit code 0 on streaming success; non-zero on failure.
-
-    Request Raises:
-        ValueError: if arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
-        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
     """
-    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
-                                     follow=follow,
-                                     tail=tail)
-
+    body = payloads.HookLogsBody(cluster_name=cluster_name,
+                                 event=event,
+                                 follow=follow,
+                                 tail=tail)
     response = server_common.make_authenticated_request(
-        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+        'POST', '/hook_logs', json=json.loads(body.model_dump_json()))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     return stream_and_get(request_id)
+
+
+# TODO(zpoint): drop the tail_autostop_logs deprecation alias after
+# v0.15.0. Replacement: tail_hook_logs(cluster_name, event='stop', ...).
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+    The autostop event was renamed to ``stop`` in the generalized
+    lifecycle-hooks framework. This shim emits a one-line stderr
+    deprecation warning and delegates to :func:`tail_hook_logs` so
+    master-version code keeps working through the v0.15.0 grace window.
+    """
+    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
+    return tail_hook_logs(cluster_name=cluster_name,
+                          event='stop',
+                          follow=follow,
+                          tail=tail)
 
 
 @usage_lib.entrypoint
@@ -1494,7 +1508,7 @@ def autostop(
             hook fails, autostop will still proceed but a warning will be
             logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
             be terminated if it exceeds this timeout.
 
     Returns:
@@ -2709,7 +2723,7 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
-def _try_polling_auth(endpoint: str) -> Optional[str]:
+def _try_polling_auth(endpoint: str, no_browser: bool = False) -> Optional[str]:
     """Try the polling-based authentication flow."""
     try:
         # Generate code verifier (random secret) and challenge (hash)
@@ -2717,17 +2731,22 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
         # Open browser to authorization page. The polling flow does not
-        # require the browser to be on this machine, so if we cannot open
-        # one locally, just ask the user to visit the URL themselves.
+        # require the browser to be on this machine, so if --no-browser was
+        # passed or we cannot open one locally, just ask the user to visit
+        # the URL themselves.
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if common_utils.open_browser(auth_url):
+        browser_opened = False
+        if not no_browser:
+            browser_opened = common_utils.open_browser(auth_url)
+            if not browser_opened:
+                logger.debug('Failed to open browser.')
+        if browser_opened:
             click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
                        f'{colorama.Style.RESET_ALL}\n'
                        f'Please click "Authorize" to complete login.\n'
                        f'{colorama.Style.DIM}Press ctrl+c to fall back to '
                        f'legacy auth method.{colorama.Style.RESET_ALL}')
         else:
-            logger.debug('Failed to open browser.')
             click.echo(f'{colorama.Fore.GREEN}Open this URL to complete '
                        f'login:{colorama.Style.RESET_ALL}\n\n'
                        f'{colorama.Style.BRIGHT}{auth_url}'
@@ -2766,8 +2785,14 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         return None
 
 
-def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+def _try_localhost_callback_auth(endpoint: str,
+                                 no_browser: bool = False) -> Optional[str]:
     """Try the localhost callback authentication flow (legacy)."""
+    if no_browser:
+        # This flow requires the browser to redirect back to a localhost port
+        # on this machine, so it cannot work without a local browser.
+        logger.debug('Skipping localhost callback flow: --no-browser is set.')
+        return None
     server: Optional[oauth_lib.HTTPServer] = None
     try:
         callback_port = common_utils.find_free_port(8000)
@@ -2831,7 +2856,8 @@ def _try_manual_token_entry(endpoint: str) -> Optional[str]:
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
               relogin: bool = False,
-              service_account_token: Optional[str] = None) -> None:
+              service_account_token: Optional[str] = None,
+              no_browser: bool = False) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -2845,6 +2871,9 @@ def api_login(endpoint: Optional[str] = None,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
         relogin: Whether to force relogin with OAuth2 when enabled.
         service_account_token: Service account token for authentication.
+        no_browser: If True, do not attempt to open a browser locally; print
+            the auth URL and let the user open it themselves. Skips the
+            localhost-callback flow, which requires a local browser.
 
     Returns:
         None
@@ -2940,11 +2969,12 @@ def api_login(endpoint: Optional[str] = None,
         # 3. Manual token entry
         remote_api_version = versions.get_remote_api_version()
         if remote_api_version is not None and remote_api_version >= 30:
-            token = _try_polling_auth(endpoint)
+            token = _try_polling_auth(endpoint, no_browser=no_browser)
 
         if token is None:
             # Polling auth not available or failed, try localhost callback
-            token = _try_localhost_callback_auth(endpoint)
+            token = _try_localhost_callback_auth(endpoint,
+                                                 no_browser=no_browser)
 
         if token is None:
             # All automatic methods failed, fall back to manual entry

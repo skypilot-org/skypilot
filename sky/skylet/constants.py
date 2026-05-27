@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import enum
 from typing import List, Tuple
 
 from packaging import version
@@ -161,17 +162,48 @@ SKYLET_VERSION = '37'  # log_lib.tail_logs supports tail_offset.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
+SKYLET_LIB_VERSION = 7  # Generalized lifecycle-hooks framework.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+# TODO(zpoint): legacy autostop-hook log path, kept so the new
+# tail_hook_logs(event='stop') can fall back to it on clusters
+# launched before the lifecycle-hooks framework. Remove after v0.15.0
+# (aligned with the autostop.hook removal pinned at v0.15.0 in
+# sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
 AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
+# Lifecycle-hooks framework — per-event log directory on cluster nodes.
+HOOK_LOG_DIR = '.sky/hooks'
+
+
+class LifecycleEvent(str, enum.Enum):
+    """The three lifecycle events that can trigger a hook.
+
+    Subclasses ``str`` so direct equality comparisons against the
+    canonical string spellings keep working (e.g.,
+    ``LifecycleEvent.STOP == 'stop'``). Use this enum at
+    callsites that handle events as identifiers; user-facing surfaces
+    (YAML, CLI help, log messages) continue to use the string forms.
+
+    Naming convention follows k8s: events describe lifecycle position
+    (``stop``, ``down``), not trigger. Autodown (idle timer with
+    ``autostop.down: true``) fires ``down`` — not ``stop`` — because
+    the outcome is teardown, not pause.
+    """
+    STOP = 'stop'
+    PREEMPTION = 'preemption'
+    DOWN = 'down'
+
+
+# Backwards-compatible tuple of the three event strings.
+HOOK_EVENTS = tuple(e.value for e in LifecycleEvent)
+
 # Autostop hook timeout default (1 hour in seconds)
-DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
+DEFAULT_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'

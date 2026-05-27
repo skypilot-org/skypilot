@@ -600,7 +600,7 @@ def generate_python_sdk():
             'cancel',
             'tail_logs',
             'tail_provision_logs',
-            'tail_autostop_logs',
+            'tail_hook_logs',
             'download_logs',
         ],
         'Managed Jobs': [

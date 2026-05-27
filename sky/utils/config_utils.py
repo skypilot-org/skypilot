@@ -29,6 +29,9 @@ _PATCH_MERGE_KEYS = {
     'topologySpreadConstraints': 'topologyKey',
     'ports': 'containerPort',
     'volumeDevices': 'devicePath',
+    # Container-level DRA resource claim refs (Container.resources.claims),
+    # keyed by 'name' per the Kubernetes listMapKey.
+    'claims': 'name',
     # Atomic list fields - replaced entirely, not merged item-by-item
     'args': None,
     'command': None,

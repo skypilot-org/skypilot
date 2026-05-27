@@ -34,13 +34,28 @@ DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
-    """Implementation of the AutostopService gRPC service."""
+    """Implementation of the AutostopService gRPC service.
+
+    Naming note: ``AutostopService`` predates the generalized
+    lifecycle-hooks framework — it is logically a "cluster metadata"
+    service now (autostop config + hooks list). The class name is
+    bound to the proto service name for gRPC framework dispatch, so
+    it stays autostop-named until the proto is renamed via a parallel
+    ``SetHooks`` RPC. See the proto file for the migration plan.
+    """
 
     def SetAutostop(  # type: ignore[return]
             self, request: autostopv1_pb2.SetAutostopRequest,
             context: grpc.ServicerContext
     ) -> autostopv1_pb2.SetAutostopResponse:
-        """Sets autostop configuration for the cluster."""
+        """Sets autostop configuration AND the lifecycle-hooks list.
+
+        Naming wart: the method is named ``SetAutostop`` for wire
+        compat but handles both the autostop config (idle_minutes /
+        wait_for / down) AND the cluster's lifecycle-hooks list
+        (request.hooks / request.clear_hooks). Renaming requires a
+        parallel ``SetHooks`` RPC in a future PR; see the proto file.
+        """
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
@@ -55,6 +70,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 down=request.down,
                 hook=hook,
                 hook_timeout=hook_timeout)
+            # v7+: full hooks list carried inline on the same RPC.
+            # `clear_hooks=True` means "drop any stored hooks" — needed
+            # because proto3 `repeated` has no presence, so an empty
+            # list on the wire is otherwise indistinguishable from
+            # "field omitted". Without this, a re-launch with no
+            # hooks would leave stale stored hooks firing forever.
+            if request.clear_hooks:
+                autostop_lib.set_hooks([])
+            elif request.hooks:
+                autostop_lib.set_hooks(
+                    autostop_lib.hooks_from_protobuf(request.hooks))
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

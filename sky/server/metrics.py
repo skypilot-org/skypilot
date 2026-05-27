@@ -1,11 +1,14 @@
 """Instrumentation for the API server."""
 
 import asyncio
+import atexit
+import glob
 import multiprocessing
 import os
+import re
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -28,6 +31,145 @@ logger = sky_logging.init_logger(__name__)
 
 _BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
 _COST_TIME_HORIZON_SECONDS = 3600
+
+# Idempotency guard for register_multiproc_cleanup_atexit.
+_multiproc_cleanup_registered = False
+
+
+def register_multiproc_cleanup_atexit() -> None:
+    """Clean up this process's prometheus_client multiproc files on exit.
+
+    Each process that uses pid-labelled multiprocess metrics (uvicorn
+    workers, executor workers) leaves files at
+    ``$PROMETHEUS_MULTIPROC_DIR/<type>_<pid>.db``. The MultiProcessCollector
+    keeps reading those files until ``multiprocess.mark_process_dead(pid)``
+    deletes them. Without this hook, a worker that exits leaves its last
+    written gauge value visible to every future scrape — for ``liveall``
+    gauges this can pin a stale per-pid value indefinitely.
+
+    Safe to call more than once per process; only the first call registers.
+    Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
+    single-process / unit-test environments.
+    """
+    global _multiproc_cleanup_registered
+    if _multiproc_cleanup_registered:
+        return
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        return
+    pid = os.getpid()
+    atexit.register(multiprocess.mark_process_dead, pid)
+    _multiproc_cleanup_registered = True
+
+
+# Default reap interval. Tuned to give prompt cleanup of stale per-pid
+# files without measurable overhead: one directory glob + one pid_exists()
+# check per unique pid per tick.
+_REAPER_INTERVAL_SECONDS = 60
+# Matches the per-pid live-gauge file names written by
+# ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
+# These are the only files that ``mark_process_dead(pid)`` would remove; the
+# library intentionally preserves counters, histograms, summaries, and
+# non-live gauges so their accumulated values keep contributing to aggregate
+# readings after the writer exits.
+_LIVE_GAUGE_FILE_PID_RE = re.compile(r'^gauge_live[a-z]+_([0-9]+)\.db$')
+
+
+def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
+    """Return pids that own live-gauge files in ``multiproc_dir``.
+
+    Uses the same glob shape that ``mark_process_dead`` would walk, so we
+    do not consider pids whose only on-disk traces are aggregate (counter
+    / histogram / non-live gauge) files — those are intentionally kept.
+    """
+    pattern = os.path.join(multiproc_dir, 'gauge_live*_*.db')
+    pids: Set[int] = set()
+    for path in glob.glob(pattern):
+        m = _LIVE_GAUGE_FILE_PID_RE.match(os.path.basename(path))
+        if m is not None:
+            pids.add(int(m.group(1)))
+    return pids
+
+
+def _reap_stale_multiproc_files() -> int:
+    """Remove prometheus multiproc files for pids that no longer exist.
+
+    Returns the number of pids reaped.
+    """
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
+        return 0
+    file_pids = _scan_multiproc_pids(multiproc_dir)
+    if not file_pids:
+        return 0
+    reaped = 0
+    for pid in file_pids:
+        if psutil.pid_exists(pid):
+            continue
+        try:
+            multiprocess.mark_process_dead(pid)
+            reaped += 1
+        except Exception:  # pylint: disable=broad-except
+            # Don't let a single bad file or a race with another reaper
+            # tick kill the daemon.
+            logger.warning(
+                f'Failed to reap prometheus multiproc files for pid {pid}.',
+                exc_info=True)
+    return reaped
+
+
+async def multiproc_reaper_daemon(
+        interval_seconds: int = _REAPER_INTERVAL_SECONDS) -> None:
+    """Periodically reap multiproc prometheus files from dead workers.
+
+    Per the prometheus_client multiprocess docs, an exiting writer
+    process should call ``multiprocess.mark_process_dead(pid)`` so its
+    per-pid live-gauge files are removed; otherwise the collector keeps
+    emitting the dead pid's last value on every scrape. ``atexit``-style
+    cleanup inside the worker covers graceful exits, but never fires on
+    SIGKILL / OOM / hard crash — in those cases a recycled worker's last
+    live-gauge value can be served by ``/metrics`` indefinitely (until
+    the API server pod itself restarts and wipes the metrics dir). This
+    daemon scans the multiproc dir from the main API server process and
+    invokes ``mark_process_dead`` on behalf of any writer whose pid no
+    longer exists.
+
+    Reaps any pid whose live-gauge file is present but for which
+    ``psutil.pid_exists`` returns False (i.e. the pid no longer maps to
+    any running process). The descendant relationship is intentionally
+    not used as the membership signal: writers may not always be direct
+    descendants of the main API server process (e.g. workers reparented
+    to init after an intermediate exits), and a strict descendant filter
+    would leak files from those legitimate writers.
+
+    Known false-negative: if a dead worker's pid is later reused by an
+    unrelated process inside the same pod, its files keep being scraped
+    until either that unrelated process exits, the worker's pid wraps to
+    another value, or a same-pid SkyPilot writer overwrites the file.
+    PID reuse within a pod's lifetime is rare in practice (Linux pid_max
+    is large and pids are allocated sequentially), so this is accepted.
+
+    No-op when ``PROMETHEUS_MULTIPROC_DIR`` is unset.
+    """
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        logger.info(
+            'PROMETHEUS_MULTIPROC_DIR unset; multiproc reaper will not run.')
+        return
+    logger.info(
+        f'Starting prometheus multiproc reaper (interval={interval_seconds}s)')
+    while True:
+        try:
+            reaped = await asyncio.to_thread(_reap_stale_multiproc_files)
+            if reaped:
+                logger.info(
+                    f'Reaped prometheus multiproc files for {reaped} dead '
+                    f'pid(s).')
+        except asyncio.CancelledError:
+            logger.info('Prometheus multiproc reaper cancelled')
+            break
+        except Exception:  # pylint: disable=broad-except
+            logger.warning('Error in prometheus multiproc reaper.',
+                           exc_info=True)
+        await asyncio.sleep(interval_seconds)
 
 
 class BurnRateCollector:
