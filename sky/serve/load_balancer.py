@@ -35,7 +35,8 @@ class SkyServeLoadBalancer:
         load_balancer_port: int,
         load_balancing_policy_name: Optional[str] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
-        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
+        stream_timeout_seconds: int = constants.DEFAULT_LB_STREAM_TIMEOUT,
     ) -> None:
         """Initialize the load balancer.
 
@@ -49,6 +50,7 @@ class SkyServeLoadBalancer:
             target_qps_per_replica: Target QPS per replica for instance-aware
                 load balancing. Can be a float or dict mapping GPU types to QPS.
                 Defaults to None.
+            stream_timeout_seconds: Timeout in seconds for proxied responses.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
@@ -71,6 +73,7 @@ class SkyServeLoadBalancer:
             serve_utils.RequestTimestamp())
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
+        self._stream_timeout_seconds: int = stream_timeout_seconds
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
         # connections.
@@ -187,7 +190,7 @@ class SkyServeLoadBalancer:
                 worker_url,
                 headers=request.headers.raw,
                 content=await request.body(),
-                timeout=constants.LB_STREAM_TIMEOUT)
+                timeout=self._stream_timeout_seconds)
             proxy_response = await client.send(proxy_request, stream=True)
 
             async def background_func():
@@ -291,9 +294,10 @@ def run_load_balancer(
     load_balancer_port: int,
     load_balancing_policy_name: Optional[str] = None,
     tls_credential: Optional[serve_utils.TLSCredential] = None,
-    target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None
+    target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
+    stream_timeout_seconds: int = constants.DEFAULT_LB_STREAM_TIMEOUT,
 ) -> None:
-    """ Run the load balancer.
+    """Run the load balancer.
 
     Args:
         controller_addr: The address of the controller.
@@ -305,13 +309,15 @@ def run_load_balancer(
         target_qps_per_replica: Target QPS per replica for instance-aware
             load balancing. Can be a float or dict mapping GPU types to QPS.
             Defaults to None.
+        stream_timeout_seconds: Timeout in seconds for proxied responses.
     """
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
         tls_credential=tls_credential,
-        target_qps_per_replica=target_qps_per_replica)
+        target_qps_per_replica=target_qps_per_replica,
+        stream_timeout_seconds=stream_timeout_seconds)
     load_balancer.run()
 
 
