@@ -931,6 +931,29 @@ def test_workspace_usage_collector_cost_lookup_failure_does_not_break():
                                                        'ws'))] == 0.0
 
 
+def test_workspace_usage_collector_cost_returns_none_does_not_break():
+    """get_cost() returning None (no exception) must not crash collect()."""
+    clusters = [
+        _make_cluster_row(workspace='ws',
+                          user_hash='u',
+                          status_name='UP',
+                          cloud_str='AWS',
+                          accelerators={'H100': 8}),
+    ]
+    # Some clouds / missing catalog entries return None rather than raising.
+    clusters[0]['handle'].launched_resources.get_cost.return_value = None
+    with patch('sky.global_user_state.get_clusters', return_value=clusters):
+        collector = metrics.WorkspaceUsageCollector()
+        samples = _collect_to_dict(collector)
+
+    burn_key = (('cloud', 'AWS'), ('gpu_type', 'H100'), ('user', 'u'),
+                ('workspace', 'ws'))
+    # None coerces to 0.0 inside the try, not a TypeError.
+    assert samples['sky_clusters_burn_rate_dollars'][burn_key] == 0.0
+    # GPU gauge still emitted.
+    assert samples['sky_clusters_gpus_in_flight'][burn_key] == 8.0
+
+
 def test_workspace_usage_collector_cache_ttl():
     """Within the cache TTL, _compute() is not called a second time."""
     with patch('sky.global_user_state.get_clusters',
@@ -942,6 +965,21 @@ def test_workspace_usage_collector_cache_ttl():
         # Immediate second scrape hits the cache.
         list(collector.collect())
         assert mock_get.call_count == 1
+
+
+def test_managed_jobs_collector_advances_timestamp_on_failure():
+    """A failing _refresh() must still advance _last_scrape_time so the
+    broken query backs off for the cache TTL instead of retrying every
+    scrape (retry-storm regression guard)."""
+    with patch('sky.jobs.state.get_status_counts_by_workspace_user_cloud',
+               side_effect=RuntimeError('db down')) as mock_q:
+        collector = metrics.ManagedJobsCollector()
+        list(collector.collect())
+        assert mock_q.call_count == 1
+        # Second immediate scrape must NOT re-query — timestamp advanced
+        # even though the first refresh raised.
+        list(collector.collect())
+        assert mock_q.call_count == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────

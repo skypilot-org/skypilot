@@ -312,9 +312,12 @@ class ManagedJobsCollector:
             if now - self._last_scrape_time >= self._cache_ttl:
                 try:
                     self._refresh()
-                    self._last_scrape_time = now
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('Failed to collect managed jobs metrics')
+                # Always advance the timestamp — even on failure — so a
+                # broken DB query backs off for the cache TTL instead of
+                # being retried on every scrape (retry storm).
+                self._last_scrape_time = now
             rows = self._cached_rows
 
         counts: dict = {}
@@ -428,8 +431,11 @@ class WorkspaceUsageCollector:
 
             # ── burn rate, USD/hr, multiplied by node count ──
             try:
-                per_node_hourly = launched_resources.get_cost(
-                    self._SECONDS_PER_HOUR)
+                # float() is inside the try: get_cost() can return None
+                # (no catalog entry) which would raise TypeError here, not
+                # just inside get_cost itself.
+                per_node_hourly = float(
+                    launched_resources.get_cost(self._SECONDS_PER_HOUR) or 0.0)
             except Exception:  # pylint: disable=broad-except
                 # Cost lookup can fail when a catalog entry is missing for
                 # the launched instance type (e.g. on-prem clouds, or
@@ -438,7 +444,7 @@ class WorkspaceUsageCollector:
                 per_node_hourly = 0.0
             burn_key = (workspace, user, cloud, gpu_type)
             burn_rate[burn_key] = (burn_rate.get(burn_key, 0.0) +
-                                   float(per_node_hourly) * num_nodes)
+                                   per_node_hourly * num_nodes)
 
         return {
             'counts': counts,
