@@ -885,6 +885,36 @@ def _catch_to_errors(errors: List[Dict[str, str]], component: str,
         })
 
 
+_DEBUG_DUMP_TMP_ROOT = pathlib.Path('~/.sky/debug_dumps_tmp').expanduser()
+# Best-effort cleanup TTL for per-run controller temp dirs. The caller
+# rsyncs them right after the CodeGen call completes, so a 1h TTL is
+# plenty of safety margin.
+_DEBUG_DUMP_TMP_TTL_SECONDS = 3600
+
+
+def _prepare_debug_dump_tmp_dir() -> pathlib.Path:
+    """Create a fresh per-run temp dir for files we'll rsync to the caller.
+
+    Also best-effort cleans up older dirs so they don't accumulate if a
+    previous run died after writing files but before rsync.
+    """
+    _DEBUG_DUMP_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    for entry in _DEBUG_DUMP_TMP_ROOT.iterdir():
+        try:
+            if entry.is_dir() and entry.stat().st_mtime < (
+                    now - _DEBUG_DUMP_TMP_TTL_SECONDS):
+                # pylint: disable=import-outside-toplevel
+                import shutil
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            pass
+    run_dir = _DEBUG_DUMP_TMP_ROOT / common_utils.get_user_hash()[:8] / str(
+        int(now * 1000))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     """Collect a debug dump manifest from the controller.
 
@@ -902,6 +932,17 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     file_paths: List[Dict[str, str]] = []
     errors: List[Dict[str, str]] = []
 
+    # Controller-local temp dir for files we want the caller to rsync
+    # (e.g. Kubernetes pod logs). Best-effort created here so an
+    # individual cluster's failure to set it up doesn't block the whole
+    # manifest.
+    try:
+        log_temp_root: Optional[pathlib.Path] = _prepare_debug_dump_tmp_dir()
+    except Exception as e:  # pylint: disable=broad-except
+        log_temp_root = None
+        debug_dump_helpers.append_error(errors, 'managed_jobs',
+                                        'debug_dump_tmp_root', e)
+
     # Collect per-job data in parallel
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(_collect_job_debug_manifest, job_ids))
@@ -917,7 +958,8 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
             seen_cluster_names.add(cluster_name)
             job_prefix = f'managed_jobs/{job_id}'
             _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
+                                            inline_data, file_paths, errors,
+                                            log_temp_root)
 
     # Collect controller system log paths (shared, not per-job)
     _collect_controller_system_log_paths(file_paths, errors)
@@ -1017,11 +1059,13 @@ def _collect_job_debug_manifest(
     return inline_data, file_paths, errors, cluster_name
 
 
-def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
-                                    inline_data: List[Dict[str, str]],
-                                    errors: List[Dict[str, str]]) -> None:
-    """Collect cluster info and events for a managed job's cluster."""
+def _collect_cluster_debug_manifest(
+        cluster_name: str, job_prefix: str, inline_data: List[Dict[str, str]],
+        file_paths: List[Dict[str, str]], errors: List[Dict[str, str]],
+        log_temp_root: Optional[pathlib.Path]) -> None:
+    """Collect cluster info, events, and (when on k8s) pod state."""
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
+    cluster_record: Optional[Dict[str, Any]] = None
 
     with _catch_to_errors(errors, 'managed_jobs',
                           f'{cluster_name}/cluster_info'):
@@ -1036,17 +1080,107 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
         })
 
         cluster_hash = cluster_record.get('cluster_hash')
-        if not cluster_hash:
-            return
-        for event_data in debug_dump_helpers.get_cluster_events_data(
-                cluster_hash):
+        if cluster_hash:
+            for event_data in debug_dump_helpers.get_cluster_events_data(
+                    cluster_hash):
+                inline_data.append({
+                    'relative_path': f'{cluster_prefix}/'
+                                     f'events_{event_data["event_type"]}.json',
+                    'content': json.dumps(event_data['events'],
+                                          indent=2,
+                                          default=str),
+                })
+
+    if cluster_record is None or log_temp_root is None:
+        return
+
+    # Capture underlying Kubernetes state when the job's cluster is on k8s.
+    access = debug_dump_helpers.get_kubernetes_access(cluster_record)
+    if access is None:
+        return
+    try:
+        result = debug_dump_helpers.collect_kubernetes_state(access)
+    except Exception as e:  # pylint: disable=broad-except
+        debug_dump_helpers.append_error(errors, 'managed_jobs',
+                                        f'{cluster_name}/kubernetes', e)
+        return
+    _add_kubernetes_result_to_manifest(result,
+                                       inline_data=inline_data,
+                                       file_paths=file_paths,
+                                       errors=errors,
+                                       log_temp_root=log_temp_root,
+                                       path_prefix=f'{cluster_prefix}/'
+                                       f'kubernetes',
+                                       resource_prefix=cluster_name)
+
+
+def _add_kubernetes_result_to_manifest(
+        result: debug_dump_helpers.KubernetesDumpResult, *,
+        inline_data: List[Dict[str, str]], file_paths: List[Dict[str, str]],
+        errors: List[Dict[str, str]], log_temp_root: pathlib.Path,
+        path_prefix: str, resource_prefix: str) -> None:
+    """Emit k8s capture into the manifest.
+
+    Pods + events go inline (KB-sized). Logs are written to a controller-
+    local temp dir and added to file_paths for the caller to rsync, since
+    they can collectively exceed what fits through the CodeGen/SSH stdout
+    payload channel.
+    """
+    # Pods (inline).
+    if result.pods:
+        try:
             inline_data.append({
-                'relative_path': f'{cluster_prefix}/'
-                                 f'events_{event_data["event_type"]}.json',
-                'content': json.dumps(event_data['events'],
-                                      indent=2,
-                                      default=str),
+                'relative_path': f'{path_prefix}/pods.json',
+                'content': json.dumps(result.pods, indent=2, default=str),
             })
+        except Exception as e:  # pylint: disable=broad-except
+            debug_dump_helpers.append_error(
+                errors, 'managed_jobs',
+                f'{resource_prefix}/kubernetes/pods.json', e)
+
+    # Events (inline, one file per pod).
+    for pod_name, events in result.events.items():
+        try:
+            inline_data.append({
+                'relative_path': f'{path_prefix}/events/{pod_name}.json',
+                'content': json.dumps(events, indent=2, default=str),
+            })
+        except Exception as e:  # pylint: disable=broad-except
+            debug_dump_helpers.append_error(
+                errors, 'managed_jobs',
+                f'{resource_prefix}/kubernetes/events/{pod_name}', e)
+
+    # Logs (file_paths → rsync).
+    def _emit_logs(log_map: Dict[Tuple[str, str], str], suffix: str) -> None:
+        if not log_map:
+            return
+        for (pod_name, container), log in log_map.items():
+            filename = f'{pod_name}__{container}{suffix}'
+            relative_path = f'{path_prefix}/logs/{filename}'
+            try:
+                local_path = log_temp_root / relative_path
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                local_path.write_text(log, encoding='utf-8')
+                file_paths.append({
+                    'remote_path': str(local_path),
+                    'relative_path': relative_path,
+                })
+            except Exception as e:  # pylint: disable=broad-except
+                debug_dump_helpers.append_error(
+                    errors, 'managed_jobs',
+                    f'{resource_prefix}/kubernetes/logs/{filename}', e)
+
+    _emit_logs(result.logs, '.log')
+    _emit_logs(result.previous_logs, '.prev.log')
+
+    # Propagate helper-recorded errors.
+    for err in result.errors:
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{resource_prefix}/{err.get("resource", "")}',
+            'error': err.get('error', ''),
+            'traceback': err.get('traceback', ''),
+        })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],

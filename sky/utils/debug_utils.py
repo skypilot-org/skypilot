@@ -49,16 +49,8 @@ DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
 # Env var names whose values should be redacted (show bool presence only).
 # Used for both server_info environment and request body sanitization.
-_SENSITIVE_ENV_VARS = {
-    'SKYPILOT_DB_CONNECTION_URI',
-    'SKYPILOT_INITIAL_BASIC_AUTH',
-    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
-    'SKYPILOT_DOCKER_PASSWORD',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_SESSION_TOKEN',
-    'AWS_ACCESS_KEY_ID',
-    'AZURE_CLIENT_SECRET',
-}
+# Canonical home is debug_dump_helpers (shared with controller-side manifest).
+_SENSITIVE_ENV_VARS = debug_dump_helpers.SENSITIVE_ENV_VARS
 
 # Maps request name → field names containing task/dag YAML to redact.
 # Empty tuple means include body verbatim (no YAML fields).
@@ -811,7 +803,139 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'traceback': _full_traceback()
                 })
 
+        # Capture underlying Kubernetes state when the cluster is on k8s.
+        if cluster_record is not None:
+            access = debug_dump_helpers.get_kubernetes_access(cluster_record)
+            if access is not None:
+                _dump_kubernetes_state_to_disk(access,
+                                               out_dir=os.path.join(
+                                                   cluster_dir, 'kubernetes'),
+                                               resource_prefix=cluster_name,
+                                               errors=errors)
+
     logger.debug('Exiting _dump_cluster_info')
+
+
+def _dump_kubernetes_state_to_disk(
+        access: 'debug_dump_helpers.K8sAccess',
+        out_dir: str,
+        resource_prefix: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Fetch k8s state via the shared helper and write it to disk.
+
+    Layout (relative to out_dir):
+      pods.json
+      events/<pod>.json
+      logs/<pod>__<container>.log
+      logs/<pod>__<container>.prev.log   (if available)
+    """
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except Exception as e:  # pylint: disable=broad-except
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{resource_prefix}/kubernetes',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            })
+        return
+
+    result = debug_dump_helpers.collect_kubernetes_state(access)
+
+    # Pods.
+    if result.pods:
+        try:
+            with open(os.path.join(out_dir, 'pods.json'), 'w',
+                      encoding='utf-8') as f:
+                json.dump(result.pods, f, indent=2, default=str)
+        except Exception as e:  # pylint: disable=broad-except
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{resource_prefix}/kubernetes/pods.json',
+                    'error': str(e),
+                    'traceback': _full_traceback(),
+                })
+
+    # Events.
+    if result.events:
+        events_dir = os.path.join(out_dir, 'events')
+        try:
+            os.makedirs(events_dir, exist_ok=True)
+        except Exception as e:  # pylint: disable=broad-except
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{resource_prefix}/kubernetes/events',
+                    'error': str(e),
+                    'traceback': _full_traceback(),
+                })
+        else:
+            for pod_name, events in result.events.items():
+                try:
+                    with open(os.path.join(events_dir, f'{pod_name}.json'),
+                              'w',
+                              encoding='utf-8') as f:
+                        json.dump(events, f, indent=2, default=str)
+                except Exception as e:  # pylint: disable=broad-except
+                    if errors is not None:
+                        errors.append({
+                            'component': 'clusters',
+                            'resource': (f'{resource_prefix}/kubernetes/'
+                                         f'events/{pod_name}'),
+                            'error': str(e),
+                            'traceback': _full_traceback(),
+                        })
+
+    # Logs.
+    if result.logs or result.previous_logs:
+        logs_dir = os.path.join(out_dir, 'logs')
+        try:
+            os.makedirs(logs_dir, exist_ok=True)
+        except Exception as e:  # pylint: disable=broad-except
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{resource_prefix}/kubernetes/logs',
+                    'error': str(e),
+                    'traceback': _full_traceback(),
+                })
+        else:
+            _write_logs(logs_dir, result.logs, '.log', resource_prefix, errors)
+            _write_logs(logs_dir, result.previous_logs, '.prev.log',
+                        resource_prefix, errors)
+
+    # Propagate helper-recorded errors with a cluster-scoped resource path.
+    if errors is not None:
+        for err in result.errors:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{resource_prefix}/{err.get("resource", "")}',
+                'error': err.get('error', ''),
+                'traceback': err.get('traceback', ''),
+            })
+
+
+def _write_logs(logs_dir: str, log_map: Dict[Tuple[str, str], str], suffix: str,
+                resource_prefix: str,
+                errors: Optional[List[Dict[str, str]]]) -> None:
+    """Write per-(pod, container) logs to disk."""
+    for (pod_name, container), log in log_map.items():
+        filename = f'{pod_name}__{container}{suffix}'
+        try:
+            with open(os.path.join(logs_dir, filename), 'w',
+                      encoding='utf-8') as f:
+                f.write(log)
+        except Exception as e:  # pylint: disable=broad-except
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': (f'{resource_prefix}/kubernetes/logs/'
+                                 f'{filename}'),
+                    'error': str(e),
+                    'traceback': _full_traceback(),
+                })
 
 
 def _dump_managed_job_info(

@@ -2221,3 +2221,317 @@ class TestDumpClusterInfo:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]['request_id'] == 'req-a'
+
+
+# --- Kubernetes capture --------------------------------------------------
+
+
+def _make_k8s_cluster_record(name: str = 'k8s-cluster',
+                             cluster_name_on_cloud: str = 'k8s-cluster-abcd',
+                             cluster_yaml: Optional[str] = '/tmp/yaml',
+                             region: Optional[str] = 'kubernetes-ctx-1',
+                             cloud_cls=None) -> Dict[str, Any]:
+    """Build a minimal cluster record whose handle looks like a k8s one."""
+    from sky import clouds
+    if cloud_cls is None:
+        cloud_cls = clouds.Kubernetes
+    handle = SimpleNamespace(
+        launched_resources=SimpleNamespace(cloud=cloud_cls(), region=region),
+        cluster_name_on_cloud=cluster_name_on_cloud,
+        cluster_yaml=cluster_yaml,
+    )
+    return {'name': name, 'handle': handle, 'status': 'UP'}
+
+
+def _make_pod(name: str,
+              namespace: str = 'default',
+              containers: Optional[List[str]] = None,
+              init_containers: Optional[List[str]] = None,
+              with_last_terminated: bool = False) -> Any:
+    """Build a V1Pod-like mock with metadata, spec, status."""
+    containers = containers or ['ray-node']
+    spec_containers = [SimpleNamespace(name=c, env=[]) for c in containers]
+    spec_init = [
+        SimpleNamespace(name=c, env=[]) for c in (init_containers or [])
+    ]
+    last_state = SimpleNamespace(terminated=SimpleNamespace(
+        exit_code=1) if with_last_terminated else None)
+    container_statuses = [
+        SimpleNamespace(name=c, last_state=last_state) for c in containers
+    ]
+    return SimpleNamespace(
+        metadata=SimpleNamespace(name=name, namespace=namespace),
+        spec=SimpleNamespace(containers=spec_containers,
+                             init_containers=spec_init),
+        status=SimpleNamespace(container_statuses=container_statuses,
+                               init_container_statuses=[]),
+    )
+
+
+class TestGetKubernetesAccess:
+    """Tests for debug_dump_helpers.get_kubernetes_access."""
+
+    def test_returns_none_for_non_kubernetes(self):
+        from sky import clouds
+        record = _make_k8s_cluster_record(cloud_cls=clouds.AWS)
+        assert debug_dump_helpers.get_kubernetes_access(record) is None
+
+    def test_returns_none_when_no_handle(self):
+        assert debug_dump_helpers.get_kubernetes_access({
+            'name': 'x',
+            'handle': None
+        }) is None
+
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state'
+                '.get_cluster_yaml_dict')
+    def test_happy_path_uses_yaml(self, mock_yaml):
+        mock_yaml.return_value = {
+            'provider': {
+                'context': 'kubernetes-ctx-1',
+                'namespace': 'sky-ns'
+            }
+        }
+        record = _make_k8s_cluster_record()
+        access = debug_dump_helpers.get_kubernetes_access(record)
+        assert access is not None
+        assert access.context == 'kubernetes-ctx-1'
+        assert access.namespace == 'sky-ns'
+        assert access.cluster_name_on_cloud == 'k8s-cluster-abcd'
+
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state'
+                '.get_cluster_yaml_dict',
+                side_effect=ValueError('yaml gone'))
+    def test_fallback_when_yaml_unreadable(self, _):
+        record = _make_k8s_cluster_record(region='ctx-from-region')
+        access = debug_dump_helpers.get_kubernetes_access(record)
+        assert access is not None
+        # Falls back to region-as-context, namespace=None (search all).
+        assert access.context == 'ctx-from-region'
+        assert access.namespace is None
+
+    def test_fallback_when_yaml_is_none(self):
+        record = _make_k8s_cluster_record(cluster_yaml=None,
+                                          region='ctx-from-region')
+        access = debug_dump_helpers.get_kubernetes_access(record)
+        assert access is not None
+        assert access.context == 'ctx-from-region'
+        assert access.namespace is None
+
+
+class TestRedactPodEnv:
+    """Tests for debug_dump_helpers._redact_pod_env."""
+
+    def test_redacts_known_keys(self):
+        pod = {
+            'spec': {
+                'containers': [{
+                    'env': [
+                        {
+                            'name': 'AWS_SECRET_ACCESS_KEY',
+                            'value': 'shhh'
+                        },
+                        {
+                            'name': 'PLAIN',
+                            'value': 'visible'
+                        },
+                    ]
+                }]
+            }
+        }
+        debug_dump_helpers._redact_pod_env(pod)  # pylint: disable=protected-access
+        env = pod['spec']['containers'][0]['env']
+        assert env[0]['value'] == '<redacted>'
+        assert env[1]['value'] == 'visible'
+
+    def test_redacts_by_regex(self):
+        pod = {
+            'spec': {
+                'containers': [{
+                    'env': [
+                        {
+                            'name': 'MY_API_TOKEN',
+                            'value': 'leak'
+                        },
+                        {
+                            'name': 'CUSTOM_PASSWORD',
+                            'value': 'leak2'
+                        },
+                        {
+                            'name': 'BORING_VAR',
+                            'value': 'safe'
+                        },
+                    ]
+                }]
+            }
+        }
+        debug_dump_helpers._redact_pod_env(pod)  # pylint: disable=protected-access
+        env = pod['spec']['containers'][0]['env']
+        assert env[0]['value'] == '<redacted>'
+        assert env[1]['value'] == '<redacted>'
+        assert env[2]['value'] == 'safe'
+
+    def test_handles_missing_fields(self):
+        # No spec.
+        debug_dump_helpers._redact_pod_env({})  # pylint: disable=protected-access
+        # No containers.
+        debug_dump_helpers._redact_pod_env({'spec': {}})  # pylint: disable=protected-access
+        # No env, but valueFrom (untouched).
+        pod = {
+            'spec': {
+                'containers': [{
+                    'env': [{
+                        'name': 'TOKEN',
+                        'valueFrom': {
+                            'secretKeyRef': {
+                                'name': 's',
+                                'key': 'k'
+                            }
+                        }
+                    }]
+                }]
+            }
+        }
+        debug_dump_helpers._redact_pod_env(pod)  # pylint: disable=protected-access
+        assert 'value' not in pod['spec']['containers'][0]['env'][0]
+
+
+class TestCollectKubernetesState:
+    """Tests for debug_dump_helpers.collect_kubernetes_state."""
+
+    @mock.patch('sky.adaptors.kubernetes.api_client')
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    def test_happy_path(self, mock_core_api, mock_api_client):
+        access = debug_dump_helpers.K8sAccess(context='ctx',
+                                              namespace='ns',
+                                              cluster_name_on_cloud='c1-abcd')
+        pod1 = _make_pod('c1-head', namespace='ns', containers=['ray-node'])
+        pod2 = _make_pod('c1-worker1',
+                         namespace='ns',
+                         containers=['ray-node'],
+                         with_last_terminated=True)
+        core_api = mock_core_api.return_value
+        core_api.list_namespaced_pod.return_value = SimpleNamespace(
+            items=[pod1, pod2])
+        core_api.list_namespaced_event.return_value = SimpleNamespace(items=[])
+
+        def _read_log(*, name, namespace, container, tail_lines, previous,
+                      _request_timeout):
+            del namespace, tail_lines, _request_timeout
+            if previous and name == 'c1-worker1' and container == 'ray-node':
+                return 'previous instance log'
+            return f'log for {name}/{container} previous={previous}'
+
+        core_api.read_namespaced_pod_log.side_effect = _read_log
+        # api_client.sanitize_for_serialization → identity-ish for dict input.
+        sanitizer = mock_api_client.return_value.sanitize_for_serialization
+        sanitizer.side_effect = lambda obj: {
+            'name': getattr(getattr(obj, 'metadata', None), 'name', None),
+            'spec': {
+                'containers': [{
+                    'name': 'ray-node',
+                    'env': []
+                }]
+            },
+        }
+
+        result = debug_dump_helpers.collect_kubernetes_state(access)
+
+        assert set(result.pods.keys()) == {'c1-head', 'c1-worker1'}
+        # Both pods got log entries for their one container.
+        assert ('c1-head', 'ray-node') in result.logs
+        assert ('c1-worker1', 'ray-node') in result.logs
+        # Only the pod with last_terminated gets a previous log.
+        assert ('c1-worker1', 'ray-node') in result.previous_logs
+        assert ('c1-head', 'ray-node') not in result.previous_logs
+        assert not result.errors
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    def test_list_pods_403_records_single_error(self, mock_core_api):
+        from sky.adaptors import kubernetes as k8s_adaptor
+        api_exc_cls = k8s_adaptor.api_exception()
+        err = api_exc_cls(status=403)
+        mock_core_api.return_value.list_namespaced_pod.side_effect = err
+        access = debug_dump_helpers.K8sAccess(context='ctx',
+                                              namespace='ns',
+                                              cluster_name_on_cloud='c1')
+        result = debug_dump_helpers.collect_kubernetes_state(access)
+        assert not result.pods
+        assert len(result.errors) == 1
+        assert result.errors[0]['resource'].endswith('list_pods')
+
+    @mock.patch('sky.adaptors.kubernetes.api_client')
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    def test_log_400_for_current_records_error(self, mock_core_api,
+                                               mock_api_client):
+        access = debug_dump_helpers.K8sAccess(context=None,
+                                              namespace='ns',
+                                              cluster_name_on_cloud='c1')
+        pod = _make_pod('c1-head', namespace='ns', containers=['ray-node'])
+        core_api = mock_core_api.return_value
+        core_api.list_namespaced_pod.return_value = SimpleNamespace(items=[pod])
+        core_api.list_namespaced_event.return_value = SimpleNamespace(items=[])
+        from sky.adaptors import kubernetes as k8s_adaptor
+        api_exc_cls = k8s_adaptor.api_exception()
+        core_api.read_namespaced_pod_log.side_effect = api_exc_cls(status=400)
+        mock_api_client.return_value.sanitize_for_serialization.side_effect = (
+            lambda obj: {
+                'name': obj.metadata.name
+            })
+
+        result = debug_dump_helpers.collect_kubernetes_state(access)
+        # No logs captured, but pod metadata captured and error recorded.
+        assert 'c1-head' in result.pods
+        assert not result.logs
+        assert any('log/' in (e.get('resource') or '') for e in result.errors)
+
+    @mock.patch('sky.adaptors.kubernetes.api_client')
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    def test_log_400_for_previous_is_silent(self, mock_core_api,
+                                            mock_api_client):
+        access = debug_dump_helpers.K8sAccess(context=None,
+                                              namespace='ns',
+                                              cluster_name_on_cloud='c1')
+        pod = _make_pod('c1-head',
+                        namespace='ns',
+                        containers=['ray-node'],
+                        with_last_terminated=True)
+        core_api = mock_core_api.return_value
+        core_api.list_namespaced_pod.return_value = SimpleNamespace(items=[pod])
+        core_api.list_namespaced_event.return_value = SimpleNamespace(items=[])
+        from sky.adaptors import kubernetes as k8s_adaptor
+        api_exc_cls = k8s_adaptor.api_exception()
+
+        def _read_log(*, name, namespace, container, tail_lines, previous,
+                      _request_timeout):
+            del name, namespace, container, tail_lines, _request_timeout
+            if previous:
+                raise api_exc_cls(status=400)
+            return 'current log'
+
+        core_api.read_namespaced_pod_log.side_effect = _read_log
+        mock_api_client.return_value.sanitize_for_serialization.side_effect = (
+            lambda obj: {
+                'name': obj.metadata.name
+            })
+
+        result = debug_dump_helpers.collect_kubernetes_state(access)
+        # Current logs ok, previous silently dropped.
+        assert ('c1-head', 'ray-node') in result.logs
+        assert ('c1-head', 'ray-node') not in result.previous_logs
+        # No errors recorded for the dropped previous-log 400.
+        assert not any(
+            'log.prev/' in (e.get('resource') or '') for e in result.errors)
+
+
+class TestKubernetesLazyImport:
+    """The helper module must import without the kubernetes extra installed."""
+
+    def test_module_importable_without_kubernetes_extra(self):
+        # Already imported by the test module — confirm no top-level k8s import.
+        import sky.utils.debug_dump_helpers as helpers
+        src = open(helpers.__file__).read()
+        # Heuristic: 'from sky.adaptors import kubernetes' must not appear
+        # at module top level (i.e. unindented at the start of a line).
+        for line in src.splitlines():
+            assert not line.startswith('from sky.adaptors import kubernetes'), (
+                'k8s adaptor must be lazily imported, not at top level')
