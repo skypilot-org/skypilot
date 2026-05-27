@@ -223,6 +223,27 @@ def _release_serve_and_pool_consolidation_mode_locks() -> None:
 atexit.register(_release_serve_and_pool_consolidation_mode_locks)
 
 
+# Backward-compatibility no-op stubs for rolling upgrade. Pickled
+# InternalRequestDaemon rows from older server versions reference these
+# symbols via the `event_fn` / `should_skip` attributes, so pickle.loads
+# raises AttributeError without them. Orphan rows are then cleaned up by
+# the request-daemon restart path because no matching
+# INTERNAL_REQUEST_DAEMONS entry exists for the pickled daemon id.
+def managed_job_status_refresh_event():
+    """No-op stub for pickle compatibility with older server versions.
+
+    The managed-job-status refresh now runs in-process as a thread; the
+    daemon-based variant is no longer scheduled. This stub exists only so
+    that old pickled daemon rows can be deserialized and then deleted by
+    the daemon-orphan cleanup path.
+    """
+
+
+def should_skip_managed_job_status_refresh():
+    """No-op stub for pickle compatibility with older server versions."""
+    return True
+
+
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
