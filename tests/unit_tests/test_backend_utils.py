@@ -434,6 +434,40 @@ def test_check_owner_identity_k8s_ignores_name_scope(monkeypatch):
     assert patched['identity'] == [scoped_identity]
 
 
+def test_check_owner_identity_k8s_name_scope_underscored_context(monkeypatch):
+    """Scope stripping must work when the context name contains underscores.
+
+    Default GKE contexts look like `gke_<project>_<zone>_<cluster>`, so the
+    scope suffix itself carries underscores. A naive `__sky__[^_]*` strip would
+    only remove up to the first underscore of the context and still report a
+    mismatch. The cluster/user names here are underscore-free so the test
+    isolates the underscored-context case.
+    """
+    ctx = 'gke_my-project_us-central1-a_my-cluster'
+    old_identity = 'kube-cluster_kube-user_default'
+    scoped_identity = f'kube-cluster__sky__{ctx}_kube-user__sky__{ctx}_default'
+
+    record = _k8s_owner_check_record([old_identity])
+
+    patched = {}
+
+    def fake_set_owner(cluster_name, identity):
+        patched['cluster_name'] = cluster_name
+        patched['identity'] = identity
+
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        fake_set_owner)
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [[scoped_identity]]))
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    assert patched['identity'] == [scoped_identity]
+
+
 def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
     """Stripping scope suffixes must not let a different identity match."""
     owner_identity = ['ctx-a_user-a_default']
