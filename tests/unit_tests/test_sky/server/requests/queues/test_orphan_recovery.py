@@ -99,12 +99,19 @@ def test_queue_manager_dies_with_parent():
     ready_r, ready_w = os.pipe()
     middle_pid = os.fork()
     if middle_pid == 0:
-        # Middle process: spawn the queue manager and notify parent of pid.
+        # Middle process: spawn the queue manager, wait until its port is
+        # actually listening (which proves PR_SET_PDEATHSIG has run, since
+        # start_queue_manager() arms it BEFORE binding the socket), then
+        # post the grandchild pid back to the parent. This synchronization
+        # is essential: without it the parent can SIGKILL middle before
+        # the grandchild has called prctl(), which would make this test
+        # look like a PDEATHSIG failure when it is actually a race.
         try:
             os.close(ready_r)
             mgr = multiprocessing.Process(target=mp_queue.start_queue_manager,
                                           args=(['q'], port))
             mgr.start()
+            mp_queue.wait_for_queues_to_be_ready(['q'], mgr, port=port)
             os.write(ready_w, f'{mgr.pid}\n'.encode())
             os.close(ready_w)
             # Block until killed.

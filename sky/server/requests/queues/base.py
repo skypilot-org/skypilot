@@ -90,7 +90,19 @@ def _reap_orphan_queue_manager(port: int) -> bool:
             holder.wait(timeout=3)
         except psutil.TimeoutExpired:
             holder.kill()
-            holder.wait(timeout=2)
+            try:
+                holder.wait(timeout=2)
+            except psutil.TimeoutExpired:
+                # SIGKILL did not bring it down within 2 s — most likely
+                # stuck in uninterruptible sleep (D state) on a hung NFS
+                # mount or similar kernel issue. We cannot do better than
+                # report and bail out; let the original "port in use"
+                # error fire.
+                logger.warning(
+                    f'Orphan pid {holder_pid} did not exit after SIGKILL; '
+                    f'it may be in uninterruptible sleep. Falling through '
+                    f'to the port-in-use error.')
+                return False
     except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
         logger.warning(f'Failed to reap orphan pid {holder_pid}: {e}')
         return False
