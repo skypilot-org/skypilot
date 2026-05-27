@@ -412,6 +412,10 @@ def test_check_owner_identity_k8s_ignores_name_scope(monkeypatch):
 
     record = _k8s_owner_check_record([old_identity])
 
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+
     patched = {}
 
     def fake_set_owner(cluster_name, identity):
@@ -449,6 +453,10 @@ def test_check_owner_identity_k8s_name_scope_underscored_context(monkeypatch):
 
     record = _k8s_owner_check_record([old_identity])
 
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+
     patched = {}
 
     def fake_set_owner(cluster_name, identity):
@@ -476,6 +484,10 @@ def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
     other_scoped = 'ctx-b__sky__ctx-b_user-b__sky__ctx-b_default'
 
     record = _k8s_owner_check_record(owner_identity)
+
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
 
     monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
                         lambda: 'default')
