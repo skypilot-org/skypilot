@@ -319,6 +319,19 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
+def _get_attached_volume_ids(instances: List[Any]) -> List[str]:
+    """Collect attached EBS volume IDs from instances."""
+    volume_ids: List[str] = []
+    seen: Set[str] = set()
+    for inst in instances:
+        for mapping in getattr(inst, 'block_device_mappings', []) or []:
+            volume_id = mapping.get('Ebs', {}).get('VolumeId')
+            if volume_id is not None and volume_id not in seen:
+                seen.add(volume_id)
+                volume_ids.append(volume_id)
+    return volume_ids
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
@@ -479,6 +492,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # empty tags will result in error in the API call
             ec2.meta.client.create_tags(Resources=resumed_instance_ids,
                                         Tags=_format_tags(tags))
+            resumed_volume_ids = _get_attached_volume_ids(resumed_instances)
+            if resumed_volume_ids:
+                try:
+                    ec2.meta.client.create_tags(Resources=resumed_volume_ids,
+                                                Tags=_format_tags(tags))
+                except aws.botocore_exceptions().ClientError as e:
+                    logger.warning(
+                        'Failed to update tags for resumed AWS volumes '
+                        f'{resumed_volume_ids}: {e}')
             for inst in resumed_instances:
                 inst.tags = _format_tags(tags)  # sync the tags info
         placement_zone = resumed_instances[0].placement['AvailabilityZone']
