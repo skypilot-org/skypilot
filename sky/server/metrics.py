@@ -374,6 +374,27 @@ class WorkspaceUsageCollector:
             'burn_rate': {},
         }
 
+    @staticmethod
+    def _cluster_kind(cluster: dict) -> str:
+        """Classify a cluster for the ``kind`` label.
+
+        - ``controller``: jobs / serve controller (infra), by name prefix.
+        - ``managed_job``: a managed-job backing cluster (``is_managed``).
+        - ``cluster``: a plain cluster (``sky launch``).
+
+        Letting operators filter ``kind="cluster"`` avoids double-counting
+        against ``sky_managed_jobs_count`` / the controller; summing
+        across all kinds still gives full resource coverage.
+        """
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import controller_utils
+        if controller_utils.Controllers.from_name(
+                cluster.get('name')) is not None:
+            return 'controller'
+        if cluster.get('is_managed'):
+            return 'managed_job'
+        return 'cluster'
+
     def _compute(self) -> dict:
         clusters = global_user_state.get_clusters(summary_response=True)
         counts: dict = {}
@@ -384,6 +405,7 @@ class WorkspaceUsageCollector:
             workspace = _label_or_default(cluster.get('workspace'),
                                           _NULL_WORKSPACE_LABEL)
             user = _label_or_default(cluster.get('user_hash'), _NULL_LABEL)
+            kind = self._cluster_kind(cluster)
 
             handle = cluster.get('handle')
             launched_resources = (getattr(handle, 'launched_resources', None)
@@ -397,7 +419,7 @@ class WorkspaceUsageCollector:
             status_name = getattr(status, 'name', str(status))
 
             # ── count ──
-            count_key = (workspace, user, status_name, cloud)
+            count_key = (workspace, user, status_name, cloud, kind)
             counts[count_key] = counts.get(count_key, 0) + 1
 
             # ── GPUs + burn rate, only for UP clusters ──
@@ -420,7 +442,7 @@ class WorkspaceUsageCollector:
                 # the same cluster always hits the same series).
                 gpu_type = sorted(accelerators.keys())[0]
                 for acc_name, acc_count in accelerators.items():
-                    gpu_key = (workspace, user, cloud, acc_name)
+                    gpu_key = (workspace, user, cloud, acc_name, kind)
                     gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
                                      float(acc_count) * num_nodes)
             else:
@@ -436,7 +458,7 @@ class WorkspaceUsageCollector:
                 # newly-added instance types). Skip silently — the count
                 # / GPU gauges are still correct.
                 per_node_hourly = 0.0
-            burn_key = (workspace, user, cloud, gpu_type)
+            burn_key = (workspace, user, cloud, gpu_type, kind)
             burn_rate[burn_key] = (burn_rate.get(burn_key, 0.0) +
                                    per_node_hourly * num_nodes)
 
@@ -449,16 +471,19 @@ class WorkspaceUsageCollector:
     def describe(self):
         yield prom_core.GaugeMetricFamily(
             'sky_clusters_count',
-            'Current count of clusters by workspace, user, status, and cloud',
-            labels=['workspace', 'user', 'status', 'cloud'])
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
         yield prom_core.GaugeMetricFamily(
             'sky_clusters_gpus_in_flight',
-            'GPU count across UP clusters, by workspace, user, cloud, type',
-            labels=['workspace', 'user', 'cloud', 'gpu_type'])
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
         yield prom_core.GaugeMetricFamily(
             'sky_clusters_burn_rate_dollars',
-            'Estimated hourly spend (USD) by workspace, user, cloud, gpu_type',
-            labels=['workspace', 'user', 'cloud', 'gpu_type'])
+            'Estimated hourly spend (USD) by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
 
     def collect(self):
         now = time.time()
@@ -474,26 +499,30 @@ class WorkspaceUsageCollector:
 
         m = prom_core.GaugeMetricFamily(
             'sky_clusters_count',
-            'Current count of clusters by workspace, user, status, and cloud',
-            labels=['workspace', 'user', 'status', 'cloud'])
-        for (workspace, user, status, cloud), v in data['counts'].items():
-            m.add_metric([workspace, user, status, cloud], v)
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
+        for (workspace, user, status, cloud, kind), v in data['counts'].items():
+            m.add_metric([workspace, user, status, cloud, kind], v)
         yield m
 
         m = prom_core.GaugeMetricFamily(
             'sky_clusters_gpus_in_flight',
-            'GPU count across UP clusters, by workspace, user, cloud, type',
-            labels=['workspace', 'user', 'cloud', 'gpu_type'])
-        for (workspace, user, cloud, gpu_type), v in data['gpus'].items():
-            m.add_metric([workspace, user, cloud, gpu_type], v)
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        for (workspace, user, cloud, gpu_type, kind), v in data['gpus'].items():
+            m.add_metric([workspace, user, cloud, gpu_type, kind], v)
         yield m
 
         m = prom_core.GaugeMetricFamily(
             'sky_clusters_burn_rate_dollars',
-            'Estimated hourly spend (USD) by workspace, user, cloud, gpu_type',
-            labels=['workspace', 'user', 'cloud', 'gpu_type'])
-        for (workspace, user, cloud, gpu_type), v in data['burn_rate'].items():
-            m.add_metric([workspace, user, cloud, gpu_type], v)
+            'Estimated hourly spend (USD) by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        for (workspace, user, cloud, gpu_type,
+             kind), v in data['burn_rate'].items():
+            m.add_metric([workspace, user, cloud, gpu_type, kind], v)
         yield m
 
 

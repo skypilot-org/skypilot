@@ -65,8 +65,11 @@ The endpoint ``/metrics`` on the SkyPilot API server exposes Prometheus-format
 metrics covering:
 
 * API server health — request rate, latency, queue wait time, per-worker memory.
-* Cluster inventory by workspace, user, status, and cloud — counts, GPU
-  occupancy by accelerator model, and estimated hourly spend.
+* Cluster inventory by workspace, user, status, cloud, and kind
+  (``cluster`` / ``managed_job`` / ``controller``) — counts, GPU occupancy
+  by accelerator model, and estimated hourly spend. Filter
+  ``kind="cluster"`` to avoid overlap with managed-job clusters; sum
+  across kinds for total resource usage.
 * Managed jobs by workspace, user, status, and cloud (non-terminal only).
 
 You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>`
