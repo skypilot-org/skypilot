@@ -352,6 +352,40 @@ class PostgresLock(DistributedLock):
         """Check if the postgres advisory lock is acquired."""
         return self._acquired
 
+    def is_session_alive(self) -> bool:
+        """Return True if the underlying PG session can still run queries.
+
+        Callers that hold a long-lived advisory lock (held for the lifetime of
+        a daemon/leader process, not just one transaction) need a way to
+        detect that the underlying session has been killed without an
+        exception propagating into their code path: RDS maintenance restarts,
+        NLB / load-balancer idle-timeout, ``idle_in_transaction_session_timeout``,
+        manual ``pg_terminate_backend``, network partitions.  All of these
+        free the advisory lock server-side while ``self._acquired`` stays
+        ``True`` locally, leaving the holder unaware that another replica
+        could now hold the same lock.
+
+        This method exposes a cheap ``SELECT 1`` probe on the very connection
+        that holds the lock so the holder can detect the loss and react
+        (typically by exiting and letting the orchestrator restart it).
+
+        Returns ``False`` if the lock was never acquired, if the connection
+        is missing, or if the probe raises any exception.  Returns ``True``
+        only when the probe succeeds.
+        """
+        if not self._acquired or self._connection is None:
+            return False
+        try:
+            cursor = self._connection.cursor()
+            try:
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            finally:
+                cursor.close()
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
 
 def get_lock(lock_id: str,
              timeout: Optional[float] = None,

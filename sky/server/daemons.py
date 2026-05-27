@@ -5,12 +5,10 @@ import os
 import shutil
 import sys
 import time
-import typing
 from typing import Callable, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants
@@ -21,11 +19,6 @@ from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    import pathlib
-else:
-    pathlib = adaptors_common.LazyImport('pathlib')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -196,7 +189,6 @@ def refresh_volume_status_event():
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
-_managed_job_consolidation_mode_lock = None
 _pool_consolidation_mode_lock = None
 _serve_consolidation_mode_lock = None
 
@@ -209,20 +201,15 @@ _serve_consolidation_mode_lock = None
 # update) would NEVER execute. The outer `while True` in
 # InternalRequestDaemon.run_event re-invokes the event_fn, so these
 # instances must outlive a single iteration.
-_managed_job_event = None
+# (managed-job uses its own instance held by ManagedJobRefreshDaemonThread
+# in sky/jobs/managed_job_refresh_thread.py — it lives on the thread,
+# not on this module.)
 _pool_status_update_event = None
 _serve_status_update_event = None
 
 
 # Attempt to gracefully release the lock when the process exits.
 # If this fails, it's okay, the lock will be released when the process dies.
-def _release_managed_job_consolidation_mode_lock() -> None:
-    global _managed_job_consolidation_mode_lock
-    if _managed_job_consolidation_mode_lock is not None:
-        _managed_job_consolidation_mode_lock.release()
-        _managed_job_consolidation_mode_lock = None
-
-
 def _release_serve_and_pool_consolidation_mode_locks() -> None:
     global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
     if _pool_consolidation_mode_lock is not None:
@@ -233,77 +220,7 @@ def _release_serve_and_pool_consolidation_mode_locks() -> None:
         _serve_consolidation_mode_lock = None
 
 
-atexit.register(_release_managed_job_consolidation_mode_lock)
 atexit.register(_release_serve_and_pool_consolidation_mode_locks)
-
-
-def managed_job_status_refresh_event():
-    """Refresh the managed job status for controller consolidation mode."""
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import constants as managed_job_constants
-    from sky.jobs import utils as managed_job_utils
-
-    global _managed_job_consolidation_mode_lock
-    if _managed_job_consolidation_mode_lock is None:
-        _managed_job_consolidation_mode_lock = locks.get_lock(
-            managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
-
-    # Touch the signal file here to avoid conflict with
-    # update_managed_jobs_statuses. Although we run
-    # ha_recovery_for_consolidation_mode before checking the job statuses
-    # (events.ManagedJobEvent), update_managed_jobs_statuses is also called in
-    # cancel_jobs_by_id.
-    # We also need to make sure that new controllers are not started until we
-    # acquire the consolidation mode lock, since if we have controllers on both
-    # the new and old API server during a rolling update, calling
-    # update_managed_jobs_statuses on the old API server could lead to
-    # FAILED_CONTROLLER.
-    signal_file = pathlib.Path(
-        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
-    try:
-        signal_file.touch()
-
-        # Make sure the lock is acquired for this process before proceeding to
-        # do recovery. This will block if another API server is still running,
-        # but should proceed once it is terminated and releases the lock.
-        if not _managed_job_consolidation_mode_lock.is_locked():
-            logger.info('Acquiring the consolidation mode lock: '
-                        f'{_managed_job_consolidation_mode_lock}')
-            _managed_job_consolidation_mode_lock.acquire()
-            logger.info('Lock acquired!')
-        # We don't explicitly release the lock until the process exits.
-        # Even if _release_managed_job_consolidation_mode_lock is not called,
-        # the lock should be released when the process dies (either due to the
-        # advisory file lock being released or the postgres session dying).
-
-        # We run the recovery logic before checking the job statuses as those
-        # two are conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for
-        # details.
-        managed_job_utils.ha_recovery_for_consolidation_mode()
-    finally:
-        # Now, we should be sure that this is the only API server, we have
-        # started the new controllers and unclaimed all the jobs, and we are
-        # ready to update the job statuses.
-        signal_file.unlink()
-
-    # After recovery, we start the event loop. The event instance is
-    # cached at module scope so its internal throttling counter
-    # accumulates across daemon iterations (see comment near
-    # _managed_job_event declaration).
-    from sky.skylet import events
-    global _managed_job_event
-    if _managed_job_event is None:
-        _managed_job_event = events.ManagedJobEvent()
-    logger.info('=== Running managed job event ===')
-    _managed_job_event.run()
-    time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
-
-
-def should_skip_managed_job_status_refresh():
-    """Check if the managed job status refresh event should be skipped."""
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import utils as managed_job_utils
-    return not managed_job_utils.is_consolidation_mode()
 
 
 def _serve_status_refresh_event(pool: bool):
@@ -449,11 +366,12 @@ INTERNAL_REQUEST_DAEMONS = [
         id='skypilot-volume-status-refresh-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_VOLUME_REFRESH,
         event_fn=refresh_volume_status_event),
-    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name=request_names.RequestName.
-                          REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH,
-                          event_fn=managed_job_status_refresh_event,
-                          should_skip=should_skip_managed_job_status_refresh),
+    # NOTE: managed-job-status-refresh runs as a thread inside the API
+    # server main process (see sky/jobs/managed_job_refresh_thread.py);
+    # it is intentionally absent from this list because routing it through
+    # the executor task queue allows the daemon to drift to a different
+    # replica from the controllers it spawned (cross-replica controller
+    # orphan).  Tying it to main's lifecycle removes that drift.
     InternalRequestDaemon(
         id='sky-serve-status-refresh-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH,

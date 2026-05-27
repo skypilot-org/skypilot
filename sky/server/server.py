@@ -3560,6 +3560,17 @@ if __name__ == '__main__':
         global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
+        # managed-job-status-refresh runs as a thread inside this
+        # supervisor process so the leader role and the controller
+        # subprocesses it spawns share a single OS lifecycle.  Routing
+        # this daemon through the executor task queue (as other daemons
+        # do) lets it drift between replicas while the controllers stay
+        # behind, which causes cross-replica controller orphans.  See
+        # sky/jobs/managed_job_refresh_thread.py for details.
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import managed_job_refresh_thread
+        managed_job_refresh_thread.start_managed_job_refresh_daemon()
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
