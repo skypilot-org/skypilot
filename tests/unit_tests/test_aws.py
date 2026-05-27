@@ -14,6 +14,7 @@ from sky.clouds import Zone
 from sky.clouds.aws import AWS
 from sky.provision import constants as provision_constants
 from sky.provision.aws import config
+from sky.provision.aws import instance as aws_instance
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -36,6 +37,101 @@ def test_aws_label():
         'sprinto:short',
         'thisiexample_string_with_123_characters_length_thing_thing_thing_thing_thing_thing_thing_thin_thing_thing_thing_thing_thing_thingthisiexample_string_with_123_characters_length_thing_thing_thing_thing_thing_thing_thing_thin_thing_thing_thing_thing_thing_thing',
     )[0])
+
+
+def test_create_instances_adds_volume_tag_spec():
+    ec2_fail_fast = MagicMock()
+    ec2_fail_fast.create_instances.return_value = ['instance']
+
+    node_config = {
+        'SubnetIds': ['subnet-123'],
+        'SecurityGroupIds': ['sg-123'],
+        'InstanceType': 'g5.xlarge',
+    }
+    tags = {
+        'Owner': 'alice',
+    }
+
+    result = aws_instance._create_instances(
+        ec2_fail_fast=ec2_fail_fast,
+        cluster_name='cluster',
+        node_config=node_config,
+        tags=tags,
+        count=1,
+        associate_public_ip_address=True,
+        max_efa_interfaces=0,
+    )
+
+    assert result == ['instance']
+
+    call_kwargs = ec2_fail_fast.create_instances.call_args.kwargs
+    assert call_kwargs['MinCount'] == 1
+    assert call_kwargs['MaxCount'] == 1
+
+    tag_specs = {
+        tag_spec['ResourceType']: tag_spec['Tags']
+        for tag_spec in call_kwargs['TagSpecifications']
+    }
+    expected_tags = [{
+        'Key': 'Name',
+        'Value': 'cluster'
+    }, {
+        'Key': provision_constants.TAG_RAY_CLUSTER_NAME,
+        'Value': 'cluster'
+    }, {
+        'Key': provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
+        'Value': 'cluster'
+    }, {
+        'Key': 'Owner',
+        'Value': 'alice'
+    }]
+    assert tag_specs['instance'] == expected_tags
+    assert tag_specs['volume'] == expected_tags
+
+
+def test_merge_tag_specs_merges_volume_tags():
+    base_tag_specs = [{
+        'ResourceType': 'instance',
+        'Tags': [{
+            'Key': 'Name',
+            'Value': 'cluster'
+        }],
+    }, {
+        'ResourceType': 'volume',
+        'Tags': [{
+            'Key': 'Name',
+            'Value': 'cluster'
+        }, {
+            'Key': 'Owner',
+            'Value': 'alice'
+        }],
+    }]
+    user_tag_specs = [{
+        'ResourceType': 'volume',
+        'Tags': [{
+            'Key': 'Owner',
+            'Value': 'bob'
+        }, {
+            'Key': 'Team',
+            'Value': 'ml'
+        }],
+    }]
+
+    aws_instance._merge_tag_specs(base_tag_specs, user_tag_specs)
+
+    volume_tags = next(tag_spec['Tags']
+                       for tag_spec in base_tag_specs
+                       if tag_spec['ResourceType'] == 'volume')
+    assert volume_tags == [{
+        'Key': 'Name',
+        'Value': 'cluster'
+    }, {
+        'Key': 'Owner',
+        'Value': 'bob'
+    }, {
+        'Key': 'Team',
+        'Value': 'ml'
+    }]
 
 
 def test_usable_subnets(monkeypatch):

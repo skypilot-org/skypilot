@@ -160,9 +160,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     node provider tag specs is modified in-place.
 
     This allows users to add tags and override values of existing
-    tags with their own, and only applies to the resource type
-    'instance'. All other resource types are appended to the list of
-    tag specs.
+    tags with their own for any resource type already present in the
+    base specs. New resource types are appended to the list of tag
+    specs.
 
     Args:
         tag_specs (List[Dict[str, Any]]): base node provider tag specs
@@ -170,18 +170,23 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     """
 
     for user_tag_spec in user_tag_specs:
-        if user_tag_spec['ResourceType'] == 'instance':
-            for user_tag in user_tag_spec['Tags']:
-                exists = False
-                for tag in tag_specs[0]['Tags']:
-                    if user_tag['Key'] == tag['Key']:
-                        exists = True
-                        tag['Value'] = user_tag['Value']
-                        break
-                if not exists:
-                    tag_specs[0]['Tags'] += [user_tag]
-        else:
-            tag_specs += [user_tag_spec]
+        resource_type = user_tag_spec['ResourceType']
+        existing_tag_spec = next((tag_spec for tag_spec in tag_specs
+                                  if tag_spec['ResourceType'] == resource_type),
+                                 None)
+        if existing_tag_spec is None:
+            tag_specs.append(copy.deepcopy(user_tag_spec))
+            continue
+
+        for user_tag in user_tag_spec['Tags']:
+            exists = False
+            for tag in existing_tag_spec['Tags']:
+                if user_tag['Key'] == tag['Key']:
+                    exists = True
+                    tag['Value'] = user_tag['Value']
+                    break
+            if not exists:
+                existing_tag_spec['Tags'].append(user_tag)
 
 
 def _create_instances(
@@ -203,6 +208,9 @@ def _create_instances(
 
     tag_specs = [{
         'ResourceType': 'instance',
+        'Tags': _format_tags(tags),
+    }, {
+        'ResourceType': 'volume',
         'Tags': _format_tags(tags),
     }]
     user_tag_specs = conf.get('TagSpecifications', [])

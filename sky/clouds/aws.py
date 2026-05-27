@@ -79,6 +79,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'g6.',
     'gr6.',
     'g6e.',
+    'g7e.',
     'p4d.',
     'p4de.',
     'p5.',
