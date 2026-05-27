@@ -51,8 +51,8 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
-from sky.jobs import state as managed_job_state
 from sky.jobs import managed_job_refresh_thread
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
