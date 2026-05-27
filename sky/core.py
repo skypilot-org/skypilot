@@ -905,6 +905,21 @@ def _maybe_run_teardown_hooks(handle: 'backends.ResourceHandle',
     # Only the VM/Ray backend is supported; other backends simply skip.
     if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
         return
+    # Skip the head SSH entirely when the cluster has NO hooks declared.
+    # The codegen exists to (a) run user-declared hooks and (b) claim
+    # the per-event teardown slot so a later SIGTERM cannot fire a
+    # competing preemption hook on what was an intentional teardown.
+    # With no hooks at all, both are no-ops — there's nothing to run
+    # and no preemption hook can race. SSH-ing the head anyway is pure
+    # overhead and surfaces a misleading ``Failed to run <event> hook
+    # on '<cluster>': . Proceeding with teardown.`` warning whenever
+    # the head IP is transiently unreachable (already partway shut
+    # down, stale cached handle, etc.) — for a user who never declared
+    # a hook in their YAML.
+    declared_hooks = getattr(getattr(handle, 'launched_resources', None),
+                             'hooks', None)
+    if not declared_hooks:
+        return
     # Claim the event slot unconditionally — even if no hook declares
     # this event. For 'down', the claim blocks the SIGTERM handler
     # (kubelet's SIGTERM at K8s pod delete) from later claiming

@@ -809,8 +809,14 @@ def test_sky_stop_fires_stop_hook_via_codegen():
 
     captured = {}
 
+    class _FakeResources:
+        # At least one hook must be declared for the codegen to run;
+        # the no-hooks shortcut is covered by
+        # ``test_sky_down_skips_codegen_when_no_hooks_declared``.
+        hooks = [{'run': 'echo s', 'events': ['stop'], 'timeout': 30}]
+
     class _FakeHandle:
-        pass
+        launched_resources = _FakeResources()
 
     class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
 
@@ -835,7 +841,8 @@ def test_sky_stop_fires_stop_hook_via_codegen():
 
 
 def test_sky_down_claims_teardown_even_without_down_hooks():
-    """`sky down` must claim the 'down' teardown slot unconditionally.
+    """`sky down` must claim the 'down' teardown slot unconditionally
+    whenever the cluster has ANY hooks declared.
 
     Otherwise a cluster declaring only ``events: [preemption]`` hooks
     leaves the slot unclaimed during ``sky down`` → the kubelet SIGTERM
@@ -852,8 +859,14 @@ def test_sky_down_claims_teardown_even_without_down_hooks():
 
     captured = {}
 
+    class _FakeResources:
+        # Cluster has a preemption hook (no `down` hook). The codegen
+        # must still run so the SIGTERM-driven preemption hook cannot
+        # later claim the slot on what was an intentional `sky down`.
+        hooks = [{'run': 'echo p', 'events': ['preemption'], 'timeout': 30}]
+
     class _FakeHandle:
-        pass
+        launched_resources = _FakeResources()
 
     class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
 
@@ -882,6 +895,60 @@ def test_sky_down_claims_teardown_even_without_down_hooks():
         "subsequent kubelet SIGTERM (during the K8s pod delete) cannot "
         "claim 'preemption' and fire the preemption hook on a sky "
         f"down. Codegen was:\n{cmd}")
+
+
+def test_sky_down_skips_codegen_when_no_hooks_declared():
+    """`sky down` on a cluster with NO hooks declared must NOT SSH to
+    the head to run the teardown codegen.
+
+    The codegen exists only to (a) run user-declared hooks and (b)
+    claim the per-event teardown slot so a later SIGTERM cannot fire
+    a competing preemption hook on what was an intentional teardown.
+    When the cluster has no hooks at all, both (a) and (b) are no-ops
+    — there are no hooks to run, and no preemption hook can race.
+    SSH-ing to the head anyway wastes time and, more importantly,
+    surfaces a noisy ``Failed to run down hook on '<cluster>': .
+    Proceeding with teardown.`` warning whenever the head IP is
+    transiently unreachable (already partway shut down, stale cached
+    handle, network blip) — even though the user never declared any
+    hook in their YAML.
+
+    Pins: when ``handle.launched_resources.hooks`` is None or empty,
+    ``run_on_head`` MUST NOT be called.
+    """
+    from sky import core
+    from sky.backends import cloud_vm_ray_backend
+
+    for hooks_value in (None, []):
+        called = {'count': 0}
+
+        class _FakeResources:
+            hooks = hooks_value  # type: ignore[misc]
+
+        class _FakeHandle:
+            launched_resources = _FakeResources()
+
+        class _FakeBackend(cloud_vm_ray_backend.CloudVmRayBackend):
+
+            def __init__(self):  # pylint: disable=super-init-not-called
+                pass
+
+            def run_on_head(self, handle, cmd, **kw):  # type: ignore[override]
+                del handle, cmd, kw
+                called['count'] += 1
+                return 0
+
+        core._maybe_run_down_hooks(_FakeHandle(), _FakeBackend(), 'mycluster')
+        core._maybe_run_stop_hooks(_FakeHandle(), _FakeBackend(), 'mycluster')
+
+        assert called['count'] == 0, (
+            f'`_maybe_run_teardown_hooks` SSHed to the head despite '
+            f'`handle.launched_resources.hooks={hooks_value!r}`. The codegen '
+            f'should be skipped entirely when no hooks are declared, '
+            f'otherwise `sky down`/`sky stop` on a cluster that never used '
+            f'hooks emits a misleading "Failed to run down hook" warning '
+            f'whenever the head IP is transiently unreachable. '
+            f'run_on_head was called {called["count"]} time(s).')
 
 
 def test_relaunch_hooks_only_preserves_autostop(monkeypatch):
