@@ -2108,6 +2108,43 @@ async def async_check_network_connection():
                 continue
 
 
+# Kubeconfig assembly may rewrite a context's cluster/user `name` fields to
+# `<original>__sky__<context>` so that multiple source kubeconfigs declaring
+# the same internal name (e.g. a shared service-account user) do not collide
+# when merged into a single file. The owner identity string is
+# `<cluster>_<user>_<namespace>`, so each rewritten field contributes a
+# `__sky__<context>` segment and changes the identity shape. Strip those
+# segments before comparing a stored owner against the current identity,
+# otherwise clusters whose owner was recorded before the convention existed
+# are flagged as owner mismatches.
+_KUBE_NAME_SCOPE_SEP = '__sky__'
+
+
+def _normalize_kube_identity(identity_str: str) -> str:
+    """Strip `__sky__<context>` scope segments from a k8s owner identity.
+
+    Both the cluster and user fields are scoped by the *same* context, and a
+    Kubernetes namespace cannot contain `_`, so the context token is exactly
+    the text between the last `__sky__` and the final `_<namespace>`. Removing
+    every occurrence of that token recovers the pre-scoping identity even when
+    the context, cluster, or user names contain underscores (e.g. GKE contexts
+    like `gke_<project>_<zone>_<cluster>`).
+    """
+    sep = _KUBE_NAME_SCOPE_SEP
+    last = identity_str.rfind(sep)
+    if last == -1:
+        return identity_str
+    ctx_start = last + len(sep)
+    # The namespace is the final underscore-free field, so the last `_` in the
+    # whole string is the namespace separator; the context token sits between
+    # the last scope separator and it.
+    ns_sep = identity_str.rfind('_')
+    if ns_sep <= ctx_start:
+        return identity_str
+    ctx = identity_str[ctx_start:ns_sep]
+    return identity_str.replace(f'{sep}{ctx}', '')
+
+
 @timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
@@ -2201,7 +2238,16 @@ def _check_owner_identity_with_record(cluster_name: str,
             # Clean up the owner identity for the backslash and newlines, caused
             # by the cloud CLI output, e.g. gcloud.
             owner = owner.replace('\n', '').replace('\\', '')
-            if owner == current:
+            # On Kubernetes, the stored owner may predate kubeconfig name
+            # scoping (see `_normalize_kube_identity`). Treat an owner that
+            # matches only after stripping the `__sky__<context>` suffixes as
+            # a match, and self-heal the row to the current identity so later
+            # checks match exactly and `sky status` stops reporting a stale
+            # mismatch.
+            scope_only_match = (is_k8s_cloud and owner != current and
+                                _normalize_kube_identity(owner)
+                                == _normalize_kube_identity(current))
+            if owner == current or scope_only_match:
                 if not is_k8s_cloud:
                     # We skip patching owner identities for Kubernetes as
                     # we expect users to naturally have multiple clusters
@@ -2229,6 +2275,11 @@ def _check_owner_identity_with_record(cluster_name: str,
                         # showing the warning above again.
                         global_user_state.set_owner_identity_for_cluster(
                             cluster_name, identity)
+                elif scope_only_match:
+                    # Migrate a pre-scoping owner string to the current scoped
+                    # identity so the row stops looking mismatched.
+                    global_user_state.set_owner_identity_for_cluster(
+                        cluster_name, identity)
                 return  # The user identity matches.
     _raise_identity_error()
 

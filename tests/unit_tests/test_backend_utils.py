@@ -2,8 +2,12 @@ import os
 import pathlib
 from unittest import mock
 
+import pytest
+
+from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import exceptions
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
@@ -369,6 +373,132 @@ def test_check_cluster_available_rejects_init(mock_refresh, mock_get_backend):
         assert False, 'Expected ClusterNotUpError to be raised'
     except ClusterNotUpError:
         pass
+
+
+def _k8s_owner_check_record(owner_identity):
+    launchable = mock.MagicMock()
+    launchable.cloud = clouds.Kubernetes()
+    # `unsafe=True` so the `assert_launchable` attribute (which MagicMock
+    # would otherwise guard as a misspelled assert method) is mockable.
+    launched_resources = mock.MagicMock(unsafe=True)
+    launched_resources.assert_launchable.return_value = launchable
+
+    handle = mock.MagicMock()
+    # Make `isinstance(handle, CloudVmRayResourceHandle)` pass without the
+    # attribute restrictions that `spec=` imposes (launched_resources is set
+    # in __init__, not on the class).
+    handle.__class__ = backends.CloudVmRayResourceHandle
+    handle.launched_resources = launched_resources
+    return {
+        'handle': handle,
+        'workspace': 'default',
+        'owner': owner_identity,
+    }
+
+
+def test_check_owner_identity_k8s_ignores_name_scope(monkeypatch):
+    """A pre-scoping owner should still match the current scoped identity.
+
+    Regression: a Kubernetes cluster whose owner was recorded before the
+    kubeconfig `__sky__<context>` name-scoping convention existed must keep
+    matching the current (scoped) identity instead of raising an owner
+    mismatch, and the stored owner should self-heal to the scoped identity.
+    """
+    # Identity string shape is `<cluster>_<user>_<namespace>`. The scoped
+    # variant appends `__sky__<context>` to the cluster and user names.
+    old_identity = 'kube-cluster_kube-user_default'
+    scoped_identity = ('kube-cluster__sky__my-context_'
+                       'kube-user__sky__my-context_default')
+
+    record = _k8s_owner_check_record([old_identity])
+
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+
+    patched = {}
+
+    def fake_set_owner(cluster_name, identity):
+        patched['cluster_name'] = cluster_name
+        patched['identity'] = identity
+
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        fake_set_owner)
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [[scoped_identity]]))
+
+    # Should not raise despite the stored owner predating name scoping.
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    # The stale, pre-scoping owner should self-heal to the scoped identity.
+    assert patched['cluster_name'] == 'my-cluster'
+    assert patched['identity'] == [scoped_identity]
+
+
+def test_check_owner_identity_k8s_name_scope_underscored_context(monkeypatch):
+    """Scope stripping must work when the context name contains underscores.
+
+    Default GKE contexts look like `gke_<project>_<zone>_<cluster>`, so the
+    scope suffix itself carries underscores. A naive `__sky__[^_]*` strip would
+    only remove up to the first underscore of the context and still report a
+    mismatch. The cluster/user names here are underscore-free so the test
+    isolates the underscored-context case.
+    """
+    ctx = 'gke_my-project_us-central1-a_my-cluster'
+    old_identity = 'kube-cluster_kube-user_default'
+    scoped_identity = f'kube-cluster__sky__{ctx}_kube-user__sky__{ctx}_default'
+
+    record = _k8s_owner_check_record([old_identity])
+
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+
+    patched = {}
+
+    def fake_set_owner(cluster_name, identity):
+        patched['cluster_name'] = cluster_name
+        patched['identity'] = identity
+
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        fake_set_owner)
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [[scoped_identity]]))
+
+    backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+        'my-cluster', record)
+
+    assert patched['identity'] == [scoped_identity]
+
+
+def test_check_owner_identity_k8s_scope_does_not_overmatch(monkeypatch):
+    """Stripping scope suffixes must not let a different identity match."""
+    owner_identity = ['ctx-a_user-a_default']
+    # Different cluster/user; normalizing the scope suffix still leaves it
+    # distinct from the stored owner.
+    other_scoped = 'ctx-b__sky__ctx-b_user-b__sky__ctx-b_default'
+
+    record = _k8s_owner_check_record(owner_identity)
+
+    # CI runs unit tests with SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1, which would
+    # short-circuit the check before our logic runs; ensure it is enabled here.
+    monkeypatch.delenv('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', raising=False)
+
+    monkeypatch.setattr('sky.skypilot_config.get_active_workspace',
+                        lambda: 'default')
+    monkeypatch.setattr('sky.global_user_state.set_owner_identity_for_cluster',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(clouds.Kubernetes, 'get_user_identities',
+                        classmethod(lambda cls: [[other_scoped]]))
+
+    with pytest.raises(exceptions.ClusterOwnerIdentityMismatchError):
+        backend_utils._check_owner_identity_with_record(  # pylint: disable=protected-access
+            'my-cluster', record)
 
 
 @mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
