@@ -339,12 +339,6 @@ INTERNAL_REQUEST_DAEMONS = [
         id='skypilot-volume-status-refresh-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_VOLUME_REFRESH,
         event_fn=refresh_volume_status_event),
-    # NOTE: managed-job-status-refresh runs as a thread inside the API
-    # server main process (see sky/jobs/managed_job_refresh_thread.py);
-    # it is intentionally absent from this list because routing it through
-    # the executor task queue allows the daemon to drift to a different
-    # replica from the controllers it spawned (cross-replica controller
-    # orphan).  Tying it to main's lifecycle removes that drift.
     InternalRequestDaemon(
         id='sky-serve-status-refresh-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH,
