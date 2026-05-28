@@ -1202,8 +1202,8 @@ def _get_pool_health_summary(pool_name: str) -> Optional[str]:
     Pool jobs that can't dispatch (no idle replicas) sit in PENDING with the
     generic 'Waiting for task to start' spinner — the user has no signal
     whether the pool is healthy or just busy. This helper produces a short
-    string like 'Pool 'foo': 1/3 ready (2 provisioning)' to surface in that
-    spinner. Returns None on any error so the caller falls back cleanly.
+    string like 'Pool 'foo': 1/3 idle (1 occupied, 1 provisioning)' to surface
+    in that spinner. Returns None on any error so the caller falls back cleanly.
     """
     try:
         replica_infos = serve_state.get_replica_infos(pool_name)
@@ -1220,6 +1220,11 @@ def _get_pool_health_summary(pool_name: str) -> Optional[str]:
                 other_counts['failed'] += 1
             else:
                 other_counts[r.status.value.lower()] += 1
+        occupied = min(managed_job_state.get_num_alive_jobs(pool=pool_name),
+                       ready)
+        idle = ready - occupied
+        if occupied > 0:
+            other_counts['occupied'] = occupied
         if other_counts:
             # Sort by count descending (alphabetical tiebreaker) so output is
             # deterministic and the dominant state appears first — what the
@@ -1227,9 +1232,8 @@ def _get_pool_health_summary(pool_name: str) -> Optional[str]:
             ordered = sorted(other_counts.items(),
                              key=lambda kv: (-kv[1], kv[0]))
             other_str = ', '.join(f'{c} {label}' for label, c in ordered)
-            return (f'Pool {pool_name!r}: {ready}/{total} ready '
-                    f'({other_str})')
-        return f'Pool {pool_name!r}: {ready}/{total} ready'
+            return f'Pool {pool_name!r}: {idle}/{total} idle ({other_str})'
+        return f'Pool {pool_name!r}: {idle}/{total} idle'
     except Exception:  # pylint: disable=broad-except
         return None
 
