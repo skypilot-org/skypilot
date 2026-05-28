@@ -880,7 +880,7 @@ class InstanceAwareRequestRateAutoscaler(RequestRateAutoscaler):
         sorted_replicas = sorted(
             replica_infos,
             key=lambda info: (
-                info.status.scale_down_decision_order(),
+                serve_state.ReplicaStatus.scale_down_decision_order().index(info.status),
                 replica_qps_map.get(info.replica_id, float('inf')),
                 info.version,
                 -info.replica_id,
