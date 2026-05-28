@@ -434,19 +434,21 @@ class TestJobGroupNetworking:
             'SKYPILOT_JOBGROUP_NAME')
 
     def test_get_k8s_namespace_logs_on_exception(self):
-        """Test that _get_k8s_namespace_from_handle logs debug message on error.
+        """`_get_k8s_namespace_from_handle` logs at debug when fallback errors.
 
-        This test verifies the fix for silent exception handling - exceptions
-        should be logged at debug level instead of silently passed.
+        Pins the silent-exception fix: when the kubeconfig fallback raises
+        we log a debug message and return 'default' rather than letting the
+        exception propagate. `cluster_yaml` is set to None so the new
+        YAML-read path is skipped and the kubeconfig path is tested in
+        isolation.
         """
         from sky.jobs import job_group_networking
 
-        # Create a mock handle that will cause an exception
         mock_handle = mock.MagicMock()
+        mock_handle.cluster_yaml = None  # skip YAML read; test fallback
         mock_handle.launched_resources = mock.MagicMock()
         mock_handle.launched_resources.region = 'test-context'
 
-        # Mock the k8s_utils to raise an exception and patch the logger
         with mock.patch(
                 'sky.provision.kubernetes.utils.'
                 'get_kube_config_context_namespace') as mock_get_ns, \
@@ -457,21 +459,115 @@ class TestJobGroupNetworking:
             result = job_group_networking._get_k8s_namespace_from_handle(
                 mock_handle)
 
-            # Should fall back to default
             assert result == 'default'
-
-            # Should have logged the exception at debug level
             mock_logger.debug.assert_called_once()
             log_message = mock_logger.debug.call_args[0][0]
             assert 'Failed to get K8s namespace from handle' in log_message
             assert 'Test K8s error' in log_message
 
     def test_get_k8s_namespace_returns_default_for_none_handle(self):
-        """Test _get_k8s_namespace_from_handle returns 'default' for None."""
+        """`_get_k8s_namespace_from_handle` returns 'default' for None."""
         from sky.jobs import job_group_networking
 
         result = job_group_networking._get_k8s_namespace_from_handle(None)
         assert result == 'default'
+
+    def test_get_k8s_namespace_reads_provider_namespace_from_yaml(self):
+        """The namespace must come from the cluster YAML's provider.namespace.
+
+        Source-of-truth check: `make_deploy_resources_variables` persists
+        the resolved namespace under `provider.namespace` in the cluster
+        YAML at launch time. The JobGroup DNS path must read it from
+        there, independent of whatever the active workspace is at query
+        time — otherwise a multi-workspace JobGroup or a controller
+        running under a different workspace would construct DNS for the
+        wrong namespace.
+        """
+        from sky.jobs import job_group_networking
+
+        mock_handle = mock.MagicMock()
+        mock_handle.cluster_yaml = '~/.sky/generated/cluster.yaml'
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.region = 'in-cluster'
+
+        with mock.patch(
+                'sky.global_user_state.get_cluster_yaml_dict'
+        ) as mock_get_yaml, \
+                mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace') as mock_kubeconfig:
+            mock_get_yaml.return_value = {
+                'provider': {
+                    'namespace': 'team-a-ns'
+                }
+            }
+
+            result = job_group_networking._get_k8s_namespace_from_handle(
+                mock_handle)
+
+            assert result == 'team-a-ns'
+            mock_get_yaml.assert_called_once_with(mock_handle.cluster_yaml)
+            mock_kubeconfig.assert_not_called()
+
+    def test_get_k8s_namespace_falls_back_when_yaml_missing_namespace(self):
+        """Legacy clusters without provider.namespace fall back to kubeconfig.
+
+        Clusters provisioned before the per-workspace namespace feature
+        existed won't have `provider.namespace` set in their YAML. The
+        fallback uses `get_kube_config_context_namespace` (deterministic,
+        workspace-invariant) rather than `get_namespace` (workspace-aware,
+        which would re-introduce the race the YAML read is meant to avoid).
+        """
+        from sky.jobs import job_group_networking
+
+        mock_handle = mock.MagicMock()
+        mock_handle.cluster_yaml = '~/.sky/generated/cluster.yaml'
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.region = 'in-cluster'
+
+        with mock.patch(
+                'sky.global_user_state.get_cluster_yaml_dict'
+        ) as mock_get_yaml, \
+                mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace') as mock_kubeconfig:
+            # Legacy YAML: provider exists but has no `namespace` key.
+            mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+            mock_kubeconfig.return_value = 'kubeconfig-default'
+
+            result = job_group_networking._get_k8s_namespace_from_handle(
+                mock_handle)
+
+            assert result == 'kubeconfig-default'
+            mock_kubeconfig.assert_called_once_with('in-cluster')
+
+    def test_get_k8s_namespace_skips_yaml_when_cluster_yaml_is_none(self):
+        """When the handle has no `cluster_yaml`, the YAML read is skipped.
+
+        Covers unpickled handles for older clusters where `cluster_yaml`
+        may be None.
+        """
+        from sky.jobs import job_group_networking
+
+        mock_handle = mock.MagicMock()
+        mock_handle.cluster_yaml = None
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.region = 'in-cluster'
+
+        with mock.patch(
+                'sky.global_user_state.get_cluster_yaml_dict'
+        ) as mock_get_yaml, \
+                mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace') as mock_kubeconfig:
+            mock_kubeconfig.return_value = 'kubeconfig-default'
+
+            result = job_group_networking._get_k8s_namespace_from_handle(
+                mock_handle)
+
+            assert result == 'kubeconfig-default'
+            mock_get_yaml.assert_not_called()
+            mock_kubeconfig.assert_called_once_with('in-cluster')
 
     def test_generate_wait_for_networking_script_with_hostnames(self):
         """Test wait script generation with multiple job names."""
