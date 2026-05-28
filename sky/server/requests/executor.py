@@ -459,42 +459,30 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
-# Worker-pool subprocess state. Each ProcessPoolExecutor worker has its own
-# copy of these module-level flags (spawn'd subprocesses are independent
-# processes). They guard the SIGTERM-from-cancel race
+# Per-worker-process flags consumed by _gated_sigterm_handler.
 _in_request_execution: bool = False
 _pending_sigterm: bool = False
 
 
 def _gated_sigterm_handler(signum: int,
                            frame: Optional['types.FrameType']) -> None:
-    """Worker-side SIGTERM handler — only raises while a request is running.
+    """Raise KeyboardInterrupt only while actively executing a request.
 
-    Cancel paths deliver SIGTERM to a worker by reading the pid stored on
-    a RUNNING request row. Because the pid is a long-lived pool worker
-    PID (workers handle many requests sequentially), a stale RUNNING row
-    can route SIGTERM to a worker that has long since finished that
-    request and moved on, potentially sitting idle in
-    concurrent.futures._process_worker's `call_queue.get(block=True)`.
-    Raising KeyboardInterrupt from there is unhandled — the worker
-    process dies, ProcessPoolExecutor marks the pool BROKEN, and every
-    in-flight future plus subsequent submits fail with
-    BrokenProcessPool.
-
-    Gate raises behind a flag that's set only while
-    _request_execution_wrapper is inside its try block. If SIGTERM
-    arrives outside that window (idle worker, finally cleanup), latch
-    a pending-cancel flag and let the next request-execution check it
-    on entry so the cancel intent is preserved without killing the
-    worker.
+    SIGTERM landing on an idle worker (blocked in
+    concurrent.futures._process_worker's call_queue.get) would escape
+    _process_worker unhandled and break the entire pool. Latch instead
+    and honor at the next wrapper entry.
     """
     del signum, frame
     global _pending_sigterm  # pylint: disable=global-statement
     if _in_request_execution:
         raise KeyboardInterrupt
     _pending_sigterm = True
-    logger.info('SIGTERM received while worker idle; deferring to '
-                'next request entry to preserve the process pool.')
+    # logger isn't async-signal-safe (re-entrant lock); use os.write.
+    try:
+        os.write(2, b'SIGTERM received while worker idle; deferred.\n')
+    except Exception:  # pylint: disable=broad-except
+        pass
 
 
 def _request_execution_wrapper(request_id: str,
@@ -517,12 +505,6 @@ def _request_execution_wrapper(request_id: str,
     # Handle the SIGTERM signal to abort the request processing gracefully.
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
-    #
-    # Use the gated variant: between requests this worker may be idle in
-    # concurrent.futures._process_worker's call_queue.get(); a SIGTERM
-    # there would kill the worker and break the entire pool. The gated
-    # handler only raises KeyboardInterrupt while we are inside the
-    # protected try-block below.
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGTERM, _gated_sigterm_handler)
 
@@ -558,17 +540,15 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
-    # Enter the protected region: from here on, the gated SIGTERM handler is
-    # allowed to raise KeyboardInterrupt. If a SIGTERM was deferred while the
-    # worker was idle between requests (see _gated_sigterm_handler), honor it
-    # now by raising immediately — the cancel intent was for whatever request
-    # this worker was/is processing.
+    # Set _in_request_execution inside the try so `finally` always clears it,
+    # even if a SIGTERM lands before any wrapper code runs.
     global _in_request_execution, _pending_sigterm  # pylint: disable=global-statement
-    _in_request_execution = True
-    pending = _pending_sigterm
-    _pending_sigterm = False
     try:
+        _in_request_execution = True
+        pending = _pending_sigterm
+        _pending_sigterm = False
         if pending:
+            logger.info(f'Request {request_id}: honoring deferred SIGTERM.')
             raise KeyboardInterrupt
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -657,9 +637,6 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
-        # Leave the protected region. From here until the next request,
-        # SIGTERM is latched (not raised) so an in-flight cancel can't kill
-        # this worker while it's idle in call_queue.get().
         _in_request_execution = False
         _restore_output()
         try:
