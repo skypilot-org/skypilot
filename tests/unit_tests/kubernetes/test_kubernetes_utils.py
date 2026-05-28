@@ -4434,3 +4434,470 @@ class TestCheckCredentials:
                                                        cloud='ssh')
         finally:
             self._stop(patches)
+
+
+# ----------------------------------------------------------------------------
+# Taint toleration tests (kubernetes.pod_config.spec.tolerations)
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'taint,tolerations,expected',
+    [
+        # 1. Exact Equal match (the customer's case).
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }], True),
+        # 2. Value mismatch under Equal.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': 'staging',
+            'effect': 'NoSchedule'
+        }], False),
+        # 3. Exists ignores value.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Exists',
+            'effect': 'NoSchedule'
+        }], True),
+        # 4. Empty effect on toleration matches all effects.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': 'research'
+        }], True),
+        # 5. Effect mismatch.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoExecute'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }], False),
+        # 6. Empty key + Exists is a universal wildcard.
+        ({
+            'key': 'whatever',
+            'value': 'any',
+            'effect': 'NoSchedule'
+        }, [{
+            'operator': 'Exists'
+        }], True),
+        # 7. Wildcard restricted to a specific effect.
+        ({
+            'key': 'whatever',
+            'value': 'any',
+            'effect': 'NoSchedule'
+        }, [{
+            'operator': 'Exists',
+            'effect': 'NoExecute'
+        }], False),
+        # 8. Default operator (Equal) when unspecified.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }], True),
+        # 9. Taint with no value, toleration with empty-string value.
+        ({
+            'key': 'workload_pool',
+            'value': None,
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': '',
+            'effect': 'NoSchedule'
+        }], True),
+        # 10. Taint with no value, toleration with explicit non-empty value.
+        ({
+            'key': 'workload_pool',
+            'value': None,
+            'effect': 'NoSchedule'
+        }, [{
+            'key': 'workload_pool',
+            'operator': 'Equal',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }], False),
+        # 11. Any-of-list match (second toleration matches).
+        ({
+            'key': 'a',
+            'value': 'b',
+            'effect': 'NoSchedule'
+        }, [
+            {
+                'key': 'a',
+                'value': 'c',
+                'effect': 'NoSchedule'
+            },
+            {
+                'key': 'a',
+                'value': 'b',
+                'effect': 'NoSchedule'
+            },
+        ], True),
+        # 12. Empty toleration list never matches.
+        ({
+            'key': 'a',
+            'value': 'b',
+            'effect': 'NoSchedule'
+        }, [], False),
+        # 13. Malformed (non-dict) toleration entries are skipped, not errors.
+        ({
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule'
+        }, [
+            'not-a-dict',
+            None,
+            {
+                'key': 'workload_pool',
+                'value': 'research',
+                'effect': 'NoSchedule'
+            },
+        ], True),
+        # 14. Empty-key Equal is invalid (only Exists is valid with empty
+        # key), so it must not match.
+        ({
+            'key': 'a',
+            'value': 'b',
+            'effect': 'NoSchedule'
+        }, [{
+            'operator': 'Equal',
+            'value': 'b',
+            'effect': 'NoSchedule'
+        }], False),
+    ])
+def test_taint_is_tolerated(taint, tolerations, expected):
+    assert utils.taint_is_tolerated(taint, tolerations) is expected
+
+
+def test_get_configured_tolerations_global_only():
+    """When only a global toleration is configured, it's returned."""
+    global_tols = [{
+        'key': 'workload_pool',
+        'operator': 'Equal',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }]
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        mock_get.return_value = {'spec': {'tolerations': global_tols}}
+        result = utils.get_configured_tolerations(context='ctx-a')
+        assert result == global_tols
+        mock_get.assert_called_once_with(cloud='kubernetes',
+                                         region='ctx-a',
+                                         keys=('pod_config',),
+                                         default_value=None)
+
+
+def test_get_configured_tolerations_none_configured():
+    """No tolerations configured → None (preserves today's wire shape).
+
+    Returning None ensures downstream get_taints(tolerations=None) skips
+    the tolerated decoration entirely, so users without configured
+    tolerations see byte-identical taint dicts to today.
+    """
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        mock_get.return_value = None
+        result = utils.get_configured_tolerations(context='ctx-a')
+        assert result is None
+
+
+def test_get_configured_tolerations_defensive_against_garbage():
+    """Non-dict pod_config / non-dict spec / non-list tolerations / non-dict
+    entries — all defaulted away without crashing the caller."""
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        # Whole pod_config isn't a dict (impossible in practice but
+        # defensive).
+        mock_get.return_value = 'not-a-dict'
+        assert utils.get_configured_tolerations(context='ctx-a') is None
+        # spec isn't a dict.
+        mock_get.return_value = {'spec': 'garbage'}
+        assert utils.get_configured_tolerations(context='ctx-a') is None
+        # tolerations isn't a list.
+        mock_get.return_value = {'spec': {'tolerations': 'garbage'}}
+        assert utils.get_configured_tolerations(context='ctx-a') is None
+        # List with non-dict entries gets filtered.
+        mock_get.return_value = {
+            'spec': {
+                'tolerations': [
+                    {
+                        'key': 'a',
+                        'operator': 'Exists'
+                    },
+                    'garbage-string',
+                    None,
+                    42,
+                ],
+            },
+        }
+        result = utils.get_configured_tolerations(context='ctx-a')
+        assert result == [{'key': 'a', 'operator': 'Exists'}]
+
+
+def test_get_configured_tolerations_empty_list_preserved():
+    """Explicit empty list in config → empty list (not None).
+
+    Distinguishes "I'm setting an empty list" from "I didn't set anything".
+    """
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        mock_get.return_value = {'spec': {'tolerations': []}}
+        result = utils.get_configured_tolerations(context='ctx-a')
+        assert result == []
+
+
+def test_get_configured_tolerations_fetches_pod_config_dict():
+    """Fetches `('pod_config',)` (the whole dict) — NOT
+    `('pod_config', 'spec', 'tolerations')` directly.
+
+    Fetching the leaf list bypasses the K8s-specific dict merge in
+    `get_cloud_config_value_from_dict`, letting a per-context
+    `tolerations` list clobber the global one. Fetching the dict
+    triggers `merge_k8s_configs`, which appends list elements — matching
+    what `resolve_effective_pod_config` does for the actual pod spec.
+    """
+    captured_keys = []
+
+    def fake_get(cloud, region, keys, default_value):
+        captured_keys.append(keys)
+        return default_value
+
+    with patch('sky.skypilot_config.get_effective_region_config',
+               side_effect=fake_get):
+        utils.get_configured_tolerations(context='ctx-a')
+        assert ('pod_config',) in captured_keys, (
+            f'Expected pod_config dict to be fetched (so the merge fires), '
+            f'got: {captured_keys}')
+
+
+def test_get_configured_tolerations_extracts_from_pod_config_dict():
+    """Merged pod_config dict → extract spec.tolerations."""
+    with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
+        mock_get.return_value = {
+            'metadata': {
+                'labels': {
+                    'team': 'research'
+                }
+            },
+            'spec': {
+                'tolerations': [
+                    {
+                        'key': 'global-key',
+                        'operator': 'Exists'
+                    },
+                    {
+                        'key': 'context-key',
+                        'operator': 'Equal',
+                        'value': 'v',
+                        'effect': 'NoSchedule'
+                    },
+                ],
+            },
+        }
+        result = utils.get_configured_tolerations(context='ctx-a')
+        assert result == [
+            {
+                'key': 'global-key',
+                'operator': 'Exists'
+            },
+            {
+                'key': 'context-key',
+                'operator': 'Equal',
+                'value': 'v',
+                'effect': 'NoSchedule'
+            },
+        ]
+
+
+def test_taint_is_tolerated_coerces_yaml_int_value_to_str():
+    """YAML-parsed int taint/toleration values must still match via str().
+
+    Without explicit `str()` coercion, a user-configured
+    `value: 123` (unquoted YAML → int) would not match a K8s taint value
+    of '123' (str) and the node would falsely render as un-tolerated.
+    """
+    taint = {'key': 'foo', 'value': '123', 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': 123,  # unquoted in YAML → int after parse
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is True
+
+
+def test_taint_is_tolerated_coerces_yaml_bool_value_to_str():
+    """YAML-parsed bool taint/toleration values must still match via str()."""
+    taint = {'key': 'foo', 'value': 'True', 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': True,  # YAML `value: true` → bool
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is True
+
+
+def _make_v1node_with_taints(taints):
+    """Helper to build a V1Node with the supplied taints."""
+    return utils.V1Node.from_dict({
+        'metadata': {
+            'name': 'worker-1',
+            'labels': {},
+        },
+        'status': {
+            'allocatable': {},
+            'capacity': {},
+            'addresses': [],
+            'conditions': [{
+                'type': 'Ready',
+                'status': 'True',
+            }],
+        },
+        'spec': {
+            'unschedulable': False,
+            'taints': taints,
+        },
+    })
+
+
+def test_v1node_get_taints_tolerations_none_is_backward_compatible():
+    """tolerations=None: dicts have no 'tolerated' key (identical to today)."""
+    node = _make_v1node_with_taints([{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }])
+    out = node.get_taints()
+    assert out == [{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }]
+    # And explicit None matches.
+    assert node.get_taints(tolerations=None) == out
+
+
+def test_v1node_get_taints_tolerations_empty_marks_all_false():
+    """tolerations=[]: every retained taint gets tolerated=False."""
+    node = _make_v1node_with_taints([{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }])
+    out = node.get_taints(tolerations=[])
+    assert out == [{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+        'tolerated': False,
+    }]
+
+
+def test_v1node_get_taints_tolerations_matches_user_taint():
+    """A matching configured toleration sets tolerated=True."""
+    node = _make_v1node_with_taints([{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }])
+    tols = [{
+        'key': 'workload_pool',
+        'operator': 'Equal',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }]
+    out = node.get_taints(tolerations=tols)
+    assert out == [{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+        'tolerated': True,
+    }]
+
+
+def test_v1node_get_taints_exclude_filters_still_apply_with_tolerations():
+    """exclude_* filters drop taints regardless of tolerations.
+
+    A tolerated handled-key taint is still dropped by exclude_keys, so it
+    doesn't appear in the output. The non-excluded taint comes through
+    with tolerated=True from the user toleration.
+    """
+    node = _make_v1node_with_taints([
+        {
+            'key': 'nvidia.com/gpu',
+            'effect': 'NoSchedule',
+        },
+        {
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule',
+        },
+    ])
+    tols = [{
+        # Wildcard toleration that would otherwise mark every taint
+        # tolerated.
+        'operator': 'Exists',
+    }]
+    out = node.get_taints(
+        exclude_keys=['nvidia.com/gpu'],
+        tolerations=tols,
+    )
+    assert out == [{
+        'key': 'workload_pool',
+        'value': 'research',
+        'effect': 'NoSchedule',
+        'tolerated': True,
+    }]
+
+
+def test_v1node_get_taints_mixed_tolerated_and_untolerated():
+    """Mixed taints get individual tolerated flags."""
+    node = _make_v1node_with_taints([
+        {
+            'key': 'workload_pool',
+            'value': 'research',
+            'effect': 'NoSchedule',
+        },
+        {
+            'key': 'dangerous',
+            'value': 'true',
+            'effect': 'NoSchedule',
+        },
+    ])
+    tols = [{
+        'key': 'workload_pool',
+        'operator': 'Equal',
+        'value': 'research',
+        'effect': 'NoSchedule',
+    }]
+    out = node.get_taints(tolerations=tols)
+    by_key = {t['key']: t['tolerated'] for t in out}
+    assert by_key == {'workload_pool': True, 'dangerous': False}

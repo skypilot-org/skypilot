@@ -431,9 +431,12 @@ export async function getContextGPUData(context) {
         const isReady = nodeData['is_ready'] !== false;
         // Check if node is cordoned (defaults to false for backward compatibility)
         const isCordoned = nodeData['is_cordoned'] === true;
-        // Check if node has taints (defaults to empty for backward compatibility)
+        // Check if node has taints (defaults to empty for backward compatibility).
+        // Only un-tolerated taints make a node "not ready" — taints matched by
+        // the configured `kubernetes.pod_config.spec.tolerations` arrive with
+        // `tolerated=true` and don't suppress GPU availability.
         const taints = nodeData['taints'] || [];
-        const isTainted = taints.length > 0;
+        const isTainted = taints.some((t) => t && t.tolerated !== true);
         // Node is considered not ready if it's not ready, cordoned, or tainted
         const isNodeNotReady = !isReady || isCordoned || isTainted;
 
@@ -569,9 +572,11 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const isReady = nodeData['is_ready'] !== false;
           // Check if node is cordoned (defaults to false for backward compatibility)
           const isCordoned = nodeData['is_cordoned'] === true;
-          // Check if node has taints (defaults to empty for backward compatibility)
+          // Check if node has taints (defaults to empty for backward
+          // compatibility). Only un-tolerated taints make a node "not
+          // ready" — see the same logic above.
           const taints = nodeData['taints'] || [];
-          const isTainted = taints.length > 0;
+          const isTainted = taints.some((t) => t && t.tolerated !== true);
           // Node is considered not ready if it's not ready, cordoned, or tainted
           const isNodeNotReady = !isReady || isCordoned || isTainted;
 

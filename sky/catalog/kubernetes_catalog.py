@@ -200,6 +200,9 @@ def _list_accelerators(
     total_accelerators_available: Dict[str, int] = {}
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
+    configured_tolerations = kubernetes_utils.get_configured_tolerations(
+        context)
+
     for node in nodes:
         # Check if node is ready
         node_is_ready = node.is_ready()
@@ -208,8 +211,14 @@ def _list_accelerators(
             exclude_cordon=True,
             exclude_not_ready=True,
             exclude_effects=['PreferNoSchedule'],
-            exclude_keys=kubernetes_utils.get_handled_taint_keys())
-        node_is_tainted = len(node_taints) > 0
+            exclude_keys=kubernetes_utils.get_handled_taint_keys(),
+            tolerations=configured_tolerations)
+        # A taint that is tolerated by the user's configured pod tolerations
+        # does not make the node un-schedulable for the user's workloads.
+        # Without configured tolerations, every retained taint has
+        # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
+        node_is_tainted = any(
+            not t.get('tolerated', False) for t in node_taints)
 
         for key in keys:
             if key in node.metadata.labels:
