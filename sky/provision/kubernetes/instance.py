@@ -2042,11 +2042,28 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
             continue
         waiting = getattr(cs.state, 'waiting', None)
         terminated = getattr(cs.state, 'terminated', None)
+        # A container that was OOMKilled (or otherwise died) and is now
+        # restarting records the failure in last_state, not the current state
+        # (which may be a generic 'waiting' or already running-again). Surface
+        # it so an OOM that briefly blips the cluster into recovery is not
+        # masked as a generic 'ray cluster is unhealthy' message.
+        last_state = getattr(cs, 'last_state', None)
+        last_terminated = getattr(last_state, 'terminated', None)
+        prior = None
+        if (last_terminated is not None and last_terminated.exit_code != 0 and
+                last_terminated.reason):
+            prior = (f'{last_terminated.reason} '
+                     f'(exit code {last_terminated.exit_code})')
         if waiting and waiting.reason:
-            container_issues.append(waiting.reason)
+            issue = waiting.reason
+            if prior is not None:
+                issue += f'; previously {prior}'
+            container_issues.append(issue)
         elif terminated and terminated.exit_code != 0:
             container_issues.append(f'{terminated.reason or "terminated"}'
                                     f' (exit code {terminated.exit_code})')
+        elif prior is not None:
+            container_issues.append(prior)
 
     if container_issues:
         parts.append('; '.join(container_issues))

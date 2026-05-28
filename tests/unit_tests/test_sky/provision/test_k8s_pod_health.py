@@ -23,6 +23,8 @@ def _make_condition(type_: str,
 def _make_container_status(ready: bool,
                            waiting_reason: Optional[str] = None,
                            terminated_exit_code: Optional[int] = None,
+                           last_terminated_exit_code: Optional[int] = None,
+                           last_terminated_reason: Optional[str] = None,
                            name: str = 'ray-node'):
     """Create a mock container status."""
     cs = mock.MagicMock()
@@ -39,6 +41,14 @@ def _make_container_status(ready: bool,
     else:
         cs.state.waiting = None
         cs.state.terminated = None
+
+    # Default: no previous termination. MagicMock would otherwise auto-create
+    # a truthy last_state.terminated and confuse the prior-termination check.
+    if last_terminated_exit_code is not None:
+        cs.last_state.terminated.exit_code = last_terminated_exit_code
+        cs.last_state.terminated.reason = last_terminated_reason
+    else:
+        cs.last_state.terminated = None
     return cs
 
 
@@ -122,6 +132,56 @@ class TestGetPodHealthIssues:
             container_statuses=[
                 _make_container_status(ready=False,
                                        waiting_reason='ContainerCreating'),
+            ],
+        )
+        assert _get_pod_health_issues(pod) is None
+
+    def test_restarting_after_oom_surfaces_last_state(self):
+        # Container OOMKilled, now restarting (waiting) -> surface the prior
+        # OOM that the current waiting state alone does not explain.
+        pod = _make_pod(
+            conditions=[
+                _make_condition('Ready', 'False', reason='ContainersNotReady')
+            ],
+            container_statuses=[
+                _make_container_status(ready=False,
+                                       waiting_reason='CrashLoopBackOff',
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
+            ],
+        )
+        result = _get_pod_health_issues(pod)
+        assert result is not None
+        assert 'CrashLoopBackOff' in result
+        assert 'OOMKilled' in result
+        assert '137' in result
+
+    def test_running_again_after_oom_surfaces_last_state(self):
+        # Container restarted after OOM and is running but not yet ready, with
+        # no current waiting/terminated reason -- the OOM lives only in
+        # last_state and must still be surfaced.
+        pod = _make_pod(
+            conditions=[
+                _make_condition('Ready', 'False', reason='ContainersNotReady')
+            ],
+            container_statuses=[
+                _make_container_status(ready=False,
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
+            ],
+        )
+        result = _get_pod_health_issues(pod)
+        assert result is not None
+        assert 'OOMKilled (exit code 137)' in result
+
+    def test_ready_pod_with_prior_oom_returns_none(self):
+        # A fully-recovered (Ready=True) pod must not surface a stale prior OOM.
+        pod = _make_pod(
+            conditions=[_make_condition('Ready', 'True')],
+            container_statuses=[
+                _make_container_status(ready=True,
+                                       last_terminated_exit_code=137,
+                                       last_terminated_reason='OOMKilled'),
             ],
         )
         assert _get_pod_health_issues(pod) is None
