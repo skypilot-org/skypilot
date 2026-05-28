@@ -179,20 +179,23 @@ class Request:
         }
 
     def set_return_value(self, return_value: Any) -> None:
-        """Set the return value.
+        """Set the encoded return value.
 
-        Encoders may be overridden by plugins. A failure in a plugin encoder
-        must not bubble out of set_return_value. Fall back to the OSS default
-        pickle encoding on any failure.
+        On encoder failure, drop to None. An exception here would escape the
+        wrapper's else-block (outside its try/except) and leave the row stuck
+        in RUNNING with the worker pid populated — enabling the
+        SIGTERM-to-idle-worker pool break. All return-value serializers
+        already guard `if return_value is not None`, so None persists as JSON
+        `null`.
         """
         encoder = encoders.get_encoder(self.name)
         try:
             self.return_value = encoder(return_value)
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Encoder {encoder!r} for request {self.request_id} '
-                           f'({self.name}) failed, falling back to pickle: '
-                           f'{common_utils.format_exception(e)}')
-            self.return_value = encoders.pickle_and_encode(return_value)
+            logger.warning(
+                f'Encoder for request {self.request_id} ({self.name}) '
+                f'failed; storing None: {common_utils.format_exception(e)}')
+            self.return_value = None
 
     def get_return_value(self) -> Any:
         """Get the return value."""
