@@ -756,7 +756,26 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
             }],
         )
     except ec2.meta.client.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
+        if e.response['Error']['Code'] == 'UnauthorizedOperation':
+            logger.warning(
+                'Unauthorized to create security group with tags. '
+                'Retrying without tags.'
+            )
+            try:
+                ec2.meta.client.create_security_group(
+                    Description='Auto-created security group for Ray workers',
+                    GroupName=expected_sg_name,
+                    VpcId=vpc_id,
+                )
+            except ec2.meta.client.exceptions.ClientError as e_inner:
+                if e_inner.response['Error']['Code'] == 'InvalidGroup.Duplicate':
+                    pass
+                else:
+                    message = ('Failed to create security group. Error: '
+                               f'{common_utils.format_exception(e_inner)}')
+                    logger.warning(message)
+                    raise exceptions.NoClusterLaunchedError(message) from e_inner
+        elif e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
             # The security group already exists, but we didn't see it
             # because of eventual consistency.
             logger.warning(f'{expected_sg_name} already exists when creating.')
@@ -770,10 +789,11 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
                 f'[id={security_group.id}]')
             return security_group
-        message = ('Failed to create security group. Error: '
-                   f'{common_utils.format_exception(e)}')
-        logger.warning(message)
-        raise exceptions.NoClusterLaunchedError(message) from e
+        else:
+            message = ('Failed to create security group. Error: '
+                       f'{common_utils.format_exception(e)}')
+            logger.warning(message)
+            raise exceptions.NoClusterLaunchedError(message) from e
 
     security_group = get_security_group_from_vpc_id(ec2, vpc_id,
                                                     expected_sg_name)
