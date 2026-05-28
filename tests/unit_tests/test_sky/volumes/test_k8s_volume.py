@@ -1645,14 +1645,32 @@ class TestRefreshVolumeConfig:
     @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
     def test_refresh_volume_config_region_none_kubeconfig_only(
             self, mock_in_cluster_context, mock_is_incluster):
-        """region=None + no in-cluster auth: keep region as None.
+        """region=None + no in-cluster auth: must NOT rewrite to 'in-cluster'.
 
-        Regression test: when the API server authenticates via kubeconfig and
-        has no in-cluster service-account token, rewriting region to the
-        literal 'in-cluster' string would cause every subsequent ``sky launch``
-        referencing the volume to fail with ``ResourcesUnavailableError``
-        (the optimizer compares against the kubeconfig context names, which
-        do not include 'in-cluster').
+        Regression test for the race surfaced by build #10973
+        (test_hostpath_volume_on_kubernetes). Mechanism:
+
+        1. ``sky volumes apply`` (no ``infra:`` field) inserts a row with
+           region=None.
+        2. The 60s volume-refresh daemon ticks (sky/server/daemons.py:182,
+           VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS=60).
+        3. The unfixed ``refresh_volume_config`` unconditionally rewrites
+           region=None to ``kubernetes.in_cluster_context_name()``, which
+           returns the literal string ``'in-cluster'`` when
+           SKYPILOT_IN_CLUSTER_CONTEXT_NAME is unset (the default).
+        4. On the next ``sky launch``, Task topology forces
+           ``task.resources.region = volume.region`` (sky/task.py:1122-1134),
+           and the optimizer's ``_check_specified_regions`` rejects
+           ``'in-cluster'`` because it isn't in the kubeconfig contexts
+           (sky/optimizer.py:1647-1668) -> raises
+           ``ResourcesUnavailableError: ... requires volume X with infra
+           Kubernetes/in-cluster which is not enabled``.
+
+        Pass-then-fail-then-pass-on-retry pattern in the wild is purely the
+        60s daemon-tick race: if the tick fires in the window between
+        ``apply`` and ``launch``, the row is poisoned. The fix is to NOT
+        rewrite when in-cluster auth isn't actually available — leaving
+        region=None lets the launch resolve the context from ``--infra``.
         """
         mock_is_incluster.return_value = False
 
@@ -1670,9 +1688,22 @@ class TestRefreshVolumeConfig:
 
         need_refresh, new_config = k8s_volume.refresh_volume_config(config)
 
-        assert need_refresh is False
-        assert new_config.region is None
-        assert config.region is None
+        # If these assertions ever fail, the production bug is back:
+        # any sky launch referencing this volume on a kubeconfig-only host
+        # will raise ResourcesUnavailableError after the next daemon tick.
+        assert need_refresh is False, (
+            'refresh_volume_config rewrote region=None to '
+            f'{new_config.region!r} even though in-cluster auth is '
+            'unavailable. Production effect: every subsequent sky launch '
+            'referencing this volume on a kubeconfig-only host '
+            '(e.g. kind buildkite agent) will raise '
+            'ResourcesUnavailableError: "requires volume X with infra '
+            'Kubernetes/in-cluster which is not enabled" once the 60s '
+            'volume-refresh daemon ticks.')
+        assert new_config.region is None, (
+            f'Expected region to stay None; got {new_config.region!r}.')
+        assert config.region is None, (
+            f'Expected in-place region to stay None; got {config.region!r}.')
         mock_in_cluster_context.assert_not_called()
 
     def test_refresh_volume_config_region_set(self):
