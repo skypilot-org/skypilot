@@ -1354,7 +1354,7 @@ def launch(
         cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
-    if backend_name is None:
+    if not backend_name:
         backend_name = backends.CloudVmRayBackend.NAME
 
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
