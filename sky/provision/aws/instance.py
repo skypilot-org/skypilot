@@ -325,7 +325,7 @@ def _get_attached_volume_ids(instances: List[Any]) -> List[str]:
     seen: Set[str] = set()
     for inst in instances:
         for mapping in getattr(inst, 'block_device_mappings', []) or []:
-            volume_id = mapping.get('Ebs', {}).get('VolumeId')
+            volume_id = (mapping.get('Ebs') or {}).get('VolumeId')
             if volume_id is not None and volume_id not in seen:
                 seen.add(volume_id)
                 volume_ids.append(volume_id)
