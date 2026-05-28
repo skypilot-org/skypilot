@@ -2128,6 +2128,16 @@ function UsersTable({
 
   const clearSelection = () => setSelectedUserIds(new Set());
 
+  // Esc clears the current selection (and dismisses the floating bar).
+  useEffect(() => {
+    if (selectedUserIds.size === 0) return undefined;
+    const handler = (e) => {
+      if (e.key === 'Escape') clearSelection();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedUserIds.size]);
+
   const handleBulkDialogClose = async (fullySucceeded) => {
     setBulkDialog(null);
     if (fullySucceeded) {
@@ -2209,54 +2219,57 @@ function UsersTable({
         </div>
       )}
       {showBulkColumn && (
-        // Bar is always rendered (with disabled buttons + an empty-state
-        // hint when nothing is selected) so checking a row doesn't insert
-        // a new row above the table and shift the row under the cursor.
-        <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-sky-50 border border-sky-200 rounded-md">
-          <div className="text-sm text-gray-700">
-            {selectedUserIds.size > 0 ? (
-              <>
-                Selected:{' '}
-                <span className="font-medium text-sky-blue">
-                  {selectedUserIds.size}
-                </span>{' '}
-                user(s)
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="ml-2 text-sky-blue hover:text-sky-blue-bright underline"
-                >
-                  Clear
-                </button>
-              </>
-            ) : (
-              <span className="text-gray-500">
-                Select users to enable batch actions
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+        // Floating bottom-center action bar. Always mounted (so the
+        // slide animation works in both directions), but
+        // pointer-events-none + translate-y-full + opacity-0 when no
+        // selection so it occupies no visual space and can't be
+        // interacted with. No layout shift on the table itself.
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 transition-all duration-200 ease-out ${
+            selectedUserIds.size > 0
+              ? 'opacity-100 translate-y-0'
+              : 'opacity-0 translate-y-[200%] pointer-events-none'
+          }`}
+          role="region"
+          aria-label="Batch user actions"
+          aria-hidden={selectedUserIds.size === 0}
+        >
+          <div className="flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-lg rounded-full">
+            <div className="text-sm text-gray-700 whitespace-nowrap">
+              <span className="font-medium text-sky-blue">
+                {selectedUserIds.size}
+              </span>{' '}
+              selected
+            </div>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="text-sm text-sky-blue hover:text-sky-blue-bright underline whitespace-nowrap"
+            >
+              Clear
+            </button>
+            <div className="h-5 w-px bg-gray-200" aria-hidden="true" />
             <button
               type="button"
               onClick={() => openBulkDialog('role')}
-              disabled={roleLoading || selectedUserIds.size === 0}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               Change role
             </button>
             <button
               type="button"
               onClick={() => openBulkDialog('add')}
-              disabled={roleLoading || selectedUserIds.size === 0}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               Add to workspaces
             </button>
             <button
               type="button"
               onClick={() => openBulkDialog('remove')}
-              disabled={roleLoading || selectedUserIds.size === 0}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               Remove from workspaces
             </button>
