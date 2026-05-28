@@ -359,7 +359,7 @@ class PostgresLock(DistributedLock):
         a daemon/leader process, not just one transaction) need a way to
         detect that the underlying session has been killed without an
         exception propagating into their code path: RDS maintenance restarts,
-        NLB / load-balancer idle-timeout, ``idle_in_transaction_session_timeout``,
+        NLB idle-timeout, ``idle_in_transaction_session_timeout``,
         manual ``pg_terminate_backend``, network partitions.  All of these
         free the advisory lock server-side while ``self._acquired`` stays
         ``True`` locally, leaving the holder unaware that another replica

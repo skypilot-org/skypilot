@@ -9,6 +9,7 @@ from typing import Optional
 
 from sky import sky_logging
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import events
@@ -112,6 +113,22 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         logger.error(
             f'Lost consolidation mode lock {self._lock}; sending SIGTERM '
             'to the API server to step down')
+        # Re-touch the recovery signal file so no new controllers will be
+        # started
+        try:
+            signal_file = pathlib.Path(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+            signal_file.parent.mkdir(parents=True, exist_ok=True)
+            signal_file.touch()
+        except OSError:
+            logger.warning('Failed to touch recovery signal file on lock-loss')
+        # The lock is already released, kill job controllers to avoid split
+        # brain, e.g. new job controllers might have been launched on the new
+        # replica during rolling-update
+        try:
+            managed_job_scheduler.kill_local_job_controllers()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Failed to kill local controllers on lock-loss')
         # SIGTERM to trigger graceful shutdown
         os.kill(os.getpid(), signal.SIGTERM)
 
