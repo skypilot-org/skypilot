@@ -2238,6 +2238,13 @@ def _check_owner_identity_with_record(cluster_name: str,
         logger.debug(msg)
         return
 
+    if owner_identity is None:
+        # Non-Kubernetes cluster created by a pre-#1808 SkyPilot: adopt
+        # the current active identity (matches pre-#9190 behavior).
+        global_user_state.set_owner_identity_for_cluster(
+            cluster_name, user_identities[0])
+        return
+
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when
     # the cluster is launched before #1808. In that case, we only check
