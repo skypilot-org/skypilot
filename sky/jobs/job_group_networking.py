@@ -55,31 +55,20 @@ def _is_kubernetes(
 
 def _get_k8s_namespace_from_handle(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> str:
-    """Get Kubernetes namespace from a resource handle.
+    """Resolve the Kubernetes namespace the handle's pods live in.
 
-    Reads ``provider.namespace`` from the cluster YAML — the value set
-    at launch by ``make_deploy_resources_variables`` — rather than
-    re-resolving via the active config. Reading off the handle's YAML
-    avoids races with the active workspace (the handle does not carry
-    its launch-time workspace, so resolving via ``get_namespace``
-    here could return a different namespace than the pods actually
-    live in when the active workspace at query time differs from the
-    cluster's launch-time workspace).
+    Reads ``provider.namespace`` from the cluster YAML (set at launch
+    time and workspace-invariant). Resolving via ``get_namespace`` here
+    would depend on the active workspace at query time, which is not
+    guaranteed to match the workspace the cluster was launched under.
 
-    Mirrors the pattern in
-    ``CloudVmRayResourceHandle._use_internal_ips`` for the same
-    reason.
-
-    Returns:
-        Namespace string, defaults to ``'default'`` if neither the
-        YAML nor the kubeconfig lookup yields a value.
+    Falls back to the kubeconfig context default for legacy clusters
+    whose YAML pre-dates ``provider.namespace``; returns ``'default'``
+    if both lookups fail.
     """
     if handle is None:
         return 'default'
 
-    # Source of truth: provider.namespace persisted in the cluster
-    # YAML at launch. Set by make_deploy_resources_variables for every
-    # cluster provisioned by PR #9640 and earlier.
     if handle.cluster_yaml:
         try:
             # pylint: disable=import-outside-toplevel
@@ -93,10 +82,6 @@ def _get_k8s_namespace_from_handle(
             logger.debug(f'Failed to read namespace from cluster YAML, '
                          f'falling back: {e}')
 
-    # Legacy-cluster fallback: provider.namespace missing or YAML
-    # unreadable. Use the kubeconfig context default rather than
-    # `get_namespace`, since the latter is workspace-aware and we have
-    # no record of the launch-time workspace on the handle.
     if handle.launched_resources and handle.launched_resources.region:
         try:
             # pylint: disable=import-outside-toplevel

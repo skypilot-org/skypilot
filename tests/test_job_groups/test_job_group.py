@@ -434,13 +434,10 @@ class TestJobGroupNetworking:
             'SKYPILOT_JOBGROUP_NAME')
 
     def test_get_k8s_namespace_logs_on_exception(self):
-        """`_get_k8s_namespace_from_handle` logs at debug when fallback errors.
+        """Kubeconfig-fallback exceptions are caught, logged, and return 'default'.
 
-        Pins the silent-exception fix: when the kubeconfig fallback raises
-        we log a debug message and return 'default' rather than letting the
-        exception propagate. `cluster_yaml` is set to None so the new
-        YAML-read path is skipped and the kubeconfig path is tested in
-        isolation.
+        ``cluster_yaml=None`` skips the YAML read so the kubeconfig path
+        is exercised in isolation.
         """
         from sky.jobs import job_group_networking
 
@@ -473,15 +470,10 @@ class TestJobGroupNetworking:
         assert result == 'default'
 
     def test_get_k8s_namespace_reads_provider_namespace_from_yaml(self):
-        """The namespace must come from the cluster YAML's provider.namespace.
+        """Namespace comes from the cluster YAML's ``provider.namespace``.
 
-        Source-of-truth check: `make_deploy_resources_variables` persists
-        the resolved namespace under `provider.namespace` in the cluster
-        YAML at launch time. The JobGroup DNS path must read it from
-        there, independent of whatever the active workspace is at query
-        time — otherwise a multi-workspace JobGroup or a controller
-        running under a different workspace would construct DNS for the
-        wrong namespace.
+        Reading the launch-time value off the handle keeps DNS resolution
+        independent of the active workspace at query time.
         """
         from sky.jobs import job_group_networking
 
@@ -510,13 +502,10 @@ class TestJobGroupNetworking:
             mock_kubeconfig.assert_not_called()
 
     def test_get_k8s_namespace_falls_back_when_yaml_missing_namespace(self):
-        """Legacy clusters without provider.namespace fall back to kubeconfig.
+        """YAML without ``provider.namespace`` falls back to kubeconfig default.
 
-        Clusters provisioned before the per-workspace namespace feature
-        existed won't have `provider.namespace` set in their YAML. The
-        fallback uses `get_kube_config_context_namespace` (deterministic,
-        workspace-invariant) rather than `get_namespace` (workspace-aware,
-        which would re-introduce the race the YAML read is meant to avoid).
+        The fallback uses the workspace-invariant kubeconfig lookup so
+        legacy clusters keep their pre-feature behaviour.
         """
         from sky.jobs import job_group_networking
 
@@ -542,11 +531,7 @@ class TestJobGroupNetworking:
             mock_kubeconfig.assert_called_once_with('in-cluster')
 
     def test_get_k8s_namespace_skips_yaml_when_cluster_yaml_is_none(self):
-        """When the handle has no `cluster_yaml`, the YAML read is skipped.
-
-        Covers unpickled handles for older clusters where `cluster_yaml`
-        may be None.
-        """
+        """``cluster_yaml=None`` skips the YAML read (e.g. legacy handles)."""
         from sky.jobs import job_group_networking
 
         mock_handle = mock.MagicMock()
