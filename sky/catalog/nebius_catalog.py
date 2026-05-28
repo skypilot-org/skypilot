@@ -37,7 +37,7 @@ _apply_personal_pricing_lock = threading.Lock()
 logger = sky_logging.init_logger(__name__)
 
 
-# pylint: disable=import-outside-toplevel
+# pylint: disable=import-outside-toplevel, broad-except
 def _get_df() -> 'pd.DataFrame':
     if not skypilot_config.get_nested(
         ('nebius', 'use_personal_pricing'), default_value=True):
@@ -57,7 +57,7 @@ def _get_df() -> 'pd.DataFrame':
                                    keep='last')
 
         return _personal_df[tenant_id]
-    except (RuntimeError, ImportError) as e:
+    except Exception as e:
         logger.warning('Failed to fetch personal pricing. '
                        f'{common_utils.format_exception(e)}')
     return _static_df
