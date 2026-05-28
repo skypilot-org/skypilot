@@ -186,7 +186,7 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
                     tag['Value'] = user_tag['Value']
                     break
             if not exists:
-                existing_tag_spec['Tags'].append(user_tag)
+                existing_tag_spec['Tags'].append(copy.deepcopy(user_tag))
 
 
 def _create_instances(
