@@ -120,8 +120,6 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 SSH_CONNECTION_ERROR_PATTERN = re.compile(
     r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
-_SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
-                                               re.IGNORECASE)
 K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
                                         re.IGNORECASE)
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
@@ -2634,19 +2632,14 @@ def _update_cluster_status(
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
-                        # Non-k8s clusters can be manually restarted and:
-                        # 1. Get new IP addresses, or
-                        # 2. Not have the SkyPilot runtime setup
-                        #
-                        # So we should surface a message to the user to
-                        # help them recover from this inconsistent state.
-                        has_new_ip_addr = (
-                            e.detailed_reason is not None and
-                            _SSH_CONNECTION_TIMED_OUT_PATTERN.search(
-                                e.detailed_reason.strip()) is not None)
+                        # Non-k8s clusters can have the SkyPilot runtime
+                        # gone (cluster manually restarted without
+                        # SkyPilot, or ray daemon crashed). That is a
+                        # structural failure, not a transient one — surface
+                        # it immediately so the user can recover.
                         runtime_not_setup = (_RAY_CLUSTER_NOT_FOUND_MESSAGE
                                              in e.error_msg)
-                        if has_new_ip_addr or runtime_not_setup:
+                        if runtime_not_setup:
                             yellow = colorama.Fore.YELLOW
                             bright = colorama.Style.BRIGHT
                             reset = colorama.Style.RESET_ALL
@@ -2658,9 +2651,21 @@ def _update_cluster_status(
                                 f'{reset}{bright}sky start {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
                             return False
-                        raise e
-                    # We retry for kubernetes because coreweave can have a
-                    # transient network issue.
+                        # Other CommandError causes (most often a 255 from
+                        # SSH itself) are treated as transient: retry the
+                        # same way we already do for kubernetes. The
+                        # previous behavior of raising on first failure
+                        # caused false-positive preemption on AWS clusters
+                        # using SSM-tunnelled SSH (`aws.use_ssm: true`),
+                        # where a single SSH banner-exchange timeout would
+                        # tear the cluster down and force re-provisioning.
+                        # If the failure is persistent (e.g. instance
+                        # really gone), all 5 attempts will fail and the
+                        # caller marks the cluster INIT just the same.
+                    # We retry on all clouds: k8s because coreweave can
+                    # have transient network issues; non-k8s because the
+                    # SSM data plane (AWS) and similar tunnelled SSH
+                    # paths can flap mid-session. Generalises #6298.
                     time.sleep(1)
                     continue
                 if ready_head + ready_workers == total_nodes:
