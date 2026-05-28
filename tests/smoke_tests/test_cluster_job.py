@@ -2296,6 +2296,12 @@ def test_aws_custom_docker_image_with_motd(image_id):
         # Test image with custom MOTD that can potentially interfere with
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
+        # Test image with PYTHONPATH set and with pyproject.toml at that path
+        # (PYTHONPATH=/sklearnserver, /sklearnserver/pyproject.toml). Guards
+        # the `env -u PYTHONPATH` step in kubernetes-ray.yml.j2 (PR #7539).
+        # Replaces the previously-used nvcr.io/nvidia/nemo:25.09, which NVIDIA
+        # gated behind NGC auth on 2026-05-27.
+        'docker:kserve/sklearnserver:v0.19.0-rc0',
         # Test image with Python 3.12 site-packages as WORKDIR, which causes
         # import failures if CWD is not handled properly. When SkyPilot's Python
         # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
