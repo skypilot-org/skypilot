@@ -51,6 +51,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
 
@@ -776,12 +777,16 @@ class JobController:
                 # to recovering, we will set the job status to None, which will
                 # force enter the recovering logic.
                 try:
+                    # get_job_status ALSO touches the DB (reads cluster
+                    # handle); retry it so a brief blip here doesn't
+                    # propagate to the catch-all.
                     job_status, transient_job_check_error_reason = (
-                        await managed_job_utils.get_job_status(
-                            self._backend,
-                            cluster_name,
-                            job_id=job_id_on_pool_cluster,
-                        ))
+                        await db_retries.with_db_retries_async(
+                            lambda: managed_job_utils.get_job_status(
+                                self._backend,
+                                cluster_name,
+                                job_id=job_id_on_pool_cluster,
+                            )))
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -882,10 +887,14 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await asyncio.to_thread(
-                backend_utils.refresh_cluster_status_handle,
-                cluster_name,
-                force_refresh_statuses=set(status_lib.ClusterStatus))
+            # Retry on transient DB errors so a brief RDS/DNS hiccup doesn't
+            # propagate to the run() catch-all and mark this job
+            # FAILED_CONTROLLER. See sky/utils/db/retries.py.
+            (cluster_status, handle) = await db_retries.with_db_retries_async(
+                lambda: asyncio.to_thread(
+                    backend_utils.refresh_cluster_status_handle,
+                    cluster_name,
+                    force_refresh_statuses=set(status_lib.ClusterStatus)))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
@@ -1825,15 +1834,19 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
-            await managed_job_state.set_cancelling_async(
-                job_id=self._job_id, callback_func=callback_func)
+            # Retry on transient DB errors so a brief blip during cleanup
+            # doesn't leave the job as a RUNNING zombie with no final state.
+            await db_retries.with_db_retries_async(
+                lambda: managed_job_state.set_cancelling_async(
+                    job_id=self._job_id, callback_func=callback_func))
             if not cancelled:
                 # the others haven't been run yet so we can set them to
                 # cancelled immediately (no resources to clean up).
                 # if we are running and get cancelled, we need to clean up the
                 # resources first so this will be done later.
-                await managed_job_state.set_cancelled_async(
-                    job_id=self._job_id, callback_func=callback_func)
+                await db_retries.with_db_retries_async(
+                    lambda: managed_job_state.set_cancelled_async(
+                        job_id=self._job_id, callback_func=callback_func))
 
     async def _update_failed_task_state(
             self, task_id: int,
@@ -1842,15 +1855,20 @@ class JobController:
         """Update the state of the failed task."""
         logger.info(f'Updating failed task state: task_id={task_id}, '
                     f'failure_type={failure_type}')
-        await managed_job_state.set_failed_async(
-            self._job_id,
-            task_id=task_id,
-            failure_type=failure_type,
-            failure_reason=failure_reason,
-            callback_func=managed_job_utils.event_callback_func(
-                job_id=self._job_id,
+        # Retry on transient DB errors. Without this, an outage that
+        # outlasts ~1 catch-all cycle leaves the job in RUNNING (no
+        # failure_reason, no end_at) instead of FAILED_*. See
+        # sky/utils/db/retries.py.
+        await db_retries.with_db_retries_async(
+            lambda: managed_job_state.set_failed_async(
+                self._job_id,
                 task_id=task_id,
-                task=self._dag.tasks[task_id]))
+                failure_type=failure_type,
+                failure_reason=failure_reason,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id])))
 
 
 class ControllerManager:
