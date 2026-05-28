@@ -1611,10 +1611,14 @@ class MockPV:
 class TestRefreshVolumeConfig:
     """Tests for refresh_volume_config function."""
 
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'is_incluster_config_available')
     @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
-    def test_refresh_volume_config_region_none(self, mock_in_cluster_context):
-        """When region is None, it should be set from in-cluster context."""
+    def test_refresh_volume_config_region_none_incluster(
+            self, mock_in_cluster_context, mock_is_incluster):
+        """region=None + in-cluster auth available: rewrite to in-cluster name."""
         mock_in_cluster_context.return_value = 'in-cluster-context'
+        mock_is_incluster.return_value = True
 
         config = models.VolumeConfig(
             _version=1,
@@ -1635,6 +1639,41 @@ class TestRefreshVolumeConfig:
         # The original object should also be updated in place
         assert config.region == 'in-cluster-context'
         mock_in_cluster_context.assert_called_once()
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'is_incluster_config_available')
+    @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
+    def test_refresh_volume_config_region_none_kubeconfig_only(
+            self, mock_in_cluster_context, mock_is_incluster):
+        """region=None + no in-cluster auth: keep region as None.
+
+        Regression test: when the API server authenticates via kubeconfig and
+        has no in-cluster service-account token, rewriting region to the
+        literal 'in-cluster' string would cause every subsequent ``sky launch``
+        referencing the volume to fail with ``ResourcesUnavailableError``
+        (the optimizer compares against the kubeconfig context names, which
+        do not include 'in-cluster').
+        """
+        mock_is_incluster.return_value = False
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        assert need_refresh is False
+        assert new_config.region is None
+        assert config.region is None
+        mock_in_cluster_context.assert_not_called()
 
     def test_refresh_volume_config_region_set(self):
         """When region is already set, it should be kept and no refresh needed."""
