@@ -214,6 +214,24 @@ def test_write_cluster_config_w_post_provision_runcmd_kubernetes(
         'runcmd'] == expected_runcmd, "runcmd not passed correctly"
 
 
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+def test_aws_template_applies_labels_to_volume_tags() -> None:
+    template_path = pathlib.Path('sky/templates/aws-ray.yml.j2')
+    template = template_path.read_text(encoding='utf-8')
+
+    expected_block = """        - ResourceType: volume
+          Tags:
+            - Key: skypilot-user
+              Value: {{ user }}
+            {%- for label_key, label_value in labels.items() %}
+            - Key: {{ label_key }}
+              Value: {{ label_value|tojson }}
+            {%- endfor %}"""
+
+    assert expected_block in template
+
+
 def test_get_clusters_launch_refresh(monkeypatch):
     # verifies that `get_clusters` works when one cluster is launching
     # and other is not.
