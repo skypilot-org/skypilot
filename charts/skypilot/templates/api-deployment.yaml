@@ -275,7 +275,18 @@ spec:
           # Use a FIFO instead of a pipe so that exec replaces the shell,
           # allowing tini to send SIGTERM directly to the API server process
           rm -f /tmp/skylog && mkfifo /tmp/skylog
-          tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+          # Optional: also mirror server log to a directory specified by
+          # $SKYPILOT_SERVER_LOG_MIRROR_DIR. Each pod boot creates a new file
+          # under <dir>/<HOSTNAME>/ so history survives local logrotate
+          # (copytruncate) and pod restarts, and replicas don't clobber each
+          # other when the dir lives on shared (RWX) storage.
+          SKYPILOT_LOG_MIRROR_FILE=""
+          if [ -n "${SKYPILOT_SERVER_LOG_MIRROR_DIR:-}" ]; then
+            SKYPILOT_LOG_MIRROR_PER_POD_DIR="$SKYPILOT_SERVER_LOG_MIRROR_DIR/${HOSTNAME:-$(hostname)}"
+            mkdir -p "$SKYPILOT_LOG_MIRROR_PER_POD_DIR"
+            SKYPILOT_LOG_MIRROR_FILE="$SKYPILOT_LOG_MIRROR_PER_POD_DIR/server-$(date -u +%Y%m%dT%H%M%SZ).log"
+          fi
+          tee -a /root/.sky/api_server/server.log ${SKYPILOT_LOG_MIRROR_FILE:+"$SKYPILOT_LOG_MIRROR_FILE"} < /tmp/skylog &
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
           {{- else }}
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
