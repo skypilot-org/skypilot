@@ -1036,10 +1036,13 @@ def open_ports(
 
                 # Azure NSG rules have a priority field that determines the
                 # order in which they are applied. The priority must be unique
-                # across all inbound rules in one NSG.
-                priority = max(rule.priority
-                               for rule in nsg.security_rules
-                               if rule.direction == 'Inbound') + 1
+                # across all inbound rules in one NSG. If the NSG has no
+                # user-defined inbound rules yet, start priorities at 100
+                # (the minimum allowed for custom rules).
+                priority = max((rule.priority
+                                for rule in nsg.security_rules
+                                if rule.direction == 'Inbound'),
+                               default=99) + 1
                 nsg.security_rules.append(
                     azure.create_security_rule(
                         name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
