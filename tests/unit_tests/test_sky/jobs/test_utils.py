@@ -1012,9 +1012,8 @@ class TestGetPoolHealthSummary:
         assert self._run(replicas, 0) == "Pool 'demo-pool': 3/3 idle"
 
     def test_some_idle_some_provisioning(self):
-        replicas = (
-            [_make_replica(serve_state.ReplicaStatus.READY)] +
-            [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
+        replicas = ([_make_replica(serve_state.ReplicaStatus.READY)] +
+                    [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
         assert self._run(replicas,
                          0) == "Pool 'demo-pool': 1/3 idle (2 provisioning)"
 
@@ -1029,9 +1028,8 @@ class TestGetPoolHealthSummary:
         assert result == "Pool 'demo-pool': 0/3 idle (3 occupied)"
 
     def test_occupied_and_provisioning(self):
-        replicas = (
-            [_make_replica(serve_state.ReplicaStatus.READY)] +
-            [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
+        replicas = ([_make_replica(serve_state.ReplicaStatus.READY)] +
+                    [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
         result = self._run(replicas, 1)
         assert result == "Pool 'demo-pool': 0/3 idle (2 provisioning, 1 occupied)"
 
