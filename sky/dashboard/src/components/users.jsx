@@ -50,6 +50,7 @@ import {
   UploadIcon,
   DownloadIcon,
   PlusIcon,
+  MinusIcon,
   CopyIcon,
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
@@ -2128,15 +2129,39 @@ function UsersTable({
 
   const clearSelection = () => setSelectedUserIds(new Set());
 
+  // "Workspaces" dropdown on the floating bar.
+  const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  const wsDropdownRef = useRef(null);
+
   // Esc clears the current selection (and dismisses the floating bar).
   useEffect(() => {
     if (selectedUserIds.size === 0) return undefined;
     const handler = (e) => {
-      if (e.key === 'Escape') clearSelection();
+      if (e.key === 'Escape') {
+        // If the workspaces dropdown is open, Esc closes the dropdown
+        // first; pressing Esc again clears the selection.
+        if (wsDropdownOpen) {
+          setWsDropdownOpen(false);
+        } else {
+          clearSelection();
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedUserIds.size]);
+  }, [selectedUserIds.size, wsDropdownOpen]);
+
+  // Close the workspaces dropdown on outside click.
+  useEffect(() => {
+    if (!wsDropdownOpen) return undefined;
+    const handler = (e) => {
+      if (wsDropdownRef.current && !wsDropdownRef.current.contains(e.target)) {
+        setWsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [wsDropdownOpen]);
 
   const handleBulkDialogClose = async (fullySucceeded) => {
     setBulkDialog(null);
@@ -2255,24 +2280,65 @@ function UsersTable({
               disabled={roleLoading}
               className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
-              Change role
+              Role
             </button>
-            <button
-              type="button"
-              onClick={() => openBulkDialog('add')}
-              disabled={roleLoading}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              Add to workspaces
-            </button>
-            <button
-              type="button"
-              onClick={() => openBulkDialog('remove')}
-              disabled={roleLoading}
-              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              Remove from workspaces
-            </button>
+            <div className="relative" ref={wsDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setWsDropdownOpen((v) => !v)}
+                disabled={roleLoading}
+                aria-haspopup="menu"
+                aria-expanded={wsDropdownOpen}
+                className="bg-sky-600 hover:bg-sky-700 text-white inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                <span>Workspaces</span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${
+                    wsDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              {wsDropdownOpen && (
+                <div
+                  role="menu"
+                  className="absolute bottom-full right-0 mb-2 bg-white rounded-lg shadow-xl border border-gray-200 z-40 py-1.5 px-1"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setWsDropdownOpen(false);
+                      openBulkDialog('add');
+                    }}
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                  >
+                    <PlusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <span>Add to workspaces</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setWsDropdownOpen(false);
+                      openBulkDialog('remove');
+                    }}
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                  >
+                    <MinusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <span>Remove from workspaces</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
