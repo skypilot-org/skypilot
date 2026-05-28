@@ -74,10 +74,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         try:
             managed_job_utils.ha_recovery_for_consolidation_mode()
         finally:
-            try:
-                signal_file.unlink()
-            except FileNotFoundError:
-                pass
+            signal_file.unlink(missing_ok=True)
 
         # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
         # lock probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
