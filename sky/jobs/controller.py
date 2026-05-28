@@ -785,6 +785,12 @@ class JobController:
                                 cluster_name,
                                 job_id=job_id_on_pool_cluster,
                             )))
+                except db_retries.RETRYABLE_EXCEPTIONS as db_e:
+                    logger.warning(
+                        f'DB unavailable for job {self._job_id}, pausing '
+                        f'monitor loop; will retry on next iteration. '
+                        f'{db_retries.summarize(db_e)}')
+                    continue
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -885,11 +891,19 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await db_retries.with_db_retries_async(
-                lambda: asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
+            try:
+                (cluster_status,
+                 handle) = await db_retries.with_db_retries_async(
+                     lambda: asyncio.to_thread(
+                         backend_utils.refresh_cluster_status_handle,
+                         cluster_name,
+                         force_refresh_statuses=set(status_lib.ClusterStatus)))
+            except db_retries.RETRYABLE_EXCEPTIONS as db_e:
+                logger.warning(
+                    f'DB unavailable for job {self._job_id}, pausing '
+                    f'monitor loop; will retry on next iteration. '
+                    f'{db_retries.summarize(db_e)}')
+                continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
