@@ -43,6 +43,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         while True:
             try:
                 self._become_leader_and_run()
+                # _become_leader_and_run only returns normally after
+                # _suicide_on_lock_loss sent SIGTERM. Re-entering would
+                # skip the lock acquire (stale local `_acquired` flag),
+                # touch the signal file, and call ha_recovery →
+                # maybe_start_controllers — which would spawn fresh
+                # controllers under a now-released lock while the new
+                # leader on another replica is doing the same. Stop the
+                # thread instead so the SIGTERM-driven drain runs to
+                # completion without further controller churn.
+                return
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
                     f'managed-job refresh error: {e}, '

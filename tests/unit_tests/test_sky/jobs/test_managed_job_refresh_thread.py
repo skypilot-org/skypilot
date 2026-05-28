@@ -158,6 +158,41 @@ class TestSuicideOnLockLoss:
         kill_mock.assert_called_once_with(12345, signal.SIGTERM)
 
 
+class TestOuterLoopStopsAfterSuicide:
+    """Normal return from _become_leader_and_run only happens after the
+    inner loop's probe detected lock loss and called _suicide_on_lock_loss.
+    The outer run() loop must stop the thread instead of re-entering —
+    otherwise the next iteration would skip the lock acquire (the local
+    _acquired flag is stale) and run ha_recovery_for_consolidation_mode,
+    which would spawn fresh controllers under a now-released lock while
+    the new leader on another replica is doing the same.
+    """
+
+    def test_run_returns_after_become_leader_returns_normally(self):
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        # If the outer loop incorrectly iterates, _become_leader_and_run
+        # would be called more than once. Use a side_effect that fails
+        # the test if that happens.
+        call_count = {'n': 0}
+
+        def normal_return(self):
+            call_count['n'] += 1
+
+        with mock.patch('sky.utils.locks.get_lock', return_value=lock), \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_become_leader_and_run',
+                    normal_return), \
+                mock.patch.object(mjrt.time, 'sleep'):
+            thread.run()
+        assert call_count['n'] == 1, (
+            'run() must not re-enter _become_leader_and_run after a '
+            'normal return — that path can only follow a suicide.')
+
+
 class TestOuterLoopExceptionHandling:
     """When _become_leader_and_run throws, decide between SIGTERM and retry
     based on whether we previously held a now-dead lock."""
