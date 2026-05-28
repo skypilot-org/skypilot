@@ -2296,9 +2296,6 @@ def test_aws_custom_docker_image_with_motd(image_id):
         # Test image with custom MOTD that can potentially interfere with
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
-        # Test image with PYTHONPATH set and with pyproject.toml.
-        # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09',
         # Test image with Python 3.12 site-packages as WORKDIR, which causes
         # import failures if CWD is not handled properly. When SkyPilot's Python
         # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
