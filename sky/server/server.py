@@ -3377,7 +3377,9 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
     # shell under the asset URL, which then fails the browser's strict MIME
     # check and blanks the dashboard until the cache entry expires.
     if safe_full_path.startswith('_next/'):
-        raise fastapi.HTTPException(status_code=404, detail='Not found')
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Not found',
+                                    headers={'Cache-Control': 'no-store'})
 
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
