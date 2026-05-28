@@ -43,9 +43,9 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         while True:
             try:
                 self._become_leader_and_run()
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception:  # pylint: disable=broad-except
                 logger.exception(
-                    f'managed-job refresh error: {e}, '
+                    'managed-job refresh error; '
                     f'retrying in {_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
                 # If we previously held the lock and lost the session
                 # mid-recovery, retrying would run as a stale leader
