@@ -179,8 +179,20 @@ class Request:
         }
 
     def set_return_value(self, return_value: Any) -> None:
-        """Set the return value."""
-        self.return_value = encoders.get_encoder(self.name)(return_value)
+        """Set the return value.
+
+        Encoders may be overridden by plugins. A failure in a plugin encoder
+        must not bubble out of set_return_value. Fall back to the OSS default
+        pickle encoding on any failure.
+        """
+        encoder = encoders.get_encoder(self.name)
+        try:
+            self.return_value = encoder(return_value)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Encoder {encoder!r} for request {self.request_id} '
+                           f'({self.name}) failed, falling back to pickle: '
+                           f'{common_utils.format_exception(e)}')
+            self.return_value = encoders.pickle_and_encode(return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""

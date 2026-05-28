@@ -801,3 +801,212 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
     from sky.server import common as server_common
     with pytest.raises(FileNotFoundError, match='Blob not found'):
         server_common.resolve_blob_dir(blob_id, 'testuser')
+
+
+# ---------------------------------------------------------------------------
+# Gated SIGTERM handler tests.
+#
+# Background. A cancel sends SIGTERM by reading the pid stored on a RUNNING
+# request row. The pid is a long-lived ProcessPoolExecutor worker PID, so a
+# stale RUNNING row (e.g. one whose wrapper exited without writing a terminal
+# status, or one cancelled cross-replica while the row state didn't catch up)
+# can route SIGTERM to a worker that is now sitting idle inside
+# concurrent.futures._process_worker's `call_queue.get(block=True)`. Raising
+# KeyboardInterrupt from that frame is unhandled — the worker dies,
+# ProcessPoolExecutor marks the whole pool BROKEN, and every in-flight future
+# plus subsequent submits fail with BrokenProcessPool.
+#
+# The gated handler raises KI only while the worker is inside the
+# wrapper's protected region (_in_request_execution=True). When idle, it
+# latches a pending flag instead so the next request's wrapper entry honors
+# the cancel intent without killing the worker.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def reset_sigterm_gate():
+    """Reset the gated-handler module flags around each test.
+
+    These are module-level and shared across tests in the same process.
+    """
+    import signal as _signal
+    original_handler = _signal.getsignal(_signal.SIGTERM)
+    executor._in_request_execution = False
+    executor._pending_sigterm = False
+    yield
+    executor._in_request_execution = False
+    executor._pending_sigterm = False
+    _signal.signal(_signal.SIGTERM, original_handler)
+
+
+def test_gated_sigterm_handler_raises_when_active(reset_sigterm_gate):
+    """SIGTERM during request execution → KeyboardInterrupt, no latch."""
+    import signal as _signal
+    executor._in_request_execution = True
+    with pytest.raises(KeyboardInterrupt):
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    # Active path doesn't latch — the cancel was delivered as an exception.
+    assert executor._pending_sigterm is False
+
+
+def test_gated_sigterm_handler_latches_when_idle(reset_sigterm_gate):
+    """SIGTERM while idle → no raise, _pending_sigterm latched.
+
+    This is the regression-shaped invariant: if this raised, an idle worker
+    sitting in call_queue.get() would die and break the pool.
+    """
+    import signal as _signal
+    executor._in_request_execution = False
+    executor._pending_sigterm = False
+    # Must not raise.
+    executor._gated_sigterm_handler(_signal.SIGTERM, None)
+    assert executor._pending_sigterm is True
+
+
+@pytest.mark.asyncio
+async def test_wrapper_honors_pending_sigterm_on_entry(isolated_database,
+                                                       reset_sigterm_gate):
+    """A pending SIGTERM latched while idle is honored at the next entry.
+
+    The wrapper raises KeyboardInterrupt before touching the row, the except-
+    block returns, and the latch is cleared. The entrypoint must not run.
+    """
+    _pending_sigterm_entrypoint_called[0] = False
+    req = requests_lib.Request(request_id='pending-sigterm-test',
+                               name='test',
+                               entrypoint=_pending_sigterm_test_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    executor._in_request_execution = False
+    executor._pending_sigterm = True
+
+    # Wrapper should observe the latch, raise+catch KI, and return cleanly.
+    executor._request_execution_wrapper('pending-sigterm-test',
+                                        ignore_return_value=False)
+
+    assert _pending_sigterm_entrypoint_called[0] is False, (
+        'Entrypoint must not run when SIGTERM is pending')
+    # Latch was consumed.
+    assert executor._pending_sigterm is False
+    # Protected-region flag was cleared in `finally`.
+    assert executor._in_request_execution is False
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_in_request_execution_after_success(
+        isolated_database, reset_sigterm_gate):
+    """After a normal request the gate must return to the idle state."""
+
+    req = requests_lib.Request(request_id='gate-cleared-on-success',
+                               name='test',
+                               entrypoint=_gate_clears_after_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    executor._request_execution_wrapper('gate-cleared-on-success',
+                                        ignore_return_value=False)
+
+    # finally must have flipped this back to False so the next SIGTERM
+    # arriving between requests gets latched, not raised.
+    assert executor._in_request_execution is False
+    assert executor._pending_sigterm is False
+
+
+# ---------------------------------------------------------------------------
+# Integration regression: an idle worker hit by SIGTERM must not break the
+# ProcessPoolExecutor it lives in. Without the gated handler, this test
+# reliably fails with BrokenProcessPool.
+# ---------------------------------------------------------------------------
+
+_pending_sigterm_entrypoint_called = [False]
+
+
+def _pending_sigterm_test_entrypoint():
+    _pending_sigterm_entrypoint_called[0] = True
+    return 'should-not-happen'
+
+
+def _gate_clears_after_success_entrypoint():
+    return 'ok'
+
+
+def _install_gated_handler_in_worker():
+    """ProcessPoolExecutor initializer that installs the gated SIGTERM
+    handler in the worker subprocess and leaves _in_request_execution=False,
+    mimicking a worker that has finished a task and is about to block on
+    call_queue.get() for the next one.
+    """
+    import signal as _signal
+
+    from sky.server.requests import executor as _executor
+    _signal.signal(_signal.SIGTERM, _executor._gated_sigterm_handler)
+    _executor._in_request_execution = False
+    _executor._pending_sigterm = False
+
+
+def _worker_pid():
+    return os.getpid()
+
+
+def _identity(x):
+    return x
+
+
+def test_idle_worker_survives_sigterm_with_gated_handler():
+    """Regression: SIGTERM to an idle worker must not break the pool.
+
+    Reproduces the production observation where a cancel-all's SIGTERM
+    landed on a worker that was already done with the row recorded as
+    its pid, taking down the entire SHORT/LONG process pool with
+    BrokenProcessPool. With the gated handler installed in the worker
+    initializer, the signal is latched instead of raised, the worker
+    keeps running, and subsequent submits succeed normally.
+
+    Without the gated handler (i.e. using the bare _sigterm_handler that
+    always raises KeyboardInterrupt), the second submit below would
+    raise concurrent.futures.process.BrokenProcessPool.
+    """
+    import signal as _signal
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,
+            initializer=_install_gated_handler_in_worker) as pool:
+        # Warm up a worker and capture its pid.
+        pid = pool.submit(_worker_pid).result(timeout=10)
+
+        # The worker has returned its result and is now blocking on
+        # call_queue.get() waiting for the next task. Hit it with the
+        # SIGTERM that the cancel path would deliver.
+        os.kill(pid, _signal.SIGTERM)
+
+        # Give the signal time to be delivered. We don't have a reliable
+        # synchronization handle for "signal handled by worker", so
+        # poll-submit a few times — under the bug, the very first
+        # post-SIGTERM submit raises BrokenProcessPool.
+        deadline = time.time() + 5
+        last_exc = None
+        while time.time() < deadline:
+            try:
+                result = pool.submit(_identity, 'alive').result(timeout=5)
+                assert result == 'alive'
+                last_exc = None
+                break
+            except concurrent.futures.process.BrokenProcessPool as e:
+                last_exc = e
+                break  # Bug reproduces — fail fast, don't retry.
+            except Exception as e:  # pylint: disable=broad-except
+                last_exc = e
+                time.sleep(0.1)
+        assert last_exc is None, (
+            f'Pool should remain usable after SIGTERM to an idle worker, '
+            f'but got: {type(last_exc).__name__}: {last_exc}')
+
+        # Submit a few more to convince ourselves the pool is healthy.
+        for i in range(3):
+            assert pool.submit(_identity, i).result(timeout=5) == i
