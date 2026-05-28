@@ -1804,6 +1804,17 @@ class JobController:
             await self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
+        except exceptions.ClusterSetUpError as e:
+            # Raised by the launch path for a non-retryable setup failure, e.g.
+            # the job's pod was OOMKilled during cluster/runtime setup. The
+            # failure is deterministic, so we mark the job terminal (rather than
+            # retrying forever) and surface the reason to the CLI/dashboard.
+            logger.error(f'Cluster setup failed for task {task_id}')
+            failure_reason = common_utils.format_exception(e, use_bracket=True)
+            logger.error(failure_reason)
+            await self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_SETUP,
+                failure_reason)
         except asyncio.CancelledError:  # pylint: disable=try-except-raise
             # have this here to avoid getting caught by the general except block
             # below.

@@ -50,6 +50,20 @@ MAX_JOB_CHECKING_RETRY = 10
 # cluster before its status can be updated by the job controller.
 _AUTODOWN_MINUTES = 10
 
+# Substrings (case-insensitive) that identify an out-of-memory failure in a
+# launch/setup exception message. The Kubernetes command runner enriches exec
+# failures with the pod's termination reason (see
+# kubernetes_utils.diagnose_terminated_pod), so 'OOMKilled' reliably appears
+# here when a managed-job pod is OOM-killed during cluster/runtime setup.
+_OOM_FAILURE_SIGNATURES = ('oomkilled', 'out of memory', 'out-of-memory')
+
+
+def _is_oom_failure(exception: Exception) -> bool:
+    """Whether `exception` indicates an out-of-memory pod termination."""
+    message = common_utils.format_exception(exception).lower()
+    return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
+
+
 ENV_VARS_TO_CLEAR = [
     skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
     constants.USER_ID_ENV_VAR,
@@ -663,8 +677,19 @@ class StrategyExecutor:
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                     except Exception as e:  # pylint: disable=broad-except
-                        # If the launch fails, it will be recovered by the
-                        # following code.
+                        # A pod OOM during cluster/runtime setup is
+                        # deterministic (e.g. the requested memory is too
+                        # low) -- retrying just OOMs again. Fail fast with a
+                        # terminal error carrying the OOM reason instead of
+                        # looping forever in the launch-retry path below. Other
+                        # failures fall through and are recovered below.
+                        if raise_on_failure and _is_oom_failure(e):
+                            logger.error(
+                                'Cluster setup failed due to out-of-memory: '
+                                f'{common_utils.format_exception(e)}')
+                            with ux_utils.print_exception_no_traceback():
+                                raise exceptions.ClusterSetUpError(
+                                    str(e)) from e
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
                         with ux_utils.enable_traceback():
