@@ -2296,9 +2296,15 @@ def test_aws_custom_docker_image_with_motd(image_id):
         # Test image with custom MOTD that can potentially interfere with
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
-        # Test image with PYTHONPATH set and with pyproject.toml.
-        # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09',
+        # TODO: Add back a variant that exercises a custom image with
+        # PYTHONPATH set. nvcr.io/nvidia/nemo:* is no longer publicly pullable
+        # (NVIDIA gated the entire repo behind NGC auth — every tag from 24.07
+        # through 25.09 returns "DENIED" anonymously), and the EKS test
+        # cluster has no NGC imagePullSecret configured, so the pod sat in
+        # ImagePullBackOff until --retry-until-up timed out at 30 min.
+        # Replace with a small public image that has PYTHONPATH set once one
+        # is built and hosted (see PR #7539 for the underlying behavior this
+        # was guarding).
         # Test image with Python 3.12 site-packages as WORKDIR, which causes
         # import failures if CWD is not handled properly. When SkyPilot's Python
         # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
