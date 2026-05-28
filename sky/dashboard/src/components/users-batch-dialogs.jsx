@@ -298,8 +298,11 @@ function WorkspacePickerDialog({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [workspaces]);
 
-  // For the 'remove' variant: show which selected users are currently in
-  // each workspace's allowed_users so admins can see what will change.
+  // Returns the subset of selectedUsers already listed in this
+  // workspace's allowed_users. Used in both variants:
+  //  - 'remove': these are the users that will actually be removed.
+  //  - 'add':    these are the users for whom the add is a no-op
+  //              (already in allowed_users).
   const computeCurrentMembers = (config) => {
     const allowed = config.allowed_users || [];
     return selectedUsers.filter(
@@ -384,10 +387,26 @@ function WorkspacePickerDialog({
                   <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto">
                     {privateWorkspaces.map(({ name, config }) => {
                       const isChecked = picked.has(name);
-                      const currentMembers =
-                        variant === 'remove'
-                          ? computeCurrentMembers(config)
-                          : null;
+                      const currentMembers = computeCurrentMembers(config);
+                      // currentMembers is `selectedUsers.filter(...)` so the
+                      // elements are the same references as in selectedUsers
+                      // -- a direct .includes(u) gives us the complement.
+                      const newMembers = selectedUsers.filter(
+                        (u) => !currentMembers.includes(u)
+                      );
+                      const fmt = (us) =>
+                        us.map((u) => u.usernameDisplay || u.userId).join(', ');
+                      let addHint = null;
+                      if (variant === 'add') {
+                        if (newMembers.length === 0) {
+                          addHint =
+                            'All selected users are already in this workspace (no-op).';
+                        } else if (currentMembers.length === 0) {
+                          addHint = `Will add: ${fmt(newMembers)}`;
+                        } else {
+                          addHint = `Will add: ${fmt(newMembers)}. Already in: ${fmt(currentMembers)}`;
+                        }
+                      }
                       return (
                         <label
                           key={name}
@@ -408,9 +427,12 @@ function WorkspacePickerDialog({
                               <div className="text-xs text-gray-500 mt-0.5">
                                 {currentMembers.length === 0
                                   ? 'No selected user is in this workspace (no-op).'
-                                  : `Will remove: ${currentMembers
-                                      .map((u) => u.usernameDisplay || u.userId)
-                                      .join(', ')}`}
+                                  : `Will remove: ${fmt(currentMembers)}`}
+                              </div>
+                            )}
+                            {variant === 'add' && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                {addHint}
                               </div>
                             )}
                           </div>
