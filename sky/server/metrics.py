@@ -26,7 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
-from sky.utils import controller_utils
+from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
 
@@ -378,9 +378,18 @@ class WorkspaceUsageCollector:
         Letting operators filter ``kind="cluster"`` avoids double-counting
         against ``sky_managed_jobs_count`` / the controller; summing
         across all kinds still gives full resource coverage.
+
+        We check the name prefix directly instead of going through
+        ``controller_utils.Controllers.from_name``: that helper asserts
+        exact-match against the live ``SERVER_ID`` (and mutates the
+        ``Controllers`` enum singleton on the looser path), which would
+        crash the whole scrape if the DB carries a controller row from
+        a previous server identity (e.g. ephemeral storage wiped
+        ``~/.sky/user_hash`` between restarts).
         """
-        if controller_utils.Controllers.from_name(
-                cluster.get('name')) is not None:
+        name = cluster.get('name') or ''
+        if (name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX) or
+                name.startswith(common.JOB_CONTROLLER_PREFIX)):
             return 'controller'
         if cluster.get('is_managed'):
             return 'managed_job'
