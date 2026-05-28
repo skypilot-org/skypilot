@@ -128,6 +128,9 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
             'resizeBy': resize_by,
             'requestedRunDuration': {
                 'seconds': run_duration,
+            },
+            'queuingPolicy': {
+                'provisioningModel': 'FLEX_START',
             }
         }).execute()
     return operation
