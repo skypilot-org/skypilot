@@ -108,6 +108,13 @@ class Server(uvicorn.Server):
         shutdown will be initiated. If a SIGINT signal is received again, the
         server will be forcefully shutdown.
         """
+        # Fire process-local shutdown callbacks ASAP so anything in this
+        # process that needs to know (e.g. an in-process readiness
+        # endpoint) can flip without waiting for the drain thread to
+        # spin up. In multi-worker mode this runs in each worker; the
+        # supervisor sets the same flag via SlowStartMultiprocess
+        # below.
+        state.set_shutting_down()
         if self.exiting and sig == signal.SIGINT:
             # The server has been signaled to exit and received a SIGINT again,
             # do force shutdown.
@@ -126,6 +133,10 @@ class Server(uvicorn.Server):
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
         """Perform graceful shutdown."""
+        # state.set_shutting_down() has already fired from handle_exit
+        # on this thread's behalf — see comment there. Plugin readiness
+        # endpoints in this process (single-worker case) have already
+        # observed the flip before we reach the grace sleep.
         time.sleep(_GRACE_WAIT_SECONDS)
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
@@ -298,3 +309,21 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
         if self._init_thread is not None:
             self._init_thread.join()
         super().terminate_all()
+
+    def handle_term(self) -> None:
+        """SIGTERM in the supervisor — fire shutdown callbacks first.
+
+        Uvicorn's supervisor enqueues the signal and only calls
+        ``handle_term`` from the main run loop (up to ~0.5s later). We
+        flip the supervisor-process shutdown flag here so plugin
+        readiness endpoints living in this process (e.g. HA's internal
+        server on port 46581) see the change as soon as the loop ticks,
+        well before ``terminate_all`` starts draining workers.
+        """
+        state.set_shutting_down()
+        super().handle_term()
+
+    def handle_int(self) -> None:
+        """SIGINT in the supervisor — same flip as handle_term."""
+        state.set_shutting_down()
+        super().handle_int()
