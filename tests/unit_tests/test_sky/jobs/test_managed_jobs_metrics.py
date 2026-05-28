@@ -12,13 +12,15 @@ class TestManagedJobsCollector:
         """Verify collect() yields the expected metric families.
 
         The collector consumes (workspace, user_hash, cloud, status, count)
-        tuples from get_status_counts_by_workspace_user_cloud(); terminal
-        statuses are filtered there, so the fixture feeds non-terminal rows.
+        tuples from get_status_counts_by_workspace_user_cloud() — both
+        active and terminal statuses are passed through.
         """
         mock_rows = [
             ('ws', 'u', 'AWS', 'RUNNING', 3),
             # Pre-cloud-assignment status: cloud is NULL → empty label.
             ('ws', 'u', None, 'PENDING', 2),
+            # Terminal status is included.
+            ('ws', 'u', 'AWS', 'SUCCEEDED', 10),
         ]
 
         collector = metrics.ManagedJobsCollector()
@@ -40,6 +42,7 @@ class TestManagedJobsCollector:
         assert samples == {
             ('ws', 'u', 'RUNNING', 'AWS'): 3,
             ('ws', 'u', 'PENDING', ''): 2,
+            ('ws', 'u', 'SUCCEEDED', 'AWS'): 10,
         }
 
     def test_collect_uses_cache(self):

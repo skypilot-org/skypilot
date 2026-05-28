@@ -1568,25 +1568,22 @@ def get_status_counts() -> Dict[str, int]:
 
 def get_status_counts_by_workspace_user_cloud(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str], str, int]]:
-    """Return non-terminal task counts grouped by workspace/user/cloud/status.
+    """Return task counts grouped by workspace/user/cloud/status.
 
     Each tuple is (workspace, user_hash, cloud, status, count). NULL values
     are returned as None. Used by the Prometheus collector to emit
-    per-workspace/user/cloud labeled gauges.
-
-    Terminal statuses (SUCCEEDED / FAILED* / CANCELLED) are filtered at
-    the SQL layer — they're monotonically-growing, indistinguishable
-    from "ever happened" without a time window, and would dominate the
-    result set on long-lived tenants. Operators wanting failure-rate
-    visibility should use a counter on state transitions, not this
-    gauge.
+    per-workspace/user/cloud labeled gauges. Includes both active and
+    terminal statuses — terminal counts on a gauge grow monotonically as
+    the DB accumulates rows, which is awkward (a Counter incremented at
+    state-transition would be more semantically correct), but operators
+    explicitly want success/failure visibility and `delta(...)` over a
+    window approximates the per-period rate.
 
     The join is on (spot, job_info) — spot rows whose job_info parent has
     been deleted are skipped, but spot rows whose job_info has NULL
     workspace/user_hash/cloud (PENDING jobs, pre-workspaces rows) are
     kept with None labels.
     """
-    terminal_values = [s.value for s in ManagedJobStatus.terminal_statuses()]
     query = sqlalchemy.select(
         job_info_table.c.workspace,
         job_info_table.c.user_hash,
@@ -1597,7 +1594,7 @@ def get_status_counts_by_workspace_user_cloud(
         spot_table.join(
             job_info_table,
             spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
-        )).where(spot_table.c.status.notin_(terminal_values)).group_by(
+        )).group_by(
             job_info_table.c.workspace,
             job_info_table.c.user_hash,
             job_info_table.c.cloud,

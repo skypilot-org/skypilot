@@ -66,11 +66,13 @@ metrics covering:
 
 * API server health — request rate, latency, queue wait time, per-worker memory.
 * Cluster inventory by workspace, user, status, cloud, and kind
-  (``cluster`` / ``managed_job`` / ``controller``) — counts, GPU occupancy
-  by accelerator model, and estimated hourly spend. Filter
-  ``kind="cluster"`` to avoid overlap with managed-job clusters; sum
-  across kinds for total resource usage.
-* Managed jobs by workspace, user, status, and cloud (non-terminal only).
+  (``cluster`` / ``managed_job`` / ``controller``) — counts and GPU
+  occupancy by accelerator model. Filter ``kind="cluster"`` to avoid
+  overlap with managed-job clusters; sum across kinds for total
+  resource usage.
+* Managed jobs by workspace, user, status, and cloud (all statuses
+  including terminal; use ``delta(...)`` over a window for per-period
+  success/failure rate).
 
 You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>`
 to directly export GPU memory, utilization and power consumption from

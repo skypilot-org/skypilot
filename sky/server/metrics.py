@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
+from sky.utils import controller_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -272,18 +273,18 @@ class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
     Emits ``sky_managed_jobs_count{workspace, user, status, cloud}`` for
-    every non-terminal task. Terminal statuses (SUCCEEDED / FAILED* /
-    CANCELLED) are deliberately filtered at the SQL layer:
+    every task — both active (PENDING / LAUNCHING / RUNNING / …) and
+    terminal (SUCCEEDED / FAILED* / CANCELLED). For pre-cloud-assignment
+    statuses (PENDING / LAUNCHING) the ``cloud`` label is the empty
+    string ``""``; operators can ``sum by (workspace, user, status)``
+    for a cloud-agnostic view.
 
-      * a gauge of monotonically-growing terminal counts cannot be
-        usefully ``rate()``-d (you'd need a counter on the state
-        transition);
-      * those rows accumulate forever in the DB, so dropping them at
-        query time also keeps the collector cheap.
-
-    For pre-cloud-assignment statuses (PENDING / LAUNCHING) the ``cloud``
-    label is the empty string ``""`` — operators can ``sum by
-    (workspace, user, status)`` for a cloud-agnostic view.
+    Caveat: terminal counts grow monotonically as the DB accumulates
+    rows. Reading absolute values gives lifetime totals; for "failures
+    in the last hour" use ``increase(...)`` / ``delta(...)`` over a
+    window. A proper Counter incremented at the state-transition site
+    would be more semantically correct than a gauge here, but is
+    deferred.
     """
 
     def __init__(self):
@@ -301,9 +302,8 @@ class ManagedJobsCollector:
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            ('Current count of non-terminal managed job tasks by '
-             'workspace, user, status, and cloud.'),
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud.'),
             labels=['workspace', 'user', 'status', 'cloud'])
 
     def collect(self):
@@ -326,9 +326,8 @@ class ManagedJobsCollector:
             counts[key] = counts.get(key, 0) + count
 
         metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            ('Current count of non-terminal managed job tasks by '
-             'workspace, user, status, and cloud'),
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud'),
             labels=['workspace', 'user', 'status', 'cloud'])
         for (workspace, user, status, cloud), count in counts.items():
             metric.add_metric([workspace, user, status, cloud], count)
@@ -341,17 +340,14 @@ class WorkspaceUsageCollector:
     Walks ``global_user_state.get_clusters()`` once per cache window
     (30 s) and emits:
 
-      * ``sky_clusters_count{workspace,user,status,cloud}`` — cluster
-        counts, including managed-job backing clusters.
-      * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type}``
-        — total GPU count by accelerator model across ``UP`` clusters,
+      * ``sky_clusters_count{workspace,user,status,cloud,kind}`` —
+        cluster counts. ``kind`` ∈ ``cluster|managed_job|controller``:
+        filter ``kind="cluster"`` to avoid overlap with
+        ``sky_managed_jobs_count`` and the controller; sum across
+        kinds for the all-clusters total.
+      * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type,kind}``
+        — GPU count by accelerator model across ``UP`` clusters,
         summed over ``launched_nodes``.
-      * ``sky_clusters_burn_rate_dollars{workspace,user,cloud,gpu_type}``
-        — total USD/hr spend across ``UP`` clusters, summed over
-        ``launched_nodes`` (the legacy
-        ``sky_apiserver_total_burn_rate_dollars`` does *not* multiply
-        by node count; this collector replaces it with a labeled
-        version that does).
 
     All gauges share one cache to keep the cost of a scrape bounded to
     a single ``get_clusters()`` call (the same query
@@ -362,8 +358,6 @@ class WorkspaceUsageCollector:
     can join with the ``users`` table or maintain a side-mapping.
     """
 
-    _SECONDS_PER_HOUR = 3600
-
     def __init__(self):
         self._lock = threading.Lock()
         self._last_scrape_time = 0.0
@@ -371,7 +365,6 @@ class WorkspaceUsageCollector:
         self._cached: dict = {
             'counts': {},
             'gpus': {},
-            'burn_rate': {},
         }
 
     @staticmethod
@@ -386,8 +379,6 @@ class WorkspaceUsageCollector:
         against ``sky_managed_jobs_count`` / the controller; summing
         across all kinds still gives full resource coverage.
         """
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import controller_utils
         if controller_utils.Controllers.from_name(
                 cluster.get('name')) is not None:
             return 'controller'
@@ -399,7 +390,6 @@ class WorkspaceUsageCollector:
         clusters = global_user_state.get_clusters(summary_response=True)
         counts: dict = {}
         gpus: dict = {}
-        burn_rate: dict = {}
 
         for cluster in clusters:
             workspace = _label_or_default(cluster.get('workspace'),
@@ -422,50 +412,22 @@ class WorkspaceUsageCollector:
             count_key = (workspace, user, status_name, cloud, kind)
             counts[count_key] = counts.get(count_key, 0) + 1
 
-            # ── GPUs + burn rate, only for UP clusters ──
+            # ── GPUs, only for UP clusters ──
             if status_name != 'UP':
                 continue
             if launched_resources is None:
                 continue
             num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
 
-            # ── GPUs by accelerator model ──
             accelerators = (launched_resources.accelerators or {})
-            # Attribute the cluster's whole spend to one gpu_type label —
-            # the dominant accelerator if any, else 'cpu'. Multi-accelerator
-            # clusters are rare; if/when they show up, splitting the cost
-            # proportionally would need pricing data we don't have at this
-            # layer, so we accept the simplification.
-            if accelerators:
-                # Sort for determinism (multiple types in one cluster are
-                # rare but possible; pick the lexicographically first so
-                # the same cluster always hits the same series).
-                gpu_type = sorted(accelerators.keys())[0]
-                for acc_name, acc_count in accelerators.items():
-                    gpu_key = (workspace, user, cloud, acc_name, kind)
-                    gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
-                                     float(acc_count) * num_nodes)
-            else:
-                gpu_type = 'cpu'
-
-            # ── burn rate, USD/hr, multiplied by node count ──
-            try:
-                per_node_hourly = float(
-                    launched_resources.get_cost(self._SECONDS_PER_HOUR) or 0.0)
-            except Exception:  # pylint: disable=broad-except
-                # Cost lookup can fail when a catalog entry is missing for
-                # the launched instance type (e.g. on-prem clouds, or
-                # newly-added instance types). Skip silently — the count
-                # / GPU gauges are still correct.
-                per_node_hourly = 0.0
-            burn_key = (workspace, user, cloud, gpu_type, kind)
-            burn_rate[burn_key] = (burn_rate.get(burn_key, 0.0) +
-                                   per_node_hourly * num_nodes)
+            for acc_name, acc_count in accelerators.items():
+                gpu_key = (workspace, user, cloud, acc_name, kind)
+                gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
+                                 float(acc_count) * num_nodes)
 
         return {
             'counts': counts,
             'gpus': gpus,
-            'burn_rate': burn_rate,
         }
 
     def describe(self):
@@ -477,11 +439,6 @@ class WorkspaceUsageCollector:
         yield prom_core.GaugeMetricFamily(
             'sky_clusters_gpus_in_flight',
             'GPU count across UP clusters, by workspace, user, cloud, '
-            'gpu_type, kind',
-            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
-        yield prom_core.GaugeMetricFamily(
-            'sky_clusters_burn_rate_dollars',
-            'Estimated hourly spend (USD) by workspace, user, cloud, '
             'gpu_type, kind',
             labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
 
@@ -512,16 +469,6 @@ class WorkspaceUsageCollector:
             'gpu_type, kind',
             labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
         for (workspace, user, cloud, gpu_type, kind), v in data['gpus'].items():
-            m.add_metric([workspace, user, cloud, gpu_type, kind], v)
-        yield m
-
-        m = prom_core.GaugeMetricFamily(
-            'sky_clusters_burn_rate_dollars',
-            'Estimated hourly spend (USD) by workspace, user, cloud, '
-            'gpu_type, kind',
-            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
-        for (workspace, user, cloud, gpu_type,
-             kind), v in data['burn_rate'].items():
             m.add_metric([workspace, user, cloud, gpu_type, kind], v)
         yield m
 
