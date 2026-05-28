@@ -64,6 +64,95 @@ class TestSuicideOnLockLoss:
                                             instance=True,
                                             spec_set=True)
         with mock.patch.object(mjrt.os, 'kill') as kill_mock, \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers'):
+            thread._suicide_on_lock_loss()
+        kill_mock.assert_called_once_with(12345, signal.SIGTERM)
+
+    def test_kills_local_controllers_before_sigterm(self):
+        """Controllers must be SIGTERMed before the API server SIGTERM —
+        the lock is already released here, so a new leader can schedule
+        within milliseconds. Killing first prevents split-brain."""
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+        call_order = []
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=lambda: call_order.append('kill_controllers')), \
+                mock.patch.object(
+                    mjrt.os, 'kill',
+                    side_effect=lambda *a, **kw: call_order.append('sigterm')), \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_lock_loss()
+        assert call_order == ['kill_controllers', 'sigterm']
+
+    def test_sigterm_still_sent_when_controller_kill_raises(self):
+        """A failure killing controllers must not block the SIGTERM —
+        otherwise the replica would stay up holding nothing useful."""
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=RuntimeError('boom')), \
+                mock.patch.object(mjrt.os, 'kill') as kill_mock, \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_lock_loss()
+        kill_mock.assert_called_once_with(12345, signal.SIGTERM)
+
+    def test_touches_recovery_signal_file(self, tmp_path, monkeypatch):
+        """The signal file must be touched BEFORE we kill controllers, so
+        any in-flight submit_jobs racing this path on another worker
+        process short-circuits maybe_start_controllers rather than
+        spawning a new controller that we'd then orphan."""
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+        order = []
+        with mock.patch.object(
+                mjrt.managed_job_scheduler,
+                'kill_local_job_controllers',
+                side_effect=lambda: order.append('kill')), \
+                mock.patch.object(
+                    mjrt.os, 'kill',
+                    side_effect=lambda *a, **kw: order.append('sigterm')), \
+                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
+            thread._suicide_on_lock_loss()
+
+        assert signal_file.exists()
+        # File must be created BEFORE kill_controllers and SIGTERM,
+        # otherwise a fresh submit_jobs slipped in just before the
+        # kill could still spawn a controller.
+        assert order == ['kill', 'sigterm']
+
+    def test_signal_file_touch_failure_does_not_block_sigterm(
+            self, monkeypatch):
+        """If the FS refuses the touch (read-only, full, etc.), proceed
+        with kill + SIGTERM anyway. Better than blocking shutdown."""
+
+        def boom_touch(self, *args, **kwargs):  # pylint: disable=unused-argument
+            raise OSError('read-only fs')
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._lock = mock.create_autospec(locks.PostgresLock,
+                                            instance=True,
+                                            spec_set=True)
+        with mock.patch.object(mjrt.pathlib.Path, 'touch', boom_touch), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers'), \
+                mock.patch.object(mjrt.os, 'kill') as kill_mock, \
                 mock.patch.object(mjrt.os, 'getpid', return_value=12345):
             thread._suicide_on_lock_loss()
         kill_mock.assert_called_once_with(12345, signal.SIGTERM)
