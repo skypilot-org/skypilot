@@ -304,6 +304,41 @@ jobs:
       package_name: skypilot-nightly
     secrets: inherit
 
+  # Optional downstream notification: emit a repository_dispatch event so a
+  # configured downstream repo can react to a fresh nightly publish without
+  # polling PyPI. Configured via repo-level secrets — when unset (e.g. forks)
+  # the step exits silently.
+  notify-downstream:
+    runs-on: ubuntu-latest
+    needs: [check-date, nightly-build-pypi, publish-and-validate-both]
+    if: ${{ always() && needs.check-date.outputs.is_preflight != 'true' && needs.publish-and-validate-both.result == 'success' }}
+    steps:
+      - name: Emit repository_dispatch to downstream repo
+        env:
+          DISPATCH_REPO: ${{ secrets.NIGHTLY_DOWNSTREAM_REPO }}
+          DISPATCH_TOKEN: ${{ secrets.NIGHTLY_DOWNSTREAM_TOKEN }}
+          DISPATCH_EVENT_TYPE: ${{ vars.NIGHTLY_DOWNSTREAM_EVENT_TYPE || 'skypilot-nightly-published' }}
+          NIGHTLY_VERSION: ${{ needs.nightly-build-pypi.outputs.version }}
+        run: |
+          if [[ -z "${DISPATCH_REPO}" || -z "${DISPATCH_TOKEN}" ]]; then
+            echo "No downstream repo configured (NIGHTLY_DOWNSTREAM_REPO/NIGHTLY_DOWNSTREAM_TOKEN unset); skipping."
+            exit 0
+          fi
+          echo "Dispatching ${DISPATCH_EVENT_TYPE} (version=${NIGHTLY_VERSION})"
+          http_code=$(curl -sS -o /tmp/dispatch-resp -w '%{http_code}' \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${DISPATCH_REPO}/dispatches" \
+            -d "{\"event_type\":\"${DISPATCH_EVENT_TYPE}\",\"client_payload\":{\"version\":\"${NIGHTLY_VERSION}\"}}")
+          if [[ "${http_code}" != "204" ]]; then
+            echo "Dispatch failed (HTTP ${http_code}):"
+            cat /tmp/dispatch-resp || true
+            exit 1
+          fi
+          echo "Dispatch accepted."
+
   summary:
     runs-on: ubuntu-latest
     needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
