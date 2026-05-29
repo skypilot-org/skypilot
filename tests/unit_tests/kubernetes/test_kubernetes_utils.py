@@ -4771,15 +4771,24 @@ def test_get_configured_tolerations_extracts_from_pod_config_dict():
         # str(). Without coercion, `value: 123` (unquoted YAML → int)
         # would not match a K8s taint value of '123' (str).
         ('yaml-int', '123', 123, True),
-        # YAML-parsed bool: `value: true` → Python True must still match
-        # taint string 'True'.
-        ('yaml-bool', 'True', True, True),
+        # YAML-parsed bool: `value: true` → Python True must match a
+        # taint string 'true' (lowercase). K8s stores taint values as
+        # whatever Go's YAML serializer emits, which is always lowercase
+        # for booleans. Without the bool-lowercase coercion, Python's
+        # `str(True)` would yield 'True' and silently mismatch.
+        ('yaml-bool', 'true', True, True),
         # Falsy YAML-int (`value: 0`) survives coercion. Regression for
         # the `str(x or '')` idiom which silently collapses 0 → ''.
         ('yaml-int-zero', '0', 0, True),
         # Falsy YAML-bool (`value: false`) — same regression risk as
-        # int-zero.
-        ('yaml-bool-false', 'False', False, True),
+        # int-zero, plus the same lowercase requirement as `yaml-bool`.
+        ('yaml-bool-false', 'false', False, True),
+        # Defensive: a Python-cased 'True'/'False' string on the K8s
+        # side must NOT match a Python-bool toleration. The lowercase
+        # coercion is strict; mismatches against 'True'/'False' don't
+        # accidentally pass.
+        ('python-cased-bool-no-match', 'True', True, False),
+        ('python-cased-bool-false-no-match', 'False', False, False),
         # Inverse collapse: taint has value='' and toleration has
         # value=0. Must NOT match (toleration's 0 → '0' ≠ taint's '').
         ('inverse-collapse', '', 0, False),

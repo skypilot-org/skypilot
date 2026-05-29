@@ -1610,8 +1610,20 @@ def get_configured_tolerations(
 # `None`-explicit form rather than `str(x or '')` is what lets falsy-but-set
 # values like `value: 0` and `value: false` survive the coercion
 # (`str(0 or '')` would collapse to `''` and never match `'0'`).
+#
+# Booleans need special-casing because `str(True)` is Python-cased
+# `'True'` but K8s stores taint values lowercase (`'true'` / `'false'`)
+# — Go's YAML serializer (which K8s uses internally) always emits
+# lowercase, and `kubectl taint nodes X foo=true:NoSchedule` stores
+# `value: "true"`. Without the lowercase coercion, a config
+# `value: true` (unquoted YAML → Python `True`) coerces to `'True'` and
+# silently fails the exact string compare against the K8s `'true'`.
 def _str_or_empty(v: Any) -> str:
-    return '' if v is None else str(v)
+    if v is None:
+        return ''
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    return str(v)
 
 
 def taint_is_tolerated(taint: Dict[str, Any],
