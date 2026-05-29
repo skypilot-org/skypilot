@@ -9,8 +9,7 @@ catch-all's own DB write failing too, producing a silent RUNNING zombie.
 Wrap any DB-touching call site with one of these helpers. They catch
 `sqlalchemy.exc.OperationalError` (which wraps `psycopg2.OperationalError`
 and asyncpg's connection errors) and retry with exponential backoff +
-jitter. Defaults follow Airflow's `run_with_db_retries`: 3 attempts,
-0.5s initial, 5s max.
+jitter.
 """
 
 import asyncio
