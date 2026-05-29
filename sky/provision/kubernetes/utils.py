@@ -2039,6 +2039,16 @@ def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
     return None
 
 
+def get_failure_hint_reasons() -> List[str]:
+    """The reason substrings KUBERNETES_FAILURE_HINTS recognizes, flattened.
+
+    A reason matching one of these names a specific failure cause (since we
+    carry a remediation hint for it). Callers that gate work on "is the cause
+    already specific" can derive from this instead of duplicating the list.
+    """
+    return [s for substrings, _ in KUBERNETES_FAILURE_HINTS for s in substrings]
+
+
 def diagnose_terminated_pod(context: Optional[str], namespace: str,
                             pod_name: str) -> Optional[str]:
     """Best-effort diagnosis of a pod that an exec/attach found already gone.

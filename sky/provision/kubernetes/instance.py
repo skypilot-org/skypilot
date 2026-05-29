@@ -2316,11 +2316,13 @@ def _get_pod_events(context: Optional[str], namespace: str,
 _FAILURE_EVENT_REASONS = ('Evicted',)
 
 # Substrings that already name a specific failure cause; when a status-derived
-# reason contains one, consulting events would add nothing.
-_SPECIFIC_FAILURE_REASON_SUBSTRINGS = ('OOMKilled', 'ImagePullBackOff',
-                                       'ErrImagePull', 'CrashLoopBackOff',
-                                       'Evicted', 'ephemeral', 'Insufficient',
-                                       'Preempted', 'Disrupted')
+# reason contains one, consulting events would add nothing. Every reason we
+# carry a remediation hint for is specific by definition, so derive those from
+# the canonical hint table; add the few specific reasons that have no hint
+# (CrashLoopBackOff and the Kueue/disruption conditions).
+_SPECIFIC_FAILURE_REASON_SUBSTRINGS = tuple(
+    kubernetes_utils.get_failure_hint_reasons()) + ('CrashLoopBackOff',
+                                                    'Preempted', 'Disrupted')
 
 
 def _reason_lacks_specific_cause(reason: Optional[str]) -> bool:

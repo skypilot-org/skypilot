@@ -5244,6 +5244,15 @@ def test_match_kubernetes_failure_hint_generic_eviction():
     assert hint == 'The pod was evicted by the node under resource pressure.'
 
 
+def test_get_failure_hint_reasons_flattens_table():
+    reasons = utils.get_failure_hint_reasons()
+    # Every reason with a hint must report as a specific cause; otherwise each
+    # reason has a match_kubernetes_failure_hint hit.
+    for reason in reasons:
+        assert utils.match_kubernetes_failure_hint(reason) is not None
+    assert 'OOMKilled' in reasons and 'Evicted' in reasons
+
+
 def test_diagnose_terminated_pod_substitutes_dashboard_url_token(monkeypatch):
     # A matched hint containing {dashboard_url} is rendered with a generic
     # phrase, since this module can't resolve the real URL.
