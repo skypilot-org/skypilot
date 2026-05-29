@@ -9,7 +9,7 @@ SkyPilot is used by AI teams of all sizes, from individual researchers to organi
 
 For AI infra and platform teams supporting frontier AI work, **SkyPilot Platform** extends SkyPilot OSS with capabilities tuned for production at scale:
 
-- **Researcher productivity** — persistent dev environments for engineers and AI agents; fast launches across the AI lifecycle: large-scale pre-training, SFT and RL post-training, batch inference, RL rollouts, and parallel evals.
+- **Researcher productivity** — persistent dev environments for engineers and AI agents; isolated sandboxes for coding agents and RL rollouts; fast launches across the AI lifecycle: large-scale pre-training, SFT and RL post-training, batch inference, and parallel evals.
 - **Higher GPU utilization** — multi-team quotas with borrowing and preemption, fleet-wide observability, idle reclamation.
 - **Standardized GPU operations** — uniform health checks and incident response across the fleet; instant GPU failure detection and recovery across XID, NVML, NCCL, and dmesg signals, with Slack alerts.
 - **Production deployments** — multi-cluster model serving, HA managed API server, encrypted secrets, SSO.
@@ -45,7 +45,7 @@ For researchers and AI agents
 
 ▸ **Fast parallel jobs** — Launch thousands of parallel jobs in seconds, for RL rollouts, parallel evals, and batch inference. Tight integration with SkyPilot job groups.
 
-▸ **SkyPilot Sandboxes** — Instant, ephemeral compute environments that run on your own Kubernetes clusters. No new infrastructure or third-party trust boundaries needed; sandboxes inherit your existing network policies, RBAC, and compliance posture. Pre-warmed pools launch sandboxes in under a second, with volumes and secrets injected automatically. Batch-launch hundreds in a single call for AI coding agents, RL rollouts, or parallel evals. Ships with a built-in image for Claude Code.
+▸ **SkyPilot Sandboxes** — Fast, isolated compute environments on your own Kubernetes clusters for AI coding agents, RL training rollouts, and parallel evals. Pre-warmed pools launch sandboxes in under a second with volumes and secrets injected automatically. Ships with a built-in image for Claude Code.
 
 .. raw:: html
 
