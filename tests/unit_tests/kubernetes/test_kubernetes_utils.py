@@ -4983,6 +4983,8 @@ def test_v1node_get_taints_mixed_tolerated_and_untolerated():
     out = node.get_taints(tolerations=tols)
     by_key = {t['key']: t['tolerated'] for t in out}
     assert by_key == {'workload_pool': True, 'dangerous': False}
+
+
 # ---------------------------------------------------------------------------
 # Pod termination reason / OOM diagnosis helpers
 # (get_condensed_pod_reason, _pod_terminated_abnormally,
@@ -5104,6 +5106,12 @@ def test_get_condensed_pod_reason_oomkilled_not_masked_by_pod_reason():
     assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
 
 
+def test_get_condensed_pod_reason_status_none():
+    # A pod with no status (e.g. not yet scheduled) must not crash.
+    pod = kubernetes.client.V1Pod(status=None)
+    assert utils.get_condensed_pod_reason(pod) == 'Terminated unexpectedly'
+
+
 def test_pod_terminated_abnormally_failed_phase():
     assert utils._pod_terminated_abnormally(_make_pod(phase='Failed')) is True
 
@@ -5132,6 +5140,12 @@ def test_pod_terminated_abnormally_clean_success():
                         _make_container_status(terminated_reason='Completed',
                                                terminated_exit_code=0)
                     ])
+    assert utils._pod_terminated_abnormally(pod) is False
+
+
+def test_pod_terminated_abnormally_status_none():
+    # A pod with no status must not crash and is not considered abnormal.
+    pod = kubernetes.client.V1Pod(status=None)
     assert utils._pod_terminated_abnormally(pod) is False
 
 

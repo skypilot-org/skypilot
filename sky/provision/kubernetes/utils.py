@@ -1935,6 +1935,8 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     returns a string; falls back to 'Terminated unexpectedly' when no specific
     cause is found.
     """
+    if pod.status is None:
+        return 'Terminated unexpectedly'
     # Check pod conditions for preemption/disruption (highest priority).
     if pod.status.conditions:
         for condition in pod.status.conditions:
@@ -1989,7 +1991,9 @@ def _pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
     Used to avoid emitting a spurious reason for a pod that merely finished
     successfully (e.g. an exec lost a race against a clean Completed pod).
     """
-    if getattr(pod.status, 'phase', None) == 'Failed':
+    if pod.status is None:
+        return False
+    if pod.status.phase == 'Failed':
         return True
     for cs in (pod.status.container_statuses or []):
         if any(term.exit_code != 0 for term in _iter_terminated_states(cs)):

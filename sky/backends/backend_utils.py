@@ -2915,10 +2915,11 @@ def _update_cluster_status(
             try:
                 ray_config = global_user_state.get_cluster_yaml_dict(
                     handle.cluster_yaml)
-                status_reason = (
-                    k8s_instance.get_cluster_failure_reason_from_events(
-                        ray_config['provider'], list(node_statuses.keys())) or
-                    '')
+                if ray_config and 'provider' in ray_config:
+                    status_reason = (
+                        k8s_instance.get_cluster_failure_reason_from_events(
+                            ray_config['provider'], list(
+                                node_statuses.keys())) or '')
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to get pod failure events for '
                              f'{cluster_name!r}: {e}')
