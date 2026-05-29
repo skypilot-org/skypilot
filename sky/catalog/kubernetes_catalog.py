@@ -217,8 +217,7 @@ def _list_accelerators(
         # does not make the node un-schedulable for the user's workloads.
         # Without configured tolerations, every retained taint has
         # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
-        node_is_tainted = any(
-            not t.get('tolerated', False) for t in node_taints)
+        node_is_tainted = kubernetes_utils.has_untolerated_taint(node_taints)
 
         for key in keys:
             if key in node.metadata.labels:

@@ -4229,14 +4229,13 @@ def _show_gpus_impl(
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                node_taints = getattr(node_info, 'taints', None) or []
+                node_taints = getattr(node_info, 'taints', None)
                 # Only un-tolerated taints count toward the "not ready" GPU
                 # tally. Taints matched by `kubernetes.pod_config.spec
                 # .tolerations` arrive with `tolerated=True` and don't make
                 # the node unschedulable for the user's workloads.
-                node_is_tainted = any(
-                    not t.get('tolerated', False) for t in node_taints)
-                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                if (not node_is_ready or node_is_cordoned or
+                        kubernetes_utils.has_untolerated_taint(node_taints)):
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 

@@ -4611,10 +4611,13 @@ def test_get_configured_tolerations_global_only():
         mock_get.return_value = {'spec': {'tolerations': global_tols}}
         result = utils.get_configured_tolerations(context='ctx-a')
         assert result == global_tols
+        # Goes through resolve_effective_pod_config, which fetches the whole
+        # pod_config dict (so the K8s dict-merge fires for per-context
+        # overrides) with default_value={}.
         mock_get.assert_called_once_with(cloud='kubernetes',
                                          region='ctx-a',
                                          keys=('pod_config',),
-                                         default_value=None)
+                                         default_value={})
 
 
 def test_get_configured_tolerations_none_configured():
@@ -4631,13 +4634,14 @@ def test_get_configured_tolerations_none_configured():
 
 
 def test_get_configured_tolerations_defensive_against_garbage():
-    """Non-dict pod_config / non-dict spec / non-list tolerations / non-dict
-    entries — all defaulted away without crashing the caller."""
+    """Non-dict spec / non-list tolerations / non-dict entries — all
+    defaulted away without crashing the caller.
+
+    `resolve_effective_pod_config` is typed to return `Dict[str, Any]`
+    so we don't defend against the top-level `pod_config` itself being
+    non-dict; only against malformed nested values.
+    """
     with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
-        # Whole pod_config isn't a dict (impossible in practice but
-        # defensive).
-        mock_get.return_value = 'not-a-dict'
-        assert utils.get_configured_tolerations(context='ctx-a') is None
         # spec isn't a dict.
         mock_get.return_value = {'spec': 'garbage'}
         assert utils.get_configured_tolerations(context='ctx-a') is None
@@ -4736,73 +4740,78 @@ def test_get_configured_tolerations_extracts_from_pod_config_dict():
         ]
 
 
-def test_taint_is_tolerated_coerces_yaml_int_value_to_str():
-    """YAML-parsed int taint/toleration values must still match via str().
+@pytest.mark.parametrize(
+    'case_id,taint_value,tol_value,expected',
+    [
+        # YAML-parsed int taint/toleration values must still match via
+        # str(). Without coercion, `value: 123` (unquoted YAML → int)
+        # would not match a K8s taint value of '123' (str).
+        ('yaml-int', '123', 123, True),
+        # YAML-parsed bool: `value: true` → Python True must still match
+        # taint string 'True'.
+        ('yaml-bool', 'True', True, True),
+        # Falsy YAML-int (`value: 0`) survives coercion. Regression for
+        # the `str(x or '')` idiom which silently collapses 0 → ''.
+        ('yaml-int-zero', '0', 0, True),
+        # Falsy YAML-bool (`value: false`) — same regression risk as
+        # int-zero.
+        ('yaml-bool-false', 'False', False, True),
+        # Inverse collapse: taint has value='' and toleration has
+        # value=0. Must NOT match (toleration's 0 → '0' ≠ taint's '').
+        ('inverse-collapse', '', 0, False),
+    ],
+    ids=lambda v: v if isinstance(v, str) else repr(v))
+def test_taint_is_tolerated_str_coercion(case_id, taint_value, tol_value,
+                                         expected):
+    """YAML-parsed non-string taint/toleration values must coerce to str
+    before comparison. Guards against the `str(x or '')` idiom which
+    silently collapses falsy values (`0`, `False`) to `''`."""
+    del case_id  # for pytest id only
+    taint = {'key': 'foo', 'value': taint_value, 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': tol_value,
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is expected
 
-    Without explicit `str()` coercion, a user-configured
-    `value: 123` (unquoted YAML → int) would not match a K8s taint value
-    of '123' (str) and the node would falsely render as un-tolerated.
+
+@pytest.mark.parametrize('taints,expected', [
+    (None, False),
+    ([], False),
+    ([{
+        'key': 'a',
+        'effect': 'NoSchedule'
+    }], True),
+    ([{
+        'key': 'a',
+        'effect': 'NoSchedule',
+        'tolerated': True
+    }], False),
+    ([{
+        'key': 'a',
+        'effect': 'NoSchedule',
+        'tolerated': False
+    }], True),
+    ([{
+        'key': 'a',
+        'effect': 'NoSchedule',
+        'tolerated': True
+    }, {
+        'key': 'b',
+        'effect': 'NoSchedule'
+    }], True),
+])
+def test_has_untolerated_taint(taints, expected):
+    """The shared predicate used by catalog / get_kubernetes_node_info /
+    sky-show-gpus aggregation.
+
+    A missing `tolerated` key counts as un-tolerated (backwards-compat
+    with servers that don't decorate the field), and an empty/None list
+    is never un-tolerated.
     """
-    taint = {'key': 'foo', 'value': '123', 'effect': 'NoSchedule'}
-    tolerations = [{
-        'key': 'foo',
-        'operator': 'Equal',
-        'value': 123,  # unquoted in YAML → int after parse
-        'effect': 'NoSchedule',
-    }]
-    assert utils.taint_is_tolerated(taint, tolerations) is True
-
-
-def test_taint_is_tolerated_coerces_yaml_bool_value_to_str():
-    """YAML-parsed bool taint/toleration values must still match via str()."""
-    taint = {'key': 'foo', 'value': 'True', 'effect': 'NoSchedule'}
-    tolerations = [{
-        'key': 'foo',
-        'operator': 'Equal',
-        'value': True,  # YAML `value: true` → bool
-        'effect': 'NoSchedule',
-    }]
-    assert utils.taint_is_tolerated(taint, tolerations) is True
-
-
-def test_taint_is_tolerated_coerces_falsy_yaml_int_zero_to_str():
-    """Falsy YAML-int (`value: 0`) survives coercion — regression for the
-    `str(x or '')` idiom which silently collapses `0` to `''`."""
-    taint = {'key': 'foo', 'value': '0', 'effect': 'NoSchedule'}
-    tolerations = [{
-        'key': 'foo',
-        'operator': 'Equal',
-        'value': 0,  # YAML `value: 0` → int(0), Python-falsy
-        'effect': 'NoSchedule',
-    }]
-    assert utils.taint_is_tolerated(taint, tolerations) is True
-
-
-def test_taint_is_tolerated_coerces_falsy_yaml_bool_false_to_str():
-    """Falsy YAML-bool (`value: false`) survives coercion — same regression
-    risk as the int-zero case."""
-    taint = {'key': 'foo', 'value': 'False', 'effect': 'NoSchedule'}
-    tolerations = [{
-        'key': 'foo',
-        'operator': 'Equal',
-        'value': False,  # YAML `value: false` → bool(False), Python-falsy
-        'effect': 'NoSchedule',
-    }]
-    assert utils.taint_is_tolerated(taint, tolerations) is True
-
-
-def test_taint_is_tolerated_does_not_match_when_only_taint_has_value():
-    """Taint has `value: ''` (or absent) and toleration has `value: '0'`
-    must NOT match — guards against the inverse collapse where the
-    toleration's `0` becomes `''` and matches a value-less taint."""
-    taint = {'key': 'foo', 'value': '', 'effect': 'NoSchedule'}
-    tolerations = [{
-        'key': 'foo',
-        'operator': 'Equal',
-        'value': 0,  # → '0' after str-coerce, ≠ taint's ''
-        'effect': 'NoSchedule',
-    }]
-    assert utils.taint_is_tolerated(taint, tolerations) is False
+    assert utils.has_untolerated_taint(taints) is expected
 
 
 def _make_v1node_with_taints(taints):

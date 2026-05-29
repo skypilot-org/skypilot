@@ -1570,35 +1570,35 @@ def get_configured_tolerations(
     `V1Node.get_taints(tolerations=...)` and get byte-identical
     output to today.
 
-    Fetches the entire `pod_config` dict (rather than the nested
-    `('pod_config', 'spec', 'tolerations')` key directly) so the
-    Kubernetes-specific dict merge fires inside
-    `get_effective_region_config` — that path appends per-context
-    list entries onto the global list (see `merge_k8s_configs`),
-    matching the toleration list that an actual pod gets at
-    scheduling time via `resolve_effective_pod_config`. Fetching the
-    leaf `tolerations` key directly would bypass the dict merge and
-    let a per-context list clobber the global one.
+    Goes through `resolve_effective_pod_config` rather than fetching the
+    `tolerations` leaf directly so the per-context list is merged onto
+    the global one (Kubernetes-specific dict merge appends list
+    entries — see `merge_k8s_configs`) and matches what an actual pod
+    gets at scheduling time. Fetching the leaf directly would let a
+    per-context list clobber the global one.
 
     Each toleration is a dict in standard Kubernetes shape, e.g.
     `{'key': 'workload_pool', 'operator': 'Equal', 'value': 'research',
       'effect': 'NoSchedule'}`.
     """
-    pod_config = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('pod_config',),
-        default_value=None)
-    if not isinstance(pod_config, dict):
-        return None
-    spec = pod_config.get('spec')
-    if not isinstance(spec, dict):
-        return None
-    tolerations = spec.get('tolerations')
+    pod_config = resolve_effective_pod_config(cluster_config_overrides={},
+                                              context=context)
+    spec = pod_config.get('spec') if isinstance(pod_config, dict) else None
+    tolerations = spec.get('tolerations') if isinstance(spec, dict) else None
     if not isinstance(tolerations, list):
         return None
     # Filter to dict entries only — be defensive against malformed config.
     return [t for t in tolerations if isinstance(t, dict)]
+
+
+# Coerce to str defensively — YAML can parse unquoted numbers/booleans
+# as non-string types (e.g. `value: 123` → int), which would silently
+# fail to match the K8s API's always-string taint fields. The
+# `None`-explicit form rather than `str(x or '')` is what lets falsy-but-set
+# values like `value: 0` and `value: false` survive the coercion
+# (`str(0 or '')` would collapse to `''` and never match `'0'`).
+def _str_or_empty(v: Any) -> str:
+    return '' if v is None else str(v)
 
 
 def taint_is_tolerated(taint: Dict[str, Any],
@@ -1627,16 +1627,6 @@ def taint_is_tolerated(taint: Dict[str, Any],
     Returns:
         True if at least one toleration in the list matches the taint.
     """
-
-    # Coerce to str defensively — YAML can parse unquoted numbers/booleans
-    # as non-string types (e.g. `value: 123` → int), which would silently
-    # fail to match the K8s API's always-string taint fields. Use the
-    # `None`-explicit form rather than `str(x or '')` so falsy-but-set
-    # values like `value: 0` and `value: false` survive the coercion
-    # (`str(0 or '')` would collapse to `''` and never match `'0'`).
-    def _str_or_empty(v: Any) -> str:
-        return '' if v is None else str(v)
-
     taint_key = _str_or_empty(taint.get('key'))
     taint_effect = _str_or_empty(taint.get('effect'))
     taint_value = _str_or_empty(taint.get('value'))
@@ -1665,6 +1655,25 @@ def taint_is_tolerated(taint: Dict[str, Any],
         if tol_value == taint_value:
             return True
     return False
+
+
+def has_untolerated_taint(taints: Optional[List[Dict[str, Any]]]) -> bool:
+    """Returns True if any taint in the list is NOT tolerated.
+
+    Reads the `'tolerated'` flag previously attached to each taint dict by
+    `V1Node.get_taints(tolerations=...)`. Taints without the flag (the
+    backward-compatible shape from servers that don't know about
+    tolerations, or callers that don't pass `tolerations=`) are treated as
+    un-tolerated, matching the pre-toleration-aware behavior where any
+    non-empty taint list made the node un-schedulable.
+
+    This is the single source of truth for the "is this node tainted for
+    user workloads?" predicate used by the catalog, `get_kubernetes_node_info`,
+    and `sky show-gpus` aggregation.
+    """
+    if not taints:
+        return False
+    return any(not t.get('tolerated', False) for t in taints)
 
 
 def _filter_allowed_nodes(nodes: List[V1Node],
@@ -4191,8 +4200,7 @@ def get_kubernetes_node_info(
         # it has at least one taint not tolerated by the configured pod
         # tolerations. Without configured tolerations, every retained taint has
         # `tolerated=False` so this is equivalent to `len(node_taints) > 0`.
-        node_is_tainted = any(
-            not t.get('tolerated', False) for t in node_taints)
+        node_is_tainted = has_untolerated_taint(node_taints)
 
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
