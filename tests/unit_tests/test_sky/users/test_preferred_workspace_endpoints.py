@@ -109,39 +109,103 @@ class TestVersionGateConstant(unittest.TestCase):
             server_constants.API_VERSION)
 
 
+# SDK decorator gate ---------------------------------------------------
+
+
+class TestSetPreferredWorkspaceSdkVersionGate(unittest.TestCase):
+    """A new SDK method that calls a new server endpoint MUST be decorated
+    with `@versions.minimal_api_version(<API_VERSION>)` so a new client
+    talking to an older server gets a clear APINotSupportedError instead
+    of a confusing HTTP 404 / connection error on the unknown route.
+    See CONTRIBUTING.md guideline for new SDK methods."""
+
+    def test_set_preferred_workspace_raises_when_server_too_old(self):
+        from sky import exceptions
+        from sky.client import sdk
+        from sky.server import versions
+
+        # Pin remote version to one less than the workspace-resolver
+        # introducing version. The decorator MUST fire and surface a
+        # clean APINotSupportedError before any HTTP attempt.
+        too_old = (server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION - 1)
+        original = versions.get_remote_api_version
+        versions.get_remote_api_version = lambda: too_old  # type: ignore
+        try:
+            with self.assertRaises(exceptions.APINotSupportedError) as cm:
+                sdk.set_preferred_workspace('team-a')
+            self.assertIn('set_preferred_workspace', str(cm.exception))
+        finally:
+            versions.get_remote_api_version = original  # type: ignore
+            versions.set_remote_api_version(None)
+
+
+# client_api_version propagation --------------------------------------
+
+
+class TestRequestBodyCarriesClientApiVersion(unittest.TestCase):
+    """The client API version MUST travel on RequestBody, not via the
+    `_remote_api_version` ContextVar — the ContextVar is set by
+    APIVersionMiddleware in the FastAPI async event loop, but request
+    execution runs in a worker process spawned by BurstableExecutor
+    (ProcessPoolExecutor). ContextVar values do not propagate across
+    process boundaries, so a worker reading the ContextVar would always
+    see the None default and the resolver gate would silently treat
+    every request as 'old client' — disabling the per-user resolver
+    entirely. This test guards the propagation path."""
+
+    def test_default_construction_populates_local_api_version(self):
+        """RequestBody.__init__ must default `client_api_version` to the
+        local API_VERSION so it survives serialization to the request DB
+        and is readable from the worker process."""
+        body = payloads.RequestBody()
+        self.assertEqual(body.client_api_version, server_constants.API_VERSION)
+
+    def test_explicit_override_is_respected(self):
+        """Old clients pre-dating the field send None / omit it; tests
+        and synthetic callers must be able to override too."""
+        body = payloads.RequestBody(client_api_version=42)
+        self.assertEqual(body.client_api_version, 42)
+        # Pydantic accepts None on Optional[int].
+        body_none = payloads.RequestBody(client_api_version=None)
+        self.assertIsNone(body_none.client_api_version)
+
+    def test_field_survives_pydantic_roundtrip(self):
+        """Persisting the body to the request DB goes through
+        model_dump_json + model_validate_json. The field MUST be present
+        on the rehydrated body — otherwise the executor's worker reads
+        None and the resolver never fires."""
+        original = payloads.RequestBody(client_api_version=99)
+        rehydrated = payloads.RequestBody.model_validate_json(
+            original.model_dump_json())
+        self.assertEqual(rehydrated.client_api_version, 99)
+
+
 # Executor resolver-gate ----------------------------------------------
 
 
 class TestExecutorResolverGate(unittest.TestCase):
     """Verify _should_apply_workspace_resolver() gates the per-user
     resolver correctly for the three skip-cases (daemon / old client /
-    explicit active_workspace) AND fires for the normal case."""
+    explicit active_workspace) AND fires for the normal case.
+
+    The client API version is now passed in as a parameter (read from
+    the RequestBody by the caller in `override_request_env_and_config`)
+    instead of being pulled from the `versions.get_remote_api_version()`
+    ContextVar, which does not propagate from the FastAPI dispatch
+    process into worker processes spawned by BurstableExecutor.
+    """
 
     def setUp(self):
         from sky.server.requests import executor
         self.executor = executor
 
-    def _patch_gates(self, *, api_version, is_active_workspace_set):
-        from sky import skypilot_config
-        from sky.server import versions
-        return [
-            mock.patch.object(versions,
-                              'get_remote_api_version',
-                              return_value=api_version),
-            mock.patch.object(skypilot_config,
-                              'is_active_workspace_set',
-                              return_value=is_active_workspace_set),
-        ]
-
     def _call(self, is_daemon: bool, api_version, active_workspace_set: bool):
-        for p in self._patch_gates(
-                api_version=api_version,
-                is_active_workspace_set=active_workspace_set):
-            p.start()
-        try:
-            return self.executor._should_apply_workspace_resolver(is_daemon)
-        finally:
-            mock.patch.stopall()
+        from sky import skypilot_config
+        with mock.patch.object(skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=active_workspace_set):
+            return self.executor._should_apply_workspace_resolver(
+                is_daemon, api_version)
 
     def test_daemon_request_skips_resolver(self):
         """Daemon = system user = admin = would always AMBIGUOUS on
@@ -161,8 +225,9 @@ class TestExecutorResolverGate(unittest.TestCase):
                        active_workspace_set=False))
 
     def test_unknown_client_version_skips_resolver(self):
-        """If versions.get_remote_api_version() returns None (no header),
-        be conservative — don't run the resolver."""
+        """If RequestBody.client_api_version is None (older client that
+        constructed the body before the field existed), be conservative
+        — don't run the resolver."""
         self.assertFalse(
             self._call(is_daemon=False,
                        api_version=None,

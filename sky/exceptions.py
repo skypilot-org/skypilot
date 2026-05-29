@@ -472,6 +472,20 @@ class WorkspaceAmbiguousError(Exception):
             f'  - pass `--workspace <name>` on this command, or\n'
             f'  - set `active_workspace:` in `~/.sky/config.yaml`.')
 
+    def __reduce__(self):
+        # SkyPilot's request executor pickles exceptions raised by a
+        # request (see sky/server/requests/serializers/encoders.py)
+        # and unpickles them in the client. The default exception
+        # pickle protocol reconstructs via `cls(*self.args)`, where
+        # `self.args` is the (already-formatted) message string set
+        # by super().__init__ above. Reconstructing via
+        # `WorkspaceAmbiguousError(message_string)` would then sort
+        # the individual characters of that string into `accessible`
+        # and rebuild a garbled guidance message. Override
+        # `__reduce__` to preserve the real constructor arguments
+        # across the round-trip.
+        return (self.__class__, (self.accessible, self.note))
+
 
 class RecipeAlreadyExistsError(Exception):
     """Raised when attempting to create a recipe with an existing name."""

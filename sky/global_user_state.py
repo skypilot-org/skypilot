@@ -638,23 +638,6 @@ def get_all_users() -> List[models.User]:
 
 @db_retries.retry
 @metrics_lib.time_me
-def get_user_preferred_workspace(user_id: str) -> Optional[str]:
-    """Returns the user's persisted preferred workspace, or None if unset.
-
-    This is the raw DB read; callers in sky/workspaces/ are responsible for
-    RBAC re-validation at resolution time (a preference set earlier can
-    become inaccessible if the user's permissions change).
-    """
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        row = session.query(
-            user_table.c.preferred_workspace).filter_by(id=user_id).first()
-    if row is None:
-        return None
-    return row.preferred_workspace
-
-
-@metrics_lib.time_me
 def set_user_preferred_workspace(user_id: str,
                                  workspace: Optional[str]) -> bool:
     """Sets (or clears with None) the user's preferred workspace.

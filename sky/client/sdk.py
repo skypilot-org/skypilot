@@ -461,6 +461,8 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION)
 @annotations.client_api
 def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
     """Sets (or clears with None) the user's preferred workspace.

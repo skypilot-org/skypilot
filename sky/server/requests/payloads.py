@@ -34,6 +34,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
+from sky.server import constants as server_constants
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -157,6 +158,12 @@ class RequestBody(BasePayload):
     override_skypilot_config_path: Optional[str] = None
     # Blob ID for uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # The client's API_VERSION at construction time. Travels with the
+    # request body so worker processes — which cannot see the server-side
+    # `_remote_api_version` ContextVar set by APIVersionMiddleware — can
+    # still tell whether the client speaks a new-enough protocol. None
+    # means an old client constructed this body before the field existed.
+    client_api_version: Optional[int] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -174,6 +181,8 @@ class RequestBody(BasePayload):
         data['override_skypilot_config_path'] = data.get(
             'override_skypilot_config_path',
             get_override_skypilot_config_path_from_client())
+        data['client_api_version'] = data.get('client_api_version',
+                                              server_constants.API_VERSION)
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -190,6 +199,7 @@ class RequestBody(BasePayload):
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
         kwargs.pop('file_mounts_blob_id')
+        kwargs.pop('client_api_version', None)
         return kwargs
 
     @property

@@ -46,7 +46,6 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
-from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -355,7 +354,8 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
     return RequestQueue(factory.create_queue(schedule_type.value))
 
 
-def _should_apply_workspace_resolver(is_daemon: bool) -> bool:
+def _should_apply_workspace_resolver(is_daemon: bool,
+                                     client_api_version: Optional[int]) -> bool:
     """Returns True iff the per-user workspace resolver should run for
     this request. Three gates, in order:
 
@@ -367,14 +367,18 @@ def _should_apply_workspace_resolver(is_daemon: bool) -> bool:
           added /users/me/workspace + WorkspaceAmbiguousError handling —
           old clients wouldn't know how to interpret the new error
           format, so preserve the legacy permission-denied path that
-          they already handle.
+          they already handle. The version travels on the RequestBody
+          itself (`client_api_version` field) so it is available in the
+          worker process; `versions.get_remote_api_version()` returns
+          None in workers because the underlying ContextVar set by
+          APIVersionMiddleware does not propagate across process
+          boundaries.
       (c) skip when active_workspace was explicitly set on the wire
           (anywhere in the merged config) — respect explicit user intent;
           preferred MUST be ignored when the user names a workspace.
     """
     if is_daemon:
         return False
-    client_api_version = versions.get_remote_api_version()
     if (client_api_version is None or client_api_version <
             server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION):
         return False
@@ -467,7 +471,15 @@ def override_request_env_and_config(
                 # explicit-intent respect).
                 workspace_ctx: contextlib.AbstractContextManager = (
                     contextlib.nullcontext())
-                if _should_apply_workspace_resolver(is_daemon):
+                # Read the client's API version from the request body, not
+                # from versions.get_remote_api_version() — the ContextVar
+                # the latter reads is set by APIVersionMiddleware in the
+                # FastAPI async context but does not propagate into worker
+                # processes (BurstableExecutor = ProcessPoolExecutor).
+                client_api_version = getattr(request_body, 'client_api_version',
+                                             None)
+                if _should_apply_workspace_resolver(is_daemon,
+                                                    client_api_version):
                     resolution = workspaces_core.resolve_workspace_for_user(
                         user)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(

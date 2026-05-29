@@ -471,6 +471,27 @@ class TestWorkspaceAmbiguousErrorSignature(unittest.TestCase):
         e = exceptions.WorkspaceAmbiguousError(['c', 'a', 'b'])
         self.assertEqual(e.accessible, ['a', 'b', 'c'])
 
+    def test_pickle_roundtrip_preserves_message_and_attrs(self):
+        """The request executor pickles exceptions raised in worker
+        processes (sky/server/requests/serializers/encoders.py) and the
+        client unpickles them. Without an explicit `__reduce__`,
+        Python's default exception pickle reconstructs the exception via
+        `cls(*self.args)` where `self.args` is the formatted message
+        string — `sorted(message_string)` would then garble both
+        `accessible` and `str(e)`. This test guards the reduce override.
+        """
+        import pickle
+        original = exceptions.WorkspaceAmbiguousError(
+            ['team-a', 'team-b', 'team-c'],
+            note="preferred 'team-x' not accessible")
+        rehydrated = pickle.loads(pickle.dumps(original))
+        self.assertEqual(rehydrated.accessible, ['team-a', 'team-b', 'team-c'])
+        self.assertEqual(rehydrated.note, "preferred 'team-x' not accessible")
+        # The user-visible guidance string MUST survive intact — that
+        # is what CLI / dashboard handlers display.
+        self.assertEqual(str(original), str(rehydrated))
+        self.assertIn('sky workspace use', str(rehydrated))
+
 
 class TestNoWorkspaceAccessError(unittest.TestCase):
     """NoWorkspaceAccessError must remain a PermissionDeniedError subclass
