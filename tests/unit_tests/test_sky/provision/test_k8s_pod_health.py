@@ -435,8 +435,9 @@ class TestGetPodFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_evicted_event_surfaced(self, mock_events):
         mock_events.return_value = [
-            _make_event('Evicted', 'Pod ephemeral local storage usage exceeds '
-                        'the total limit of containers 1Gi.'),
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage exceeds '
+                'the total limit of containers 1Gi.'),
             _make_event('Scheduled', 'Successfully assigned default/p to n'),
         ]
         result = k8s_instance._get_pod_failure_reason_from_events(
@@ -474,8 +475,9 @@ class TestQueryInstancesEventEnrichment:
             _make_full_pod('worker-0', 'Running', 'node-1', ready=False),
         ]
         mock_events.return_value = [
-            _make_event('Evicted', 'Pod ephemeral local storage usage exceeds '
-                        'the total limit of containers 1Gi.'),
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage exceeds '
+                'the total limit of containers 1Gi.'),
         ]
         result = k8s_instance.query_instances(
             cluster_name='c',
@@ -508,3 +510,32 @@ class TestQueryInstancesEventEnrichment:
         assert result['worker-0'][1] is None
         # Healthy pods must not incur an extra events API call.
         mock_events.assert_not_called()
+
+
+class TestGetClusterFailureReasonFromEvents:
+    """Tests for get_cluster_failure_reason_from_events."""
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_returns_first_evicted(self, mock_events, mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_events.return_value = [
+            _make_event(
+                'Evicted', 'Pod ephemeral local storage usage '
+                'exceeds the total limit of containers 2Gi.'),
+        ]
+        result = k8s_instance.get_cluster_failure_reason_from_events({},
+                                                                     ['pod-0'])
+        assert result is not None
+        assert 'Evicted' in result
+        assert 'ephemeral' in result
+
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_none_when_no_failure_event(self, mock_events, mock_kutils):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_events.return_value = [_make_event('Scheduled', 'assigned')]
+        assert k8s_instance.get_cluster_failure_reason_from_events(
+            {}, ['pod-0', 'pod-1']) is None

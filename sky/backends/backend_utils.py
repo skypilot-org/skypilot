@@ -2904,6 +2904,25 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # When the per-pod status doesn't yet name a cause, recover it from pod
+        # events. An eviction (ephemeral-storage / disk / memory pressure) is
+        # emitted as a kubelet event while the pod can still report
+        # Running/Ready and pod.status.reason has not caught up, so at abnormal-
+        # detection time the only signal is the event. Bounded: only on an
+        # abnormal k8s cluster with no status-derived reason.
+        if not status_reason and isinstance(launched_resources.cloud,
+                                            clouds.Kubernetes):
+            try:
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                status_reason = (
+                    k8s_instance.get_cluster_failure_reason_from_events(
+                        ray_config['provider'], list(node_statuses.keys())) or
+                    '')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get pod failure events for '
+                             f'{cluster_name!r}: {e}')
+
         # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
         # be checked before some_nodes_not_stopped, which would otherwise
         # report the misleading "some but not all nodes are stopped" for

@@ -2239,7 +2239,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     pod_status_reason = getattr(pod.status, 'reason', None)
     if termination_reason == 'Terminated unexpectedly' and pod_status_reason:
         termination_reason = pod_status_reason
-        pod_status_message = getattr(pod.status, 'message', None)
+        pod_status_message = (getattr(pod.status, 'message', None) or
+                              '').strip()
         if pod_status_message:
             termination_reason += f' ({pod_status_message})'
 
@@ -2347,6 +2348,26 @@ def _get_pod_failure_reason_from_events(context: Optional[str], namespace: str,
         if event.reason in _FAILURE_EVENT_REASONS:
             message = (event.message or '').strip()
             return f'{event.reason}: {message}'.rstrip(': ')
+    return None
+
+
+def get_cluster_failure_reason_from_events(
+        provider_config: Dict[str, Any], pod_names: List[str]) -> Optional[str]:
+    """Return a failure reason from the cluster pods' kubelet events, or None.
+
+    Used when a cluster is abnormal but pod.status does not yet name a cause --
+    e.g. an eviction (ephemeral-storage / disk / memory pressure) that the
+    kubelet has emitted as a pod event while the pod still reports
+    Running/Ready and status.reason has not caught up. Returns the first
+    matching pod's event reason. Best-effort (per-pod lookups never raise).
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    for pod_name in pod_names:
+        reason = _get_pod_failure_reason_from_events(context, namespace,
+                                                     pod_name)
+        if reason is not None:
+            return reason
     return None
 
 
