@@ -2047,8 +2047,7 @@ def _get_pod_health_issues(pod: Any) -> Optional[str]:
         # (which may be a generic 'waiting' or already running-again). Surface
         # it so an OOM that briefly blips the cluster into recovery is not
         # masked as a generic 'ray cluster is unhealthy' message.
-        last_state = getattr(cs, 'last_state', None)
-        last_terminated = getattr(last_state, 'terminated', None)
+        last_terminated = cs.last_state.terminated if cs.last_state else None
         prior = None
         if (last_terminated is not None and last_terminated.exit_code != 0 and
                 last_terminated.reason):
