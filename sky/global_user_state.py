@@ -922,6 +922,7 @@ def add_or_update_cluster(cluster_name: str,
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
@@ -1312,6 +1313,7 @@ def update_last_use(cluster_name: str):
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
@@ -1471,6 +1473,7 @@ def get_glob_cluster_names(
     return [row.name for row in rows]
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
