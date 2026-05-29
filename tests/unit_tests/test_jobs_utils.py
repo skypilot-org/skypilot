@@ -886,6 +886,44 @@ class TestControllerSystemLogScoping:
                                     utils._collect_job_debug_manifest(1))
         assert uuids == {self._UUID_A, self._UUID_B}
 
+    def test_extracts_ha_recovery_uuid_far_from_head(self):
+        """HA recovery appends a second "From controller …" line after
+        an arbitrary amount of intervening output (the per-job log is
+        opened in append mode at sky/utils/context.py:146). A 16 KB-only
+        head read would miss it; the scan must traverse the whole file.
+        """
+        gap_bytes = 200 * 1024  # 200 KB of intervening status output
+        content = (
+            f'Starting job loop for 1\nFrom controller {self._UUID_A}\n'
+            # Realistic-ish filler: many short status lines.
+            + ('Status check: still running\n' * (gap_bytes // 28)) +
+            f'=== Recovery ===\nFrom controller {self._UUID_B}\n')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (pathlib.Path(tmpdir) / '1.log').write_text(content)
+            assert (pathlib.Path(tmpdir) / '1.log').stat().st_size > 16 * 1024
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A, self._UUID_B}
+
     def test_missing_job_log_returns_empty_set(self):
         """No <jobid>.log → empty UUID set, no exception."""
         with tempfile.TemporaryDirectory() as tmpdir:
