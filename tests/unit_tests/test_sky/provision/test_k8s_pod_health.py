@@ -561,7 +561,7 @@ class TestGetClusterFailureReasonFromPods:
             'OOMKilled (exit code 137)')
         result = k8s_instance.get_cluster_failure_reason_from_pods({},
                                                                    ['pod-0'])
-        assert result == 'OOMKilled (exit code 137)'
+        assert result == 'pod-0 is not ready (OOMKilled (exit code 137))'
 
     @mock.patch('sky.adaptors.kubernetes.core_api')
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
@@ -586,4 +586,4 @@ class TestGetClusterFailureReasonFromPods:
         mock_kutils.get_condensed_pod_reason.return_value = 'OOMKilled'
         result = k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1'])
-        assert result == 'OOMKilled'
+        assert result == 'pod-1 is not ready (OOMKilled)'

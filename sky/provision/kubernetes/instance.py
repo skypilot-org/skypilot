@@ -2385,8 +2385,11 @@ def get_cluster_failure_reason_from_pods(provider_config: Dict[str, Any],
     derives the reason from current *and* previous terminated states, so the OOM
     is recovered regardless of where the read landed in the restart cycle.
 
-    Returns the condensed reason for the first pod that terminated abnormally,
-    else None. Best-effort (per-pod reads never raise).
+    Returns '<pod> is not ready (<condensed reason>)' for the first pod that
+    terminated abnormally, else None. The framing mirrors the single-pod output
+    of backend_utils._summarize_pod_reasons so the abnormal message reads the
+    same whether the live status or this fallback caught the failure.
+    Best-effort (per-pod reads never raise).
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
@@ -2397,7 +2400,8 @@ def get_cluster_failure_reason_from_pods(provider_config: Dict[str, Any],
         except Exception:  # pylint: disable=broad-except
             continue
         if kubernetes_utils.pod_terminated_abnormally(pod):
-            return kubernetes_utils.get_condensed_pod_reason(pod)
+            reason = kubernetes_utils.get_condensed_pod_reason(pod)
+            return f'{pod_name} is not ready ({reason})'
     return None
 
 
