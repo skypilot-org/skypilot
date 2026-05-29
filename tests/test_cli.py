@@ -360,8 +360,13 @@ class TestWithNoCloudEnabled:
         assert output[
             2] == f'├── Status: {mock_api_info.status}, commit: {mock_api_info.commit}, version: {mock_api_info.version}'
         assert output[3] == f'├── User: {current_user.name} ({current_user.id})'
-        assert output[4] == f'└── Endpoint set to default local API server.'
-        assert len(output) == 6
+        # Preferred workspace line — comes from User.preferred_workspace
+        # on the /api/health user row. mock_api_info.user is None, so the
+        # client falls back to models.User.get_current_user() which has no
+        # preferred set → '(not set)'.
+        assert output[4] == '├── Preferred workspace: (not set)'
+        assert output[5] == f'└── Endpoint set to default local API server.'
+        assert len(output) == 7
 
 
 class TestHelperFunctions:
