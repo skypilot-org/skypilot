@@ -239,6 +239,22 @@ def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                                         read_only=read_only)
 
 
+def get_seeweb_mount_cmd(profile_name: str,
+                         bucket_name: str,
+                         endpoint_url: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None,
+                         read_only: bool = False) -> str:
+    """Returns a command to mount Seeweb buckets."""
+    cred_env = f'AWS_PROFILE={profile_name}'
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        endpoint_url=endpoint_url,
+                                        cred_env=cred_env,
+                                        read_only=read_only)
+
+
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
     install_cmd = ('ARCH=$(uname -m) && '

@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, seeweb
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -68,7 +68,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci
+              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, vastdata, ibm, oci, seeweb
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -443,14 +443,15 @@ Storage YAML reference
             - r2://<bucket_name>
             - cw://<bucket_name>
             - vastdata://<bucket_name>
+            - seeweb://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, or ibm). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, coreweave, vastdata, oci, ibm, or seeweb). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave', 'vastdata', 'ibm', 'oci', 'seeweb'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.
