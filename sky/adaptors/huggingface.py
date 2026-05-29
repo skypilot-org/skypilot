@@ -114,14 +114,26 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         hints += f'\n{_INDENT_PREFIX}$ pip install "skypilot[huggingface]"'
         hints += (f'\n{_INDENT_PREFIX}$ hf auth login   '
                   '# or: export HF_TOKEN=<your-token>')
+        hints += (f'\n{_INDENT_PREFIX}For more info: '
+                  'https://docs.skypilot.co/en/latest/getting-started/'
+                  'installation.html#huggingface-installation')
         return False, hints
 
     # If we have a token, verify it actually works.
     try:
         user = api().whoami(token=token)
     except Exception as e:  # pylint: disable=broad-except
-        hints = (f'Failed to validate Hugging Face credentials: {e}. '
-                 'Re-run `hf auth login` to refresh your token.')
+        # ``whoami`` can fail for reasons unrelated to the token (network
+        # errors, missing transitive deps, etc.), so surface the underlying
+        # error on a separate ``Details:`` line instead of presuming the
+        # token is at fault.
+        hints = ('Failed to validate Hugging Face credentials. '
+                 'If your token is expired, run `hf auth login` to refresh '
+                 'it.')
+        hints += (f'\n{_INDENT_PREFIX}For more info: '
+                  'https://docs.skypilot.co/en/latest/getting-started/'
+                  'installation.html#huggingface-installation')
+        hints += f'\n{_INDENT_PREFIX}Details: {e}'
         return False, hints
 
     # ``whoami`` returns a dict with at least a ``name`` key.

@@ -1640,6 +1640,67 @@ You can verify your credentials are set up correctly by running:
 
   sky check vastdata
 
+.. _huggingface-installation:
+
+Hugging Face
+~~~~~~~~~~~~
+
+SkyPilot can use the `Hugging Face Hub <https://huggingface.co/docs/huggingface_hub>`__ as a storage backend. `Hugging Face Buckets <https://huggingface.co/docs/huggingface_hub/guides/buckets>`__ are supported for both read and write (``hf://buckets/<namespace>/<bucket_name>``), and Hub repos, datasets, and spaces are supported as read-only sources (``hf://<owner>/<model>``, ``hf://datasets/...``, ``hf://spaces/...``).
+
+Install the necessary dependencies for Hugging Face:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[huggingface]"
+      # From nightly build
+      uv pip install "skypilot-nightly[huggingface]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[huggingface]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[huggingface]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[huggingface]"
+      # From nightly build
+      pip install "skypilot-nightly[huggingface]"
+      # From source
+      pip install -e ".[huggingface]"
+
+Authenticate with the Hugging Face Hub, either by logging in with the ``hf`` CLI or by setting the ``HF_TOKEN`` environment variable:
+
+.. code-block:: shell
+
+  # Option 1: log in interactively (writes ~/.cache/huggingface/token)
+  hf auth login
+
+  # Option 2: set a token directly (see https://huggingface.co/settings/tokens)
+  export HF_TOKEN=<your-token>
+
+You can verify your credentials are set up correctly by running:
+
+.. code-block:: shell
+
+  sky check huggingface
+
 
 Prime Intellect |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

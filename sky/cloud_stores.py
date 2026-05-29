@@ -830,7 +830,11 @@ if not token:
                 'import os',
                 'from huggingface_hub import HfApi',
                 self._TOKEN_HELPER,
-                (f'HfApi().sync_bucket({source!r}, {destination!r}, '
+                # SkyPilot hands us a wrapped destination like
+                # ``~/.sky/file_mounts/...``. We invoke huggingface_hub
+                # directly (no shell), so ``~`` must be expanded in Python.
+                f'dest = os.path.expanduser({destination!r})',
+                (f'HfApi().sync_bucket({source!r}, dest, '
                  'token=token, quiet=True)'),
             ])
             return self._python_command(code)
@@ -850,7 +854,8 @@ if not token:
                 'import tempfile',
                 'from huggingface_hub import snapshot_download',
                 self._TOKEN_HELPER,
-                f'os.makedirs({destination!r}, exist_ok=True)',
+                f'dest = os.path.expanduser({destination!r})',
+                'os.makedirs(dest, exist_ok=True)',
                 'tmp_dir = tempfile.mkdtemp()',
                 'try:',
                 (f'    snapshot_download(repo_id={repo_id!r}, '
@@ -861,8 +866,8 @@ if not token:
                  f'.split("/"))'),
                 '    if os.path.isdir(src):',
                 '        for entry in os.listdir(src):',
-                (f'            shutil.move(os.path.join(src, entry), '
-                 f'os.path.join({destination!r}, entry))'),
+                ('            shutil.move(os.path.join(src, entry), '
+                 'os.path.join(dest, entry))'),
                 'finally:',
                 '    shutil.rmtree(tmp_dir, ignore_errors=True)',
             ])
@@ -871,9 +876,10 @@ if not token:
                 'import os',
                 'from huggingface_hub import snapshot_download',
                 self._TOKEN_HELPER,
+                f'dest = os.path.expanduser({destination!r})',
                 (f'snapshot_download(repo_id={repo_id!r}, '
                  f'repo_type={repo_type!r}, revision={revision!r}, '
-                 f'local_dir={destination!r}, allow_patterns=None, '
+                 f'local_dir=dest, allow_patterns=None, '
                  f'token=token)'),
             ])
         return self._python_command(code)
@@ -885,8 +891,9 @@ if not token:
                 'import os',
                 'from huggingface_hub import HfApi',
                 self._TOKEN_HELPER,
+                f'dest = os.path.expanduser({destination!r})',
                 (f'HfApi().download_bucket_files({bucket_id!r}, '
-                 f'files=[({path!r}, {destination!r})], token=token)'),
+                 f'files=[({path!r}, dest)], token=token)'),
             ])
             return self._python_command(code)
 
@@ -898,13 +905,13 @@ if not token:
             'import tempfile',
             'from huggingface_hub import hf_hub_download',
             self._TOKEN_HELPER,
+            f'dest = os.path.expanduser({destination!r})',
             'tmp_dir = tempfile.mkdtemp()',
             (f'downloaded = hf_hub_download(repo_id={repo_id!r}, '
              f'repo_type={repo_type!r}, revision={revision!r}, '
              f'filename={path!r}, local_dir=tmp_dir, token=token)'),
-            (f'os.makedirs(os.path.dirname({destination!r}) or ".", '
-             'exist_ok=True)'),
-            f'shutil.copy2(downloaded, {destination!r})',
+            'os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)',
+            'shutil.copy2(downloaded, dest)',
         ])
         return self._python_command(code)
 

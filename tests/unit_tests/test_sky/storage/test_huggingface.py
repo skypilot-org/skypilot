@@ -534,6 +534,36 @@ class TestHfCredentials:
             huggingface.HF_TOKEN_PATH: huggingface.HF_TOKEN_PATH_LEGACY
         }
 
+    @mock.patch.object(huggingface.huggingface_hub, 'load_module')
+    @mock.patch('sky.adaptors.huggingface.get_token', return_value=None)
+    def test_missing_token_hint_links_to_docs(self, mock_token, mock_load):
+        del mock_token, mock_load  # unused; patch fixtures
+        ok, hint = huggingface.check_storage_credentials()
+        assert ok is False
+        # Users need an obvious place to read the setup guide, like the other
+        # storage-only clouds.
+        assert 'For more info:' in hint
+        assert 'installation.html#huggingface-installation' in hint
+
+    @mock.patch.object(huggingface.huggingface_hub, 'load_module')
+    @mock.patch('sky.adaptors.huggingface.api')
+    @mock.patch('sky.adaptors.huggingface.get_token', return_value='tok')
+    def test_whoami_failure_surfaces_details(self, mock_token, mock_api,
+                                             mock_load):
+        del mock_token, mock_load  # unused; patch fixtures
+        # whoami can fail for reasons unrelated to the token (network errors,
+        # a missing transitive dependency, etc.). The hint must surface that
+        # error instead of unconditionally blaming the token.
+        mock_api.return_value.whoami.side_effect = RuntimeError(
+            "the 'socksio' package is not installed")
+        ok, hint = huggingface.check_storage_credentials()
+        assert ok is False
+        assert 'Details:' in hint
+        assert "the 'socksio' package is not installed" in hint
+        # The token refresh must be presented as conditional, not the only
+        # possible cause.
+        assert 'If your token is expired' in hint
+
 
 class TestHfCloudStorage:
     """Tests for HF COPY-mode cloud store commands."""
@@ -570,6 +600,24 @@ class TestHfCloudStorage:
         assert 'snapshot_download' in command
         assert 'tempfile' not in command
         assert 'shutil' not in command
+
+    def test_copy_mode_expands_home_in_destinations(self):
+        # file_mounts hands callers a wrapped destination like
+        # ``~/.sky/file_mounts/<mount>``. Because we invoke ``huggingface_hub``
+        # directly (no shell), ``~`` must be expanded in Python; otherwise it
+        # is treated as a literal directory name and files land in the wrong
+        # place.
+        hf = cloud_stores.HFCloudStorage()
+        dest = '~/.sky/file_mounts/x'
+        commands = [
+            hf.make_sync_dir_command('hf://buckets/ns/bucket', dest),
+            hf.make_sync_dir_command('hf://datasets/ns/ds@main/subdir', dest),
+            hf.make_sync_dir_command('hf://datasets/ns/ds@main', dest),
+            hf.make_sync_file_command('hf://buckets/ns/bucket/f.txt', dest),
+            hf.make_sync_file_command('hf://ns/model/config.json', dest),
+        ]
+        for command in commands:
+            assert 'os.path.expanduser(' in command
 
     @mock.patch('sky.cloud_stores.huggingface.get_token', return_value=None)
     @mock.patch('sky.cloud_stores.huggingface.api')

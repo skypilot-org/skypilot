@@ -285,8 +285,9 @@ def check_capabilities(
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare, CoreWeave, and VastData are not real clouds in
-            # registry.CLOUD_REGISTRY, and should not be inserted into the DB
+            # Cloudflare, CoreWeave, VastData, and HuggingFace are not real
+            # clouds in registry.CLOUD_REGISTRY, and should not be inserted
+            # into the DB
             # (otherwise `sky launch` and other code would error out when it's
             # trying to look it up in the registry).
             enabled_clouds_set = {
