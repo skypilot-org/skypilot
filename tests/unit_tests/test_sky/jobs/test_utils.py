@@ -990,11 +990,13 @@ class TestFormatJobDetails:
                  schedule_state='ALIVE',
                  failure_reason=None,
                  status='RECOVERING',
-                 recovery_reason=None):
+                 recovery_reason=None,
+                 cloud=None):
         job = {
             'schedule_state': schedule_state,
             'failure_reason': failure_reason,
             'status': status,
+            'cloud': cloud,
         }
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
@@ -1030,3 +1032,28 @@ class TestFormatJobDetails:
         assert self._details(
             schedule_state='ALIVE_BACKOFF',
             recovery_reason='ignored') == 'In backoff, waiting for resources'
+
+    def test_recovery_reason_oom_appends_hint_on_kubernetes(self):
+        result = self._details(cloud='Kubernetes',
+                               recovery_reason='podX OOMKilled (exit code 137)')
+        assert result.startswith('Recovering: podX OOMKilled (exit code 137)')
+        assert 'resources.memory' in result
+
+    def test_recovery_reason_ephemeral_appends_hint_on_kubernetes(self):
+        result = self._details(
+            cloud='Kubernetes',
+            recovery_reason='Evicted: Pod ephemeral local storage usage '
+            'exceeds the total limit of containers 2Gi.')
+        assert 'resources.ephemeral_storage' in result
+
+    def test_recovery_reason_no_hint_on_non_kubernetes(self):
+        # A non-k8s reason containing a matched word ('Insufficient') must not
+        # be decorated with a Kubernetes hint.
+        result = self._details(cloud='AWS',
+                               recovery_reason='Insufficient capacity')
+        assert result == 'Recovering: Insufficient capacity'
+
+    def test_recovery_reason_no_hint_when_cloud_unknown(self):
+        # No cloud info -> surface the reason without a (possibly wrong) hint.
+        result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
+        assert result == 'Recovering: podX OOMKilled (exit code 137)'

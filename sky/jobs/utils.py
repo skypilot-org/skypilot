@@ -43,6 +43,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2064,7 +2065,20 @@ def _format_job_details(*,
         # _get_pod_termination_reason) may be multi-line; collapse whitespace
         # so it renders as a single line in the details column.
         flattened = ' '.join(recovery_reason.split())
-        job['details'] = f'Recovering: {flattened}'
+        detail = f'Recovering: {flattened}'
+        # Append an actionable remediation hint when the cause is a known
+        # Kubernetes pod failure (e.g. OOMKilled -> raise resources.memory).
+        # Guarded on the job's cloud so a non-k8s reason that happens to
+        # contain a matched word (e.g. 'Insufficient') is not mis-hinted.
+        if 'kubernetes' in str(job.get('cloud', '')).lower():
+            hint = kubernetes_utils.match_kubernetes_failure_hint(flattened)
+            if hint is not None:
+                # This listing has no scoped dashboard URL to resolve, so use
+                # the generic phrase if the hint references it.
+                hint = hint.replace('{dashboard_url}',
+                                    'the SkyPilot dashboard infra page')
+                detail += f' ({hint})'
+        job['details'] = detail
     else:
         job['details'] = None
 

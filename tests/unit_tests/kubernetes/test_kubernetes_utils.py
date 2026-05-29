@@ -5241,7 +5241,9 @@ def test_match_kubernetes_failure_hint_generic_eviction():
     # A non-ephemeral eviction falls to the general eviction hint.
     hint = utils.match_kubernetes_failure_hint(
         'Evicted: The node was low on resource: memory')
-    assert hint == 'The pod was evicted by the node under resource pressure.'
+    assert hint is not None
+    assert hint.startswith(
+        'The pod was evicted by the node under resource pressure.')
 
 
 def test_get_failure_hint_reasons_flattens_table():
