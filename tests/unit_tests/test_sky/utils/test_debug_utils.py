@@ -904,6 +904,51 @@ class TestCrossLinkCycleBreak:
         assert ctx['request_ids_via_cluster'] == {'req-1', 'req-2'}
         assert ctx['request_ids_via_job'] == set()
 
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_clusters_does_not_tag_preexisting(
+            self, mock_get_tasks):
+        """A user-seeded request that also matches a cluster scan must
+        not inherit the via_cluster tag, otherwise the user's explicit
+        request would be wrongly skipped by _get_clusters_from_requests."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='user-seeded', cluster_name='c1'),
+            _make_request(request_id='new-from-cluster', cluster_name='c1'),
+        ]
+        # 'user-seeded' was already in request_ids before the helper ran.
+        ctx = _make_context(cluster_names={'c1'}, request_ids={'user-seeded'})
+
+        debug_utils._get_requests_from_clusters(ctx)
+
+        assert ctx['request_ids'] == {'user-seeded', 'new-from-cluster'}
+        # Only the genuinely new one carries the via_cluster tag.
+        assert ctx['request_ids_via_cluster'] == {'new-from-cluster'}
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_managed_jobs_does_not_tag_preexisting(
+            self, mock_get_tasks):
+        """Symmetric: a user-seeded request that also matches the
+        managed-job scan must not inherit the via_job tag."""
+        body = SimpleNamespace(job_id=42,
+                               job_ids=None,
+                               name='task',
+                               all_users=False,
+                               all=False)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='user-seeded',
+                          request_body=body,
+                          name='sky.jobs.launch'),
+        ]
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            # 'user-seeded' was already in request_ids before the helper ran.
+            ctx = _make_context(managed_job_ids={42},
+                                request_ids={'user-seeded'})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'user-seeded' in ctx['request_ids']
+        # Pre-existing request was not tagged → still expandable downstream.
+        assert ctx['request_ids_via_job'] == set()
+
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_all_users_cancel_does_not_drag_unrelated_jobs(

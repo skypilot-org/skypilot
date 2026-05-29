@@ -195,8 +195,13 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
             if new_ids:
                 logger.debug(f'Cross-link: cluster {cluster_name!r} -> '
                              f'{len(new_ids)} requests: {sorted(new_ids)}')
+            # Only tag IDs that weren't already in the context. Otherwise
+            # a user-seeded or recent-context request would inherit the
+            # via_cluster restriction and get skipped in
+            # _get_clusters_from_requests.
+            newly_added = new_ids - debug_dump_context['request_ids']
             debug_dump_context['request_ids'] |= new_ids
-            debug_dump_context['request_ids_via_cluster'] |= new_ids
+            debug_dump_context['request_ids_via_cluster'] |= newly_added
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get requests for cluster '
                            f'{cluster_name}: {e}')
@@ -296,9 +301,15 @@ def _get_requests_from_managed_jobs(
                 logger.debug(f'Cross-link: managed jobs -> request '
                              f'{request.request_id} ({request.name}) '
                              f'via {match_reason}')
+                # Only tag IDs that weren't already in the context.
+                # Otherwise a user-seeded or recent-context request
+                # would inherit the via_job restriction and get skipped
+                # in _get_managed_jobs_from_requests.
+                if (request.request_id
+                        not in debug_dump_context['request_ids']):
+                    debug_dump_context['request_ids_via_job'].add(
+                        request.request_id)
                 debug_dump_context['request_ids'].add(request.request_id)
-                debug_dump_context['request_ids_via_job'].add(
-                    request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
         debug_dump_context['errors'].append({
