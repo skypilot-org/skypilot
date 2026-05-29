@@ -51,7 +51,7 @@ For researchers and AI agents
 
    <figure class="align-center" style="width: 90%; margin: 0 auto 20px auto;">
      <video id="sandbox-video" style="width: 100%; height: auto;" autoplay muted playsinline loop>
-        <source src="../_static/sandbox-claude.mp4" type="video/mp4" />
+        <source src="_static/sandbox-claude.mp4" type="video/mp4" />
      </video>
      <figcaption><p>Sandboxes: launching a Claude Code environment on your own cluster with secrets injected from the SkyPilot Secrets Manager.</p></figcaption>
    </figure>
