@@ -385,7 +385,8 @@ def _consolidated_launch(
     run_script = '\n'.join(env_cmds + [run_script])
     # Dump script for high availability recovery.
     assert job_ids is not None, 'job_ids not set'
-    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs')
+    log_dir = os.path.expanduser(
+        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
