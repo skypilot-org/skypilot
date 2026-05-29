@@ -5019,11 +5019,18 @@ def _make_container_status(*,
                                                last_state=last_state)
 
 
-def _make_pod(*, phase=None, conditions=None, container_statuses=None):
+def _make_pod(*,
+              phase=None,
+              conditions=None,
+              container_statuses=None,
+              reason=None,
+              message=None):
     return kubernetes.client.V1Pod(status=kubernetes.client.V1PodStatus(
         phase=phase,
         conditions=conditions,
-        container_statuses=container_statuses))
+        container_statuses=container_statuses,
+        reason=reason,
+        message=message))
 
 
 def test_get_condensed_pod_reason_oomkilled():
@@ -5071,6 +5078,30 @@ def test_get_condensed_pod_reason_kueue_preemption_wins():
 def test_get_condensed_pod_reason_fallback():
     pod = _make_pod(phase='Failed', container_statuses=[])
     assert utils.get_condensed_pod_reason(pod) == 'Terminated unexpectedly'
+
+
+def test_get_condensed_pod_reason_evicted_ephemeral():
+    # Ephemeral-storage eviction is recorded at the pod level, not in
+    # container statuses.
+    pod = _make_pod(
+        phase='Failed',
+        reason='Evicted',
+        message='Pod ephemeral local storage usage exceeds the total limit '
+        'of containers 1Gi.',
+        container_statuses=[])
+    reason = utils.get_condensed_pod_reason(pod)
+    assert reason.startswith('Evicted: ')
+    assert 'ephemeral' in reason
+
+
+def test_get_condensed_pod_reason_oomkilled_not_masked_by_pod_reason():
+    # Container OOMKilled (no pod-level reason set) still wins.
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
 
 
 def test_pod_terminated_abnormally_failed_phase():
@@ -5154,6 +5185,21 @@ def test_diagnose_terminated_pod_non_oom_has_no_hint(monkeypatch):
     assert 'Hint:' not in msg
 
 
+def test_diagnose_terminated_pod_evicted_ephemeral(monkeypatch):
+    pod = _make_pod(
+        phase='Failed',
+        reason='Evicted',
+        message='Pod ephemeral local storage usage exceeds the total limit '
+        'of containers 1Gi.',
+        container_statuses=[])
+    _patch_read_pod(monkeypatch, pod=pod)
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'Evicted' in msg
+    assert 'ephemeral' in msg
+    assert 'Hint:' in msg
+
+
 def test_match_kubernetes_failure_hint_oom():
     assert 'ran out of memory' in utils.match_kubernetes_failure_hint(
         'OOMKilled (exit code 137)')
@@ -5166,6 +5212,22 @@ def test_match_kubernetes_failure_hint_multi_substring():
 
 def test_match_kubernetes_failure_hint_no_match_returns_none():
     assert utils.match_kubernetes_failure_hint('SomeUnknownReason') is None
+
+
+def test_match_kubernetes_failure_hint_ephemeral_precedes_evicted():
+    # An ephemeral-storage eviction reason contains both substrings; the more
+    # specific 'ephemeral' hint must win.
+    hint = utils.match_kubernetes_failure_hint(
+        'Evicted: Pod ephemeral local storage usage exceeds the total limit')
+    assert hint is not None
+    assert 'ephemeral' in hint
+
+
+def test_match_kubernetes_failure_hint_generic_eviction():
+    # A non-ephemeral eviction falls to the general eviction hint.
+    hint = utils.match_kubernetes_failure_hint(
+        'Evicted: The node was low on resource: memory')
+    assert hint == 'The pod was evicted by the node under resource pressure.'
 
 
 def test_diagnose_terminated_pod_substitutes_dashboard_url_token(monkeypatch):

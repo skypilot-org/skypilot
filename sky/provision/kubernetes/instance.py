@@ -744,7 +744,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 pod.status.phase == 'Failed'):
             # Get the reason and write to cluster events before
             # the pod gets completely deleted from the API.
-            termination_reason = _get_pod_termination_reason(pod, cluster_name)
+            termination_reason = _get_pod_termination_reason(
+                pod, cluster_name, context, namespace)
             logger.warning(
                 f'Pod {pod.metadata.name} terminated: {termination_reason}')
             condensed = _condensed_pod_reason(pod)
@@ -2195,11 +2196,14 @@ def get_node_health_for_cluster(
     return result
 
 
-def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
+def _get_pod_termination_reason(pod: Any, cluster_name: str,
+                                context: Optional[str], namespace: str) -> str:
     """Get pod termination reason and write to cluster events.
 
-    Checks both pod conditions (for preemption/disruption) and
-    container statuses (for exit codes/errors).
+    Checks pod conditions (for preemption/disruption), the pod-level kubelet
+    reason, container statuses (for exit codes/errors), and -- as a last resort
+    -- an 'Evicted' pod event (ephemeral-storage / disk / memory pressure,
+    which the kubelet records only as an Event, not in pod.status).
     """
     utc_min_time = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
     latest_timestamp = (pod.status.start_time or utc_min_time)
@@ -2231,6 +2235,27 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
         if condition.last_transition_time is not None:
             latest_timestamp = max(latest_timestamp,
                                    condition.last_transition_time)
+
+    # When no preemption/disruption condition explained the failure, fall back
+    # to (a) the pod-level kubelet reason, then (b) an 'Evicted' pod event. The
+    # kubelet records ephemeral-storage / disk / memory-pressure evictions as an
+    # Event with a descriptive message -- not in pod.status -- and the container
+    # exit (e.g. 'Error') is only a side effect of the kill, so the event is the
+    # authoritative cause.
+    if termination_reason == 'Terminated unexpectedly':
+        pod_status_reason = getattr(pod.status, 'reason', None)
+        if pod_status_reason:
+            termination_reason = pod_status_reason
+            pod_status_message = getattr(pod.status, 'message', None)
+            if pod_status_message:
+                termination_reason += f' ({pod_status_message})'
+        else:
+            evicted_event = _get_pod_eviction_event(context, namespace,
+                                                    pod.metadata.name)
+            if evicted_event is not None:
+                termination_reason = evicted_event.reason or 'Evicted'
+                if evicted_event.message:
+                    termination_reason += f' ({evicted_event.message})'
 
     pod_reason = (f'{termination_reason}.\n'
                   f'Last known state: {ready_state}.')
@@ -2296,6 +2321,24 @@ def _get_pod_events(context: Optional[str], namespace: str,
         key=lambda event: event.metadata.creation_timestamp,
         # latest event appears first
         reverse=True)
+
+
+def _get_pod_eviction_event(context: Optional[str], namespace: str,
+                            pod_name: str) -> Optional[Any]:
+    """Return the most recent 'Evicted' pod event, or None.
+
+    The kubelet records evictions (ephemeral-storage / disk / memory pressure)
+    as an Event with reason 'Evicted' and a descriptive message. This is not
+    reflected in pod.status, so the pod object alone cannot explain the cause.
+    Best-effort: never raises.
+    """
+    try:
+        for event in _get_pod_events(context, namespace, pod_name):
+            if event.reason == 'Evicted':
+                return event
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return None
 
 
 def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
@@ -2686,7 +2729,8 @@ def query_instances(
         pod_status = status_map[phase]
         reason = None
         if phase in ('Failed', 'Unknown') or is_terminating:
-            reason = _get_pod_termination_reason(pod, cluster_name)
+            reason = _get_pod_termination_reason(pod, cluster_name, context,
+                                                 namespace)
             logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
         elif phase == 'Running':
             reason = _get_pod_health_issues(pod)

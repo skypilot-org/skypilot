@@ -1951,6 +1951,15 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
                     summary += f' ({message})'
                 return summary
 
+    # Pod-level kubelet reason (e.g. 'Evicted' for ephemeral-storage / disk /
+    # memory pressure, 'Preempted', 'Shutdown'). This is the authoritative
+    # cause when set; container-level failures (e.g. OOMKilled) do not populate
+    # it, so they still fall through to the container checks below.
+    pod_status_reason = getattr(pod.status, 'reason', None)
+    if pod_status_reason:
+        pod_status_message = getattr(pod.status, 'message', None) or ''
+        return f'{pod_status_reason}: {pod_status_message}'.rstrip(': ')
+
     # Check container statuses for waiting states (ImagePullBackOff, etc.).
     if pod.status.container_statuses:
         for cs in pod.status.container_statuses:
@@ -2002,8 +2011,12 @@ def _pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'Verify the image tag exists and registry credentials are configured.'),
-    (['OOMKilled'],
-     'The container ran out of memory.'),
+    (['OOMKilled'], 'The container ran out of memory.'),
+    # 'ephemeral' must precede 'Evicted': an ephemeral-storage eviction reason
+    # contains both, and the first match wins.
+    (['ephemeral'],
+     'The pod exceeded its ephemeral (local) storage limit and was evicted.'),
+    (['Evicted'], 'The pod was evicted by the node under resource pressure.'),
     (['Insufficient'],
      'The cluster does not have enough free resources. View node '
      'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
