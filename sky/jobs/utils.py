@@ -92,6 +92,12 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+# While a managed job is provisioning, we poll the jobs controller log this
+# often to relay the cluster-launch spinner messages (e.g. "Preparing SkyPilot
+# runtime (1/3)") to the user. This is faster than JOB_STATUS_CHECK_GAP_SECONDS
+# so the spinner feels responsive without polling the job-status DB as often.
+_PROVISION_LOG_POLL_GAP_SECONDS = 1
+
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
@@ -110,7 +116,7 @@ _CONTROLLER_UUID_LOG_RE = re.compile(
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
-    '{status_str}. It may take a few minutes.\n'
+    '{status_str}. It may take a few minutes.{provision_str}\n'
     '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
@@ -1322,6 +1328,63 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
+def read_provision_status_from_log(
+        log_path: str, pos: int,
+        current_msg: Optional[str]) -> Tuple[int, Optional[str]]:
+    """Reads rich-status spinner messages relayed into a controller log.
+
+    The jobs controller relays the inner cluster-launch rich-status payloads
+    into its per-job log (see ``recovery_strategy._launch``'s
+    ``relay_rich_status=True``). This decodes any payloads appended since
+    ``pos`` and returns the new read position together with the latest
+    provisioning spinner message, so ``sky jobs launch`` / ``sky jobs logs``
+    can show the same provisioning progress (e.g. "Preparing SkyPilot runtime
+    (1/3)") that ``sky launch`` displays.
+
+    Args:
+        log_path: Path to the jobs controller log for the job.
+        pos: Byte/character offset to resume reading from (0 on first call).
+        current_msg: The previously returned spinner message.
+
+    Returns:
+        A tuple ``(new_pos, latest_msg)``. ``latest_msg`` is ``None`` if
+        provisioning has not emitted a spinner yet, or if it has finished
+        (a STOP/EXIT control clears the message).
+    """
+    msg = current_msg
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            f.seek(pos)
+            while True:
+                line_start = f.tell()
+                line = f.readline()
+                if line == '':
+                    # EOF.
+                    break
+                if not line.endswith('\n'):
+                    # Partial line still being written; re-read it next time.
+                    f.seek(line_start)
+                    break
+                pos = f.tell()
+                is_payload, decoded = message_utils.decode_payload(
+                    line, raise_for_mismatch=False)
+                if not is_payload:
+                    continue
+                control, encoded_status = rich_utils.Control.decode(decoded)
+                if control in (rich_utils.Control.INIT,
+                               rich_utils.Control.UPDATE,
+                               rich_utils.Control.START):
+                    msg = encoded_status
+                elif control in (rich_utils.Control.STOP,
+                                 rich_utils.Control.EXIT):
+                    msg = None
+    except (OSError, ValueError):
+        # Best-effort: the log may not exist yet (FileNotFoundError) or be
+        # mid-write; never let log following break job-log streaming.
+        pass
+    return pos, msg
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1439,7 +1502,9 @@ def stream_logs_by_id(
         # task_filter is a str, match by task name
         return task_name == task_filter
 
-    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
+    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='',
+                                             provision_str='',
+                                             job_id=job_id)
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -1462,6 +1527,21 @@ def stream_logs_by_id(
             return (f'No task found matching {task!r} in job {job_id}. '
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
+
+    # Follow the jobs controller log during provisioning so the user sees the
+    # same spinner messages that `sky launch` shows. The controller relays the
+    # inner cluster-launch rich-status payloads into its per-job log (see
+    # recovery_strategy._launch's relay_rich_status=True); here we decode them
+    # to drive the single status spinner.
+    controller_log_path = controller_log_file_for_job(job_id)
+    provision_pos = 0
+    provision_msg: Optional[str] = None
+
+    def _latest_provision_status_msg() -> Optional[str]:
+        nonlocal provision_pos, provision_msg
+        provision_pos, provision_msg = read_provision_status_from_log(
+            controller_log_path, provision_pos, provision_msg)
+        return provision_msg
 
     with status_display:
         prev_msg = msg
@@ -1631,12 +1711,29 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
-                                                         job_id=job_id)
-                if msg != prev_msg:
-                    status_display.update(msg)
-                    prev_msg = msg
-                time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                # Poll the controller log frequently for provisioning spinner
+                # updates, but only re-check the (more expensive) managed job
+                # status every JOB_STATUS_CHECK_GAP_SECONDS.
+                waited = 0.0
+                while True:
+                    # Keep the "Waiting for task to start" context and append
+                    # the live cluster-launch status, so it's clear the job is
+                    # waiting on its cluster to be provisioned.
+                    provision_msg = _latest_provision_status_msg()
+                    provision_str = (
+                        '' if provision_msg is None else
+                        f'\n  [dim]Launching cluster:[/] {provision_msg}')
+                    msg = _JOB_WAITING_STATUS_MESSAGE.format(
+                        status_str=status_str,
+                        provision_str=provision_str,
+                        job_id=job_id)
+                    if msg != prev_msg:
+                        status_display.update(msg)
+                        prev_msg = msg
+                    if waited >= JOB_STATUS_CHECK_GAP_SECONDS:
+                        break
+                    time.sleep(_PROVISION_LOG_POLL_GAP_SECONDS)
+                    waited += _PROVISION_LOG_POLL_GAP_SECONDS
                 latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified

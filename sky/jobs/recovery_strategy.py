@@ -569,9 +569,17 @@ class StrategyExecutor:
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')
+                                # Relay the encoded rich-status payloads from
+                                # the inner cluster launch into this per-job
+                                # controller log (instead of rendering/dropping
+                                # them here). `stream_logs_by_id` decodes them
+                                # to drive the provisioning spinner shown by
+                                # `sky jobs launch` / `sky jobs logs`, matching
+                                # the `sky launch` experience.
                                 await asyncio.to_thread(
                                     sdk.stream_and_get,
                                     request_id,
+                                    relay_rich_status=True,
                                 )
                             except asyncio.CancelledError:
                                 if request_id:

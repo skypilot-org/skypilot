@@ -299,8 +299,20 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 
 def decode_rich_status(
-        response: 'requests.Response') -> Iterator[Optional[str]]:
-    """Decode the rich status message from the response."""
+        response: 'requests.Response',
+        relay_rich_status: bool = False) -> Iterator[Optional[str]]:
+    """Decode the rich status message from the response.
+
+    Args:
+        response: The HTTP response to decode.
+        relay_rich_status: If True, encoded rich-status control payloads are
+            forwarded verbatim (yielded as raw lines) instead of being rendered
+            into a local spinner. This lets a process that is not itself the
+            final consumer (e.g. the managed jobs controller streaming an inner
+            cluster launch into its per-job log) preserve the spinner control
+            codes so that a downstream reader can re-render the spinner. See
+            ``sky/jobs/recovery_strategy.py``.
+    """
     decoding_status = None
     try:
         last_line = ''
@@ -381,6 +393,13 @@ def decode_rich_status(
                 if control == Control.RETRY:
                     raise exceptions.RequestInterruptedError(
                         'Streaming interrupted. Please retry.')
+                if relay_rich_status:
+                    # Forward the encoded payload verbatim instead of rendering
+                    # it locally. Heartbeats are control-plane only and are
+                    # dropped to avoid bloating the relayed log.
+                    if control != Control.HEARTBEAT:
+                        yield line
+                    continue
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
                     yield None
