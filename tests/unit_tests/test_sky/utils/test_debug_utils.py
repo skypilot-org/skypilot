@@ -21,12 +21,16 @@ def _make_context(
     cluster_names: Optional[Set[str]] = None,
     managed_job_ids: Optional[Set[int]] = None,
     errors: Optional[List[Dict[str, str]]] = None,
+    request_ids_via_job: Optional[Set[str]] = None,
+    request_ids_via_cluster: Optional[Set[str]] = None,
 ) -> debug_utils.DebugDumpContext:
     """Helper to create a DebugDumpContext."""
     return debug_utils.DebugDumpContext(
         request_ids=request_ids or set(),
         cluster_names=cluster_names or set(),
         managed_job_ids=managed_job_ids or set(),
+        request_ids_via_job=request_ids_via_job or set(),
+        request_ids_via_cluster=request_ids_via_cluster or set(),
         errors=errors if errors is not None else [],
     )
 
@@ -780,6 +784,167 @@ class TestPopulateRecentContext:
 
 
 # ---------------------------------------------------------------------------
+# Tests for cross-link cycle prevention via provenance sidecars.
+#
+# Without these guards, a request linked in via a job (e.g. a
+# sky.jobs.launch matched on body.name) would re-seed managed_job_ids
+# with that request's return_value.job_id, dragging every sibling job
+# of a batch launch into the dump. Symmetric story for clusters.
+# ---------------------------------------------------------------------------
+class TestCrossLinkCycleBreak:
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_request_added_via_job_does_not_reseed_managed_jobs(
+            self, mock_get_request):
+        """job → request → job cycle is broken."""
+        # Simulate: req-from-job was added by _get_requests_from_managed_jobs
+        # (e.g. matched on body.name="sb-sweep-8"). Its body.job_id would
+        # point at a SIBLING job (B) that shares the task name with our
+        # seed job A. Without the guard, B would be added to
+        # managed_job_ids.
+        body = SimpleNamespace(job_id=999, job_ids=None)
+        mock_get_request.return_value = _make_request(request_id='req-from-job',
+                                                      request_body=body,
+                                                      name='sky.jobs.launch')
+        ctx = _make_context(
+            request_ids={'req-from-job'},
+            request_ids_via_job={'req-from-job'},
+            managed_job_ids={42},  # original seed job
+        )
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == {42}
+        # The guarded request was never even fetched.
+        mock_get_request.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_request_added_via_cluster_does_not_reseed_clusters(
+            self, mock_get_request):
+        """cluster → request → cluster cycle is broken."""
+        # Simulate: req-from-cluster was added by
+        # _get_requests_from_clusters. Its cluster_name points at a
+        # DIFFERENT cluster than the seed (since the request also
+        # touched another cluster). Without the guard, that other
+        # cluster would be added to cluster_names.
+        mock_get_request.return_value = _make_request(
+            request_id='req-from-cluster', cluster_name='other-cluster')
+        ctx = _make_context(
+            request_ids={'req-from-cluster'},
+            request_ids_via_cluster={'req-from-cluster'},
+            cluster_names={'seed-cluster'},
+        )
+
+        debug_utils._get_clusters_from_requests(ctx)
+
+        assert ctx['cluster_names'] == {'seed-cluster'}
+        mock_get_request.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_unrestricted_request_still_expands_jobs(self, mock_get_request):
+        """A user-seeded request (no provenance tag) still expands."""
+        body = SimpleNamespace(job_id=42, job_ids=None)
+        mock_get_request.return_value = _make_request(request_id='req-seed',
+                                                      request_body=body,
+                                                      name='sky.jobs.launch')
+        # No provenance tag — this came from user input or recent context.
+        ctx = _make_context(request_ids={'req-seed'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 42 in ctx['managed_job_ids']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_unrestricted_request_still_expands_clusters(
+            self, mock_get_request):
+        """A user-seeded request (no provenance tag) still expands."""
+        mock_get_request.return_value = _make_request(request_id='req-seed',
+                                                      cluster_name='c1')
+        ctx = _make_context(request_ids={'req-seed'})
+
+        debug_utils._get_clusters_from_requests(ctx)
+
+        assert 'c1' in ctx['cluster_names']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_managed_jobs_tags_provenance(self, mock_get_tasks):
+        """Requests added by job-cross-link are tagged."""
+        body = SimpleNamespace(job_id=42,
+                               job_ids=None,
+                               name='task',
+                               all_users=False,
+                               all=False)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=body,
+                          name='sky.jobs.launch'),
+        ]
+        # queue_v2 must not raise — patch it as a no-op.
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            ctx = _make_context(managed_job_ids={42})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-1' in ctx['request_ids']
+        assert 'req-1' in ctx['request_ids_via_job']
+        assert 'req-1' not in ctx['request_ids_via_cluster']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_clusters_tags_provenance(self, mock_get_tasks):
+        """Requests added by cluster-cross-link are tagged."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1', cluster_name='c1'),
+            _make_request(request_id='req-2', cluster_name='c1'),
+        ]
+        ctx = _make_context(cluster_names={'c1'})
+
+        debug_utils._get_requests_from_clusters(ctx)
+
+        assert ctx['request_ids'] == {'req-1', 'req-2'}
+        assert ctx['request_ids_via_cluster'] == {'req-1', 'req-2'}
+        assert ctx['request_ids_via_job'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_all_users_cancel_does_not_drag_unrelated_jobs(
+            self, mock_get_tasks, mock_get_request):
+        """A historic `cancel --all-users` request must not pollute the
+        dump.
+
+        Before this fix: `_get_requests_from_managed_jobs` matches the
+        request via body.all_users=True → adds it to request_ids →
+        `_get_managed_jobs_from_requests` reads it back and would
+        normally extract any job_ids from its body. The guard means
+        none of that re-expansion happens.
+        """
+        cancel_body = SimpleNamespace(job_id=None,
+                                      job_ids=None,
+                                      name=None,
+                                      all_users=True,
+                                      all=False)
+        # The cancel request that matched body.all_users in step 1.
+        mock_get_tasks.return_value = [
+            _make_request(request_id='cancel-req',
+                          request_body=cancel_body,
+                          name='sky.jobs.cancel'),
+        ]
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            ctx = _make_context(managed_job_ids={1})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'cancel-req' in ctx['request_ids']
+        assert 'cancel-req' in ctx['request_ids_via_job']
+
+        # Step 2: the cancel request would normally be re-examined here.
+        # It must be skipped because it's tagged via_job.
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == {1}
+        mock_get_request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Tests for create_debug_dump (end-to-end)
 # ---------------------------------------------------------------------------
 class TestCreateDebugDump:
@@ -1207,6 +1372,8 @@ class TestDebugDumpContext:
         assert ctx['request_ids'] == {'r1', 'r2'}
         assert ctx['cluster_names'] == {'c1'}
         assert ctx['managed_job_ids'] == {1, 2, 3}
+        assert ctx['request_ids_via_job'] == set()
+        assert ctx['request_ids_via_cluster'] == set()
         assert ctx['errors'] == []
 
     def test_context_sets_are_mutable(self):
