@@ -85,9 +85,15 @@ def summarize(e: BaseException) -> str:
     return f'{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ""}'
 
 
-def with_db_retries(fn: Callable[[], T],
+def with_db_retries(fn: Callable[[int], T],
                     max_retries: int = _DEFAULT_MAX_RETRIES) -> T:
-    """Run `fn()` with retry/backoff on transient DB errors."""
+    """Run `fn(attempt)` with retry/backoff on transient DB errors.
+
+    `fn` receives the attempt index (0 = first call, 1+ = retry replay). Use
+    it to keep otherwise-non-idempotent operations safe across commit-lost
+    retries (e.g. accept the target state as already-applied on attempt>0).
+    Callers that don't need attempt-awareness can just ignore the arg.
+    """
     if max_retries < 1:
         raise ValueError(
             f'max_retries must be greater than 0, got {max_retries}')
@@ -96,7 +102,7 @@ def with_db_retries(fn: Callable[[], T],
         max_backoff_factor=_DEFAULT_MAX_BACKOFF_FACTOR)
     for attempt in range(max_retries):
         try:
-            result = fn()
+            result = fn(attempt)
             if attempt > 0:
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
@@ -114,7 +120,7 @@ def with_db_retries(fn: Callable[[], T],
     raise AssertionError('with_db_retries: unreachable')
 
 
-async def with_db_retries_async(coro_fn: Callable[[], Awaitable[T]],
+async def with_db_retries_async(coro_fn: Callable[[int], Awaitable[T]],
                                 max_retries: int = _DEFAULT_MAX_RETRIES) -> T:
     """Async equivalent of with_db_retries."""
     if max_retries < 1:
@@ -125,7 +131,7 @@ async def with_db_retries_async(coro_fn: Callable[[], Awaitable[T]],
         max_backoff_factor=_DEFAULT_MAX_BACKOFF_FACTOR)
     for attempt in range(max_retries):
         try:
-            result = await coro_fn()
+            result = await coro_fn(attempt)
             if attempt > 0:
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
@@ -155,7 +161,7 @@ def retry(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        return with_db_retries(lambda: fn(*args, **kwargs))
+        return with_db_retries(lambda _attempt: fn(*args, **kwargs))
 
     return wrapper
 
@@ -168,6 +174,7 @@ def retry_async(coro_fn):
 
     @functools.wraps(coro_fn)
     async def wrapper(*args, **kwargs):
-        return await with_db_retries_async(lambda: coro_fn(*args, **kwargs))
+        return await with_db_retries_async(
+            lambda _attempt: coro_fn(*args, **kwargs))
 
     return wrapper

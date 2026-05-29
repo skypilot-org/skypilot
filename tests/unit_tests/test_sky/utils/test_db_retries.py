@@ -146,7 +146,8 @@ class TestWithDbRetriesAsync:
 
     @pytest.mark.asyncio
     async def test_raises_after_exhausting(self):
-        coro_fn = mock.Mock(side_effect=lambda: _coro_raising(_make_op_error()))
+        coro_fn = mock.Mock(
+            side_effect=lambda _attempt: _coro_raising(_make_op_error()))
         with mock.patch.object(retries.asyncio,
                                'sleep',
                                new_callable=mock.AsyncMock):

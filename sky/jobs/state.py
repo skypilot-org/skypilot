@@ -287,7 +287,8 @@ async def _retry_session(operation):
     the `@db_retries.retry_async` decorator on the function itself.
     """
 
-    async def _do():
+    async def _do(attempt):  # pylint: disable=unused-argument
+        del attempt
         engine = await _db_manager.get_async_engine()
         async with sql_async.AsyncSession(engine) as session:
             return await operation(session)
@@ -2191,24 +2192,51 @@ async def scheduler_set_launching_async(job_id: int):
         await session.commit()
 
 
-@db_retries.retry_async
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
-        result = await session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.LAUNCHING.value,
-                )).values({
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.ALIVE.value
-                }))
-        changes = result.rowcount
-        await session.commit()
-        assert changes == 1, (job_id, changes)
+    # Keep the first attempt strict. On retry, if an earlier UPDATE matched
+    # before failing, treat an already-ALIVE row as commit-lost success.
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.update(job_info_table).where(
+                    sqlalchemy.and_(
+                        job_info_table.c.spot_job_id == job_id,
+                        job_info_table.c.schedule_state ==
+                        ManagedJobScheduleState.LAUNCHING.value,
+                    )).values({
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.ALIVE.value
+                    }))
+            changes = result.rowcount
+            # Set the flag BEFORE commit so a commit-lost on this attempt
+            # still leaves a trail for the next attempt to recognize.
+            if changes == 1:
+                prior_update_matched = True
+            await session.commit()
+            if changes == 1:
+                return
+            # Only retries from this invocation may accept the target state as
+            # already applied. A first-attempt 0-row update is still a real
+            # transition failure.
+            assert changes == 0, (job_id, changes)
+            if attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(job_info_table.c.schedule_state).where(
+                        job_info_table.c.spot_job_id == job_id))
+                row = current.fetchone()
+                if row is not None and (row[0]
+                                        == ManagedJobScheduleState.ALIVE.value):
+                    return
+            # Either no row matched, or the row is not in the expected
+            # postcondition after a retry.
+            assert False, (job_id, changes)
+
+    await db_retries.with_db_retries_async(_op)
 
 
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
@@ -3050,26 +3078,50 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
         return ManagedJobScheduleState(state)
 
 
-@db_retries.retry_async
 async def scheduler_set_done_async(job_id: int,
                                    idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
-        result = await session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state !=
-                    ManagedJobScheduleState.DONE.value,
-                )).values({
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.DONE.value
-                }))
-        updated_count = result.rowcount
-        await session.commit()
-        if not idempotent:
-            assert updated_count == 1, (job_id, updated_count)
+    # Keep the first attempt strict. On retry, if an earlier UPDATE matched
+    # before failing, treat an already-DONE row as commit-lost success.
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.update(job_info_table).where(
+                    sqlalchemy.and_(
+                        job_info_table.c.spot_job_id == job_id,
+                        job_info_table.c.schedule_state !=
+                        ManagedJobScheduleState.DONE.value,
+                    )).values({
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.DONE.value
+                    }))
+            updated_count = result.rowcount
+            if updated_count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if updated_count == 1 or idempotent:
+                return
+            # Only retries from this invocation may accept the target state as
+            # already applied. A first-attempt 0-row update is still a real
+            # transition failure.
+            assert updated_count == 0, (job_id, updated_count)
+            if attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(job_info_table.c.schedule_state).where(
+                        job_info_table.c.spot_job_id == job_id))
+                row = current.fetchone()
+                if row is not None and (row[0]
+                                        == ManagedJobScheduleState.DONE.value):
+                    return
+            # Either no row matched, or the row is not in the expected
+            # postcondition after a retry.
+            assert False, (job_id, updated_count)
+
+    await db_retries.with_db_retries_async(_op)
 
 
 # ==== needed for codegen ====
