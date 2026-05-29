@@ -317,6 +317,75 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
     return details
 
 
+async def _retry_task_status_update(
+    job_id: int,
+    task_id: int,
+    target_status: 'ManagedJobStatus',
+    update: Callable[[sql_async.AsyncSession], Awaitable[int]],
+    failure_prefix: str,
+) -> None:
+    """Run a one-row task status update with commit-lost-safe retry."""
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            count = await update(session)
+            if count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if count == 1:
+                return
+            if count == 0 and attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(spot_table.c.status).where(
+                        sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                        spot_table.c.task_id == task_id)))
+                row = current.fetchone()
+                if row is not None and row[0] == target_status.value:
+                    return
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = f'{failure_prefix} ({count} rows updated. {details})'
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
+
+    await db_retries.with_db_retries_async(_op)
+
+
+async def _retry_schedule_state_update(
+    job_id: int,
+    target_state: 'ManagedJobScheduleState',
+    update: Callable[[sql_async.AsyncSession], Awaitable[int]],
+    idempotent: bool = False,
+) -> None:
+    """Run a one-row schedule-state update with commit-lost-safe retry."""
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            count = await update(session)
+            if count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if count == 1 or idempotent:
+                return
+            assert count == 0, (job_id, count)
+            if count == 0 and attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(job_info_table.c.schedule_state).where(
+                        job_info_table.c.spot_job_id == job_id))
+                row = current.fetchone()
+                if row is not None and row[0] == target_state.value:
+                    return
+            assert False, (job_id, count)
+
+    await db_retries.with_db_retries_async(_op)
+
+
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
 # and recovery time.
@@ -826,7 +895,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
                               'Job is in backoff')
 
-    async def _op(session):
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -839,17 +908,11 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
         )
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task back to pending. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
 
-    await _retry_session(_op)
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.PENDING,
+                                    _op,
+                                    'Failed to set the task back to pending.')
     # Do not call callback_func here, as we don't use the callback for PENDING.
 
 
@@ -2194,49 +2257,22 @@ async def scheduler_set_launching_async(job_id: int):
 
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    # Keep the first attempt strict. On retry, if an earlier UPDATE matched
-    # before failing, treat an already-ALIVE row as commit-lost success.
-    prior_update_matched = False
 
-    async def _op(attempt: int) -> None:
-        nonlocal prior_update_matched
-        engine = await _db_manager.get_async_engine()
-        async with sql_async.AsyncSession(engine) as session:
-            result = await session.execute(
-                sqlalchemy.update(job_info_table).where(
-                    sqlalchemy.and_(
-                        job_info_table.c.spot_job_id == job_id,
-                        job_info_table.c.schedule_state ==
-                        ManagedJobScheduleState.LAUNCHING.value,
-                    )).values({
-                        job_info_table.c.schedule_state:
-                            ManagedJobScheduleState.ALIVE.value
-                    }))
-            changes = result.rowcount
-            # Set the flag BEFORE commit so a commit-lost on this attempt
-            # still leaves a trail for the next attempt to recognize.
-            if changes == 1:
-                prior_update_matched = True
-            await session.commit()
-            if changes == 1:
-                return
-            # Only retries from this invocation may accept the target state as
-            # already applied. A first-attempt 0-row update is still a real
-            # transition failure.
-            assert changes == 0, (job_id, changes)
-            if attempt > 0 and prior_update_matched:
-                current = await session.execute(
-                    sqlalchemy.select(job_info_table.c.schedule_state).where(
-                        job_info_table.c.spot_job_id == job_id))
-                row = current.fetchone()
-                if row is not None and (row[0]
-                                        == ManagedJobScheduleState.ALIVE.value):
-                    return
-            # Either no row matched, or the row is not in the expected
-            # postcondition after a retry.
-            assert False, (job_id, changes)
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.ALIVE.value
+                }))
+        return result.rowcount
 
-    await db_retries.with_db_retries_async(_op)
+    await _retry_schedule_state_update(job_id, ManagedJobScheduleState.ALIVE,
+                                       _op)
 
 
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
@@ -2631,7 +2667,7 @@ async def set_starting_async(job_id: int,
                               'Job is starting')
     logger.info('Launching the spot cluster...')
 
-    async def _op(session):
+    async def _op(session: sql_async.AsyncSession) -> int:
         values = {
             spot_table.c.resources: resources_str,
             spot_table.c.submitted_at: submit_time,
@@ -2649,17 +2685,10 @@ async def set_starting_async(job_id: int,
                     spot_table.c.status == ManagedJobStatus.PENDING.value,
                     spot_table.c.end_at.is_(None),
                 )).values(values))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task to starting. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
 
-    await _retry_session(_op)
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.STARTING,
+                                    _op, 'Failed to set the task to starting.')
     await callback_func('SUBMITTED')
     await callback_func('STARTING')
 
@@ -2671,7 +2700,7 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                               'Job has started')
     logger.info('Job started.')
 
-    async def _op(session):
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2687,17 +2716,10 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                     spot_table.c.start_at: start_time,
                     spot_table.c.last_recovered_at: start_time,
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to started. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
 
-    await _retry_session(_op)
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
+                                    _op, 'Failed to set the task to started.')
     await callback_func('STARTED')
 
 
@@ -2754,7 +2776,7 @@ async def set_recovering_async(
     logger.info('=== Recovering... ===')
     current_time = time.time()
 
-    async def _op(session):
+    async def _op(session: sql_async.AsyncSession) -> int:
         if force_transit_to_recovering:
             status_condition = spot_table.c.status.in_(
                 [s.value for s in ManagedJobStatus.processing_statuses()])
@@ -2762,11 +2784,16 @@ async def set_recovering_async(
             status_condition = (
                 spot_table.c.status == ManagedJobStatus.RUNNING.value)
 
-        # Only RUNNING contributes runtime. Forced recovery may revisit
-        # PENDING/STARTING/RECOVERING rows on resume or retry; do not
-        # re-accumulate duration in those states.
+        # RUNNING and WINDING_DOWN are the "still doing job work"
+        # states (set_succeeded_async treats them equivalently, and
+        # `set_winding_down` itself doesn't accumulate). Forced
+        # recovery may revisit PENDING/STARTING/RECOVERING rows on
+        # resume or commit-lost retry; do not re-accumulate there.
         should_accumulate_duration = sqlalchemy.and_(
-            spot_table.c.status == ManagedJobStatus.RUNNING.value,
+            spot_table.c.status.in_([
+                ManagedJobStatus.RUNNING.value,
+                ManagedJobStatus.WINDING_DOWN.value,
+            ]),
             spot_table.c.last_recovered_at >= 0,
         )
         result = await session.execute(
@@ -2786,19 +2813,12 @@ async def set_recovering_async(
                         (spot_table.c.last_recovered_at < 0, current_time),
                         else_=spot_table.c.last_recovered_at),
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task to recovering with '
-                       'force_transit_to_recovering='
-                       f'{force_transit_to_recovering}. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
 
-    await _retry_session(_op)
+    await _retry_task_status_update(
+        job_id, task_id, ManagedJobStatus.RECOVERING, _op,
+        ('Failed to set the task to recovering with '
+         f'force_transit_to_recovering={force_transit_to_recovering}.'))
     await callback_func('RECOVERING')
 
 
@@ -2807,52 +2827,25 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     """Set the task to recovered."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
-    prior_update_matched = False
 
-    async def _op(attempt: int) -> None:
-        nonlocal prior_update_matched
-        engine = await _db_manager.get_async_engine()
-        async with sql_async.AsyncSession(engine) as session:
-            result = await session.execute(
-                sqlalchemy.update(spot_table).where(
-                    sqlalchemy.and_(
-                        spot_table.c.spot_job_id == job_id,
-                        spot_table.c.task_id == task_id,
-                        spot_table.c.status ==
-                        ManagedJobStatus.RECOVERING.value,
-                        spot_table.c.end_at.is_(None),
-                    )).values({
-                        spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                        spot_table.c.last_recovered_at: recovered_time,
-                        spot_table.c.recovery_count: spot_table.c.recovery_count
-                                                     + 1,
-                    }))
-            count = result.rowcount
-            if count == 1:
-                prior_update_matched = True
-            await session.commit()
-            if count == 1:
-                return
-            assert count == 0, (job_id, task_id, count)
-            # If a previous attempt committed but lost the ack, the replay
-            # sees the postcondition instead of the original RECOVERING row.
-            if attempt > 0 and prior_update_matched:
-                current = await session.execute(
-                    sqlalchemy.select(spot_table.c.status).where(
-                        sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                        spot_table.c.task_id == task_id)))
-                row = current.fetchone()
-                if row is not None and (row[0]
-                                        == ManagedJobStatus.RUNNING.value):
-                    return
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to recovered. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.status == ManagedJobStatus.RECOVERING.value,
+                    spot_table.c.end_at.is_(None),
+                )).values({
+                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                    spot_table.c.last_recovered_at: recovered_time,
+                    spot_table.c.recovery_count: spot_table.c.recovery_count +
+                                                 1,
+                }))
+        return result.rowcount
 
-    await db_retries.with_db_retries_async(_op)
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
+                                    _op, 'Failed to set the task to recovered.')
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
 
@@ -2887,7 +2880,7 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
     await add_job_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
                               'Job has succeeded')
 
-    async def _op(session):
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2902,17 +2895,10 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                     spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
                     spot_table.c.end_at: end_time,
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to succeeded. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
 
-    await _retry_session(_op)
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.SUCCEEDED,
+                                    _op, 'Failed to set the task to succeeded.')
     await callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
@@ -3107,47 +3093,22 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
 async def scheduler_set_done_async(job_id: int,
                                    idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
-    # Keep the first attempt strict. On retry, if an earlier UPDATE matched
-    # before failing, treat an already-DONE row as commit-lost success.
-    prior_update_matched = False
 
-    async def _op(attempt: int) -> None:
-        nonlocal prior_update_matched
-        engine = await _db_manager.get_async_engine()
-        async with sql_async.AsyncSession(engine) as session:
-            result = await session.execute(
-                sqlalchemy.update(job_info_table).where(
-                    sqlalchemy.and_(
-                        job_info_table.c.spot_job_id == job_id,
-                        job_info_table.c.schedule_state !=
-                        ManagedJobScheduleState.DONE.value,
-                    )).values({
-                        job_info_table.c.schedule_state:
-                            ManagedJobScheduleState.DONE.value
-                    }))
-            updated_count = result.rowcount
-            if updated_count == 1:
-                prior_update_matched = True
-            await session.commit()
-            if updated_count == 1 or idempotent:
-                return
-            # Only retries from this invocation may accept the target state as
-            # already applied. A first-attempt 0-row update is still a real
-            # transition failure.
-            assert updated_count == 0, (job_id, updated_count)
-            if attempt > 0 and prior_update_matched:
-                current = await session.execute(
-                    sqlalchemy.select(job_info_table.c.schedule_state).where(
-                        job_info_table.c.spot_job_id == job_id))
-                row = current.fetchone()
-                if row is not None and (row[0]
-                                        == ManagedJobScheduleState.DONE.value):
-                    return
-            # Either no row matched, or the row is not in the expected
-            # postcondition after a retry.
-            assert False, (job_id, updated_count)
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.DONE.value
+                }))
+        return result.rowcount
 
-    await db_retries.with_db_retries_async(_op)
+    await _retry_schedule_state_update(job_id, ManagedJobScheduleState.DONE,
+                                       _op, idempotent)
 
 
 # ==== needed for codegen ====
