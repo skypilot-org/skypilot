@@ -1,0 +1,31 @@
+resources:
+  cloud: kubernetes
+  cpus: 1+
+  memory: 2+
+
+setup: |
+  cat > /tmp/parent.py <<'PY'
+  # SIGKILL-orphan repro: parent dies, workers reparent to the subreaper.
+  import multiprocessing
+  import os
+  import time
+
+  def child():
+      time.sleep(86400)
+
+  if __name__ == "__main__":
+      ctx = multiprocessing.get_context("spawn")
+      procs = [ctx.Process(target=child) for _ in range(2)]
+      for p in procs:
+          p.start()
+      with open("/tmp/child_pids.txt", "w") as f:
+          for p in procs:
+              f.write(str(p.pid) + chr(10))
+      with open("/tmp/parent_pid.txt", "w") as f:
+          f.write(str(os.getpid()) + chr(10))
+      time.sleep(86400)
+  PY
+
+run: |
+  python3 /tmp/parent.py > /tmp/parent.log 2>&1 &
+  sleep 86400

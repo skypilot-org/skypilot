@@ -14,6 +14,19 @@ import psutil
 # Environment variable to enable kill_pg in subprocess daemon.
 USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 
+# Environment variable controlling whether the daemon force-kills an
+# alive-but-wedged ancestor of a long-running zombie descendant. Default
+# enabled; set to '0' to disable.
+REAP_WEDGED_PARENTS_ENV_VAR = 'SKYPILOT_REAP_WEDGED_PARENTS'
+
+# How long a zombie descendant must persist before we treat its parent
+# as wedged and SIGKILL it. Configurable via env var; default 30 s.
+# 30 s gives a normal program plenty of time to call wait()/reap a
+# briefly-zombie child between fork() and the parent's next instruction;
+# real wedges sit at zombie for the entire lifetime of the wedged ancestor.
+ZOMBIE_GRACE_ENV_VAR = 'SKYPILOT_ZOMBIE_GRACE_SECONDS'
+_DEFAULT_ZOMBIE_GRACE_SECONDS = 30.0
+
 
 def daemonize():
     """Detaches the process from its parent process with double-forking.
@@ -77,6 +90,71 @@ def kill_process_group(pgid: int) -> bool:
         pass
 
     return True
+
+
+def _zombie_wedge_sweep(descendants: List[psutil.Process],
+                        zombie_first_seen: Dict[int,
+                                                float], grace_seconds: float,
+                        proc_pid: int, parent_pid: int) -> None:
+    """Age each zombie descendant; SIGKILL the wedged parent of any that
+    have outlived the grace period.
+
+    A wedged process — one whose SIGTERM handler raised an exception out
+    of the wait path — accumulates zombie children that never get reaped.
+    When a zombie has been zombie for > grace_seconds, its parent isn't
+    just slow, it's stuck; SIGKILL is the only way out. The PPID-transition
+    machinery in the caller then handles the parent's still-alive siblings
+    on the next tick (they reparent to the subreaper, which is proc_pid).
+
+    Excluded targets: PID 1, the watched subreaper itself, and the outer
+    parent (the SkyPilot orchestrator) — killing any of those would
+    bring the whole task down, defeating the daemon's purpose.
+    """
+    now = time.monotonic()
+    for descendant in descendants:
+        try:
+            status = descendant.status()
+        except psutil.NoSuchProcess:
+            zombie_first_seen.pop(descendant.pid, None)
+            continue
+        if status != psutil.STATUS_ZOMBIE:
+            zombie_first_seen.pop(descendant.pid, None)
+            continue
+        first_seen = zombie_first_seen.setdefault(descendant.pid, now)
+        if now - first_seen < grace_seconds:
+            continue
+        try:
+            wedged_ppid = descendant.ppid()
+        except psutil.NoSuchProcess:
+            zombie_first_seen.pop(descendant.pid, None)
+            continue
+        if wedged_ppid in (0, 1, proc_pid, parent_pid):
+            # Either kernel/init owns it, or it's a protected ancestor.
+            continue
+        try:
+            wedged = psutil.Process(wedged_ppid)
+            print(
+                f'Wedge detected: descendant pid={descendant.pid} has been '
+                f'zombie for >{grace_seconds:.0f}s under ppid={wedged_ppid} '
+                f'({wedged.name()}); the parent has stopped reaping its '
+                f'children. SIGKILLing the wedged parent so any still-alive '
+                f'siblings reparent to the subreaper (pid={proc_pid}) and '
+                f'get cleaned up by the PPID-transition sweep.',
+                file=sys.stderr,
+                flush=True)
+            wedged.kill()
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.AccessDenied as e:
+            print(
+                f'Wedge detected but SIGKILL denied for ppid={wedged_ppid}: '
+                f'{e}',
+                file=sys.stderr,
+                flush=True)
+        # Either we killed the wedged parent (zombie will be reaped by
+        # the new init), or we hit AccessDenied (won't retry until the
+        # zombie pid is reused). Either way, drop the entry.
+        zombie_first_seen.pop(descendant.pid, None)
 
 
 def kill_process_tree(process: psutil.Process,
@@ -173,7 +251,21 @@ def main():
         # context, RAM, open sockets, file locks) until the outer process
         # finally exits.
         ppid_history: Dict[int, int] = {}
+        # Zombie-first-seen timestamps: pid -> monotonic time we first
+        # observed the process in STATUS_ZOMBIE. Used to detect wedged
+        # alive ancestors that never call wait() on their dead children
+        # (see _zombie_wedge_sweep below).
+        zombie_first_seen: Dict[int, float] = {}
         proc_pid = process.pid
+        parent_pid = parent_process.pid
+        reap_wedged_parents = (os.environ.get(REAP_WEDGED_PARENTS_ENV_VAR, '1')
+                               != '0')
+        try:
+            zombie_grace_seconds = float(
+                os.environ.get(ZOMBIE_GRACE_ENV_VAR,
+                               _DEFAULT_ZOMBIE_GRACE_SECONDS))
+        except ValueError:
+            zombie_grace_seconds = _DEFAULT_ZOMBIE_GRACE_SECONDS
         # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
             try:
@@ -214,6 +306,24 @@ def main():
                 for pid, ppid in ppid_history.items()
                 if pid in active_pids
             }
+            # Wedge detection: an alive ancestor that has stopped calling
+            # wait() on its children — typically because a SIGTERM handler
+            # raised an exception out of the wait path — accumulates zombie
+            # children. The PPID-transition machinery above can't see this
+            # case: the children never reparent (their parent is still
+            # alive, just stuck). Detect by aging each zombie; once one has
+            # been zombie for > zombie_grace_seconds, treat its parent as
+            # wedged and SIGKILL it. The kernel reparents the (still-alive)
+            # siblings to our proc_pid subreaper, the PPID-transition logic
+            # above then cleans those up on the next tick.
+            if reap_wedged_parents:
+                _zombie_wedge_sweep(tmp_children, zombie_first_seen,
+                                    zombie_grace_seconds, proc_pid, parent_pid)
+                zombie_first_seen = {
+                    pid: ts
+                    for pid, ts in zombie_first_seen.items()
+                    if pid in active_pids
+                }
             time.sleep(1)
 
     if pgid is not None:

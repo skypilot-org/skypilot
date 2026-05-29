@@ -1002,41 +1002,7 @@ def test_kubernetes_orphan_process_reaping():
     most visible symptom.
     """
     name = smoke_tests_utils.get_cluster_name()
-    cfg = f'/tmp/sky-{name}.yaml'
-
-    write_cfg = (
-        f'cat > {cfg} <<\'EOF\'\n'
-        f'resources:\n'
-        f'  cloud: kubernetes\n'
-        f'  cpus: 1+\n'
-        f'  memory: 2+\n'
-        f'\n'
-        f'setup: |\n'
-        f'  cat > /tmp/parent.py <<\'PY\'\n'
-        f'  import multiprocessing\n'
-        f'  import os\n'
-        f'  import time\n'
-        f'\n'
-        f'  def child():\n'
-        f'      time.sleep(86400)\n'
-        f'\n'
-        f'  if __name__ == "__main__":\n'
-        f'      ctx = multiprocessing.get_context("spawn")\n'
-        f'      procs = [ctx.Process(target=child) for _ in range(2)]\n'
-        f'      for p in procs:\n'
-        f'          p.start()\n'
-        f'      with open("/tmp/child_pids.txt", "w") as f:\n'
-        f'          for p in procs:\n'
-        f'              f.write(str(p.pid) + chr(10))\n'
-        f'      with open("/tmp/parent_pid.txt", "w") as f:\n'
-        f'          f.write(str(os.getpid()) + chr(10))\n'
-        f'      time.sleep(86400)\n'
-        f'  PY\n'
-        f'\n'
-        f'run: |\n'
-        f'  python3 /tmp/parent.py > /tmp/parent.log 2>&1 &\n'
-        f'  sleep 86400\n'
-        f'EOF')
+    cfg = 'tests/test_yamls/orphan_reap_sigkill.yaml'
 
     repro_and_assert = (
         # Wait for parent.py to actually run + record PIDs.
@@ -1067,11 +1033,89 @@ def test_kubernetes_orphan_process_reaping():
     test = smoke_tests_utils.Test(
         'kubernetes_orphan_process_reaping',
         [
-            write_cfg,
             f'sky launch -y -c {name} {cfg}',
             repro_and_assert,
         ],
-        teardown=f'sky down -y {name}; rm -f {cfg}',
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Wedged parent's zombie+alive descendants are reaped on Kubernetes.
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_wedged_parent_zombie_reaping():
+    """Workers under a SIGTERM-wedged parent are cleaned up via wedge sweep.
+
+    Setup:
+      - Same shape as ``test_kubernetes_orphan_process_reaping``, but the
+        parent installs a SIGTERM handler that raises ``KeyboardInterrupt``
+        and then sits in a place that never returns (``signal.pause()``
+        after catching). This is the failure mode users hit when a Python
+        application's init-time signal handler is unsafe — SIGTERM lands
+        mid-syscall, the exception propagates into an except-block that
+        wedges, and the app sits alive forever holding all its resources.
+      - The parent has two ``os.fork()``-spawned children:
+          * a long-lived "worker" (sleeps forever) — like a model worker
+            holding a GPU,
+          * a short-lived "helper" that exits cleanly after a few seconds
+            — without the wedge fix, this child becomes a zombie because
+            the wedged parent never calls ``wait()``.
+
+    Action:
+      - From outside, send ``kill`` (default SIGTERM, NOT SIGKILL) to the
+        parent. The parent catches it, raises ``KeyboardInterrupt``, and
+        wedges. The helper exits → zombie under the wedged parent. The
+        worker stays alive.
+      - The PPID-transition machinery in ``subprocess_daemon`` can't see
+        this case: the parent didn't die, so nothing reparents.
+
+    Assertion:
+      - The wedge sweep ages the zombie helper; once it has been zombie
+        for the configured grace period (30 s default, see
+        ``subprocess_daemon._DEFAULT_ZOMBIE_GRACE_SECONDS``), the daemon
+        SIGKILLs the wedged parent. The worker then reparents to the
+        subreaper, and the existing PPID-transition logic terminates it.
+        Both child PIDs are gone within ~50 s of the SIGTERM.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg = 'tests/test_yamls/orphan_reap_sigterm_wedge.yaml'
+
+    repro_and_assert = (
+        # Wait for parent.py to record its pids.
+        f'for i in $(seq 1 30); do '
+        f'ssh -o StrictHostKeyChecking=no {name} '
+        f'"test -s /tmp/child_pids.txt && test -s /tmp/parent_pid.txt" '
+        f'&& break || sleep 2; done && '
+        f'P=$(ssh {name} "cat /tmp/parent_pid.txt") && '
+        f'W=$(ssh {name} "sed -n 1p /tmp/child_pids.txt") && '
+        f'H=$(ssh {name} "sed -n 2p /tmp/child_pids.txt") && '
+        f'echo "PARENT_PID=$P WORKER=$W HELPER=$H" && '
+        # Pre-kill sanity.
+        f'ssh {name} "kill -0 $P && kill -0 $W && kill -0 $H" && '
+        f'echo "pre-kill: parent + both children alive" && '
+        # SIGTERM the parent (default kill). vLLM-style wedge handler
+        # catches it, raises KeyboardInterrupt, falls into signal.pause().
+        f'ssh {name} "kill $P" && '
+        f'echo "T-0: sent SIGTERM to parent $P" && '
+        # Daemon polls every 1 s; zombie grace default = 30 s; SIGKILL
+        # escalation + PPID-transition cleanup adds a few more. Allow 50 s.
+        f'sleep 50 && '
+        # Both children gone? Parent gone?
+        f'if ssh {name} "kill -0 $W 2>/dev/null"; then '
+        f'  echo "FAIL: worker $W still alive — wedge not detected"; exit 1; fi && '
+        f'if ssh {name} "kill -0 $P 2>/dev/null"; then '
+        f'  echo "FAIL: wedged parent $P still alive — SIGKILL escalation missing"; exit 1; fi && '
+        f'echo "PASS: wedged parent killed + worker cleaned up via subreaper"')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_wedged_parent_zombie_reaping',
+        [
+            f'sky launch -y -c {name} {cfg}',
+            repro_and_assert,
+        ],
+        teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
