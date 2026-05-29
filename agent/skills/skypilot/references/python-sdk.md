@@ -1333,6 +1333,24 @@ Gets the real-time Slurm GPU availability.
 **Returns:**
     The request ID of the Slurm GPU availability request.
 
+### `sky.set_preferred_workspace`
+
+```python
+sky.set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]
+```
+
+Sets (or clears with None) the user's preferred workspace.
+
+**Args:**
+    preferred: workspace name to set as default, or None to clear.
+
+**Returns:**
+    ``{'preferred': <new value>}`` echoing what was set. Callers that
+    need the user's accessible workspaces or other state should fetch
+    them separately (``/workspaces``, ``/api/health``). Raises if the
+    server rejects the change (workspace does not exist, or user
+    lacks permission to it).
+
 ### `sky.slurm_node_info`
 
 ```python

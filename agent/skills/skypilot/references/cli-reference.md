@@ -52,6 +52,7 @@ Launch a cluster or task.
 - `--fast` — [Experimental] If the cluster is already up and available, skip provisioning and setup steps.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to launch into. Shorthand for `--config active_workspace=<name>`.
 
 ### `sky exec`
 
@@ -352,6 +353,7 @@ Launch a managed job from a YAML or a command.
 - `--num-jobs` — Number of jobs to submit.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
