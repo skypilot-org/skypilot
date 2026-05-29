@@ -459,6 +459,28 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     return server_common.get_request_id(response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    Args:
+        preferred: workspace name to set as default, or None to clear.
+
+    Returns:
+        ``{'preferred': <new value>}`` echoing what was set. Callers that
+        need the user's accessible workspaces or other state should fetch
+        them separately (``/workspaces``, ``/api/health``). Raises if the
+        server rejects the change (workspace does not exist, or user
+        lacks permission to it).
+    """
+    response = server_common.make_authenticated_request(
+        'POST', '/users/me/workspace', json={'preferred': preferred})
+    response.raise_for_status()
+    return response.json()
+
+
 def _raise_exception_object_on_client(e: BaseException) -> None:
     """Raise the exception object on the client."""
     if env_options.Options.SHOW_DEBUG_INFO.get():

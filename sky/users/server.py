@@ -11,6 +11,7 @@ from typing import Any, Dict, Generator, List, Optional, Set
 import fastapi
 import filelock
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -24,6 +25,7 @@ from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -108,6 +110,36 @@ def get_current_user_role(request: fastapi.Request):
         'name': auth_user.name,
         'role': user_roles[0] if user_roles else ''
     }
+
+
+@router.post('/me/workspace')
+def set_user_preferred_workspace(
+    request: fastapi.Request,
+    body: payloads.UserPreferredWorkspaceBody,
+) -> Dict[str, Any]:
+    """Sets (or clears with `preferred: null`) the user's preferred workspace.
+
+    Echoes the new preferred value on success. Callers that need the
+    user's accessible workspaces should fetch /workspaces; callers that
+    need the persisted preferred (e.g. dashboard re-render, `sky api
+    info`) should re-fetch /api/health (the user row already includes
+    `preferred_workspace`). Keeping this endpoint to just the
+    write-and-echo keeps it cheap and the API surface small.
+
+    RBAC: rejects setting a workspace the user does not have access to.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Not authenticated.')
+    try:
+        workspaces_core.set_user_preferred_workspace(auth_user, body.preferred)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        # Workspace does not exist.
+        raise fastapi.HTTPException(status_code=404, detail=str(e)) from e
+    return {'preferred': body.preferred}
 
 
 @router.post('/create')

@@ -1289,6 +1289,14 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to launch into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -5682,6 +5690,14 @@ def jobs():
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to submit the managed job into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -7916,6 +7932,11 @@ def api_info(output_format: str):
     else:
         user = models.User.get_current_user()
 
+    # Preferred workspace is included on the user row returned by
+    # /api/health. Older servers (pre-preferred_workspace column) return
+    # None for the field — render as 'not set'.
+    preferred_ws = getattr(user, 'preferred_workspace', None)
+
     # JSON output mode
     if output_format == flags.OUTPUT_FORMAT_JSON:
         output_data = {
@@ -7931,6 +7952,7 @@ def api_info(output_format: str):
                 'api_version': api_server_info.api_version,
             },
             'user': user.name,
+            'preferred_workspace': preferred_ws,
         }
         click.echo(json.dumps(output_data, indent=2))
         return
@@ -7952,14 +7974,60 @@ def api_info(output_format: str):
             location = f'Endpoint set via {config_path}'
     else:
         location = 'Endpoint set to default local API server.'
+    preferred_str = (f'{preferred_ws!r}'
+                     if preferred_ws is not None else '(not set)')
     click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
+               f'{ux_utils.INDENT_SYMBOL}Preferred workspace: {preferred_str}\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
     # Show upgrade hint if available
     server_common.check_and_print_upgrade_hint(api_server_info, url)
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def workspace():
+    """Per-user workspace commands."""
+    pass
+
+
+@workspace.command('use', cls=_DocumentedCodeCommand)
+@click.argument('name', required=False, type=str)
+@click.option('--clear',
+              is_flag=True,
+              default=False,
+              help='Clear the saved preferred workspace.')
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def workspace_use(name: Optional[str], clear: bool):
+    """Sets (or clears with --clear) your default workspace on the server.
+
+    The default is picked up automatically on subsequent ``sky launch`` /
+    ``sky jobs launch`` commands. Per-command overrides (``--workspace`` and
+    project ``.sky.yaml``) continue to win.
+
+    Examples:
+
+      .. code-block:: bash
+
+        \b
+        sky workspace use team-a       # set
+        sky workspace use --clear      # clear
+    """
+    if clear and name:
+        raise click.UsageError('Cannot pass both --clear and a workspace name.')
+    if not clear and not name:
+        raise click.UsageError(
+            'Specify a workspace name, or pass --clear to remove your '
+            'current default.')
+    target = None if clear else name
+    sdk.set_preferred_workspace(target)
+    if clear:
+        click.secho('Cleared preferred workspace.', fg='green')
+    else:
+        click.secho(f'Set preferred workspace to {target!r}.', fg='green')
 
 
 @cli.group(cls=_NaturalOrderGroup)

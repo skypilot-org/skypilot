@@ -354,6 +354,28 @@ def config_option(expose_value: bool):
     return return_option_decorator
 
 
+def apply_workspace_option_callback(ctx, param, value):
+    """Click callback for the `--workspace`/`-w` flag.
+
+    Translates `--workspace <name>` into the equivalent
+    `--config active_workspace=<name>`, then drops the value (the
+    option's `expose_value=False` keeps it out of the function signature).
+    Decorating commands need only:
+
+        @click.option('--workspace', '-w', expose_value=False,
+                      callback=flags.apply_workspace_option_callback, ...)
+
+    No function-body changes are required: once apply_cli_config runs, the
+    loaded skypilot config has `active_workspace` set, so the override
+    payload sent to the server treats it as an explicit user choice (and
+    the per-user resolver is bypassed).
+    """
+    del ctx, param  # Unused.
+    if value is not None:
+        skypilot_config.apply_cli_config([f'active_workspace={value}'])
+    return value
+
+
 def yes_option(helptext: Optional[str] = None):
     """A decorator for the --yes/-y option."""
     if helptext is None:

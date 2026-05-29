@@ -457,6 +457,24 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
     return active_workspace
 
 
+def is_active_workspace_set() -> bool:
+    """Returns True iff active_workspace was explicitly set somewhere.
+
+    Distinguishes "user set active_workspace" from "fell back to the
+    SKYPILOT_DEFAULT_WORKSPACE literal because nothing was set". The two are
+    indistinguishable through `get_active_workspace()` (both return a string)
+    but are different on the wire: the override config sent by the client
+    omits the key entirely when unset. The server-side per-user resolver
+    should only kick in for the unset case — explicit intent (including
+    explicit `'default'`) is respected as-is.
+    """
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if context_workspace is not None:
+        return True
+    return get_nested(keys=('active_workspace',),
+                      default_value=None) is not None
+
+
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 

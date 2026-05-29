@@ -2181,16 +2181,23 @@ def _check_owner_identity_with_record(cluster_name: str,
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
-    active_workspace = skypilot_config.get_active_workspace()
     cluster_workspace = record.get('workspace',
                                    constants.SKYPILOT_DEFAULT_WORKSPACE)
-    if active_workspace != cluster_workspace:
+    # Allow operations on the cluster as long as the caller has access to
+    # the cluster's recorded workspace, regardless of what their currently
+    # active workspace is. Without this, switching active workspace would
+    # lock the user out of `sky down/stop/exec/cancel/logs` on their own
+    # clusters.
+    current_user = common_utils.get_current_user()
+    try:
+        workspaces_core.check_workspace_permission(current_user,
+                                                   cluster_workspace)
+    except exceptions.PermissionDeniedError as e:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
-                f'{colorama.Fore.YELLOW}'
-                f'The cluster {cluster_name!r} is in workspace '
-                f'{cluster_workspace!r}, but the active workspace is '
-                f'{active_workspace!r}.{colorama.Fore.RESET}')
+                f'{colorama.Fore.YELLOW}The cluster {cluster_name!r} is in '
+                f'workspace {cluster_workspace!r}, which you do not have '
+                f'access to.{colorama.Fore.RESET}\n  {e}') from e
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud

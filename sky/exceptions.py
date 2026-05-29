@@ -448,6 +448,31 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
+class WorkspaceAmbiguousError(Exception):
+    """Raised when a user belongs to multiple workspaces and none is chosen.
+
+    Carries the list of accessible workspace names so callers (CLI / API
+    handlers) can format consistent guidance pointing the user at
+    `sky workspace use <name>`, `--workspace`, or `~/.sky/config.yaml`.
+
+    `note` is an optional drift explanation populated when the user has a
+    saved preference that is no longer accessible — so the user understands
+    why their previous default stopped working.
+    """
+
+    def __init__(self, accessible: List[str], note: Optional[str] = None):
+        self.accessible = sorted(accessible)
+        self.note = note
+        names = ', '.join(self.accessible)
+        note_line = f'\nNote: {note}.' if note else ''
+        super().__init__(
+            f'You belong to multiple workspaces: {names}.{note_line}\n'
+            f'To proceed:\n'
+            f'  - run `sky workspace use <name>` to set your default, or\n'
+            f'  - pass `--workspace <name>` on this command, or\n'
+            f'  - set `active_workspace:` in `~/.sky/config.yaml`.')
+
+
 class RecipeAlreadyExistsError(Exception):
     """Raised when attempting to create a recipe with an existing name."""
     pass
@@ -661,6 +686,16 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class NoWorkspaceAccessError(PermissionDeniedError):
+    """Raised when the user has no accessible workspaces at all.
+
+    A subclass of PermissionDeniedError so existing handlers still catch it,
+    while specific tests / UI can distinguish "zero accessible workspaces"
+    from a per-workspace permission denial.
+    """
     pass
 
 

@@ -88,19 +88,15 @@ def test_workspace_switching(generic_cloud: str):
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 | grep {ws1_name}',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep {ws2_name}',
+            # Switch active workspace back to ws-1. Operations on a cluster
+            # recorded in a different workspace succeed as long as the
+            # caller has access to that workspace — the previous "is in
+            # workspace X, but the active workspace is Y" guard is gone.
+            # Both clusters tear down here.
             change_config_cmd.format(config_path=ws1_config_path),
-            f's=$(sky down -y {name}-1 {name}-2); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            f'rm -f .sky.yaml || true',
-            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is \'default\'"',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
-            f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            change_config_cmd.format(config_path=ws2_config_path),
-            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "Terminating cluster {name}-2...done."',
+            f's=$(sky down -y {name}-1 {name}-2 2>&1); echo "$s"; '
+            f'echo "$s" | grep "Terminating cluster {name}-1...done."; '
+            f'echo "$s" | grep "Terminating cluster {name}-2...done."',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 && exit 1 || true',
         ],
@@ -117,6 +113,163 @@ def test_workspace_switching(generic_cloud: str):
     os.unlink(server_config_path)
     os.unlink(ws1_config_path)
     os.unlink(ws2_config_path)
+
+
+# ---------- Test workspace end-to-end CLI flow ----------
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_workspace_e2e_via_cli(generic_cloud: str):
+    """End-to-end CLI smoke for per-user preferred_workspace + --workspace
+    flag + sky api info workspace line + cluster-recording correctness.
+
+    Combines what would otherwise be several separate smoke tests into a
+    single real-cluster pass that exercises the full CLI →
+    /users/me/workspace → resolver → launch → cluster.workspace recording
+    chain.
+
+    Flow:
+      1. Configure server with team-a + team-b (both accessible). 'default'
+         is also accessible (admin / no RBAC restriction in smoke env).
+      2. `sky workspace use team-b` -> preferred persisted.
+      3. `sky api info` -> Preferred workspace: 'team-b'.
+      4. `sky launch` with no --workspace -> cluster lands in team-b
+         because the resolver picks up the persisted preferred. Verifies
+         the server-resolved workspace is recorded on the cluster.
+      5. `sky launch --workspace team-a` -> cluster lands in team-a; api
+         info STILL shows team-b — the flag overrides preferred only for
+         this one request, it does not mutate the persisted value.
+      6. `sky workspace use --clear` -> preferred cleared; api info
+         shows '(not set)'.
+      7. `sky launch` with no --workspace and no preferred -> cluster
+         lands in 'default'. This is the back-compat safety net: without
+         the 'default' fallback every legacy multi-workspace / admin
+         user would hit a 'multiple accessible workspaces' error on
+         upgrade. This step asserts the safety net is wired end-to-end.
+
+    Not covered here (deferred to test_resolver_compat_matrix.py UT):
+      - Single-membership auto-select — requires a non-admin user plus
+        private workspaces. Expensive to wire up in smoke and brittle.
+      - Zero-access and multi-accessible-no-default cases — same
+        RBAC-setup requirement; deterministically covered in the UT.
+    """
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping workspace e2e test when not in Buildkite environment')
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'This test requires a local API server and needs to restart the '
+            'server during execution. If the API server endpoint is set in '
+            'the environment file, restarting is not supported, so the test '
+            'will be skipped.')
+
+    ws_a = 'team-a'
+    ws_b = 'team-b'
+    server_config_content = textwrap.dedent(f"""\
+        workspaces:
+            {ws_a}: {{}}
+            {ws_b}: {{}}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    name = smoke_tests_utils.get_cluster_name()
+    # `sky workspace use` and `sky api info` write/read the server-side
+    # preferred_workspace, which does NOT live in .sky.yaml — so unlike
+    # test_workspace_switching this test does not maintain any local
+    # config file. Removing .sky.yaml ensures the preference flows
+    # through `active_workspace` being ABSENT from the override config,
+    # which is exactly the trigger condition for the server-side resolver.
+    test = smoke_tests_utils.Test(
+        'test_workspace_e2e_via_cli',
+        [
+            # Bring up server with the workspaces config and ensure no
+            # leftover .sky.yaml from a previous test sets active_workspace.
+            'rm -f .sky.yaml || true',
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+
+            # === Step 2-3: set preferred via CLI, verify via api info ===
+            f'sky workspace use {ws_b}',
+            # `sky api info` text-mode output shows the preferred workspace
+            # as a quoted string when set, or '(not set)' when cleared.
+            f's=$(sky api info); echo "$s"; '
+            f"echo \"$s\" | grep \"Preferred workspace: '{ws_b}'\"",
+
+            # === Step 4: launch with no flag, cluster lands in the
+            # persisted preferred workspace ===
+            f'sky launch -y -c {name}-1 --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo "hi from {ws_b}"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                f'{name}-1', [sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # The cluster's workspace column must be team-b — i.e. the
+            # server-resolved workspace landed on disk.
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-1 | grep {ws_b}',
+
+            # === Step 5: --workspace flag overrides preferred for one
+            # launch; the persisted preference stays unchanged ===
+            f'sky launch -y -c {name}-2 --workspace {ws_a} '
+            f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'echo "hi from {ws_a}"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                f'{name}-2', [sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-2 | grep {ws_a}',
+            # Preference unchanged after the --workspace flag use.
+            f's=$(sky api info); echo "$s"; '
+            f"echo \"$s\" | grep \"Preferred workspace: '{ws_b}'\"",
+
+            # === Step 6: clear preference, api info reflects unset ===
+            'sky workspace use --clear',
+            f's=$(sky api info); echo "$s"; '
+            f'echo "$s" | grep "Preferred workspace: (not set)"',
+
+            # === Step 7: no preferred, no --workspace, and admin has
+            # access to 'default' (synthesized by the server). The
+            # resolver lands the cluster on 'default' as the back-compat
+            # safety net for legacy multi-workspace / admin users. ===
+            f'sky launch -y -c {name}-3 --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo "hi from default"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                f'{name}-3', [sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-3 | grep default',
+
+            # === Teardown (also verifies cross-workspace down works) ===
+            f's=$(sky down -y {name}-1 {name}-2 {name}-3 2>&1); echo "$s"; '
+            f'echo "$s" | grep "Terminating cluster {name}-1...done."; '
+            f'echo "$s" | grep "Terminating cluster {name}-2...done."; '
+            f'echo "$s" | grep "Terminating cluster {name}-3...done."',
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && exit 1 || true',
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-2 && exit 1 || true',
+            f's=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name}-3 && exit 1 || true',
+        ],
+        teardown=(
+            # Best-effort cleanup; `|| true` so a partial-run teardown does
+            # not mask the real failure surfaced above.
+            f'sky workspace use --clear || true; '
+            f'sky down -y {name}-1 || true; '
+            f'sky down -y {name}-2 || true; '
+            f'sky down -y {name}-3 || true; '
+            f'rm -f .sky.yaml || true; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+            f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        if os.path.exists(server_config_path):
+            os.unlink(server_config_path)
 
 
 def _verify_cluster_created_by_user(cluster_name: str,

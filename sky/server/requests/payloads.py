@@ -942,6 +942,16 @@ class GetConfigBody(RequestBody):
     pass
 
 
+class UserPreferredWorkspaceBody(RequestBody):
+    """Request body for POST /users/me/workspace.
+
+    `preferred` is the workspace name to set as the user's default, or None
+    to clear the preference. RBAC is validated server-side in
+    sky/workspaces/core.set_user_preferred_workspace().
+    """
+    preferred: Optional[str] = None
+
+
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
