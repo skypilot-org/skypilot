@@ -1057,3 +1057,64 @@ class TestFormatJobDetails:
         # No cloud info -> surface the reason without a (possibly wrong) hint.
         result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
         assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+
+class TestReadProvisionStatusFromLog:
+    """Tests for relaying the provisioning spinner from the controller log."""
+
+    @staticmethod
+    def _status_line(control, msg=''):
+        from sky.utils import message_utils
+        return message_utils.encode_payload(control.encode(msg))
+
+    def test_missing_file_returns_inputs(self, tmp_path):
+        path = str(tmp_path / 'missing.log')
+        pos, msg = jobs_utils.read_provision_status_from_log(path, 0, 'prev')
+        assert pos == 0
+        assert msg == 'prev'
+
+    def test_reads_latest_spinner_message_incrementally(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text('a plain provisioning log line\n' +
+                        self._status_line(rich_utils.Control.INIT, 'Launching'))
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        assert pos > 0
+
+        # Append an UPDATE; only the newly appended bytes should be read.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(
+                self._status_line(rich_utils.Control.UPDATE,
+                                  'Preparing SkyPilot runtime (1/3)'))
+        pos2, msg2 = jobs_utils.read_provision_status_from_log(
+            str(path), pos, msg)
+        assert msg2 == 'Preparing SkyPilot runtime (1/3)'
+        assert pos2 > pos
+
+    def test_stop_control_clears_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.EXIT))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg is None
+
+    def test_partial_trailing_line_is_not_consumed(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        full = self._status_line(rich_utils.Control.INIT, 'Launching')
+        # Write a complete payload plus a partial (no trailing newline) one.
+        partial = self._status_line(rich_utils.Control.UPDATE,
+                                    'half').rstrip('\n')
+        path.write_text(full + partial)
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        # Complete the partial line; the next read should pick it up.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('\n')
+        _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
+        assert msg2 == 'half'
