@@ -153,16 +153,71 @@ class TestRequestBodyCarriesClientApiVersion(unittest.TestCase):
     every request as 'old client' — disabling the per-user resolver
     entirely. This test guards the propagation path."""
 
-    def test_default_construction_populates_local_api_version(self):
-        """RequestBody.__init__ must default `client_api_version` to the
-        local API_VERSION so it survives serialization to the request DB
-        and is readable from the worker process."""
-        body = payloads.RequestBody()
+    def _client_side(self):
+        """Context manager that flips `annotations.is_on_api_server` to
+        False, mimicking what `@client_api` SDK wrappers do at runtime
+        so client-side RequestBody construction stamps the field."""
+        from sky.utils import annotations
+
+        class _Ctx:
+
+            def __enter__(self_inner):
+                self_inner._prev = annotations.is_on_api_server
+                annotations.is_on_api_server = False
+
+            def __exit__(self_inner, *exc):
+                annotations.is_on_api_server = self_inner._prev
+
+        return _Ctx()
+
+    def test_client_construction_stamps_local_api_version(self):
+        """When a SDK call constructs a RequestBody (i.e.
+        `annotations.is_on_api_server` is False because we are inside a
+        `@client_api` wrapper), `__init__` MUST stamp the local
+        API_VERSION so the value travels with the body to the worker."""
+        with self._client_side():
+            body = payloads.RequestBody()
         self.assertEqual(body.client_api_version, server_constants.API_VERSION)
 
+    def test_server_side_parse_of_old_client_body_leaves_field_none(self):
+        """The critical back-compat case. Old clients (pre-this-PR) do
+        not know about `client_api_version`. The server MUST NOT silently
+        substitute its own API_VERSION when deserializing such a body —
+        doing so would bypass the executor's old-client gate and may
+        raise WorkspaceAmbiguousError, an exception class the old
+        client cannot deserialize.
+
+        `annotations.is_on_api_server` is True in this test (the default
+        in a server process), so the `__init__` default fill must be
+        suppressed and Pydantic should leave the field at its
+        Optional[int] = None declaration default.
+        """
+        from sky.utils import annotations
+
+        # Sanity-check we are in server-mode for this test.
+        self.assertTrue(annotations.is_on_api_server)
+        # Old-client JSON: every required RequestBody field present
+        # EXCEPT client_api_version (which old clients do not know
+        # about).
+        old_body_json = (
+            '{"env_vars": {}, "entrypoint": "", "entrypoint_command": "",'
+            ' "using_remote_api_server": false}')
+        body = payloads.RequestBody.model_validate_json(old_body_json)
+        self.assertIsNone(body.client_api_version)
+
+    def test_server_side_parse_of_new_client_body_preserves_field(self):
+        """The forward path: a new client sends `client_api_version` on
+        the wire. Server-side parse MUST preserve it verbatim, not
+        clobber it with the server's local API_VERSION."""
+        new_body_json = (
+            '{"env_vars": {}, "entrypoint": "", "entrypoint_command": "",'
+            ' "using_remote_api_server": false, "client_api_version": 53}')
+        body = payloads.RequestBody.model_validate_json(new_body_json)
+        self.assertEqual(body.client_api_version, 53)
+
     def test_explicit_override_is_respected(self):
-        """Old clients pre-dating the field send None / omit it; tests
-        and synthetic callers must be able to override too."""
+        """Tests and synthetic callers must be able to override the
+        field directly via kwargs, independent of client/server mode."""
         body = payloads.RequestBody(client_api_version=42)
         self.assertEqual(body.client_api_version, 42)
         # Pydantic accepts None on Optional[int].

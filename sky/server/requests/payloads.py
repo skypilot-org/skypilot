@@ -181,8 +181,17 @@ class RequestBody(BasePayload):
         data['override_skypilot_config_path'] = data.get(
             'override_skypilot_config_path',
             get_override_skypilot_config_path_from_client())
-        data['client_api_version'] = data.get('client_api_version',
-                                              server_constants.API_VERSION)
+        # Stamp `client_api_version` ONLY when constructing on the client
+        # side. If we filled it in unconditionally, server-side Pydantic
+        # deserialization of a body sent by an old client (which omits
+        # the field) would populate it with the server's API_VERSION,
+        # silently bypassing the executor's old-client gate and
+        # potentially raising a WorkspaceAmbiguousError the old client
+        # cannot deserialize. Leaving the field as `None` for missing
+        # input on the server is the correct legacy-client signal.
+        if not annotations.is_on_api_server:
+            data['client_api_version'] = data.get('client_api_version',
+                                                  server_constants.API_VERSION)
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:

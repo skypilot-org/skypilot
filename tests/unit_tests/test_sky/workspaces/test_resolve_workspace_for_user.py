@@ -523,6 +523,31 @@ class TestWorkspaceAmbiguousErrorSignature(unittest.TestCase):
         self.assertEqual(str(original), str(rehydrated))
         self.assertIn('sky workspace use', str(rehydrated))
 
+    def test_serialize_deserialize_roundtrip_via_request_executor_path(self):
+        """The PRODUCTION exception transit path is NOT direct pickle —
+        it is `serialize_exception` -> dict -> `pickle_and_encode` ->
+        request DB -> `decode_and_unpickle` -> `deserialize_exception`,
+        and the deserializer reconstructs via `cls(*args, **attributes)`.
+        Because this exception has a `(accessible, note=None)`
+        constructor, leaving `args = (formatted_message,)` would cause
+        `cls(formatted_message, accessible=[...], note=...)` ->
+        TypeError: multiple values for 'accessible'. The fix is to
+        extend `SkyPilotExcludeArgsBaseException` so `serialize_exception`
+        zeros out args. This test guards that inheritance — the
+        `__reduce__` override alone does NOT cover this path."""
+        original = exceptions.WorkspaceAmbiguousError(
+            ['team-a', 'team-b', 'team-c'],
+            note="preferred 'team-x' not accessible")
+        ser = exceptions.serialize_exception(original)
+        # The exclude-args base class MUST zero this out so the
+        # deserialize step does not double-pass the positional.
+        self.assertEqual(ser['args'], tuple())
+        de = exceptions.deserialize_exception(ser)
+        self.assertIsInstance(de, exceptions.WorkspaceAmbiguousError)
+        self.assertEqual(de.accessible, ['team-a', 'team-b', 'team-c'])
+        self.assertEqual(de.note, "preferred 'team-x' not accessible")
+        self.assertEqual(str(original), str(de))
+
 
 class TestNoWorkspaceAccessError(unittest.TestCase):
     """NoWorkspaceAccessError must remain a PermissionDeniedError subclass

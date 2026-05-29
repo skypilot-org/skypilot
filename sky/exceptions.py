@@ -448,7 +448,7 @@ class InvalidWorkspaceNameError(Exception):
     pass
 
 
-class WorkspaceAmbiguousError(Exception):
+class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
     """Raised when a user belongs to multiple workspaces and none is chosen.
 
     Carries the list of accessible workspace names so callers (CLI / API
