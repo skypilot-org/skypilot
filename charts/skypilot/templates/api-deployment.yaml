@@ -279,14 +279,22 @@ spec:
           # $SKYPILOT_SERVER_LOG_MIRROR_DIR. Each pod boot creates a new file
           # under <dir>/<HOSTNAME>/ so history survives local logrotate
           # (copytruncate) and pod restarts, and replicas don't clobber each
-          # other when the dir lives on shared (RWX) storage.
-          SKYPILOT_LOG_MIRROR_FILE=""
+          # other when the dir lives on shared (RWX) storage. Mirroring is
+          # opportunistic — if directory creation fails (e.g. RO mount,
+          # permissions, NFS blip) we log a warning and continue without
+          # mirroring rather than crash-loop the API server pod.
           if [ -n "${SKYPILOT_SERVER_LOG_MIRROR_DIR:-}" ]; then
-            SKYPILOT_LOG_MIRROR_PER_POD_DIR="$SKYPILOT_SERVER_LOG_MIRROR_DIR/${HOSTNAME:-$(hostname)}"
-            mkdir -p "$SKYPILOT_LOG_MIRROR_PER_POD_DIR"
-            SKYPILOT_LOG_MIRROR_FILE="$SKYPILOT_LOG_MIRROR_PER_POD_DIR/server-$(date -u +%Y%m%dT%H%M%SZ).log"
+            SKYPILOT_LOG_MIRROR_PER_POD_DIR="${SKYPILOT_SERVER_LOG_MIRROR_DIR}/${HOSTNAME:-unknown}"
+            if mkdir -p "$SKYPILOT_LOG_MIRROR_PER_POD_DIR"; then
+              SKYPILOT_LOG_MIRROR_FILE="${SKYPILOT_LOG_MIRROR_PER_POD_DIR}/server-$(date -u +%Y%m%dT%H%M%SZ).log"
+              tee -a /root/.sky/api_server/server.log "$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog &
+            else
+              echo "warning: failed to create log mirror directory $SKYPILOT_LOG_MIRROR_PER_POD_DIR; mirroring disabled" >&2
+              tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+            fi
+          else
+            tee -a /root/.sky/api_server/server.log < /tmp/skylog &
           fi
-          tee -a /root/.sky/api_server/server.log ${SKYPILOT_LOG_MIRROR_FILE:+"$SKYPILOT_LOG_MIRROR_FILE"} < /tmp/skylog &
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
           {{- else }}
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
