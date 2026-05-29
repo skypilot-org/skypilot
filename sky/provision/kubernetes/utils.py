@@ -1985,7 +1985,7 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     return 'Terminated unexpectedly'
 
 
-def _pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
+def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
     """True if the pod failed or any container terminated with a nonzero exit.
 
     Used to avoid emitting a spurious reason for a pod that merely finished
@@ -2071,7 +2071,7 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
             pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except Exception:  # pylint: disable=broad-except
         return None
-    if not _pod_terminated_abnormally(pod):
+    if not pod_terminated_abnormally(pod):
         return None
     reason = get_condensed_pod_reason(pod)
     msg = f'Pod {pod_name} terminated: {reason}.'

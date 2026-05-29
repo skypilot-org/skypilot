@@ -539,3 +539,51 @@ class TestGetClusterFailureReasonFromEvents:
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None
+
+
+class TestGetClusterFailureReasonFromPods:
+    """Tests for get_cluster_failure_reason_from_pods (durable last_state).
+
+    The condensed-reason derivation itself (incl. OOMKilled recovered from a
+    container's last_state) is covered in test_kubernetes_utils.py; here we
+    cover this helper's control flow: read each pod, return the first that
+    terminated abnormally, never raise on a per-pod read error.
+    """
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_returns_condensed_reason_for_abnormal_pod(self, mock_kutils,
+                                                       mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.pod_terminated_abnormally.return_value = True
+        mock_kutils.get_condensed_pod_reason.return_value = (
+            'OOMKilled (exit code 137)')
+        result = k8s_instance.get_cluster_failure_reason_from_pods({},
+                                                                   ['pod-0'])
+        assert result == 'OOMKilled (exit code 137)'
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_none_when_no_pod_abnormal(self, mock_kutils, mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.pod_terminated_abnormally.return_value = False
+        assert k8s_instance.get_cluster_failure_reason_from_pods(
+            {}, ['pod-0', 'pod-1']) is None
+
+    @mock.patch('sky.adaptors.kubernetes.core_api')
+    @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
+    def test_skips_pod_read_errors(self, mock_kutils, mock_core_api):
+        mock_kutils.get_namespace_from_config.return_value = 'ns'
+        mock_kutils.get_context_from_config.return_value = 'ctx'
+        # First pod read raises; the second pod is abnormal.
+        mock_core_api.return_value.read_namespaced_pod.side_effect = [
+            Exception('boom'),
+            mock.MagicMock(),
+        ]
+        mock_kutils.pod_terminated_abnormally.return_value = True
+        mock_kutils.get_condensed_pod_reason.return_value = 'OOMKilled'
+        result = k8s_instance.get_cluster_failure_reason_from_pods(
+            {}, ['pod-0', 'pod-1'])
+        assert result == 'OOMKilled'

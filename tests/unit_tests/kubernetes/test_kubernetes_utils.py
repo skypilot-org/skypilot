@@ -4987,7 +4987,7 @@ def test_v1node_get_taints_mixed_tolerated_and_untolerated():
 
 # ---------------------------------------------------------------------------
 # Pod termination reason / OOM diagnosis helpers
-# (get_condensed_pod_reason, _pod_terminated_abnormally,
+# (get_condensed_pod_reason, pod_terminated_abnormally,
 #  diagnose_terminated_pod)
 # ---------------------------------------------------------------------------
 
@@ -5113,7 +5113,7 @@ def test_get_condensed_pod_reason_status_none():
 
 
 def test_pod_terminated_abnormally_failed_phase():
-    assert utils._pod_terminated_abnormally(_make_pod(phase='Failed')) is True
+    assert utils.pod_terminated_abnormally(_make_pod(phase='Failed')) is True
 
 
 def test_pod_terminated_abnormally_nonzero_container_exit():
@@ -5122,7 +5122,7 @@ def test_pod_terminated_abnormally_nonzero_container_exit():
                         _make_container_status(terminated_reason='OOMKilled',
                                                terminated_exit_code=137)
                     ])
-    assert utils._pod_terminated_abnormally(pod) is True
+    assert utils.pod_terminated_abnormally(pod) is True
 
 
 def test_pod_terminated_abnormally_crashloopbackoff():
@@ -5131,7 +5131,7 @@ def test_pod_terminated_abnormally_crashloopbackoff():
         container_statuses=[
             _make_container_status(waiting_reason='CrashLoopBackOff')
         ])
-    assert utils._pod_terminated_abnormally(pod) is True
+    assert utils.pod_terminated_abnormally(pod) is True
 
 
 def test_pod_terminated_abnormally_clean_success():
@@ -5140,13 +5140,13 @@ def test_pod_terminated_abnormally_clean_success():
                         _make_container_status(terminated_reason='Completed',
                                                terminated_exit_code=0)
                     ])
-    assert utils._pod_terminated_abnormally(pod) is False
+    assert utils.pod_terminated_abnormally(pod) is False
 
 
 def test_pod_terminated_abnormally_status_none():
     # A pod with no status must not crash and is not considered abnormal.
     pod = kubernetes.client.V1Pod(status=None)
-    assert utils._pod_terminated_abnormally(pod) is False
+    assert utils.pod_terminated_abnormally(pod) is False
 
 
 def _patch_read_pod(monkeypatch, pod=None, side_effect=None):

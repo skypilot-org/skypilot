@@ -133,6 +133,31 @@ class TestUpdateClusterStatusInitReason:
         assert 'Evicted' in msg, msg
         assert 'ephemeral' in msg, msg
 
+    def test_oom_recovered_from_pod_last_state(self):
+        # A container that OOMKilled and restarted reports Ready again, so the
+        # live per-pod status names no cause and the events lookup finds
+        # nothing (OOM is not a pod event). The durable last_state reason is
+        # recovered from the pods fallback.
+        oom = 'OOMKilled (exit code 137)'
+        with mock.patch.object(
+                backend_utils.global_user_state,
+                'get_cluster_yaml_dict',
+                return_value={'provider': {
+                    'namespace': 'default',
+                    'context': 'ctx'
+                }}), \
+             mock.patch.object(
+                 backend_utils.k8s_instance,
+                 'get_cluster_failure_reason_from_events',
+                 return_value=None), \
+             mock.patch.object(
+                 backend_utils.k8s_instance,
+                 'get_cluster_failure_reason_from_pods',
+                 return_value=oom):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)})
+        assert 'OOMKilled' in msg, msg
+
     def test_some_nodes_terminated(self):
         # 1 of 2 launched nodes is missing from node_statuses.
         msg = _capture_init_log_message(

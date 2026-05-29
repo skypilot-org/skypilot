@@ -2372,6 +2372,35 @@ def get_cluster_failure_reason_from_events(
     return None
 
 
+def get_cluster_failure_reason_from_pods(provider_config: Dict[str, Any],
+                                         pod_names: List[str]) -> Optional[str]:
+    """Return a durable failure reason from the cluster pods' status, or None.
+
+    Used when a cluster is abnormal but the live per-pod status did not name a
+    cause. A run-phase OOMKilled is recorded in the container's
+    ``last_state.terminated`` and survives the restart, but the live ``Ready``
+    condition flips back to True once the container is running again -- so a
+    snapshot taken outside that window (the read raced the restart) misses it.
+    Unlike the live ``_get_pod_health_issues`` check, this re-reads each pod and
+    derives the reason from current *and* previous terminated states, so the OOM
+    is recovered regardless of where the read landed in the restart cycle.
+
+    Returns the condensed reason for the first pod that terminated abnormally,
+    else None. Best-effort (per-pod reads never raise).
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    for pod_name in pod_names:
+        try:
+            pod = kubernetes.core_api(context).read_namespaced_pod(
+                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if kubernetes_utils.pod_terminated_abnormally(pod):
+            return kubernetes_utils.get_condensed_pod_reason(pod)
+    return None
+
+
 def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
     """Return `last_state.terminated.reason` iff cs is in CrashLoopBackOff
     and a previous terminated reason is available; else None.
