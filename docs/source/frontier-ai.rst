@@ -43,7 +43,18 @@ For researchers and AI agents
      accelerators: B200:8
    num_nodes: 5000
 
-▸ **Fast parallel jobs and sandboxes** — Launch thousands of parallel jobs and sandboxes in seconds, for RL rollouts, parallel evals, and agent sandboxes. Tight integration with SkyPilot job groups.
+▸ **Fast parallel jobs** — Launch thousands of parallel jobs in seconds, for RL rollouts, parallel evals, and batch inference. Tight integration with SkyPilot job groups.
+
+▸ **SkyPilot Sandboxes** — Instant, ephemeral compute environments that run on your own Kubernetes clusters. No new infrastructure or third-party trust boundaries needed; sandboxes inherit your existing network policies, RBAC, and compliance posture. Pre-warmed pools launch sandboxes in under a second, with volumes and secrets injected automatically. Batch-launch hundreds in a single call for AI coding agents, RL rollouts, or parallel evals. Ships with a built-in image for Claude Code.
+
+.. raw:: html
+
+   <figure class="align-center" style="width: 90%; margin: 0 auto 20px auto;">
+     <video id="sandbox-video" style="width: 100%; height: auto;" autoplay muted playsinline loop>
+        <source src="../_static/sandbox-claude.mp4" type="video/mp4" />
+     </video>
+     <figcaption><p>Sandboxes: launching a Claude Code environment on your own cluster with secrets injected from the SkyPilot Secrets Manager.</p></figcaption>
+   </figure>
 
 For infra teams
 ~~~~~~~~~~~~~~~
