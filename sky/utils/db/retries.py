@@ -56,7 +56,7 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
     )
 
 
-_RETRYABLE_EXCEPTIONS = _build_retryable_exceptions()
+RETRYABLE_EXCEPTIONS = _build_retryable_exceptions()
 
 # 5 attempts × exp backoff capped at 5s ≈ ~10s total retry budget — covers
 # typical brief outages (DNS hiccup, sub-second RDS reconnect) and the
@@ -67,7 +67,7 @@ _DEFAULT_INITIAL_BACKOFF = 1.0
 _DEFAULT_MAX_BACKOFF_FACTOR = 5  # cap = 1.0 * 5 = 5s
 
 
-def _summarize(e: BaseException) -> str:
+def summarize(e: BaseException) -> str:
     """One-line exception summary (SQLAlchemy errors are multi-line)."""
     return f'{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ""}'
 
@@ -88,15 +88,15 @@ def with_db_retries(fn: Callable[[], T],
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
             return result
-        except _RETRYABLE_EXCEPTIONS as e:
+        except RETRYABLE_EXCEPTIONS as e:
             if attempt == max_retries - 1:
                 logger.error(f'Transient DB error: giving up after '
-                             f'{max_retries} attempts; {_summarize(e)}')
+                             f'{max_retries} attempts; {summarize(e)}')
                 raise
             delay = backoff.current_backoff()
             logger.warning(
                 f'Transient DB error (attempt {attempt + 1}/{max_retries}), '
-                f'retrying in {delay:.1f}s: {_summarize(e)}')
+                f'retrying in {delay:.1f}s: {summarize(e)}')
             time.sleep(delay)
     raise AssertionError('with_db_retries: unreachable')
 
@@ -117,14 +117,14 @@ async def with_db_retries_async(coro_fn: Callable[[], Awaitable[T]],
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
             return result
-        except _RETRYABLE_EXCEPTIONS as e:
+        except RETRYABLE_EXCEPTIONS as e:
             if attempt == max_retries - 1:
                 logger.error(f'Transient DB error: giving up after '
-                             f'{max_retries} attempts; {_summarize(e)}')
+                             f'{max_retries} attempts; {summarize(e)}')
                 raise
             delay = backoff.current_backoff()
             logger.warning(
                 f'Transient DB error (attempt {attempt + 1}/{max_retries}), '
-                f'retrying in {delay:.1f}s: {_summarize(e)}')
+                f'retrying in {delay:.1f}s: {summarize(e)}')
             await asyncio.sleep(delay)
     raise AssertionError('with_db_retries_async: unreachable')

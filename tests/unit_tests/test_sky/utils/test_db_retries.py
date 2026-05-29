@@ -169,15 +169,15 @@ class TestSummarize:
 
     def test_first_line_only_for_multiline(self):
         e = _make_op_error('first line\n\tsecond line\n\tthird line')
-        summary = retries._summarize(e)
+        summary = retries.summarize(e)
         assert '\n' not in summary
         assert 'OperationalError' in summary
         assert 'first line' in summary
         assert 'second line' not in summary
 
     def test_includes_exception_class_name(self):
-        assert 'ConnectionError' in retries._summarize(ConnectionError('boom'))
-        assert 'OperationalError' in retries._summarize(
+        assert 'ConnectionError' in retries.summarize(ConnectionError('boom'))
+        assert 'OperationalError' in retries.summarize(
             psycopg2.OperationalError('boom'))
 
 
