@@ -97,14 +97,15 @@ JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
 # the debug-dump manifest to scope controller_system/*.log files to the
-# controllers that actually ran the requested jobs.
+# controllers that actually ran the requested jobs. HA recovery causes
+# the per-job log (opened in append mode at sky/utils/context.py:146) to
+# receive a fresh "From controller …" line each time a new controller
+# picks up the job — and that line can land arbitrarily far into the
+# file after hours of intervening status-check output, so we scan the
+# whole file rather than just the head.
 _CONTROLLER_UUID_LOG_RE = re.compile(
     r'From controller ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
     r'[0-9a-f]{4}-[0-9a-f]{12})')
-# Bytes read from the head of each <jobid>.log when extracting UUIDs. A
-# job that migrated controllers (HA recovery) can produce multiple lines;
-# all of them live near the top of the file.
-_CONTROLLER_UUID_LOG_HEAD_BYTES = 16 * 1024
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -979,10 +980,16 @@ def _collect_job_debug_manifest(
                 'relative_path': f'{job_prefix}/{job_id}.log',
             })
             try:
+                # Stream the file line by line: HA recovery appends a
+                # fresh "From controller <UUID>" line after the prior
+                # controller's entire output, which can be many MB into
+                # the file. Bounded memory regardless of file size.
                 with open(log_file, 'r', encoding='utf-8',
                           errors='replace') as f:
-                    head = f.read(_CONTROLLER_UUID_LOG_HEAD_BYTES)
-                controller_uuids.update(_CONTROLLER_UUID_LOG_RE.findall(head))
+                    for line in f:
+                        match = _CONTROLLER_UUID_LOG_RE.search(line)
+                        if match is not None:
+                            controller_uuids.add(match.group(1))
             except OSError:
                 # File disappeared / unreadable between is_file() and open;
                 # leave controller_uuids unchanged.
