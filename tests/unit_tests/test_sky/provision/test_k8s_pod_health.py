@@ -391,49 +391,31 @@ class TestGetPodTerminationReason:
     def _make_terminated_pod(self, *, reason=None, message=None):
         pod = mock.MagicMock()
         pod.metadata.name = 'p'
-        pod.status.start_time = datetime.datetime(
-            2026, 1, 1, tzinfo=datetime.timezone.utc)
+        pod.status.start_time = datetime.datetime(2026,
+                                                  1,
+                                                  1,
+                                                  tzinfo=datetime.timezone.utc)
         pod.status.conditions = []
         pod.status.container_statuses = []
         pod.status.reason = reason
         pod.status.message = message
         return pod
 
-    def _patch(self, monkeypatch, *, events=None):
+    def test_evicted_ephemeral_storage_surfaced(self, monkeypatch):
+        # Ephemeral-storage eviction is recorded only at the pod level.
         monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
                             lambda *a, **k: None)
-        monkeypatch.setattr(k8s_instance, '_get_pod_events',
-                            lambda *a, **k: events or [])
-
-    def test_evicted_via_pod_event(self, monkeypatch):
-        # The authoritative ephemeral-storage eviction signal is a kubelet
-        # 'Evicted' Event, not pod.status (which stays empty here).
-        evicted = mock.MagicMock()
-        evicted.reason = 'Evicted'
-        evicted.message = ('Pod ephemeral local storage usage exceeds the '
-                           'total limit of containers 2Gi.')
-        self._patch(monkeypatch, events=[evicted])
-        pod = self._make_terminated_pod(reason=None, message=None)
-        result = k8s_instance._get_pod_termination_reason(pod, 'cluster', 'ctx',
-                                                          'ns')
-        assert 'Evicted' in result
-        assert 'ephemeral' in result
-
-    def test_evicted_via_pod_status_reason(self, monkeypatch):
-        # Some kubelets do populate pod.status.reason; that path still works.
-        self._patch(monkeypatch)
         pod = self._make_terminated_pod(
             reason='Evicted',
             message='Pod ephemeral local storage usage exceeds the total '
             'limit of containers 1Gi.')
-        result = k8s_instance._get_pod_termination_reason(pod, 'cluster', 'ctx',
-                                                          'ns')
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
         assert 'Evicted' in result
         assert 'ephemeral' in result
 
-    def test_no_reason_no_event_keeps_default(self, monkeypatch):
-        self._patch(monkeypatch)  # no events
+    def test_no_pod_reason_keeps_default(self, monkeypatch):
+        monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
+                            lambda *a, **k: None)
         pod = self._make_terminated_pod(reason=None, message=None)
-        result = k8s_instance._get_pod_termination_reason(pod, 'cluster', 'ctx',
-                                                          'ns')
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
         assert 'Terminated unexpectedly' in result
