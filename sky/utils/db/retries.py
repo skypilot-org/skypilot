@@ -13,6 +13,7 @@ that can escape SQLAlchemy, and retry with exponential backoff + jitter.
 """
 
 import asyncio
+import functools
 import logging
 import socket
 import time
@@ -128,3 +129,33 @@ async def with_db_retries_async(coro_fn: Callable[[], Awaitable[T]],
                 f'retrying in {delay:.1f}s: {summarize(e)}')
             await asyncio.sleep(delay)
     raise AssertionError('with_db_retries_async: unreachable')
+
+
+def retry(fn):
+    """Decorator: retry a sync function on transient DB errors.
+
+    Safe only when the entire function body is idempotent under retry — use
+    on pure-leaf DB functions (single session, no external side effects).
+    For functions with non-DB side effects (event log, callback, log lines
+    outside the session block), wrap just the session block inline with
+    `with_db_retries` instead.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return with_db_retries(lambda: fn(*args, **kwargs))
+
+    return wrapper
+
+
+def retry_async(coro_fn):
+    """Decorator: retry an async function on transient DB errors.
+
+    Same idempotency caveat as `retry`.
+    """
+
+    @functools.wraps(coro_fn)
+    async def wrapper(*args, **kwargs):
+        return await with_db_retries_async(lambda: coro_fn(*args, **kwargs))
+
+    return wrapper

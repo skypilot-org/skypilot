@@ -38,6 +38,7 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import retries as db_retries
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -619,6 +620,7 @@ def get_all_users() -> List[models.User]:
     ]
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
@@ -1202,6 +1204,7 @@ def get_cluster_events(
     ...
 
 
+@db_retries.retry
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
@@ -1358,6 +1361,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
 
 @metrics_lib.time_me
+@db_retries.retry
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     engine = _db_manager.get_engine()
@@ -1829,6 +1833,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+@db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def get_cluster_from_name(
@@ -3017,6 +3022,7 @@ def update_service_account_token_last_used(token_id: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
