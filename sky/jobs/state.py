@@ -825,8 +825,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
                               'Job is in backoff')
 
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+    async def _op(session):
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -848,6 +847,8 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                        f'({count} rows updated. {details})')
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
+
+    await _retry_session(_op)
     # Do not call callback_func here, as we don't use the callback for PENDING.
 
 
@@ -865,8 +866,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
 
     await add_job_event_async(job_id, task_id, target_status,
                               'Job is restarting')
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session):
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -884,6 +885,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
                        f'({count} rows updated. {details})')
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
+
+    await _retry_session(_op)
     # Do not call callback_func here, as it should only be invoked for the
     # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
@@ -1914,6 +1917,7 @@ def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
     }
 
 
+@db_retries.retry
 def get_pool_from_job_id(job_id: int) -> Optional[str]:
     """Get the pool from the job id."""
     engine = _db_manager.get_engine()
@@ -1934,6 +1938,7 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 def set_job_infra(job_id: int,
                   cloud: Optional[str] = None,
                   region: Optional[str] = None,
@@ -2172,6 +2177,7 @@ def get_api_access_token_id(job_id: int) -> Optional[str]:
         return result[0]
 
 
+@db_retries.retry_async
 async def scheduler_set_launching_async(job_id: int):
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -2185,6 +2191,7 @@ async def scheduler_set_launching_async(job_id: int):
         await session.commit()
 
 
+@db_retries.retry_async
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     engine = await _db_manager.get_async_engine()
@@ -3043,6 +3050,7 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
         return ManagedJobScheduleState(state)
 
 
+@db_retries.retry_async
 async def scheduler_set_done_async(job_id: int,
                                    idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
