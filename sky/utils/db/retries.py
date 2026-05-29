@@ -48,21 +48,33 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
     # `socket.gaierror` is what asyncpg raises on DNS resolution failure —
     # it propagates uncaught through asyncpg.connect() and is NOT wrapped
     # by SQLAlchemy when going through async_creator.
+    # `TimeoutError` / `asyncio.TimeoutError`: asyncpg.connect() wraps its
+    # internal `asyncio.wait_for(...)` and raises asyncio.TimeoutError on
+    # connect-timeout (e.g. RDS failover black-holing packets). SQLAlchemy
+    # does NOT recognize it as a DBAPI error, so it escapes unwrapped. On
+    # Python 3.11+ asyncio.TimeoutError is aliased to the builtin
+    # TimeoutError; on 3.8–3.10 they are distinct classes, so we list both.
     return (
         sqlalchemy.exc.OperationalError,
         sqlalchemy.exc.InterfaceError,
         ConnectionError,
         socket.gaierror,
+        TimeoutError,
+        asyncio.TimeoutError,
         *psycopg2_excs,
     )
 
 
 RETRYABLE_EXCEPTIONS = _build_retryable_exceptions()
 
-# 5 attempts × exp backoff capped at 5s ≈ ~10s total retry budget — covers
+# 5 attempts × exp backoff capped at 5s ≈ ~10s of backoff sleeps — covers
 # typical brief outages (DNS hiccup, sub-second RDS reconnect) and the
 # short tail of longer ones; very long outages (multi-second RDS failover)
 # will still raise.
+# NB: this is backoff *sleep* time only. On a TCP black-hole each attempt
+# also blocks on asyncpg's connect timeout (15s, see _make_asyncpg_creator
+# in db_utils), so worst-case wall time before giving up is closer to
+# ~10s backoff + 5×15s connect ≈ 85s, not ~10s.
 _DEFAULT_MAX_RETRIES = 5
 _DEFAULT_INITIAL_BACKOFF = 1.0
 _DEFAULT_MAX_BACKOFF_FACTOR = 5  # cap = 1.0 * 5 = 5s
