@@ -1563,12 +1563,13 @@ def get_configured_tolerations(
         context: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Returns the configured pod tolerations for the given K8s context.
 
-    Reads `kubernetes.pod_config.spec.tolerations` from ~/.sky/config.yaml,
-    respecting context_configs overrides. Returns `None` if no tolerations
-    are configured (which is the case for the vast majority of setups) so
-    that downstream callers can pass the result through to
-    `V1Node.get_taints(tolerations=...)` and get byte-identical
-    output to today.
+    Reads `kubernetes.pod_config.spec.tolerations` (or `ssh.pod_config
+    .spec.tolerations` for an `ssh-<pool>` context) from
+    ~/.sky/config.yaml, respecting context_configs overrides. Returns
+    `None` if no tolerations are configured (the case for the vast
+    majority of setups) so downstream callers can pass the result
+    through to `V1Node.get_taints(tolerations=...)` and get
+    byte-identical output to today.
 
     Goes through `resolve_effective_pod_config` rather than fetching the
     `tolerations` leaf directly so the per-context list is merged onto
@@ -1577,11 +1578,23 @@ def get_configured_tolerations(
     gets at scheduling time. Fetching the leaf directly would let a
     per-context list clobber the global one.
 
+    SSH-pool contexts (`ssh-<pool>`) read from the `ssh` config namespace
+    and need their `ssh-` prefix stripped before looking up
+    `context_configs.<pool>` — both handled inside
+    `resolve_effective_pod_config` when `cloud` is an SSH instance.
+    Auto-detect from the context name to preserve the signature.
+
     Each toleration is a dict in standard Kubernetes shape, e.g.
     `{'key': 'workload_pool', 'operator': 'Equal', 'value': 'research',
       'effect': 'NoSchedule'}`.
     """
+    # Pass `cloud=clouds.SSH()` for ssh-prefixed contexts so
+    # `resolve_effective_pod_config` reads the `ssh.*` namespace and
+    # strips the `ssh-` prefix before applying context overrides.
+    cloud: Optional[clouds.Cloud] = (clouds.SSH() if context and
+                                     context.startswith('ssh-') else None)
     pod_config = resolve_effective_pod_config(cluster_config_overrides={},
+                                              cloud=cloud,
                                               context=context)
     spec = pod_config.get('spec') if isinstance(pod_config, dict) else None
     tolerations = spec.get('tolerations') if isinstance(spec, dict) else None
@@ -4079,6 +4092,14 @@ def get_kubernetes_node_info(
                 return result
         # Fall through to direct Kubernetes API query if provider returns None
 
+    # Resolve `context=None` to the current kubeconfig context BEFORE
+    # reading tolerations — otherwise `get_kubernetes_nodes` and
+    # `get_configured_tolerations` see different contexts (the former
+    # resolves None internally; the latter would skip `context_configs`
+    # overrides and miss per-context tolerations the user configured for
+    # the current context).
+    if context is None:
+        context = get_current_kube_config_context_name()
     nodes = get_kubernetes_nodes(context=context)
     configured_tolerations = get_configured_tolerations(context)
 

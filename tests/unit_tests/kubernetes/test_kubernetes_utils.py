@@ -4701,6 +4701,30 @@ def test_get_configured_tolerations_fetches_pod_config_dict():
             f'got: {captured_keys}')
 
 
+def test_get_configured_tolerations_ssh_context_uses_ssh_namespace():
+    """An `ssh-<pool>` context must be read under the `ssh.*` config
+    namespace with the `ssh-` prefix stripped before applying
+    `context_configs.<pool>` overrides — matching the SSH branch of
+    `resolve_effective_pod_config`. The Kubernetes branch (cloud=None)
+    would read the wrong namespace AND skip the prefix-stripping, so an
+    `ssh-cluster1`-scoped toleration would be missed and a global
+    `kubernetes.pod_config` toleration would leak onto SSH node health.
+    """
+    captured = []
+
+    def fake_get(cloud, region, keys, default_value):
+        captured.append((cloud, region))
+        return default_value
+
+    with patch('sky.skypilot_config.get_effective_region_config',
+               side_effect=fake_get):
+        utils.get_configured_tolerations(context='ssh-cluster1')
+        # Expect (cloud='ssh', region='cluster1') — NOT
+        # (cloud='kubernetes', region='ssh-cluster1').
+        assert ('ssh', 'cluster1') in captured, (
+            f'Expected SSH namespace + stripped prefix; got {captured}')
+
+
 def test_get_configured_tolerations_extracts_from_pod_config_dict():
     """Merged pod_config dict → extract spec.tolerations."""
     with patch('sky.skypilot_config.get_effective_region_config') as mock_get:
