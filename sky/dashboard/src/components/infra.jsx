@@ -879,12 +879,19 @@ export function ContextDetails({
                       statusInfo.push('Cordoned');
                     }
 
-                    // Build taint info separately
+                    // Build taint info separately. Taints whose
+                    // `tolerated` flag is set by the backend (i.e. matched
+                    // by `kubernetes.pod_config.spec.tolerations`) do not
+                    // count against node health on the Infra page — they're
+                    // surfaced in the GPU Manager drawer instead.
                     const taints = node.taints || [];
+                    const untoleratedTaints = taints.filter(
+                      (t) => t && t.tolerated !== true
+                    );
                     let taintInfo = null;
-                    if (taints.length > 0) {
+                    if (untoleratedTaints.length > 0) {
                       const taintsByEffect = {};
-                      for (const taint of taints) {
+                      for (const taint of untoleratedTaints) {
                         const effect = taint.effect;
                         const key = taint.key;
                         if (!taintsByEffect[effect]) {
