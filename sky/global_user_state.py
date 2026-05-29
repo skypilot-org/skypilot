@@ -1362,8 +1362,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         session.commit()
 
 
-@metrics_lib.time_me
 @db_retries.retry
+@metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     engine = _db_manager.get_engine()
