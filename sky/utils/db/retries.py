@@ -8,12 +8,13 @@ catch-all's own DB write failing too, producing a silent RUNNING zombie.
 
 Wrap any DB-touching call site with one of these helpers. They catch
 `sqlalchemy.exc.OperationalError` (which wraps `psycopg2.OperationalError`
-and asyncpg's connection errors) and retry with exponential backoff +
-jitter.
+and many asyncpg connection errors), plus raw driver/network exceptions
+that can escape SQLAlchemy, and retry with exponential backoff + jitter.
 """
 
 import asyncio
 import logging
+import socket
 import time
 from typing import Awaitable, Callable, Tuple, Type, TypeVar
 
@@ -34,16 +35,23 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
     psycopg2_excs: Tuple[Type[BaseException], ...] = ()
     try:
         import psycopg2  # pylint: disable=import-outside-toplevel
-        psycopg2_excs = (psycopg2.OperationalError,)
+
+        # `InterfaceError` covers "connection already closed" — what you
+        # get on a stale raw_connection during/after an outage.
+        psycopg2_excs = (psycopg2.OperationalError, psycopg2.InterfaceError)
     except ImportError:
         pass
     # `ConnectionError` is the Python builtin; asyncpg raises it
     # ("unexpected connection_lost() call") in some code paths without
     # SQLAlchemy wrapping it.
+    # `socket.gaierror` is what asyncpg raises on DNS resolution failure —
+    # it propagates uncaught through asyncpg.connect() and is NOT wrapped
+    # by SQLAlchemy when going through async_creator.
     return (
         sqlalchemy.exc.OperationalError,
         sqlalchemy.exc.InterfaceError,
         ConnectionError,
+        socket.gaierror,
         *psycopg2_excs,
     )
 
@@ -67,6 +75,9 @@ def _summarize(e: BaseException) -> str:
 def with_db_retries(fn: Callable[[], T],
                     max_retries: int = _DEFAULT_MAX_RETRIES) -> T:
     """Run `fn()` with retry/backoff on transient DB errors."""
+    if max_retries < 1:
+        raise ValueError(
+            f'max_retries must be greater than 0, got {max_retries}')
     backoff = common_utils.Backoff(
         initial_backoff=_DEFAULT_INITIAL_BACKOFF,
         max_backoff_factor=_DEFAULT_MAX_BACKOFF_FACTOR)
@@ -93,6 +104,9 @@ def with_db_retries(fn: Callable[[], T],
 async def with_db_retries_async(coro_fn: Callable[[], Awaitable[T]],
                                 max_retries: int = _DEFAULT_MAX_RETRIES) -> T:
     """Async equivalent of with_db_retries."""
+    if max_retries < 1:
+        raise ValueError(
+            f'max_retries must be greater than 0, got {max_retries}')
     backoff = common_utils.Backoff(
         initial_backoff=_DEFAULT_INITIAL_BACKOFF,
         max_backoff_factor=_DEFAULT_MAX_BACKOFF_FACTOR)

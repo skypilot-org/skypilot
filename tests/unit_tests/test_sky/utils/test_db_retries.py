@@ -1,5 +1,6 @@
 """Unit tests for sky.utils.db.retries."""
 # pylint: disable=missing-class-docstring,protected-access,unnecessary-lambda
+import socket
 from unittest import mock
 
 import psycopg2
@@ -29,6 +30,8 @@ class TestWithDbRetries:
         lambda: sqlalchemy.exc.InterfaceError('s', {}, Exception('x')),
         lambda: ConnectionError('unexpected connection_lost() call'),
         lambda: psycopg2.OperationalError('server closed the connection'),
+        lambda: psycopg2.InterfaceError('connection already closed'),
+        lambda: socket.gaierror(8, 'nodename nor servname provided'),
     ])
     def test_retries_on_each_retryable_exception(self, exc_factory):
         # Fail twice, then succeed.
@@ -62,6 +65,13 @@ class TestWithDbRetries:
             with pytest.raises(sqlalchemy.exc.OperationalError):
                 retries.with_db_retries(fn, max_retries=3)
         assert fn.call_count == 3
+
+    @pytest.mark.parametrize('bad_max_retries', [0, -1, -100])
+    def test_invalid_max_retries_raises_value_error(self, bad_max_retries):
+        fn = mock.Mock()
+        with pytest.raises(ValueError, match='max_retries must be greater'):
+            retries.with_db_retries(fn, max_retries=bad_max_retries)
+        fn.assert_not_called()
 
     def test_logs_warning_on_each_retry(self):
         # SkyPilot disables logger propagation (sky_logging.py), so caplog
@@ -118,6 +128,7 @@ class TestWithDbRetriesAsync:
     @pytest.mark.parametrize('exc_factory', [
         lambda: _make_op_error(),
         lambda: ConnectionError('unexpected connection_lost() call'),
+        lambda: socket.gaierror(8, 'nodename nor servname provided'),
         lambda: psycopg2.OperationalError('server closed the connection'),
     ])
     async def test_retries_on_each_retryable_exception(self, exc_factory):
@@ -142,6 +153,16 @@ class TestWithDbRetriesAsync:
             with pytest.raises(sqlalchemy.exc.OperationalError):
                 await retries.with_db_retries_async(coro_fn, max_retries=3)
         assert coro_fn.call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('bad_max_retries', [0, -1, -100])
+    async def test_invalid_max_retries_raises_value_error(
+            self, bad_max_retries):
+        coro_fn = mock.Mock()
+        with pytest.raises(ValueError, match='max_retries must be greater'):
+            await retries.with_db_retries_async(coro_fn,
+                                                max_retries=bad_max_retries)
+        coro_fn.assert_not_called()
 
 
 class TestSummarize:
