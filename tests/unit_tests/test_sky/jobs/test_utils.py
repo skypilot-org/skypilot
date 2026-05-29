@@ -980,3 +980,53 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+class TestFormatJobDetails:
+    """Tests for _format_job_details (the 'details' column)."""
+
+    def _details(self,
+                 *,
+                 schedule_state='ALIVE',
+                 failure_reason=None,
+                 status='RECOVERING',
+                 recovery_reason=None):
+        job = {
+            'schedule_state': schedule_state,
+            'failure_reason': failure_reason,
+            'status': status,
+        }
+        jobs_utils._format_job_details(job=job,
+                                       highest_blocking_priority=0,
+                                       recovery_reason=recovery_reason)
+        return job['details']
+
+    def test_recovery_reason_surfaced(self):
+        assert self._details(
+            recovery_reason='podX is not ready (OOMKilled (exit code 137))'
+        ) == 'Recovering: podX is not ready (OOMKilled (exit code 137))'
+
+    def test_recovery_reason_multiline_collapsed(self):
+        # Multi-line pod-termination reasons must render as a single line.
+        multiline = ('Cluster is abnormal because head is not ready '
+                     '(Terminated unexpectedly.\nLast known state: PodFailed.\n'
+                     'Container errors: OOMKilled). Transitioned to INIT.')
+        result = self._details(recovery_reason=multiline)
+        assert '\n' not in result
+        assert result == (
+            'Recovering: Cluster is abnormal because head is not ready '
+            '(Terminated unexpectedly. Last known state: PodFailed. '
+            'Container errors: OOMKilled). Transitioned to INIT.')
+
+    def test_no_recovery_reason_is_none(self):
+        assert self._details(recovery_reason=None) is None
+
+    def test_failure_reason_takes_precedence_over_recovery(self):
+        # A terminal failure_reason should win over a (stale) recovery reason.
+        assert self._details(failure_reason='boom',
+                             recovery_reason='ignored') == 'Failure: boom'
+
+    def test_backoff_state_takes_precedence_over_recovery(self):
+        assert self._details(
+            schedule_state='ALIVE_BACKOFF',
+            recovery_reason='ignored') == 'In backoff, waiting for resources'
