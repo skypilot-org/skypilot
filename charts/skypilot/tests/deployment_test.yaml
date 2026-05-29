@@ -988,6 +988,39 @@ tests:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .* --foreground"
 
+  - it: should resolve mirror sink regardless of serveServerLog (both branches)
+    asserts:
+      # The runtime check on $SKYPILOT_SERVER_LOG_MIRROR_DIR is emitted in
+      # both serveServerLog=true and =false renders so the mirror feature
+      # works in either mode.
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'if \[ -n "\$\{SKYPILOT_SERVER_LOG_MIRROR_DIR'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "SKYPILOT_LOG_MIRROR_PER_POD_DIR"
+
+  - it: should resolve mirror sink when serveServerLog is false
+    set:
+      apiService.serveServerLog: false
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'if \[ -n "\$\{SKYPILOT_SERVER_LOG_MIRROR_DIR'
+      # Mirror-only branch must still set up the FIFO + tee fan-out (gated
+      # at runtime by $SKYPILOT_LOG_MIRROR_FILE being non-empty).
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: 'tee -a "\$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .* --foreground"
+      # And the direct-exec path must still be present as the no-mirror
+      # fallback in the same render.
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "else\\s+exec sky api start"
+
   - it: should include logrotate sidecar when serveServerLog is true and retention is enabled
     set:
       apiService.serveServerLog: true
