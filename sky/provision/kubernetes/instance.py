@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import time
-from typing import (Any, Dict, List, Mapping, Optional, Set, Tuple,
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Set, Tuple,
                     TYPE_CHECKING, Union)
 
 from sky import exceptions
@@ -2352,57 +2352,73 @@ def _get_pod_failure_reason_from_events(context: Optional[str], namespace: str,
     return None
 
 
-def get_cluster_failure_reason_from_events(
-        provider_config: Dict[str, Any], pod_names: List[str]) -> Optional[str]:
-    """Return a failure reason from the cluster pods' kubelet events, or None.
+def _get_pod_failure_reason_from_status(context: Optional[str], namespace: str,
+                                        pod_name: str) -> Optional[str]:
+    """Best-effort durable failure reason from the pod's terminated states.
 
-    Used when a cluster is abnormal but pod.status does not yet name a cause --
-    e.g. an eviction (ephemeral-storage / disk / memory pressure) that the
-    kubelet has emitted as a pod event while the pod still reports
-    Running/Ready and status.reason has not caught up. Returns the first
-    matching pod's event reason. Best-effort (per-pod lookups never raise).
+    A run-phase OOMKilled is recorded in the container's
+    ``last_state.terminated`` and survives the restart, but the live ``Ready``
+    condition flips back to True once the container is running again -- so a
+    snapshot taken outside that window (the read raced the restart) misses it.
+    Re-reads the pod and derives the reason from current *and* previous
+    terminated states, so the OOM is recovered regardless of where the read
+    landed in the restart cycle. Returns '<pod> is not ready (<reason>)' (the
+    framing mirrors the single-pod output of
+    backend_utils._summarize_pod_reasons so the message reads the same whether
+    the live status or this fallback caught it), else None. Never raises.
+    """
+    try:
+        pod = kubernetes.core_api(context).read_namespaced_pod(
+            pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not kubernetes_utils.pod_terminated_abnormally(pod):
+        return None
+    return (f'{pod_name} is not ready '
+            f'({kubernetes_utils.get_condensed_pod_reason(pod)})')
+
+
+def _first_pod_failure_reason(
+    provider_config: Dict[str, Any], pod_names: List[str],
+    per_pod_fn: Callable[[Optional[str], str, str], Optional[str]]
+) -> Optional[str]:
+    """Return the first non-None ``per_pod_fn(context, namespace, pod)``.
+
+    Resolves namespace/context from the provider config and probes each pod in
+    order. Used when a cluster is abnormal but the live per-pod status did not
+    name a cause. Best-effort -- per_pod_fn is expected to never raise.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     for pod_name in pod_names:
-        reason = _get_pod_failure_reason_from_events(context, namespace,
-                                                     pod_name)
+        reason = per_pod_fn(context, namespace, pod_name)
         if reason is not None:
             return reason
     return None
 
 
+def get_cluster_failure_reason_from_events(
+        provider_config: Dict[str, Any], pod_names: List[str]) -> Optional[str]:
+    """First pod eviction reason from kubelet events (status lags), or None.
+
+    An eviction (ephemeral-storage / disk / memory pressure) is emitted as a
+    pod event while the pod can still report Running/Ready and status.reason
+    has not caught up. See _get_pod_failure_reason_from_events.
+    """
+    return _first_pod_failure_reason(provider_config, pod_names,
+                                     _get_pod_failure_reason_from_events)
+
+
 def get_cluster_failure_reason_from_pods(provider_config: Dict[str, Any],
                                          pod_names: List[str]) -> Optional[str]:
-    """Return a durable failure reason from the cluster pods' status, or None.
+    """First pod's durable terminated-state reason (e.g. a restarted OOM).
 
-    Used when a cluster is abnormal but the live per-pod status did not name a
-    cause. A run-phase OOMKilled is recorded in the container's
-    ``last_state.terminated`` and survives the restart, but the live ``Ready``
-    condition flips back to True once the container is running again -- so a
-    snapshot taken outside that window (the read raced the restart) misses it.
-    Unlike the live ``_get_pod_health_issues`` check, this re-reads each pod and
-    derives the reason from current *and* previous terminated states, so the OOM
-    is recovered regardless of where the read landed in the restart cycle.
-
-    Returns '<pod> is not ready (<condensed reason>)' for the first pod that
-    terminated abnormally, else None. The framing mirrors the single-pod output
-    of backend_utils._summarize_pod_reasons so the abnormal message reads the
-    same whether the live status or this fallback caught the failure.
-    Best-effort (per-pod reads never raise).
+    See _get_pod_failure_reason_from_status. Complements the events lookup:
+    catches an OOMKilled recovered from last_state when no kubelet event names
+    the cause.
     """
-    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
-    for pod_name in pod_names:
-        try:
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-        except Exception:  # pylint: disable=broad-except
-            continue
-        if kubernetes_utils.pod_terminated_abnormally(pod):
-            reason = kubernetes_utils.get_condensed_pod_reason(pod)
-            return f'{pod_name} is not ready ({reason})'
-    return None
+    return _first_pod_failure_reason(provider_config, pod_names,
+                                     _get_pod_failure_reason_from_status)
 
 
 def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:

@@ -2068,15 +2068,13 @@ def _format_job_details(*,
         detail = f'Recovering: {flattened}'
         # Append an actionable remediation hint when the cause is a known
         # Kubernetes pod failure (e.g. OOMKilled -> raise resources.memory).
-        # Guarded on the job's cloud so a non-k8s reason that happens to
-        # contain a matched word (e.g. 'Insufficient') is not mis-hinted.
-        if 'kubernetes' in str(job.get('cloud', '')).lower():
-            hint = kubernetes_utils.match_kubernetes_failure_hint(flattened)
+        # Guarded on the job's cloud (job['cloud'] is str(cloud), exactly
+        # 'Kubernetes') so a non-k8s reason that happens to contain a matched
+        # word (e.g. 'Insufficient') is not mis-hinted.
+        if str(job.get('cloud', '')).lower() == 'kubernetes':
+            hint = kubernetes_utils.match_kubernetes_failure_hint_text(
+                flattened)
             if hint is not None:
-                # This listing has no scoped dashboard URL to resolve, so use
-                # the generic phrase if the hint references it.
-                hint = hint.replace('{dashboard_url}',
-                                    'the SkyPilot dashboard infra page')
                 detail += f' ({hint})'
         job['details'] = detail
     else:

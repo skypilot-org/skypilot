@@ -2046,6 +2046,18 @@ def match_kubernetes_failure_hint(reason: str) -> Optional[str]:
     return None
 
 
+def match_kubernetes_failure_hint_text(reason: str) -> Optional[str]:
+    """Like match_kubernetes_failure_hint, but ready to display.
+
+    Resolves the `{dashboard_url}` token to a generic phrase, for callers
+    without a server context to build a real URL. Returns the hint or None.
+    """
+    hint = match_kubernetes_failure_hint(reason)
+    if hint is None:
+        return None
+    return hint.replace('{dashboard_url}', 'the SkyPilot dashboard infra page')
+
+
 def get_failure_hint_reasons() -> List[str]:
     """The reason substrings KUBERNETES_FAILURE_HINTS recognizes, flattened.
 
@@ -2075,12 +2087,8 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
         return None
     reason = get_condensed_pod_reason(pod)
     msg = f'Pod {pod_name} terminated: {reason}.'
-    hint = match_kubernetes_failure_hint(reason)
+    hint = match_kubernetes_failure_hint_text(reason)
     if hint is not None:
-        # This module has no server dependency to resolve the dashboard URL, so
-        # fall back to a generic phrase if the matched hint references it.
-        hint = hint.replace('{dashboard_url}',
-                            'the SkyPilot dashboard infra page')
         msg += f'\nHint: {hint}'
     return msg
 
