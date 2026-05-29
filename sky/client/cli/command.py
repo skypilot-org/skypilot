@@ -4479,27 +4479,26 @@ def _show_gpus_impl(
                 # count toward node status — taints matched by the user's
                 # configured `kubernetes.pod_config.spec.tolerations` arrive
                 # with `tolerated=True` and don't make the node unhealthy.
-                taints = getattr(node_info, 'taints', None)
-                if taints:
-                    untolerated_taints = [
-                        t for t in taints if not t.get('tolerated', False)
+                untolerated_taints = [
+                    t for t in (getattr(node_info, 'taints', None) or [])
+                    if not t.get('tolerated', False)
+                ]
+                if untolerated_taints:
+                    # Group taints by effect: 'NoSchedule Taint [key1, key2],
+                    # NoExecute Taint [key3]'
+                    taints_by_effect: Dict[str, List[str]] = {}
+                    for taint in untolerated_taints:
+                        effect = taint['effect']
+                        key = taint['key']
+                        if effect not in taints_by_effect:
+                            taints_by_effect[effect] = []
+                        taints_by_effect[effect].append(key)
+                    taints_strs = [
+                        f'{effect} Taint [{", ".join(keys)}]'
+                        for effect, keys in taints_by_effect.items()
                     ]
-                    if untolerated_taints:
-                        # Group taints by effect: 'NoSchedule Taint [key1,
-                        # key2], NoExecute Taint [key3]'
-                        taints_by_effect: Dict[str, List[str]] = {}
-                        for taint in untolerated_taints:
-                            effect = taint['effect']
-                            key = taint['key']
-                            if effect not in taints_by_effect:
-                                taints_by_effect[effect] = []
-                            taints_by_effect[effect].append(key)
-                        taints_strs = []
-                        for effect, keys in taints_by_effect.items():
-                            taints_strs.append(
-                                f'{effect} Taint [{", ".join(keys)}]')
-                        if taints_strs:
-                            status_info.append(', '.join(taints_strs))
+                    if taints_strs:
+                        status_info.append(', '.join(taints_strs))
 
                 status_str = ', '.join(
                     status_info) if status_info else 'Healthy'
