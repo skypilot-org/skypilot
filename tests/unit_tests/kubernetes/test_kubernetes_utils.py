@@ -4765,6 +4765,46 @@ def test_taint_is_tolerated_coerces_yaml_bool_value_to_str():
     assert utils.taint_is_tolerated(taint, tolerations) is True
 
 
+def test_taint_is_tolerated_coerces_falsy_yaml_int_zero_to_str():
+    """Falsy YAML-int (`value: 0`) survives coercion — regression for the
+    `str(x or '')` idiom which silently collapses `0` to `''`."""
+    taint = {'key': 'foo', 'value': '0', 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': 0,  # YAML `value: 0` → int(0), Python-falsy
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is True
+
+
+def test_taint_is_tolerated_coerces_falsy_yaml_bool_false_to_str():
+    """Falsy YAML-bool (`value: false`) survives coercion — same regression
+    risk as the int-zero case."""
+    taint = {'key': 'foo', 'value': 'False', 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': False,  # YAML `value: false` → bool(False), Python-falsy
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is True
+
+
+def test_taint_is_tolerated_does_not_match_when_only_taint_has_value():
+    """Taint has `value: ''` (or absent) and toleration has `value: '0'`
+    must NOT match — guards against the inverse collapse where the
+    toleration's `0` becomes `''` and matches a value-less taint."""
+    taint = {'key': 'foo', 'value': '', 'effect': 'NoSchedule'}
+    tolerations = [{
+        'key': 'foo',
+        'operator': 'Equal',
+        'value': 0,  # → '0' after str-coerce, ≠ taint's ''
+        'effect': 'NoSchedule',
+    }]
+    assert utils.taint_is_tolerated(taint, tolerations) is False
+
+
 def _make_v1node_with_taints(taints):
     """Helper to build a V1Node with the supplied taints."""
     return utils.V1Node.from_dict({

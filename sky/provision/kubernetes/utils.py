@@ -1627,21 +1627,31 @@ def taint_is_tolerated(taint: Dict[str, Any],
     Returns:
         True if at least one toleration in the list matches the taint.
     """
+
     # Coerce to str defensively — YAML can parse unquoted numbers/booleans
     # as non-string types (e.g. `value: 123` → int), which would silently
-    # fail to match the K8s API's always-string taint fields.
-    taint_key = str(taint.get('key') or '')
-    taint_effect = str(taint.get('effect') or '')
-    taint_value = str(taint.get('value') or '')
+    # fail to match the K8s API's always-string taint fields. Use the
+    # `None`-explicit form rather than `str(x or '')` so falsy-but-set
+    # values like `value: 0` and `value: false` survive the coercion
+    # (`str(0 or '')` would collapse to `''` and never match `'0'`).
+    def _str_or_empty(v: Any) -> str:
+        return '' if v is None else str(v)
+
+    taint_key = _str_or_empty(taint.get('key'))
+    taint_effect = _str_or_empty(taint.get('effect'))
+    taint_value = _str_or_empty(taint.get('value'))
     for tol in tolerations:
         if not isinstance(tol, dict):
             continue
-        tol_effect = str(tol.get('effect') or '')
+        tol_effect = _str_or_empty(tol.get('effect'))
         if tol_effect and tol_effect != taint_effect:
             continue
-        tol_op = str(tol.get('operator') or 'Equal')
-        tol_key = str(tol.get('key') or '')
-        tol_value = str(tol.get('value') or '')
+        # `operator` is the only field where Equal is the documented
+        # default per the K8s API spec, so a missing/empty value should
+        # resolve to 'Equal' rather than ''.
+        tol_op = _str_or_empty(tol.get('operator')) or 'Equal'
+        tol_key = _str_or_empty(tol.get('key'))
+        tol_value = _str_or_empty(tol.get('value'))
         if not tol_key:
             # Empty key is only valid with Exists; matches any key.
             if tol_op == 'Exists':
