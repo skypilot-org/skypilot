@@ -360,10 +360,14 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky logs {name} 2 --status',
                 f'sky status -r {name} | grep UP',
 
-                # Verify the hook was executed by checking the autostop hook log and skylet logs
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
-                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
-                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
+                # Verify the hook was executed by checking the stop-event
+                # hook log and skylet logs. The legacy `autostop.hook` YAML
+                # field routes to `events: [stop]` when `autostop.down` is
+                # false (the default), so the log lives at
+                # ~/.sky/hooks/stop.log and is read via `--hook stop`.
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky logs {name} --hook stop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
+                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Stop hook executed successfully"',
             ],
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) +
@@ -510,7 +514,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
     Regression test for https://github.com/skypilot-org/skypilot/issues/9524.
     psutil's get_terminal_map() is module-globally memoized; if skylet's
-    first AutostopEvent tick after `sky start` runs with no SSH attached,
+    first StopEvent tick after `sky start` runs with no SSH attached,
     the cache freezes empty and any later SSH session is invisible. The
     cluster then autostops despite an active interactive session even
     when wait_for=jobs_and_ssh.
@@ -529,7 +533,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
 
             # The #9524 trigger: stop, then start. Crucially, do not SSH
             # during `sky start` so /dev/pts/ is empty when skylet's first
-            # AutostopEvent tick fires (~60s after boot) and primes the
+            # StopEvent tick fires (~60s after boot) and primes the
             # buggy cache.
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -542,7 +546,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
 
-            # Arm autostop FIRST so AutostopEvent ticks actually call
+            # Arm autostop FIRST so StopEvent ticks actually call
             # has_active_ssh_sessions() (otherwise they early-exit on
             # boot_time mismatch and never touch psutil's terminal-map
             # cache). idle_minutes=3 leaves a buffer past the assertion
@@ -552,7 +556,7 @@ def test_autostop_ssh_alive_after_stop_start(generic_cloud: str):
             f'sky status | grep {name} | grep "3m"',
 
             # Now wait 90s with NO SSH so skylet's first 1-2
-            # AutostopEvent ticks call has_active_ssh_sessions() while
+            # StopEvent ticks call has_active_ssh_sessions() while
             # /dev/pts/ is empty, priming the buggy psutil cache as empty.
             'sleep 90',
 

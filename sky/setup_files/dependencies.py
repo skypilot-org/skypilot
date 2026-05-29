@@ -163,8 +163,14 @@ aws_dependencies = [
 
 # Kubernetes 32.0.0 has an authentication bug:
 # https://github.com/kubernetes-client/python/issues/2333
+# Kubernetes 36.0.0 (released 2026-05-20) broke a number of things for us:
+# in-cluster auth (kubernetes-client/python#2584), bearer token handling
+# (kubernetes-client/python#2582), and a swagger regen that renamed
+# attributes (e.g. V1ServiceSpec.external_i_ps -> external_ips) and
+# changed dict openapi_types from 'dict(K, V)' to 'dict[K, V]'. Pin away
+# from 36.x until upstream resolves these.
 kubernetes_dependencies = [
-    'kubernetes>=20.0.0,!=32.0.0',
+    'kubernetes>=20.0.0,!=32.0.0,<36.0.0',
     'websockets',
     'python-dateutil',
 ]

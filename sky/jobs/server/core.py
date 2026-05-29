@@ -2,6 +2,8 @@
 import ipaddress
 import os
 import pathlib
+import shlex
+import sys
 import tempfile
 import time
 import typing
@@ -383,7 +385,8 @@ def _consolidated_launch(
     run_script = '\n'.join(env_cmds + [run_script])
     # Dump script for high availability recovery.
     assert job_ids is not None, 'job_ids not set'
-    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs')
+    log_dir = os.path.expanduser(
+        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
@@ -966,6 +969,9 @@ def launch(
             'priority': priority,
             'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
+            'jobs_scheduler_python_cmd':
+                (shlex.quote(sys.executable)
+                 if is_consolidation_mode else skylet_constants.SKY_PYTHON_CMD),
             'pool': pool,
             'job_controller_indicator_file':
                 managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,

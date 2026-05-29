@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
         { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
+        { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

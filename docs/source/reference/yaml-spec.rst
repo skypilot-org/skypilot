@@ -51,12 +51,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
-      :ref:`hook <auto-stop-hooks>`: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -285,12 +279,10 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
-  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
-
-  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see :ref:`Lifecycle hooks <lifecycle-hooks>`
+(under ``config.hooks`` with ``events: [stop]`` for autostop, or
+``events: [down]`` for autodown — ``autostop: {down: true}``).
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -337,20 +329,6 @@ OR
     autostop:
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    autostop:
-      idle_minutes: 10
-      hook: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
 
 .. _yaml-spec-resources-accelerators:
@@ -1331,6 +1309,16 @@ Example:
       managed_instance_group: ...
     nvidia_gpus:
       disable_ecc: ...
+    hooks:
+      - run: |
+          cd my-code-base
+          git add . && git commit -m "Auto-commit" && git push
+        events: [stop, preemption, down]  # optional; defaults to all three
+        timeout: 300                      # optional; default 3600s
+
+The ``hooks`` field lists scripts to run on the cluster on lifecycle events
+(``stop``, ``preemption``, ``down``). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 .. _service-yaml-spec:
 
@@ -1349,6 +1337,11 @@ Syntax
       :ref:`post_data <yaml-spec-service-readiness-probe-post-data>`: {'model_name': 'model'}
       :ref:`initial_delay_seconds <yaml-spec-service-readiness-probe-initial-delay-seconds>`: 1200
       :ref:`timeout_seconds <yaml-spec-service-readiness-probe-timeout-seconds>`: 15
+      :ref:`endpoint_probe_interval_seconds <yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds>`: 10
+      :ref:`consecutive_failure_threshold_timeout <yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout>`: 180
+
+    :ref:`load_balancer <yaml-spec-service-load-balancer>`:
+      :ref:`stream_timeout_seconds <yaml-spec-service-load-balancer-stream-timeout-seconds>`: 120
 
     :ref:`readiness_probe <yaml-spec-service-readiness-probe>`: /v1/models
 
@@ -1396,6 +1389,11 @@ OR
       post_data: '{"model_name": "my_model"}'
       initial_delay_seconds: 600
       timeout_seconds: 10
+      endpoint_probe_interval_seconds: 10
+      consecutive_failure_threshold_timeout: 180
+
+    load_balancer:
+      stream_timeout_seconds: 120
 
 
 .. _yaml-spec-service-readiness-probe-path:
@@ -1468,6 +1466,74 @@ Note, having a too high timeout will delay the detection of a real failure of yo
     service:
       readiness_probe:
         timeout_seconds: 10
+
+
+.. _yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds:
+
+``service.readiness_probe.endpoint_probe_interval_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        endpoint_probe_interval_seconds: 5
+
+
+.. _yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout:
+
+``service.readiness_probe.consecutive_failure_threshold_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: ``10`` seconds for pools and
+``180`` seconds for regular services.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        consecutive_failure_threshold_timeout: 30
+
+
+.. _yaml-spec-service-load-balancer:
+
+``service.load_balancer``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
+
+
+.. _yaml-spec-service-load-balancer-stream-timeout-seconds:
+
+``service.load_balancer.stream_timeout_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
 
 
 .. _yaml-spec-service-replica-policy:

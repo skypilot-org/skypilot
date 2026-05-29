@@ -244,13 +244,18 @@ class TestControllerHttpRetry:
                 assert m.call_count == 1
 
     def test_post_retries_then_succeeds(self):
-        # First 2 calls raise, 3rd succeeds.
+        # First 2 calls raise, 3rd succeeds. The default attempt count is
+        # tightened to 1 (see lazy-handle PR), but the retry mechanism
+        # itself still needs end-to-end coverage — patch the constant up
+        # to 3 just for this test.
         side = [
             requests_exceptions.ConnectionError('refused'),
             requests_exceptions.ConnectionError('refused'),
             mock.Mock(status_code=200)
         ]
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.post',
                         side_effect=side) as m:
@@ -310,6 +315,8 @@ class TestControllerHttpRetry:
         with mock.patch('sky.serve.serve_utils.serve_state.'
                         'get_service_from_name',
                         side_effect=records), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=capture_get):
@@ -396,7 +403,11 @@ class TestControllerHttpRetry:
             requests_exceptions.Timeout('connect timed out'),
             mock.Mock(status_code=200),
         ]
+        # Patch the attempt count up to 3 so the retry path is actually
+        # exercised; the production default is 1 (see lazy-handle PR).
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=side) as m:
@@ -790,6 +801,144 @@ class TestStreamReplicaLogsZeroByteFallback:
         captured = capsys.readouterr()
         assert 'MAIN-CONTENT' in captured.out
         assert 'SHOULD-NOT-APPEAR' not in captured.out
+
+
+class TestStartInFlight:
+    """`_start_in_flight` is the defense-in-depth dedup used by
+    `ha_recovery_for_consolidation_mode` to avoid firing a duplicate
+    recovery script while a previously-spawned _start is still in its
+    0-60s boot window (during which DB controller_pid may still be the
+    stale pre-recovery value).
+    """
+
+    def _make_proc(self, cmdline, status='running'):
+        """Helper: build a mock proc whose .info dict matches what
+        psutil.process_iter yields with the attrs list."""
+        proc = mock.Mock()
+        proc.info = {'cmdline': cmdline, 'status': status}
+        return proc
+
+    def test_returns_true_when_start_process_present(self):
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--service-name', 'pool-a',
+            '--job-id', '5'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is True
+
+    def test_returns_false_when_no_matching_process(self):
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--service-name', 'other-pool'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_returns_false_when_no_processes(self):
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_skips_zombie_processes(self):
+        """A zombie `_start` (crashed but not yet reaped by init) must NOT
+        block recovery — otherwise the pool would be stuck in a
+        permanent "recovery in flight" loop until something reaps the
+        zombie, which may never happen in pods without a proper init.
+        """
+        # pylint: disable=import-outside-toplevel
+        import psutil
+        zombie = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-a'],
+            status=psutil.STATUS_ZOMBIE)
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[zombie]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_swallows_per_process_psutil_errors(self):
+        """If iterating one process raises NoSuchProcess / AccessDenied
+        (race with proc exit), the iteration must continue and check
+        the rest, not raise.
+        """
+        # pylint: disable=import-outside-toplevel
+        import psutil
+
+        # First proc raises on attribute access; second one is a legit match.
+        bad = mock.Mock()
+        type(bad).info = mock.PropertyMock(
+            side_effect=psutil.NoSuchProcess(99999))
+        good = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-a'])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[bad, good]):
+            assert serve_utils._start_in_flight('pool-a') is True
+
+    def test_no_prefix_false_positive(self):
+        """Service name 'pool-a' must NOT match a process for 'pool-abc'.
+        The implementation does exact argv-list matching on the
+        `--service-name <value>` pair (not substring on a joined string),
+        so the prefix collision is rejected.
+        """
+        proc = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-abc'])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_no_service_name_arg_returns_false(self):
+        """A `sky.serve.service` process with no `--service-name` flag
+        at all (defensive case, shouldn't happen in practice) must not
+        match — index() returning ValueError is caught."""
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--some-other-flag', 'whatever'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+
+class TestHaRecoverySkipsWhenStartInFlight:
+    """When the in-flight snapshot contains the service name,
+    `ha_recovery_for_consolidation_mode` must NOT invoke the recovery
+    script for that service this round. Otherwise the daemon piles up
+    multiple `_start` instances during the 0-60s controller boot window.
+    """
+
+    def test_skip_when_start_in_flight(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('POD_IP', '10.4.0.1')
+        with mock.patch(
+                'sky.serve.serve_utils.serve_state.get_glob_service_names',
+                return_value=['pool-a']), \
+             mock.patch(
+                 'sky.serve.serve_utils._get_service_status',
+                 return_value={'controller_pid': 1234,
+                               'controller_ip': '10.4.0.1',
+                               'status': 'READY'}), \
+             mock.patch(
+                 'sky.serve.serve_utils._controller_process_alive',
+                 return_value=False), \
+             mock.patch(
+                 'sky.serve.serve_utils.'
+                 '_snapshot_in_flight_start_service_names',
+                 return_value={'pool-a'}) as mock_snapshot, \
+             mock.patch(
+                 'sky.serve.serve_utils.serve_state.get_ha_recovery_script',
+                 return_value='dummy script') as mock_script, \
+             mock.patch(
+                 'sky.serve.serve_utils.command_runner.'
+                 'LocalProcessCommandRunner') as mock_runner_cls, \
+             mock.patch(
+                 'sky.serve.serve_utils.skylet_constants.'
+                 'HA_PERSISTENT_RECOVERY_LOG_PATH',
+                 str(tmp_path / 'recovery_log_{}.log')):
+            serve_utils.ha_recovery_for_consolidation_mode(pool=True)
+            # Snapshot is taken once per daemon iteration, not once per
+            # service, so it's exactly one call regardless of N services.
+            assert mock_snapshot.call_count == 1
+            # Script lookup AND runner.run must be skipped — we bailed
+            # before reaching either.
+            mock_script.assert_not_called()
+            mock_runner_cls.return_value.run.assert_not_called()
 
 
 class TestHaRecoveryDefensiveOnAliveCheckException:

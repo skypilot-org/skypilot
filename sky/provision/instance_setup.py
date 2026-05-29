@@ -667,8 +667,8 @@ def start_skylet_on_head_node(
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
-    # We need to source bashrc for skylet to make sure the autostop event can
-    # access the path to the cloud CLIs.
+    # We need to source bashrc for skylet to make sure the idle-timer
+    # (stop/down) event handler can access the path to the cloud CLIs.
     set_usage_run_id_cmd = _set_usage_run_id_cmd()
     # Set the skypilot environment variables, including the usage type, debug
     # info, other options, and cluster identity / accelerator context for

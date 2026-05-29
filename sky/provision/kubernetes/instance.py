@@ -700,11 +700,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
 
-    def _check_init_containers(pod):
-        # Check if any of the init containers failed
-        # to start. Could be because the init container
-        # command failed or failed to pull image etc.
-        for init_status in pod.status.init_container_statuses:
+    def _check_init_containers(pod) -> Optional[Tuple[str, int, int]]:
+        """Check init containers for errors and return running container info.
+
+        Returns (name, 1-based index, total) of the currently running init
+        container, or None if none is running.
+        Raises KubernetesError if any init container failed.
+        """
+        init_statuses = pod.status.init_container_statuses
+        total = len(init_statuses)
+        running_info: Optional[Tuple[str, int, int]] = None
+        for idx, init_status in enumerate(init_statuses):
             init_terminated = init_status.state.terminated
             if init_terminated:
                 if init_terminated.exit_code != 0:
@@ -714,6 +720,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         'Failed to run init container for pod '
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
+            if (init_status.state.running is not None and running_info is None):
+                running_info = (init_status.name, idx + 1, total)
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
                     not in ['ContainerCreating', 'PodInitializing']):
@@ -728,6 +736,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     f'Failed to create init container for pod '
                     f'{pod.metadata.name}. Error details: '
                     f'{reason_text}: {msg}.')
+        return running_info
 
     def _inspect_pod_status(pod):
         # Check if pod is terminated/preempted/failed (unchanged).
@@ -757,6 +766,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # Today's raise block -- control flow preserved, message enriched
             # via _unmask_crashloopbackoff_reason when the waiting state is
             # CrashLoopBackOff. msg body (waiting.message) is always preserved.
+            init_reason: Optional[str] = None
             if container_statuses is not None:
                 for container_status in container_statuses:
                     waiting = (container_status.state.waiting
@@ -764,7 +774,13 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     if waiting is None:
                         continue
                     if waiting.reason == 'PodInitializing':
-                        _check_init_containers(pod)
+                        running_init = _check_init_containers(pod)
+                        if running_init is not None:
+                            name, idx, total = running_init
+                            init_reason = (f'init container {name!r} '
+                                           f'running ({idx}/{total})')
+                        else:
+                            init_reason = 'init container running'
                     elif waiting.reason != 'ContainerCreating':
                         msg = waiting.message if (
                             waiting.message) else str(waiting)
@@ -775,17 +791,22 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         raise config_lib.KubernetesError(
                             f'{reason_text}: {msg}')
 
-            # Tier 1 wins; fall back to Tier 2/3 events (semantics changed --
-            # see _get_pod_pending_reason: Warning beats Normal regardless
-            # of timestamp).
-            reason: Optional[str] = container_reason
+            # Init container reason wins over all event-based reasons,
+            # since events can retain stale "Pulling image" entries long
+            # after the pull completed.  Otherwise, Tier 1 (container
+            # status) wins; fall back to Tier 2/3 events.
+            reason: Optional[str] = init_reason or container_reason
+            event_message: Optional[str] = None
             if reason is None:
                 pending_reason = _get_pod_pending_reason(
                     context, namespace, pod.metadata.name)
                 if pending_reason is not None:
-                    reason, message = pending_reason
-                    logger.debug(f'Pod {pod.metadata.name} is pending: '
-                                 f'{reason}: {message}')
+                    reason, event_message = pending_reason
+            if reason is not None:
+                log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
+                if event_message:
+                    log_msg += f': {event_message}'
+                logger.debug(log_msg)
             return False, reason
 
         # phase == 'Running' but not all containers running (e.g. one is in

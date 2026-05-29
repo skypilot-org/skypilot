@@ -206,6 +206,11 @@ class Server(uvicorn.Server):
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
+        # Reap this worker's per-pid prometheus multiproc files at exit so
+        # that recycled workers do not leak stale liveall gauge values
+        # (e.g. event-loop-lag peaks recorded just before the worker died)
+        # to every subsequent /metrics scrape and liveall-based probe.
+        metrics_lib.register_multiproc_cleanup_atexit()
         lag_threshold = perf_utils.get_loop_lag_threshold()
         if lag_threshold is not None:
             event_loop = asyncio.get_event_loop()

@@ -200,6 +200,19 @@ _managed_job_consolidation_mode_lock = None
 _pool_consolidation_mode_lock = None
 _serve_consolidation_mode_lock = None
 
+# Module-scoped SkyletEvent instances. `SkyletEvent.run()` relies on the
+# internal `_n` counter accumulating across calls to throttle the heavy
+# `_run()` work to once per EVENT_INTERVAL_SECONDS. Recreating the event
+# inside each daemon iteration would reset `_n` to 0 every call, run()
+# would advance it only to 1, the `_n == 0` trigger would never fire,
+# and the throttled work (update_service_status / managed_job_utils
+# update) would NEVER execute. The outer `while True` in
+# InternalRequestDaemon.run_event re-invokes the event_fn, so these
+# instances must outlive a single iteration.
+_managed_job_event = None
+_pool_status_update_event = None
+_serve_status_update_event = None
+
 
 # Attempt to gracefully release the lock when the process exits.
 # If this fails, it's okay, the lock will be released when the process dies.
@@ -273,11 +286,16 @@ def managed_job_status_refresh_event():
         # ready to update the job statuses.
         signal_file.unlink()
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _managed_job_event declaration).
     from sky.skylet import events
-    refresh_event = events.ManagedJobEvent()
+    global _managed_job_event
+    if _managed_job_event is None:
+        _managed_job_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
-    refresh_event.run()
+    _managed_job_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
@@ -319,9 +337,21 @@ def _serve_status_refresh_event(pool: bool):
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
     serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _pool_status_update_event / _serve_status_update_event
+    # declarations).
     from sky.skylet import events
-    event = events.ServiceUpdateEvent(pool=pool)
+    global _pool_status_update_event, _serve_status_update_event
+    if pool:
+        if _pool_status_update_event is None:
+            _pool_status_update_event = events.ServiceUpdateEvent(pool=True)
+        event = _pool_status_update_event
+    else:
+        if _serve_status_update_event is None:
+            _serve_status_update_event = events.ServiceUpdateEvent(pool=False)
+        event = _serve_status_update_event
     noun = 'pool' if pool else 'serve'
     logger.info(f'=== Running {noun} status refresh event ===')
     event.run()

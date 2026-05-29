@@ -2655,3 +2655,300 @@ class TestCheckInitContainersEnrichedRaise:
         assert 'Failed to create init container' in err
         assert 'ImagePullBackOff' in err
         assert 'init-img:bad' in err
+
+
+# ---------------------------------------------------------------------------
+# Tests for _inspect_pod_status init container pending reason reporting
+# ---------------------------------------------------------------------------
+
+
+def _make_init_status_with_name(name='init-copy-home',
+                                running=False,
+                                terminated_exit_code=None,
+                                waiting_reason=None,
+                                waiting_message=None):
+    """Build a mock init container status with an explicit name."""
+    cs = mock.MagicMock()
+    cs.name = name
+    cs.state.running = mock.MagicMock() if running else None
+    cs.state.terminated = None
+    cs.state.waiting = None
+    if terminated_exit_code is not None:
+        cs.state.terminated = mock.MagicMock()
+        cs.state.terminated.exit_code = terminated_exit_code
+        cs.state.terminated.message = None
+    if waiting_reason is not None:
+        cs.state.waiting = mock.MagicMock()
+        cs.state.waiting.reason = waiting_reason
+        cs.state.waiting.message = waiting_message
+    return cs
+
+
+class TestInspectPodStatusInitContainerReason:
+    """Tests that _inspect_pod_status reports init container running
+    instead of the stale 'Pulling' event reason."""
+
+    @staticmethod
+    def _make_pod(name='test-pod', cluster_name_on_cloud='test-cluster'):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        return pod
+
+    def _run_wait(self, monkeypatch, pod_sequence):
+        """Run _wait_for_pods_to_run with a sequence of pod states.
+
+        Each entry in pod_sequence is a callable that configures the pod
+        for that iteration. The last entry must make the pod Running.
+        Returns the list of (is_running, reason) tuples from each
+        iteration and captured log messages.
+        """
+        cluster_name_on_cloud = 'test-cluster'
+        pod = self._make_pod(cluster_name_on_cloud=cluster_name_on_cloud)
+
+        iteration = [0]
+        results = []
+
+        def configure_and_list(*_args, **_kwargs):
+            if iteration[0] < len(pod_sequence):
+                pod_sequence[iteration[0]](pod)
+            pods_list = mock.MagicMock()
+            pods_list.items = [pod]
+            return pods_list
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.side_effect = configure_and_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        def passthrough_parallel(fn, items, n):
+            r = [fn(item) for item in items]
+            results.append(r)
+            iteration[0] += 1
+            return r
+
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            passthrough_parallel)
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.time, 'sleep', lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        log_messages = []
+
+        def capture_debug(msg, *args, **kwargs):
+            log_messages.append(msg % args if args else msg)
+
+        monkeypatch.setattr(logger, 'debug', capture_debug)
+
+        instance._wait_for_pods_to_run(
+            namespace='ns',
+            context='ctx',
+            cluster_name='cn',
+            new_pods=[pod],
+        )
+        return results, log_messages
+
+    @staticmethod
+    def _make_running_container_status():
+        cs = mock.MagicMock()
+        cs.state.running = True
+        cs.state.waiting = None
+        cs.state.terminated = None
+        cs.last_state.terminated = None
+        return cs
+
+    def test_pulling_image_reason_during_actual_pull(self, monkeypatch):
+        """While containers are in ContainerCreating, the event-based
+        'Pulling' reason (with image name) should be reported."""
+        monkeypatch.setattr(
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
+
+        def pending_creating(pod):
+            pod.status.phase = 'Pending'
+            cs = _make_container_status(waiting_reason='ContainerCreating')
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'ContainerCreating'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = []
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, log_msgs = self._run_wait(monkeypatch,
+                                           [pending_creating, running])
+
+        assert results[0] == [(False, 'Pulling')]
+        pull_logs = [m for m in log_msgs if 'Pulling' in m]
+        assert any('us-docker.pkg.dev/foo:v1' in m for m in pull_logs)
+
+    def test_pod_initializing_overrides_pulling_reason(self, monkeypatch):
+        """When containers show PodInitializing with a running init
+        container, the reason must reflect the init container name."""
+        monkeypatch.setattr(
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
+
+        def pending_init(pod):
+            pod.status.phase = 'Pending'
+            cs = mock.MagicMock()
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'PodInitializing'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = [
+                _make_init_status_with_name(name='init-copy-home',
+                                            running=True),
+            ]
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, log_msgs = self._run_wait(monkeypatch, [pending_init, running])
+
+        assert results[0] == [(False,
+                               "init container 'init-copy-home' running (1/1)")]
+        init_logs = [m for m in log_msgs if 'init container' in m]
+        assert len(init_logs) >= 1
+        assert "'init-copy-home'" in init_logs[0]
+        assert '(1/1)' in init_logs[0]
+        assert 'Pulling' not in init_logs[0]
+
+    def test_pod_initializing_no_running_init_container(self, monkeypatch):
+        """When PodInitializing but no init container is in running state,
+        fall back to generic message."""
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
+
+        def pending_init(pod):
+            pod.status.phase = 'Pending'
+            cs = mock.MagicMock()
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'PodInitializing'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = [
+                _make_init_status_with_name(name='init-copy-home',
+                                            terminated_exit_code=0),
+            ]
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, _ = self._run_wait(monkeypatch, [pending_init, running])
+        assert results[0] == [(False, 'init container running')]
+
+    def test_pod_initializing_multiple_init_containers(self, monkeypatch):
+        """With multiple init containers, report the currently running one."""
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
+
+        def pending_init(pod):
+            pod.status.phase = 'Pending'
+            cs = mock.MagicMock()
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'PodInitializing'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = [
+                _make_init_status_with_name(name='init-setup-ssh',
+                                            terminated_exit_code=0),
+                _make_init_status_with_name(name='init-copy-home',
+                                            running=True),
+            ]
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, _ = self._run_wait(monkeypatch, [pending_init, running])
+        assert results[0] == [(False,
+                               "init container 'init-copy-home' running (2/2)")]
+
+    def test_log_message_includes_image_during_pull(self, monkeypatch):
+        """The provision log must include the image name during actual pull."""
+        monkeypatch.setattr(
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "registry.io/myimg:latest"'))
+
+        def pending_creating(pod):
+            pod.status.phase = 'Pending'
+            cs = mock.MagicMock()
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'ContainerCreating'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = []
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        _, log_msgs = self._run_wait(monkeypatch, [pending_creating, running])
+        pending_logs = [m for m in log_msgs if 'is pending' in m]
+        assert len(pending_logs) == 1
+        assert 'Pulling' in pending_logs[0]
+        assert 'registry.io/myimg:latest' in pending_logs[0]
+
+    def test_log_message_no_image_during_init(self, monkeypatch):
+        """The provision log must NOT include stale image pull info
+        when the pod is actually waiting for init containers."""
+        monkeypatch.setattr(
+            instance, '_get_pod_pending_reason', lambda *a, **kw:
+            ('Pulling', 'Pulling image "us-docker.pkg.dev/foo:v1"'))
+
+        def pending_init(pod):
+            pod.status.phase = 'Pending'
+            cs = mock.MagicMock()
+            cs.state = mock.MagicMock()
+            cs.state.waiting = mock.MagicMock()
+            cs.state.waiting.reason = 'PodInitializing'
+            cs.state.terminated = None
+            cs.last_state.terminated = None
+            pod.status.container_statuses = [cs]
+            pod.status.init_container_statuses = [
+                _make_init_status_with_name(name='init-copy-home',
+                                            running=True),
+            ]
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        _, log_msgs = self._run_wait(monkeypatch, [pending_init, running])
+        pending_logs = [m for m in log_msgs if 'is pending' in m]
+        assert len(pending_logs) == 1
+        assert 'init container' in pending_logs[0]
+        assert 'Pulling image' not in pending_logs[0]

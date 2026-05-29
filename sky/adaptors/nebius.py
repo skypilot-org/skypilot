@@ -141,6 +141,12 @@ def request_error():
     return service_error.RequestError
 
 
+def status_code():
+    # pylint: disable=import-outside-toplevel
+    from nebius.aio.service_error import StatusCode
+    return StatusCode
+
+
 def compute():
     # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.compute import v1 as compute_v1

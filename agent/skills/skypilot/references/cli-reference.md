@@ -206,7 +206,8 @@ Tail the log of a job.
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--provision` — Stream the cluster provisioning logs (provision.log).
-- `--autostop` — Stream the autostop hook logs from the cluster.
+- `--hook` — Stream a per-event lifecycle-hook log from the cluster. Omit the event name to auto-select whichever log exists.
+- `--autostop` — [DEPRECATED] Alias for `--hook stop`. The autostop event was renamed to `stop` in the lifecycle-hooks framework.
 - `--worker`, `-w` — The worker ID to stream the logs from. If not set, stream the logs of the head node.
 - `--sync-down`, `-s` — Sync down the logs of a job to the local machine. For a distributed job, a separate log file from each worker will be downloaded.
 - `--status` — If specified, do not show logs but exit with a status code for the job's status: 0 for succeeded, or 1 for all other statuses.
@@ -676,6 +677,7 @@ Logs into a SkyPilot API server.
 - `--endpoint`, `-e` — The SkyPilot API server endpoint.
 - `--relogin` — Force relogin with OAuth2 when enabled.
 - `--service-account-token`, `--token`, `-t` — Service account token for authentication (starts with ``sky_``).
+- `--no-browser` — Do not attempt to open a browser locally; print the auth URL and wait for the user to open it manually. Useful on headless machines (SSH sessions, containers, etc.).
 
 ### `sky api logout`
 

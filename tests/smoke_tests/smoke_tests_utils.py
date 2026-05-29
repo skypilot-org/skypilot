@@ -440,6 +440,29 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
+def kubectl_for_cluster(cluster_name: str) -> str:
+    """``kubectl --context <ctx>`` with <ctx> resolved at *shell* runtime
+    to the kubeconfig context that contains a pod for ``cluster_name``.
+
+    Smoke pipelines fall into two shapes:
+
+    * Single-context (kind-based): only ``kind-skypilot`` exists, so the
+      discovery loop short-circuits on the first iteration.
+    * Multi-context (shared-GKE): the runner has the API server's
+      cluster as current-context and the workload cluster as a second
+      entry; the loop picks the one that actually owns the pod.
+
+    The returned string is meant to be interpolated into an f-string
+    command, e.g. ``f'{kubectl_for_cluster(name)} delete pod foo'``.
+    The context lookup runs at command-execution time (not test-collection
+    time), so it sees the pod created by an earlier ``sky launch`` step.
+    """
+    return (
+        f'kubectl --context "$(for c in $(kubectl config get-contexts -o name); '
+        f'do kubectl --context "$c" get pods -o name 2>/dev/null '
+        f'| grep -q {cluster_name} && echo "$c" && break; done)"')
+
+
 def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     return common_utils.make_cluster_name_on_cloud(

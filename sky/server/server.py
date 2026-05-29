@@ -85,6 +85,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
@@ -1834,7 +1835,8 @@ async def stop(request: fastapi.Request,
 @app.post('/status')
 async def status(
     request: fastapi.Request,
-    status_body: payloads.StatusBody = payloads.StatusBody()
+    status_body: payloads.StatusBody = fastapi.Depends(
+        role_filter.force_viewer_status_body),
 ) -> None:
     """Gets cluster statuses."""
     if state.get_block_requests():
@@ -2157,20 +2159,23 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
-@app.post('/autostop_logs')
-async def autostop_logs(
-    request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
+@app.post('/hook_logs')
+async def hook_logs(
+    request: fastapi.Request, hook_logs_body: payloads.HookLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    """Tails the autostop hook logs of a cluster."""
+    """Tails lifecycle-hook logs of a cluster.
+
+    If ``event`` is None, auto-selects whichever hook event has fired.
+    """
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
-        request_body=autostop_logs_body,
-        func=core.tail_autostop_logs,
+        request_name=request_names.RequestName.CLUSTER_HOOK_LOGS,
+        request_body=hook_logs_body,
+        func=core.tail_hook_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=autostop_logs_body.cluster_name,
+        request_cluster_name=hook_logs_body.cluster_name,
         auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
@@ -3366,6 +3371,16 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
             return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
+    # Build assets under _next/ are content-hashed static files; a missing
+    # one must 404 instead of falling through to the index.html SPA shell
+    # below. Returning HTML (200) for a missing .js/.css lets a CDN cache the
+    # shell under the asset URL, which then fails the browser's strict MIME
+    # check and blanks the dashboard until the cache entry expires.
+    if safe_full_path.startswith('_next/'):
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Not found',
+                                    headers={'Cache-Control': 'no-store'})
+
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
@@ -3491,10 +3506,13 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
-    # Pre-load plugin RBAC rules before initializing permission service.
-    # This ensures plugin RBAC rules are available when policies are created.
-    logger.info('Pre-loading plugin RBAC rules')
+    # Pre-load plugin RBAC rules + viewer allowlist before initializing
+    # the permission service. The permission service reads both during
+    # _maybe_initialize_policies (blocklist seeded into Casbin; viewer
+    # allowlist built into an in-memory structure).
+    logger.info('Pre-loading plugin RBAC rules + viewer allowlist')
     plugins.load_plugin_rbac_rules()
+    plugins.load_plugin_viewer_allowlist()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
@@ -3530,6 +3548,13 @@ if __name__ == '__main__':
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))
+            # Reap per-pid prometheus multiproc files left behind by
+            # workers that crashed (SIGKILL, OOM, hard crash) and never
+            # called mark_process_dead. Without this, MultiProcessCollector
+            # keeps serving the dead pid's last live-gauge value on every
+            # /metrics scrape.
+            global_tasks.append(
+                background.create_task(metrics.multiproc_reaper_daemon()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
         global_tasks.append(

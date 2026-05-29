@@ -349,6 +349,7 @@ Follow updates:
    ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
    ../examples/ports
+   ../reference/lifecycle-hooks
    ../reference/logging
    ../reference/faq
 
