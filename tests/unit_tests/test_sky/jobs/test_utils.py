@@ -1,12 +1,14 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest import mock
 
 import pytest
 
 from sky import exceptions
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
+from sky.serve import serve_state
 
 
 class TestClusterHandleNotRequired:
@@ -980,3 +982,74 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_pool_health_summary
+# ---------------------------------------------------------------------------
+
+
+def _make_replica(status: serve_state.ReplicaStatus):
+    r = mock.MagicMock()
+    r.status = status
+    return r
+
+
+class TestGetPoolHealthSummary:
+
+    def _run(self, replicas, alive_jobs):
+        with mock.patch.object(serve_state, 'get_replica_infos',
+                               return_value=replicas), \
+             mock.patch.object(managed_job_state, 'get_num_alive_jobs',
+                               return_value=alive_jobs):
+            return jobs_utils._get_pool_health_summary('demo-pool')
+
+    def test_empty_pool(self):
+        assert self._run([], 0) == "Pool 'demo-pool': 0 workers"
+
+    def test_all_idle(self):
+        replicas = [_make_replica(serve_state.ReplicaStatus.READY)] * 3
+        assert self._run(replicas, 0) == "Pool 'demo-pool': 3/3 idle"
+
+    def test_some_idle_some_provisioning(self):
+        replicas = ([_make_replica(serve_state.ReplicaStatus.READY)] +
+                    [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
+        assert self._run(replicas,
+                         0) == "Pool 'demo-pool': 1/3 idle (2 provisioning)"
+
+    def test_occupied_shown_when_nonzero(self):
+        replicas = [_make_replica(serve_state.ReplicaStatus.READY)] * 3
+        result = self._run(replicas, 2)
+        assert result == "Pool 'demo-pool': 1/3 idle (2 occupied)"
+
+    def test_all_occupied(self):
+        replicas = [_make_replica(serve_state.ReplicaStatus.READY)] * 3
+        result = self._run(replicas, 3)
+        assert result == "Pool 'demo-pool': 0/3 idle (3 occupied)"
+
+    def test_occupied_and_provisioning(self):
+        replicas = ([_make_replica(serve_state.ReplicaStatus.READY)] +
+                    [_make_replica(serve_state.ReplicaStatus.PROVISIONING)] * 2)
+        result = self._run(replicas, 1)
+        assert result == "Pool 'demo-pool': 0/3 idle (2 provisioning, 1 occupied)"
+
+    def test_occupied_clamped_to_ready(self):
+        # alive_jobs count can race ahead of replica state; clamp defensively.
+        replicas = [_make_replica(serve_state.ReplicaStatus.READY)] * 2
+        result = self._run(replicas, 5)
+        assert result == "Pool 'demo-pool': 0/2 idle (2 occupied)"
+
+    def test_failed_replicas_collapsed(self):
+        replicas = [
+            _make_replica(serve_state.ReplicaStatus.READY),
+            _make_replica(serve_state.ReplicaStatus.FAILED),
+            _make_replica(serve_state.ReplicaStatus.FAILED_PROVISION),
+        ]
+        result = self._run(replicas, 0)
+        assert result == "Pool 'demo-pool': 1/3 idle (2 failed)"
+
+    def test_error_returns_none(self):
+        with mock.patch.object(serve_state,
+                               'get_replica_infos',
+                               side_effect=Exception('db down')):
+            assert jobs_utils._get_pool_health_summary('demo-pool') is None
