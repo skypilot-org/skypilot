@@ -419,3 +419,92 @@ class TestGetPodTerminationReason:
         pod = self._make_terminated_pod(reason=None, message=None)
         result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
         assert 'Terminated unexpectedly' in result
+
+
+def _make_event(reason, message):
+    """Create a mock kubelet pod event."""
+    e = mock.MagicMock()
+    e.reason = reason
+    e.message = message
+    return e
+
+
+class TestGetPodFailureReasonFromEvents:
+    """Tests for _get_pod_failure_reason_from_events."""
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_evicted_event_surfaced(self, mock_events):
+        mock_events.return_value = [
+            _make_event('Evicted', 'Pod ephemeral local storage usage exceeds '
+                        'the total limit of containers 1Gi.'),
+            _make_event('Scheduled', 'Successfully assigned default/p to n'),
+        ]
+        result = k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p')
+        assert result is not None
+        assert result.startswith('Evicted: ')
+        assert 'ephemeral' in result
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    def test_no_failure_event_returns_none(self, mock_events):
+        mock_events.return_value = [
+            _make_event('Scheduled', 'Successfully assigned default/p to n'),
+            _make_event('Pulled', 'Container image already present'),
+        ]
+        assert k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p') is None
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events',
+                side_effect=Exception('api down'))
+    def test_event_lookup_error_returns_none(self, mock_events):
+        assert k8s_instance._get_pod_failure_reason_from_events(
+            'ctx', 'ns', 'p') is None
+
+
+class TestQueryInstancesEventEnrichment:
+    """query_instances recovers an eviction reason from events."""
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_running_not_ready_pod_recovers_eviction(self, mock_list,
+                                                     mock_events):
+        # Pod still reports Running + not-ready; the eviction lives only in the
+        # event.
+        mock_list.return_value = [
+            _make_full_pod('worker-0', 'Running', 'node-1', ready=False),
+        ]
+        mock_events.return_value = [
+            _make_event('Evicted', 'Pod ephemeral local storage usage exceeds '
+                        'the total limit of containers 1Gi.'),
+        ]
+        result = k8s_instance.query_instances(
+            cluster_name='c',
+            cluster_name_on_cloud='c',
+            provider_config={
+                'namespace': 'default',
+                'context': 'ctx',
+                'services': [],
+            },
+        )
+        reason = result['worker-0'][1]
+        assert 'Evicted' in reason
+        assert 'ephemeral' in reason
+
+    @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
+    @mock.patch('sky.provision.kubernetes.instance.list_namespaced_pod')
+    def test_healthy_pod_skips_event_lookup(self, mock_list, mock_events):
+        mock_list.return_value = [
+            _make_full_pod('worker-0', 'Running', 'node-1', ready=True),
+        ]
+        result = k8s_instance.query_instances(
+            cluster_name='c',
+            cluster_name_on_cloud='c',
+            provider_config={
+                'namespace': 'default',
+                'context': 'ctx',
+                'services': [],
+            },
+        )
+        assert result['worker-0'][1] is None
+        # Healthy pods must not incur an extra events API call.
+        mock_events.assert_not_called()

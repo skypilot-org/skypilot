@@ -2309,6 +2309,47 @@ def _get_pod_events(context: Optional[str], namespace: str,
         reverse=True)
 
 
+# kubelet pod-event reasons that carry a terminal failure cause which is not
+# always reflected in pod.status in time -- notably an eviction for
+# ephemeral-storage / disk / memory pressure, where the kubelet emits the event
+# while pod.status.phase is still 'Running' and status.reason/message lag.
+_FAILURE_EVENT_REASONS = ('Evicted',)
+
+# Substrings that already name a specific failure cause; when a status-derived
+# reason contains one, consulting events would add nothing.
+_SPECIFIC_FAILURE_REASON_SUBSTRINGS = ('OOMKilled', 'ImagePullBackOff',
+                                       'ErrImagePull', 'CrashLoopBackOff',
+                                       'Evicted', 'ephemeral', 'Insufficient',
+                                       'Preempted', 'Disrupted')
+
+
+def _reason_lacks_specific_cause(reason: Optional[str]) -> bool:
+    """Whether `reason` does not already name a specific failure cause."""
+    return not reason or not any(s in reason
+                                 for s in _SPECIFIC_FAILURE_REASON_SUBSTRINGS)
+
+
+def _get_pod_failure_reason_from_events(context: Optional[str], namespace: str,
+                                        pod_name: str) -> Optional[str]:
+    """Best-effort failure reason from the pod's most recent kubelet event.
+
+    Some failures (notably evictions for ephemeral-storage / disk / memory
+    pressure) are recorded in pod events before they propagate to
+    pod.status.reason / phase. Returns '<reason>: <message>' for the most
+    recent event whose reason is in ``_FAILURE_EVENT_REASONS``, else None.
+    Never raises -- this is additive diagnostics.
+    """
+    try:
+        events = _get_pod_events(context, namespace, pod_name)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    for event in events:  # most recent first
+        if event.reason in _FAILURE_EVENT_REASONS:
+            message = (event.message or '').strip()
+            return f'{event.reason}: {message}'.rstrip(': ')
+    return None
+
+
 def _unmask_crashloopbackoff_reason(cs: Any) -> Optional[str]:
     """Return `last_state.terminated.reason` iff cs is in CrashLoopBackOff
     and a previous terminated reason is available; else None.
@@ -2701,6 +2742,17 @@ def query_instances(
             logger.debug(f'Pod Status ({phase}) Reason(s): {reason}')
         elif phase == 'Running':
             reason = _get_pod_health_issues(pod)
+        # An eviction (ephemeral-storage / disk / memory pressure) is recorded
+        # in the pod's kubelet events before it reaches pod.status -- often
+        # while the pod still reports 'Running'. When a flagged pod's
+        # status-derived reason is missing the specific cause, recover it from
+        # events. Scoped to already-flagged pods (reason set) with a generic
+        # reason, so healthy pods incur no extra events API call.
+        if reason is not None and _reason_lacks_specific_cause(reason):
+            event_reason = _get_pod_failure_reason_from_events(
+                context, namespace, pod.metadata.name)
+            if event_reason is not None:
+                reason = f'{reason}; {event_reason}'
         if non_terminated_only and pod_status is None:
             logger.debug(f'Pod {pod.metadata.name} is terminated, but '
                          'query_instances is called with '
