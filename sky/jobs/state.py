@@ -2762,6 +2762,13 @@ async def set_recovering_async(
             status_condition = (
                 spot_table.c.status == ManagedJobStatus.RUNNING.value)
 
+        # Only RUNNING contributes runtime. Forced recovery may revisit
+        # PENDING/STARTING/RECOVERING rows on resume or retry; do not
+        # re-accumulate duration in those states.
+        should_accumulate_duration = sqlalchemy.and_(
+            spot_table.c.status == ManagedJobStatus.RUNNING.value,
+            spot_table.c.last_recovered_at >= 0,
+        )
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2772,9 +2779,8 @@ async def set_recovering_async(
                 )).values({
                     spot_table.c.status: ManagedJobStatus.RECOVERING.value,
                     spot_table.c.job_duration: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at >= 0,
-                         spot_table.c.job_duration + current_time -
-                         spot_table.c.last_recovered_at),
+                        (should_accumulate_duration, spot_table.c.job_duration +
+                         current_time - spot_table.c.last_recovered_at),
                         else_=spot_table.c.job_duration),
                     spot_table.c.last_recovered_at: sqlalchemy.case(
                         (spot_table.c.last_recovered_at < 0, current_time),
@@ -2801,24 +2807,44 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     """Set the task to recovered."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
+    prior_update_matched = False
 
-    async def _op(session):
-        result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RECOVERING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                    spot_table.c.last_recovered_at: recovered_time,
-                    spot_table.c.recovery_count: spot_table.c.recovery_count +
-                                                 1,
-                }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            result = await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(
+                        spot_table.c.spot_job_id == job_id,
+                        spot_table.c.task_id == task_id,
+                        spot_table.c.status ==
+                        ManagedJobStatus.RECOVERING.value,
+                        spot_table.c.end_at.is_(None),
+                    )).values({
+                        spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                        spot_table.c.last_recovered_at: recovered_time,
+                        spot_table.c.recovery_count: spot_table.c.recovery_count
+                                                     + 1,
+                    }))
+            count = result.rowcount
+            if count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if count == 1:
+                return
+            assert count == 0, (job_id, task_id, count)
+            # If a previous attempt committed but lost the ack, the replay
+            # sees the postcondition instead of the original RECOVERING row.
+            if attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(spot_table.c.status).where(
+                        sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                        spot_table.c.task_id == task_id)))
+                row = current.fetchone()
+                if row is not None and (row[0]
+                                        == ManagedJobStatus.RUNNING.value):
+                    return
             details = await _describe_task_transition_failure(
                 session, job_id, task_id)
             message = (f'Failed to set the task to recovered. '
@@ -2826,7 +2852,7 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
 
-    await _retry_session(_op)
+    await db_retries.with_db_retries_async(_op)
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
 
