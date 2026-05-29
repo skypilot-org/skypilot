@@ -785,6 +785,18 @@ class JobController:
                                 cluster_name,
                                 job_id=job_id_on_pool_cluster,
                             )))
+                except db_retries.RETRYABLE_EXCEPTIONS as db_e:
+                    logger.warning(
+                        f'DB unavailable for job {self._job_id}, pausing '
+                        f'monitor loop; will retry on next iteration. '
+                        f'{db_retries.summarize(db_e)}')
+                    # We did not actually probe job status this iteration;
+                    # do not let a previously-open transient-error window
+                    # accumulate DB-outage time and trigger premature
+                    # recovery once the DB returns.
+                    transient_job_check_error_start_time = None
+                    job_check_backoff = None
+                    continue
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -885,11 +897,33 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await db_retries.with_db_retries_async(
-                lambda: asyncio.to_thread(
-                    backend_utils.refresh_cluster_status_handle,
-                    cluster_name,
-                    force_refresh_statuses=set(status_lib.ClusterStatus)))
+            try:
+                (cluster_status,
+                 handle) = await db_retries.with_db_retries_async(
+                     lambda: asyncio.to_thread(
+                         backend_utils.refresh_cluster_status_handle,
+                         cluster_name,
+                         force_refresh_statuses=set(status_lib.ClusterStatus)))
+            except db_retries.RETRYABLE_EXCEPTIONS as db_e:
+                logger.warning(
+                    f'DB unavailable for job {self._job_id}, pausing '
+                    f'monitor loop; will retry on next iteration. '
+                    f'{db_retries.summarize(db_e)}')
+                # See the matching catch above: don't let DB-outage time
+                # count against the transient-status retry window.
+                transient_job_check_error_start_time = None
+                job_check_backoff = None
+                # When force_transit_to_recovering is True we skip the
+                # JOB_STATUS_CHECK_GAP_SECONDS sleep at the top of the
+                # loop. Pause explicitly here so we don't tight-loop on
+                # the DB retry helper. Do NOT consume the flag — it's
+                # still needed below to force cluster cleanup before
+                # recovery (prevents double-submission after a controller
+                # restart).
+                if force_transit_to_recovering:
+                    await asyncio.sleep(
+                        managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+                continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
