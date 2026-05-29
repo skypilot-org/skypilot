@@ -436,9 +436,19 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
         return
     _active_workspace_context.workspace = workspace
     logger.debug(f'Set context workspace: {workspace}')
-    yield
-    logger.debug(f'Reset context workspace: {original_workspace}')
-    _active_workspace_context.workspace = original_workspace
+    # try/finally is required: a caller that lets an exception escape the
+    # `with` block would otherwise leak this thread-local workspace to
+    # subsequent callers in the same worker process (ProcessPoolExecutor
+    # reuses workers). For most callers the leak is masked because
+    # `override_skypilot_config` rebinds `_active_workspace_context` to a
+    # fresh `threading.local()` per request, but tightening this here is
+    # the right shape for a contextmanager and removes the implicit
+    # dependency on that downstream reset.
+    try:
+        yield
+    finally:
+        logger.debug(f'Reset context workspace: {original_workspace}')
+        _active_workspace_context.workspace = original_workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:

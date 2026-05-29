@@ -430,6 +430,37 @@ class TestIsActiveWorkspaceSet(unittest.TestCase):
                                return_value='team-a'):
             self.assertTrue(skypilot_config.is_active_workspace_set())
 
+    def test_local_active_workspace_ctx_cleanup_on_exception(self):
+        """`local_active_workspace_ctx` MUST restore the previous
+        thread-local workspace even when the wrapped code raises.
+        Without try/finally on the yield, an exception leaks the new
+        workspace value to subsequent requests in the same
+        ProcessPoolExecutor worker; the next request's gate then sees
+        `is_active_workspace_set()` return True and silently skips the
+        per-user resolver — routing that request to the leaked
+        workspace instead of resolving its own.
+        """
+
+        class _Boom(Exception):
+            pass
+
+        # Pin the "previous" value to a known sentinel so the assertion
+        # does not depend on any local skypilot config the dev happens
+        # to have on disk.
+        with mock.patch.object(skypilot_config,
+                               'get_active_workspace',
+                               return_value='pre-existing'):
+            with self.assertRaises(_Boom):
+                with skypilot_config.local_active_workspace_ctx('team-leaked'):
+                    raise _Boom()
+        # Post-condition: the workspace MUST have been restored to its
+        # pre-`with` value (the sentinel) even though _Boom escaped.
+        # Without try/finally on the yield, this would still be
+        # `'team-leaked'` — the leak the new test guards against.
+        self.assertEqual(
+            getattr(skypilot_config._active_workspace_context, 'workspace',
+                    None), 'pre-existing')
+
     def test_returns_true_for_thread_local_context(self):
         """The CLI --workspace flag sets the thread-local context. The
         trigger MUST see it and treat it as explicit, otherwise the
